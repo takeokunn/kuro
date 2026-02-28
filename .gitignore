@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+# Emacs
+*.elc
+.dir-locals.el
+.elisp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+*.o
+*.a
+
+# Test coverage
+tarpaulin-report.html
+cobertura.xml
+lcov.info

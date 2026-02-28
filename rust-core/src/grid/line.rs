@@ -1,0 +1,154 @@
+//! Line type representing a single row in the terminal screen
+
+use super::super::types::{Cell, SgrAttributes};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// A single line in the terminal grid
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Line {
+    /// Cells in this line
+    pub cells: Vec<Cell>,
+    /// Whether this line has been modified since last render
+    pub is_dirty: bool,
+}
+
+impl Line {
+    /// Create a new line with the specified number of columns
+    pub fn new(cols: usize) -> Self {
+        Self {
+            cells: vec![Cell::default(); cols],
+            is_dirty: false,
+        }
+    }
+
+    /// Get cell at column index
+    pub fn get_cell(&self, col: usize) -> Option<&Cell> {
+        self.cells.get(col)
+    }
+
+    /// Get mutable reference to cell at column index
+    pub fn get_cell_mut(&mut self, col: usize) -> Option<&mut Cell> {
+        self.cells.get_mut(col)
+    }
+
+    /// Update cell at column index
+    pub fn update_cell(&mut self, col: usize, c: char, attrs: SgrAttributes) {
+        if let Some(cell) = self.cells.get_mut(col) {
+            let old_c = cell.c;
+            let old_attrs = cell.attrs;
+
+            cell.c = c;
+            cell.attrs = attrs;
+
+            // Mark dirty if something changed
+            if old_c != c || old_attrs != attrs {
+                self.is_dirty = true;
+            }
+        }
+    }
+
+    /// Update cell at column index with a Cell struct (includes width)
+    pub fn update_cell_with(&mut self, col: usize, cell: Cell) {
+        if col < self.cells.len() {
+            let old_cell = self.cells[col].clone();
+            self.cells[col] = cell;
+
+            // Mark dirty if something changed
+            if old_cell != self.cells[col] {
+                self.is_dirty = true;
+            }
+        }
+    }
+
+    /// Clear all cells in line
+    pub fn clear(&mut self) {
+        for cell in &mut self.cells {
+            *cell = Cell::default();
+        }
+        self.is_dirty = true;
+    }
+
+    /// Mark line as dirty
+    pub fn mark_dirty(&mut self) {
+        self.is_dirty = true;
+    }
+
+    /// Mark line as clean (not dirty)
+    pub fn mark_clean(&mut self) {
+        self.is_dirty = false;
+    }
+
+    /// Resize line to new column count
+    pub fn resize(&mut self, new_cols: usize) {
+        if new_cols > self.cells.len() {
+            // Expand with default cells
+            self.cells.resize(new_cols, Cell::default());
+        } else if new_cols < self.cells.len() {
+            // Truncate
+            self.cells.truncate(new_cols);
+        }
+        self.is_dirty = true;
+    }
+}
+
+impl fmt::Display for Line {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for cell in &self.cells {
+            write!(f, "{}", cell.c)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_line_creation() {
+        let line = Line::new(80);
+        assert_eq!(line.cells.len(), 80);
+        assert!(!line.is_dirty);
+    }
+
+    #[test]
+    fn test_line_update_cell() {
+        let mut line = Line::new(10);
+        let attrs = SgrAttributes::default();
+
+        line.update_cell(5, 'X', attrs);
+
+        assert!(line.is_dirty);
+        assert_eq!(line.get_cell(5).unwrap().c, 'X');
+    }
+
+    #[test]
+    fn test_line_clear() {
+        let mut line = Line::new(10);
+        line.update_cell(0, 'A', SgrAttributes::default());
+
+        line.clear();
+
+        assert!(line.is_dirty);
+        assert_eq!(line.get_cell(0).unwrap().c, ' ');
+    }
+
+    #[test]
+    fn test_line_resize_expand() {
+        let mut line = Line::new(10);
+        line.resize(20);
+
+        assert_eq!(line.cells.len(), 20);
+        assert!(line.is_dirty);
+    }
+
+    #[test]
+    fn test_line_resize_shrink() {
+        let mut line = Line::new(20);
+        line.resize(10);
+
+        assert_eq!(line.cells.len(), 10);
+        assert!(line.is_dirty);
+    }
+}

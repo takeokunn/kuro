@@ -1,0 +1,29 @@
+[package]
+name = "kuro-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vte.workspace = true
+emacs.workspace = true
+unicode-width.workspace = true
+unicode-segmentation.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+nix.workspace = true
+which.workspace = true
+crossbeam-channel = "0.5"
+
+# Platform-specific dependencies
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true

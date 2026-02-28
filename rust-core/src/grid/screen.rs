@@ -94,7 +94,11 @@ impl Screen {
 
     /// Get cell at position
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&Cell> {
-        self.lines.get(row)?.get_cell(col)
+        if self.is_alternate_active {
+            self.alternate_screen.as_ref().unwrap().lines.get(row)?.get_cell(col)
+        } else {
+            self.lines.get(row)?.get_cell(col)
+        }
     }
 
     /// Print a character at the cursor position
@@ -309,53 +313,115 @@ impl Screen {
 
     /// Get dirty lines and clear the dirty set
     pub fn take_dirty_lines(&mut self) -> Vec<usize> {
-        let dirty: Vec<usize> = self.dirty_set.iter().copied().collect();
-        self.dirty_set.clear();
-        dirty
+        if self.is_alternate_active {
+            let alt = self.alternate_screen.as_mut().unwrap();
+            let dirty: Vec<usize> = alt.dirty_set.iter().copied().collect();
+            alt.dirty_set.clear();
+            dirty
+        } else {
+            let dirty: Vec<usize> = self.dirty_set.iter().copied().collect();
+            self.dirty_set.clear();
+            dirty
+        }
     }
 
     /// Get line data at row
     pub fn get_line(&self, row: usize) -> Option<&Line> {
-        self.lines.get(row)
+        if self.is_alternate_active {
+            self.alternate_screen.as_ref().unwrap().lines.get(row)
+        } else {
+            self.lines.get(row)
+        }
     }
 
     /// Get mutable line data at row
     pub fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
-        self.lines.get_mut(row)
+        if self.is_alternate_active {
+            self.alternate_screen.as_mut().unwrap().lines.get_mut(row)
+        } else {
+            self.lines.get_mut(row)
+        }
     }
 
     /// Clear all lines in range
     pub fn clear_lines(&mut self, start: usize, end: usize) {
-        let end = end.min(self.lines.len());
-        if start < end {
-            for line in &mut self.lines[start..end] {
-                line.clear();
+        if self.is_alternate_active {
+            let alt = self.alternate_screen.as_mut().unwrap();
+            let end = end.min(alt.lines.len());
+            if start < end {
+                for line in &mut alt.lines[start..end] {
+                    line.clear();
+                }
+            }
+        } else {
+            let end = end.min(self.lines.len());
+            if start < end {
+                for line in &mut self.lines[start..end] {
+                    line.clear();
+                }
             }
         }
     }
 
     /// Move cursor to absolute position
     pub fn move_cursor(&mut self, row: usize, col: usize) {
-        self.cursor.row = row.min(self.rows as usize - 1);
-        self.cursor.col = col.min(self.cols as usize - 1);
+        if self.is_alternate_active {
+            let alt = self.alternate_screen.as_mut().unwrap();
+            alt.cursor.row = row.min(alt.rows as usize - 1);
+            alt.cursor.col = col.min(alt.cols as usize - 1);
+        } else {
+            self.cursor.row = row.min(self.rows as usize - 1);
+            self.cursor.col = col.min(self.cols as usize - 1);
+        }
     }
 
     /// Move cursor relative
     pub fn move_cursor_by(&mut self, row_offset: i32, col_offset: i32) {
-        self.cursor.move_by(col_offset, row_offset);
-        self.cursor.row = self.cursor.row.min(self.rows as usize - 1);
-        self.cursor.col = self.cursor.col.min(self.cols as usize - 1);
+        if self.is_alternate_active {
+            let alt = self.alternate_screen.as_mut().unwrap();
+            alt.cursor.move_by(col_offset, row_offset);
+            alt.cursor.row = alt.cursor.row.min(alt.rows as usize - 1);
+            alt.cursor.col = alt.cursor.col.min(alt.cols as usize - 1);
+        } else {
+            self.cursor.move_by(col_offset, row_offset);
+            self.cursor.row = self.cursor.row.min(self.rows as usize - 1);
+            self.cursor.col = self.cursor.col.min(self.cols as usize - 1);
+        }
+    }
+
+    /// Mark a line as dirty in both the line flag and the dirty set
+    pub fn mark_line_dirty(&mut self, row: usize) {
+        if self.is_alternate_active {
+            let alt = self.alternate_screen.as_mut().unwrap();
+            alt.dirty_set.insert(row);
+            if let Some(line) = alt.lines.get_mut(row) {
+                line.is_dirty = true;
+            }
+        } else {
+            self.dirty_set.insert(row);
+            if let Some(line) = self.lines.get_mut(row) {
+                line.is_dirty = true;
+            }
+        }
     }
 
     /// Set scroll region
     pub fn set_scroll_region(&mut self, top: usize, bottom: usize) {
-        self.scroll_region = ScrollRegion::new(top, bottom);
+        if self.is_alternate_active {
+            self.alternate_screen.as_mut().unwrap().scroll_region = ScrollRegion::new(top, bottom);
+        } else {
+            self.scroll_region = ScrollRegion::new(top, bottom);
+        }
     }
 
     /// Get scroll region (for testing)
     #[cfg(test)]
     pub fn get_scroll_region(&self) -> &ScrollRegion {
-        &self.scroll_region
+        if self.is_alternate_active {
+            &self.alternate_screen.as_ref().unwrap().scroll_region
+        } else {
+            &self.scroll_region
+        }
     }
 
     /// Set maximum scrollback buffer size
@@ -388,6 +454,24 @@ impl Screen {
         let screen = self.active_screen_mut();
         screen.scrollback_buffer.clear();
         screen.scrollback_line_count = 0;
+    }
+
+    /// Get reference to the active screen's cursor
+    pub fn cursor(&self) -> &Cursor {
+        if self.is_alternate_active {
+            &self.alternate_screen.as_ref().unwrap().cursor
+        } else {
+            &self.cursor
+        }
+    }
+
+    /// Get mutable reference to the active screen's cursor
+    pub fn cursor_mut(&mut self) -> &mut Cursor {
+        if self.is_alternate_active {
+            &mut self.alternate_screen.as_mut().unwrap().cursor
+        } else {
+            &mut self.cursor
+        }
     }
 
     /// Get mutable reference to the currently active screen
@@ -680,5 +764,65 @@ mod tests {
         // Scrollback lines should be resized to new column count
         assert_eq!(screen.scrollback_buffer.len(), 3);
         assert_eq!(screen.scrollback_buffer[0].cells.len(), 40);
+    }
+
+    #[test]
+    fn test_alt_screen_cursor_routing() {
+        let mut screen = Screen::new(24, 80);
+
+        // Move cursor on primary screen
+        screen.move_cursor(5, 10);
+        assert_eq!(screen.cursor().row, 5);
+        assert_eq!(screen.cursor().col, 10);
+
+        // Activate alternate screen
+        screen.switch_to_alternate();
+
+        // Alt screen cursor starts at (0, 0)
+        assert_eq!(screen.cursor().row, 0);
+        assert_eq!(screen.cursor().col, 0);
+
+        // Move cursor on alt screen — should NOT affect primary
+        screen.move_cursor(3, 7);
+        assert_eq!(screen.cursor().row, 3);
+        assert_eq!(screen.cursor().col, 7);
+
+        // Switch back to primary — primary cursor still at (5, 10)
+        screen.switch_to_primary();
+        assert_eq!(screen.cursor().row, 5);
+        assert_eq!(screen.cursor().col, 10);
+    }
+
+    #[test]
+    fn test_alt_screen_dirty_lines_routing() {
+        let mut screen = Screen::new(24, 80);
+
+        // Mark line dirty on primary
+        screen.mark_line_dirty(2);
+
+        // Switch to alternate — take_dirty_lines drains the alt screen's set
+        screen.switch_to_alternate();
+
+        // switch_to_alternate marks all lines dirty; drain them so we start clean
+        let _ = screen.take_dirty_lines();
+
+        // Mark a specific line dirty on alt screen
+        screen.mark_line_dirty(5);
+
+        // take_dirty_lines should return alt screen's dirty lines (just [5])
+        let alt_dirty = screen.take_dirty_lines();
+        assert_eq!(alt_dirty, vec![5]);
+
+        // Switch back to primary — switch_to_primary marks all lines dirty; drain them
+        screen.switch_to_primary();
+        let _ = screen.take_dirty_lines();
+
+        // The primary dirty set had line 2 marked before the switch;
+        // switch_to_primary re-marks all lines dirty so line 2 is included.
+        // Verify line 2 is still present in the primary dirty set.
+        // Re-mark just line 2 to test isolation independently of switch overhead.
+        screen.mark_line_dirty(2);
+        let primary_dirty = screen.take_dirty_lines();
+        assert!(primary_dirty.contains(&2));
     }
 }

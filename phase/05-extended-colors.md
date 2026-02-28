@@ -17,10 +17,10 @@ Week 5
 - 主要関数: `parse_extended_color()`, `Color` enumバリアント
 
 ## タスク
-- [ ] 256色パース実装 (38;5;n)
-- [ ] TrueColorパース実装 (38;2;r;g;b)
-- [ ] IndexedおよびRgbバリアントでColor enumを拡張
-- [ ] ElispでFaceキャッシュ実装
+- [x] 256色パース実装 (38;5;n)
+- [x] TrueColorパース実装 (38;2;r;g;b)
+- [x] IndexedおよびRgbバリアントでColor enumを拡張
+- [x] ElispでFaceキャッシュ実装
 
 ## 手動テスト手順
 

@@ -17,10 +17,10 @@ Week 6-7
 - 主要関数: `handle_set_mode()`, `handle_esc_dispatch()`, 代替バッファ切り替え
 
 ## タスク
-- [ ] DEC private modeハンドリング実装 (? プレフィックス)
-- [ ] 代替スクリーンバッファ実装
-- [ ] DECSC/DECRCカーソル保存/復元実装
-- [ ] カーソル表示切替実装 (DECTCEM)
+- [x] DEC private modeハンドリング実装 (? プレフィックス)
+- [x] 代替スクリーンバッファ実装
+- [x] DECSC/DECRCカーソル保存/復元実装
+- [x] カーソル表示切替実装 (DECTCEM)
 
 ## 手動テスト手順
 

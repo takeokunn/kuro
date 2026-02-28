@@ -31,6 +31,22 @@
   "Marker for cursor position.")
 (put 'kuro--cursor-marker 'permanent-local t)
 
+(defvar-local kuro--blink-overlays nil
+  "List of active blink overlays in the current kuro buffer.")
+(put 'kuro--blink-overlays 'permanent-local t)
+
+(defvar-local kuro--blink-frame-count 0
+  "Frame counter used for blink animation timing.")
+(put 'kuro--blink-frame-count 'permanent-local t)
+
+(defvar-local kuro--blink-visible-slow t
+  "Non-nil when slow-blink text is currently in the visible phase.")
+(put 'kuro--blink-visible-slow 'permanent-local t)
+
+(defvar-local kuro--blink-visible-fast t
+  "Non-nil when fast-blink text is currently in the visible phase.")
+(put 'kuro--blink-visible-fast 'permanent-local t)
+
 ;;; Face cache and color support
 
 (defvar kuro--face-cache (make-hash-table :test 'equal)
@@ -107,9 +123,9 @@ COLOR can be:
 
 (defun kuro--rgb-to-emacs (rgb-value)
   "Convert 24-bit RGB value to Emacs color string."
-  (let ((r (logand rgb-value 255))
-        (g (logand (ash rgb-value -8) 255))
-        (b (logand (ash rgb-value -16) 255)))
+  (let ((r (logand (ash rgb-value -16) #xFF))
+        (g (logand (ash rgb-value -8)  #xFF))
+        (b (logand rgb-value            #xFF)))
     (format "#%02x%02x%02x" r g b)))
 
 ;;; Attribute decoding functions
@@ -131,14 +147,20 @@ Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is 
         (dim           (/= 0 (logand attr-flags #x02)))
         (italic        (/= 0 (logand attr-flags #x04)))
         (underline     (/= 0 (logand attr-flags #x08)))
+        (blink-slow    (/= 0 (logand attr-flags #x10)))
+        (blink-fast    (/= 0 (logand attr-flags #x20)))
         (inverse       (/= 0 (logand attr-flags #x40)))
+        (hidden        (/= 0 (logand attr-flags #x80)))
         (strikethrough (/= 0 (logand attr-flags #x100))))
     (list :bold bold
           :italic italic
           :underline underline
           :strike-through strikethrough
           :inverse inverse
-          :dim dim)))
+          :dim dim
+          :blink-slow blink-slow
+          :blink-fast blink-fast
+          :hidden hidden)))
 
 (defun kuro--attrs-to-face-props (attrs)
   "Convert SGR attributes plist to Emacs face property list.
@@ -184,6 +206,35 @@ ATTRS is a plist containing :foreground, :background, and :flags."
 (defun kuro--clear-face-cache ()
   "Clear the face cache to free memory."
   (clrhash kuro--face-cache))
+
+(defun kuro--apply-blink-overlay (start end blink-type)
+  "Create a blink overlay covering buffer positions START to END.
+BLINK-TYPE is the symbol `slow' or `fast', controlling which blink
+visibility state variable is consulted."
+  (let* ((visible (if (eq blink-type 'slow)
+                      kuro--blink-visible-slow
+                    kuro--blink-visible-fast))
+         (ov (make-overlay start end)))
+    (overlay-put ov 'kuro-blink t)
+    (overlay-put ov 'kuro-blink-type blink-type)
+    (overlay-put ov 'invisible (not visible))
+    (push ov kuro--blink-overlays)))
+
+(defun kuro--clear-line-blink-overlays (row)
+  "Remove blink overlays on line ROW and remove them from kuro--blink-overlays."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line row)
+    (let ((line-start (point))
+          (line-end (1+ (line-end-position)))
+          (remaining nil))
+      (dolist (ov kuro--blink-overlays)
+        (if (and (overlay-buffer ov)
+                 (>= (overlay-start ov) line-start)
+                 (<= (overlay-end ov) line-end))
+            (delete-overlay ov)
+          (push ov remaining)))
+      (setq kuro--blink-overlays (nreverse remaining)))))
 
 ;;; Face application functions
 
@@ -244,6 +295,25 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
   (when (kuro-core-bell-pending)
     (ding)
     (kuro-core-clear-bell))
+  ;; Advance frame counter and toggle blink states at correct intervals.
+  ;; Slow blink (SGR 5): ~0.5 Hz — toggle every 30 frames at 30 fps (1 s per phase).
+  ;; Fast blink (SGR 6): ~1.5 Hz — toggle every 10 frames at 30 fps (~0.33 s per phase).
+  (setq kuro--blink-frame-count (1+ kuro--blink-frame-count))
+  (when (zerop (mod kuro--blink-frame-count 30))
+    (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
+    (dolist (ov kuro--blink-overlays)
+      (when (and (overlay-buffer ov)
+                 (eq (overlay-get ov 'kuro-blink-type) 'slow))
+        (overlay-put ov 'invisible (not kuro--blink-visible-slow)))))
+  (when (zerop (mod kuro--blink-frame-count 10))
+    (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))
+    (dolist (ov kuro--blink-overlays)
+      (when (and (overlay-buffer ov)
+                 (eq (overlay-get ov 'kuro-blink-type) 'fast))
+        (overlay-put ov 'invisible (not kuro--blink-visible-fast)))))
+  ;; Process dirty lines: clear per-line blink overlays before rewriting,
+  ;; then rebuild faces (including new blink overlays) for each updated line.
+  ;; Overlays on lines NOT in this update batch are preserved intact.
   (let ((updates (kuro--poll-updates-with-faces)))
     (when updates
       (dolist (line-update updates)
@@ -251,6 +321,7 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
               (face-ranges (cdr line-update)))
           (let ((row (car line-data))
                 (text (cdr line-data)))
+            (kuro--clear-line-blink-overlays row)
             (kuro--update-line row text)
             (when face-ranges
               (kuro--apply-faces-from-ffi row face-ranges))))))
@@ -284,7 +355,8 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
           ;; Clamp column to line-end to avoid end-of-buffer signal
           (goto-char (min (+ (point) col) (line-end-position)))
           (when kuro--cursor-marker
-            (set-marker kuro--cursor-marker (point))))))))
+            (set-marker kuro--cursor-marker (point)))))
+      (setq-local cursor-type (if (kuro--get-cursor-visible) 'box nil)))))
 
 ;;;###autoload
 (defun kuro--apply-faces-simple (updates)
@@ -316,10 +388,10 @@ COLOR-ENC is a u32 value encoding the color:
    ((/= 0 (logand color-enc #x40000000))
     (cons 'indexed (logand color-enc #xFF)))
    (t
-    (let ((r (logand color-enc #xFF))
-          (g (logand (ash color-enc -8) #xFF))
-          (b (logand (ash color-enc -16) #xFF)))
-      (cons 'rgb (logior r (ash g 8) (ash b 16)))))))
+    (let ((r (logand (ash color-enc -16) #xFF))
+          (g (logand (ash color-enc -8)  #xFF))
+          (b (logand color-enc            #xFF)))
+      (cons 'rgb (logior (ash r 16) (ash g 8) b))))))
 
 (defun kuro--apply-faces-from-ffi (line-num face-ranges)
   "Apply SGR faces from FFI data to a line.
@@ -337,7 +409,7 @@ FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) tuples."
                (end-col (cadr range))
                (fg-enc (caddr range))
                (bg-enc (cadddr range))
-               (flags (car (cddddr range)))
+               (flags (or (car (cddddr range)) 0))
                (fg (kuro--decode-ffi-color fg-enc))
                (bg (kuro--decode-ffi-color bg-enc))
                ;; Cap positions at line-end to prevent face bleeding into next line
@@ -347,7 +419,16 @@ FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) tuples."
             (kuro--apply-face-range start-pos end-pos
                                     (list :foreground fg
                                           :background bg
-                                          :flags flags))))))))
+                                          :flags flags))
+            ;; Apply blink overlay (fast takes priority over slow)
+            (cond
+             ((/= 0 (logand flags #x20))
+              (kuro--apply-blink-overlay start-pos end-pos 'fast))
+             ((/= 0 (logand flags #x10))
+              (kuro--apply-blink-overlay start-pos end-pos 'slow)))
+            ;; Apply hidden (invisible) as a direct text property
+            (when (/= 0 (logand flags #x80))
+              (add-text-properties start-pos end-pos '(invisible t)))))))))
 
 (provide 'kuro-renderer)
 

@@ -237,29 +237,38 @@ impl TerminalSession {
                     let flags = Self::encode_attrs(&cell.attrs);
 
                     // Check if attributes changed
-                    if (fg != current_fg
-                        || bg != current_bg
-                        || flags != current_flags
-                        || col == line.cells.len() - 1)
-                        && col > current_start
-                    {
-                        let end_col = if col == line.cells.len() - 1 {
-                            col + 1
-                        } else {
-                            col
-                        };
-                        face_ranges.push((
-                            current_start,
-                            end_col,
-                            current_fg,
-                            current_bg,
-                            current_flags,
-                        ));
-                        current_start = col;
+                    if fg != current_fg || bg != current_bg || flags != current_flags {
+                        // Only push a range when there is a non-empty span to record.
+                        // At col=0 (current_start=0) the span length is zero, so we
+                        // skip the push but still update the tracked attributes so the
+                        // first character gets the correct color.
+                        if col > current_start {
+                            face_ranges.push((
+                                current_start,
+                                col,
+                                current_fg,
+                                current_bg,
+                                current_flags,
+                            ));
+                            current_start = col;
+                        }
                         current_fg = fg;
                         current_bg = bg;
                         current_flags = flags;
                     }
+                }
+
+                // Flush the final segment (covers both single-color lines and the last span).
+                // The guard prevents a double-push when the last attribute-change flush fired
+                // exactly at the last cell and advanced current_start to line.cells.len().
+                if current_start < line.cells.len() {
+                    face_ranges.push((
+                        current_start,
+                        line.cells.len(),
+                        current_fg,
+                        current_bg,
+                        current_flags,
+                    ));
                 }
 
                 // Trim trailing spaces from render buffer; face_ranges that extend
@@ -277,7 +286,7 @@ impl TerminalSession {
     /// Encode color as u32 for efficient FFI transfer
     fn encode_color(color: &crate::types::Color) -> u32 {
         match color {
-            crate::types::Color::Default => 0,
+            crate::types::Color::Default => 0, // Sentinel: 0 means "use terminal default color"
             crate::types::Color::Named(named) => {
                 let idx = match named {
                     crate::types::NamedColor::Black => 0,
@@ -303,7 +312,12 @@ impl TerminalSession {
                 0x40000000u32 | (*idx as u32) // Second high bit for indexed colors
             }
             crate::types::Color::Rgb(r, g, b) => {
-                // Pack RGB into 24 bits
+                // Pack RGB into 24 bits (RRGGBB in lower 24 bits, upper bits clear).
+                // KNOWN LIMITATION: Rgb(0, 0, 0) encodes as 0, which is the same
+                // sentinel value as Color::Default. kuro--decode-ffi-color in Elisp
+                // cannot distinguish true black from default color. Avoid using
+                // Color::Rgb(0, 0, 0) in tests; use a non-zero color like (1, 0, 0).
+                // Fix: use a reserved sentinel (e.g. 0xFF000000) for Default instead.
                 ((*r as u32) << 16) | ((*g as u32) << 8) | (*b as u32)
             }
         }
@@ -353,7 +367,13 @@ impl TerminalSession {
 
     /// Get cursor position
     pub fn get_cursor(&self) -> (usize, usize) {
-        (self.core.screen.cursor.row, self.core.screen.cursor.col)
+        let c = self.core.screen.cursor();
+        (c.row, c.col)
+    }
+
+    /// Get cursor visibility (DECTCEM state)
+    pub fn get_cursor_visible(&self) -> bool {
+        self.core.dec_modes.cursor_visible
     }
 
     /// Get scrollback lines

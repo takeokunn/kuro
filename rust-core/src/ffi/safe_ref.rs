@@ -255,18 +255,22 @@ mod tests {
 
     #[test]
     fn test_env_ref_registry() {
+        // fetch_add and fetch_sub return the previous (old) value before the operation
         let initial_count = env_ref_count();
         let count1 = register_env_ref();
-        assert_eq!(count1, initial_count + 1);
+        assert_eq!(count1, initial_count); // fetch_add returns old value
 
         let count2 = register_env_ref();
-        assert_eq!(count2, initial_count + 2);
+        assert_eq!(count2, initial_count + 1); // fetch_add returns old value
 
         let count3 = unregister_env_ref();
-        assert_eq!(count3, initial_count + 1);
+        assert_eq!(count3, initial_count + 2); // fetch_sub returns old value
 
         let count4 = unregister_env_ref();
-        assert_eq!(count4, initial_count);
+        assert_eq!(count4, initial_count + 1); // fetch_sub returns old value
+
+        // After two unregisters, count should be back to initial
+        assert_eq!(env_ref_count(), initial_count);
     }
 
     #[test]

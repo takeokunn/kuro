@@ -30,8 +30,8 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
         .copied()
         .unwrap_or(0);
 
-    let row = term.screen.cursor.row;
-    let col = term.screen.cursor.col;
+    let row = term.screen.cursor().row;
+    let col = term.screen.cursor().col;
 
     match mode {
         0 => {
@@ -41,15 +41,15 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                 for c in col..line.cells.len() {
                     line.cells[c] = Default::default();
                 }
-                line.is_dirty = true;
             }
+            term.screen.mark_line_dirty(row);
 
             // Then erase all lines below
             for r in (row + 1)..term.screen.rows() as usize {
                 if let Some(line) = term.screen.get_line_mut(r) {
                     line.clear();
-                    line.is_dirty = true;
                 }
+                term.screen.mark_line_dirty(r);
             }
         }
         1 => {
@@ -58,8 +58,8 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
             for r in 0..row {
                 if let Some(line) = term.screen.get_line_mut(r) {
                     line.clear();
-                    line.is_dirty = true;
                 }
+                term.screen.mark_line_dirty(r);
             }
 
             // Then erase from start of cursor line to cursor
@@ -67,16 +67,16 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                 for c in 0..=col {
                     line.cells[c] = Default::default();
                 }
-                line.is_dirty = true;
             }
+            term.screen.mark_line_dirty(row);
         }
         2 | 3 => {
             // Erase entire screen
             for r in 0..term.screen.rows() as usize {
                 if let Some(line) = term.screen.get_line_mut(r) {
                     line.clear();
-                    line.is_dirty = true;
                 }
+                term.screen.mark_line_dirty(r);
             }
 
             // Mode 3 also clears scrollback buffer
@@ -104,8 +104,8 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
         .copied()
         .unwrap_or(0);
 
-    let col = term.screen.cursor.col;
-    let row = term.screen.cursor.row;
+    let col = term.screen.cursor().col;
+    let row = term.screen.cursor().row;
 
     if let Some(line) = term.screen.get_line_mut(row) {
         match mode {
@@ -127,8 +127,8 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
             }
             _ => {}
         }
-        line.is_dirty = true;
     }
+    term.screen.mark_line_dirty(row);
 }
 
 #[cfg(test)]
@@ -240,9 +240,8 @@ mod tests {
         // Move cursor to (1, 5)
         term.screen.move_cursor(1, 5);
 
-        // ED mode 1: start to cursor
-        let params = vte::Params::default();
-        csi_ed(&mut term, &params);
+        // ED mode 1: start to cursor (CSI 1 J)
+        term.advance(b"\x1b[1J");
 
         // Row 0 should be cleared
         let line = term.screen.get_line(0).unwrap();
@@ -299,9 +298,8 @@ mod tests {
 
         assert_eq!(term.screen.scrollback_line_count, 5);
 
-        // ED mode 3: entire screen and scrollback
-        let params = vte::Params::default();
-        csi_ed(&mut term, &params);
+        // ED mode 3: entire screen and scrollback (CSI 3 J)
+        term.advance(b"\x1b[3J");
 
         // Scrollback should be cleared
         assert_eq!(term.screen.scrollback_line_count, 0);
@@ -371,9 +369,8 @@ mod tests {
 
         term.screen.move_cursor(row, 5);
 
-        // EL mode 1: start to cursor
-        let params = vte::Params::default();
-        csi_el(&mut term, &params);
+        // EL mode 1: start to cursor (CSI 1 K)
+        term.advance(b"\x1b[1K");
 
         let line = term.screen.get_line(row).unwrap();
         assert_eq!(line.cells[5].c, ' ');
@@ -393,9 +390,8 @@ mod tests {
 
         term.screen.move_cursor(row, 5);
 
-        // EL mode 2: entire line
-        let params = vte::Params::default();
-        csi_el(&mut term, &params);
+        // EL mode 2: entire line (CSI 2 K)
+        term.advance(b"\x1b[2K");
 
         let line = term.screen.get_line(row).unwrap();
         for c in 0..10 {

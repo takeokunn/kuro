@@ -132,16 +132,16 @@ impl TabStops {
 ///
 /// Move cursor to the next tab stop.
 pub fn handle_ht(screen: &mut crate::grid::Screen, tabs: &TabStops) {
-    let current_col = screen.cursor.col;
+    let current_col = screen.cursor().col;
     let next_stop = tabs.next_stop(current_col + 1); // +1 to move forward
-    screen.cursor.col = next_stop.min(screen.cols() as usize - 1);
+    screen.cursor_mut().col = next_stop.min(screen.cols() as usize - 1);
 }
 
 /// Handle horizontal tab set (HTS - ESC H)
 ///
 /// Set a tab stop at the current cursor column.
 pub fn handle_hts(screen: &crate::grid::Screen, tabs: &mut TabStops) {
-    tabs.set_stop(screen.cursor.col);
+    tabs.set_stop(screen.cursor().col);
 }
 
 /// Handle tab clear (TBC - CSI g)
@@ -160,7 +160,7 @@ pub fn handle_tbc(screen: &crate::grid::Screen, tabs: &mut TabStops, params: &vt
     match mode {
         0 => {
             // Clear tab stop at current cursor column
-            tabs.clear_stop(Some(screen.cursor.col));
+            tabs.clear_stop(Some(screen.cursor().col));
         }
         3 => {
             // Clear all tab stops (reset to defaults)
@@ -311,19 +311,18 @@ mod tests {
 
     #[test]
     fn test_handle_tbc_clear_all() {
-        let screen = crate::grid::Screen::new(24, 80);
-        let mut tabs = TabStops::new(80);
+        // Use TerminalCore.advance to send CSI 3 g (TBC - clear all tab stops)
+        let mut term = crate::TerminalCore::new(24, 80);
 
         // Add custom stops
-        tabs.set_stop(5);
-        tabs.set_stop(10);
+        term.tab_stops.set_stop(5);
+        term.tab_stops.set_stop(10);
 
-        // Clear all tab stops
-        let params = vte::Params::default();
-        handle_tbc(&screen, &mut tabs, &params);
+        // Clear all tab stops via escape sequence (CSI 3 g)
+        term.advance(b"\x1b[3g");
 
         // Should be back to defaults
-        let stops = tabs.get_stops();
+        let stops = term.tab_stops.get_stops();
         assert!(stops.contains(&8));
         assert!(stops.contains(&16));
         assert!(!stops.contains(&5));

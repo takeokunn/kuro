@@ -85,28 +85,28 @@ struct CellAttr {
 
 ## タスク
 
-- [ ] **SGRシーケンス解析の実装**
-  - [ ] 単一および複数パラメータの解析
-  - [ ] 属性コードの処理（0, 1, 3, 4, 7, 9等）
-  - [ ] 色コードの処理（30-37, 40-47, 90-97, 100-107）
-  - [ ] リセットコードの処理（22, 23, 24, 29, 39, 49）
-  - [ ] `CellAttr`状態の更新
+- [x] **SGRシーケンス解析の実装**
+  - [x] 単一および複数パラメータの解析
+  - [x] 属性コードの処理（0, 1, 3, 4, 7, 9等）
+  - [x] 色コードの処理（30-37, 40-47, 90-97, 100-107）
+  - [x] リセットコードの処理（22, 23, 24, 29, 39, 49）
+  - [x] `CellAttr`状態の更新
 
-- [ ] **TerminalCoreでのCellAttr追跡の実装**
-  - [ ] `current_attr: CellAttr`フィールドの追加
-  - [ ] 新しいセル作成時にcurrent_attrを適用
-  - [ ] SGRパラメータの組み合わせを処理
+- [x] **TerminalCoreでのCellAttr追跡の実装**
+  - [x] `current_attr: CellAttr`フィールドの追加
+  - [x] 新しいセル作成時にcurrent_attrを適用
+  - [x] SGRパラメータの組み合わせを処理
 
-- [ ] **Elispフェイスマッピング関数の作成**
-  - [ ] `kuro--make-face`関数
-  - [ ] 色hexをEmacsフェイスプロパティに変換
-  - [ ] 属性フラグをフェイスプロパティにマッピング
-  - [ ] 反転モードの処理（前景/背景入れ替え）
+- [x] **Elispフェイスマッピング関数の作成**
+  - [x] `kuro--make-face`関数
+  - [x] 色hexをEmacsフェイスプロパティに変換
+  - [x] 属性フラグをフェイスプロパティにマッピング
+  - [x] 反転モードの処理（前景/背景入れ替え）
 
-- [ ] **レンダーループでのフェイス適用**
-  - [ ] poll_updatesからフェイス範囲を解析
-  - [ ] フェイス適用に`add-text-properties`を使用
-  - [ ] 最適化: 変更のみを適用
+- [x] **レンダーループでのフェイス適用**
+  - [x] poll_updatesからフェイス範囲を解析
+  - [x] フェイス適用に`add-text-properties`を使用
+  - [x] 最適化: 変更のみを適用
 
 ## 受け入れ条件
 
@@ -250,24 +250,33 @@ ATTRSはビットマスク整数。"
   (let ((face nil)
         (actual-fg fg)
         (actual-bg bg))
-    ;; 反転 (0x10): fgとbgを入れ替え
-    (when (/= 0 (logand attrs #x10))
+    ;; 反転 (0x40): fgとbgを入れ替え
+    (when (/= 0 (logand attrs #x40))
       (setq actual-fg bg
             actual-bg fg))
     (when actual-fg
       (setq face (plist-put face :foreground actual-fg)))
     (when actual-bg
       (setq face (plist-put face :background actual-bg)))
+    ;; bold (0x01)
     (when (/= 0 (logand attrs #x01))
       (setq face (plist-put face :weight 'bold)))
+    ;; dim (0x02): weight を light に下げる
     (when (/= 0 (logand attrs #x02))
-      (setq face (plist-put face :slant 'italic)))
-    (when (/= 0 (logand attrs #x04))
-      (setq face (plist-put face :underline t)))
-    (when (/= 0 (logand attrs #x08))
-      (setq face (plist-put face :strike-through t)))
-    (when (/= 0 (logand attrs #x20))
       (setq face (plist-put face :weight 'semi-light)))
+    ;; italic (0x04)
+    (when (/= 0 (logand attrs #x04))
+      (setq face (plist-put face :slant 'italic)))
+    ;; underline (0x08)
+    (when (/= 0 (logand attrs #x08))
+      (setq face (plist-put face :underline t)))
+    ;; blink-slow (0x10): kuro--apply-blink-overlay で別途オーバーレイを作成
+    ;; blink-fast (0x20): kuro--apply-blink-overlay で別途オーバーレイを作成
+    ;; hidden (0x80): add-text-properties で直接 invisible プロパティを設定
+    ;;   (:invisible t をフェイスplistに含めても表示効果がないため、フェイス外で適用する)
+    ;; strikethrough (0x100)
+    (when (/= 0 (logand attrs #x100))
+      (setq face (plist-put face :strike-through t)))
     face))
 ```
 
@@ -302,3 +311,11 @@ FACE-RANGESは[[start end fg bg attrs] ...]ベクター。"
 - 256色およびTrueColor対応
 - OSCシーケンス（ウィンドウタイトル、ハイパーリンク）
 - スクロール領域および高度な機能
+
+## 実装済み追加属性
+
+以下の属性はRust側でエンコードされており、Phase 4完了時にElisp側でも実装済み:
+
+- `blink_slow` (SGR 5, bit 0x10): 低速点滅（~0.5 Hz）— `kuro--apply-blink-overlay` でオーバーレイ作成、レンダーサイクルのフレームカウンタ（mod 30）で表示/非表示を切替
+- `blink_fast` (SGR 6, bit 0x20): 高速点滅（~1.5 Hz）— `kuro--apply-blink-overlay` でオーバーレイ作成、フレームカウンタ（mod 10）で切替（fast が slow より優先）
+- `hidden` (SGR 8, bit 0x80): 非表示 — `add-text-properties` で `invisible t` を直接設定（face plist 経由では無効なため）

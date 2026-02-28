@@ -27,7 +27,7 @@
 (defgroup kuro nil
   "Kuro terminal emulator."
   :group 'terminal
-  :prefix 'kuro-)
+  :prefix "kuro-")
 
 (defcustom kuro-default-shell "/bin/zsh"
   "Default shell command to run."
@@ -112,6 +112,9 @@ Switches to the terminal buffer after creation."
   (interactive)
   (when (derived-mode-p 'kuro-mode)
     (kuro--stop-render-loop)
+    ;; Clean up blink overlays
+    (remove-overlays (point-min) (point-max) 'kuro-blink t)
+    (setq kuro--blink-overlays nil)
     (kuro--shutdown)
     (let ((buffer (current-buffer)))
       (kill-buffer buffer))))

@@ -21,6 +21,11 @@
 (declare-function kuro-core-resize                "ext:kuro-core" (rows cols))
 (declare-function kuro-core-shutdown              "ext:kuro-core" ())
 (declare-function kuro-core-get-cursor            "ext:kuro-core" ())
+(declare-function kuro-core-get-scrollback        "ext:kuro-core" (max-lines))
+(declare-function kuro-core-clear-scrollback      "ext:kuro-core" ())
+(declare-function kuro-core-set-scrollback-max-lines "ext:kuro-core" (max-lines))
+(declare-function kuro-core-get-scrollback-count  "ext:kuro-core" ())
+(declare-function kuro-core-get-cursor-visible    "ext:kuro-core" ())
 
 (defvar kuro--initialized nil
   "Non-nil if Kuro has been initialized.")
@@ -107,6 +112,61 @@ Returns (ROW . COL) pair."
       (error
        (message "Kuro get-cursor error: %s" err)
        '(0 . 0)))))
+
+;;;###autoload
+(defun kuro--get-scrollback (max-lines)
+  "Retrieve up to MAX-LINES lines from the scrollback buffer.
+Returns a list of strings, or nil if not initialized."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-scrollback max-lines)
+      (error
+       (message "Kuro get-scrollback error: %s" err)
+       nil))))
+
+;;;###autoload
+(defun kuro--clear-scrollback ()
+  "Clear the scrollback buffer.
+Returns t if successful, nil otherwise."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-clear-scrollback)
+      (error
+       (message "Kuro clear-scrollback error: %s" err)
+       nil))))
+
+;;;###autoload
+(defun kuro--set-scrollback-max-lines (max-lines)
+  "Set the maximum scrollback buffer size to MAX-LINES.
+Returns t if successful, nil otherwise."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-set-scrollback-max-lines max-lines)
+      (error
+       (message "Kuro set-scrollback-max-lines error: %s" err)
+       nil))))
+
+;;;###autoload
+(defun kuro--get-scrollback-count ()
+  "Get the number of lines currently in the scrollback buffer.
+Returns an integer, or nil if not initialized."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-scrollback-count)
+      (error
+       (message "Kuro get-scrollback-count error: %s" err)
+       nil))))
+
+;;;###autoload
+(defun kuro--get-cursor-visible ()
+  "Get cursor visibility state (DECTCEM).
+Returns t if cursor is visible, nil if hidden."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-cursor-visible)
+      (error
+       (message "Kuro get-cursor-visible error: %s" err)
+       t))))
 
 (provide 'kuro-ffi)
 

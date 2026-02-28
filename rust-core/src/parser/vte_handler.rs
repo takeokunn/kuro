@@ -19,7 +19,8 @@ mod tests {
     #[test]
     fn test_vte_sgr_bold() {
         let mut term = TerminalCore::new(24, 80);
-        term.advance(b"\x1b[1mBold\x1b[0m");
+        // Set bold, print text, then verify bold is active (no reset)
+        term.advance(b"\x1b[1mBold");
 
         assert!(term.current_attrs.bold);
     }

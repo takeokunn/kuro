@@ -107,8 +107,8 @@ fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
         .unwrap_or(0);
 
     if code == 6 {
-        let row = term.screen.cursor.row + 1; // Convert to 1-indexed
-        let col = term.screen.cursor.col + 1;
+        let row = term.screen.cursor().row + 1; // Convert to 1-indexed
+        let col = term.screen.cursor().col + 1;
         let response = format!("\x1b[{};{}R", row, col);
         term.pending_responses.push(response.into_bytes());
     }
@@ -130,7 +130,7 @@ fn csi_vpa(term: &mut crate::TerminalCore, params: &vte::Params) {
 
     // Move cursor to absolute row, keep current column
     term.screen
-        .move_cursor(row as usize, term.screen.cursor.col);
+        .move_cursor(row as usize, term.screen.cursor().col);
 }
 
 /// CHA - Character Position Absolute (CSI G)
@@ -149,7 +149,7 @@ fn csi_cha(term: &mut crate::TerminalCore, params: &vte::Params) {
 
     // Move cursor to absolute column, keep current row
     term.screen
-        .move_cursor(term.screen.cursor.row, col as usize);
+        .move_cursor(term.screen.cursor().row, col as usize);
 }
 
 /// HVP - Horizontal and Vertical Position (CSI f)
@@ -190,8 +190,7 @@ mod tests {
         assert_eq!(term.screen.cursor.col, 0);
 
         // Move cursor to row 5 (1-indexed: CSI 5 d)
-        let params = vte::Params::default();
-        csi_vpa(&mut term, &params);
+        term.advance(b"\x1b[5d");
 
         // Should move to row 4 (0-indexed), column unchanged
         assert_eq!(term.screen.cursor.row, 4);
@@ -218,9 +217,8 @@ mod tests {
     fn test_vpa_bounds() {
         let mut term = crate::TerminalCore::new(10, 80);
 
-        // Try to move beyond screen bounds
-        let params = vte::Params::default();
-        csi_vpa(&mut term, &params);
+        // Try to move beyond screen bounds (CSI 100 d)
+        term.advance(b"\x1b[100d");
 
         // Should clamp to screen boundary (row 9 for 10 rows)
         assert_eq!(term.screen.cursor.row, 9);
@@ -235,8 +233,7 @@ mod tests {
         assert_eq!(term.screen.cursor.col, 0);
 
         // Move cursor to column 20 (1-indexed: CSI 20 G)
-        let params = vte::Params::default();
-        csi_cha(&mut term, &params);
+        term.advance(b"\x1b[20G");
 
         // Should move to column 19 (0-indexed), row unchanged
         assert_eq!(term.screen.cursor.row, 0);
@@ -263,9 +260,8 @@ mod tests {
     fn test_cha_bounds() {
         let mut term = crate::TerminalCore::new(24, 50);
 
-        // Try to move beyond screen bounds
-        let params = vte::Params::default();
-        csi_cha(&mut term, &params);
+        // Try to move beyond screen bounds (CSI 100 G)
+        term.advance(b"\x1b[100G");
 
         // Should clamp to screen boundary (col 49 for 50 cols)
         assert_eq!(term.screen.cursor.col, 49);
@@ -280,8 +276,7 @@ mod tests {
         assert_eq!(term.screen.cursor.col, 0);
 
         // Move cursor to (row=10, col=30) (1-indexed: CSI 10;30 f)
-        let params = vte::Params::default();
-        csi_hvp(&mut term, &params);
+        term.advance(b"\x1b[10;30f");
 
         // Should move to (9, 29) (0-indexed)
         assert_eq!(term.screen.cursor.row, 9);
@@ -308,10 +303,8 @@ mod tests {
     fn test_hvp_partial_params() {
         let mut term = crate::TerminalCore::new(24, 80);
 
-        // Start at (0, 0)
-        // Move cursor to row only (column defaults to 1)
-        let params = vte::Params::default();
-        csi_hvp(&mut term, &params);
+        // Move cursor to row 5 only (column defaults to 1): CSI 5 f
+        term.advance(b"\x1b[5f");
 
         // Should move to (4, 0) (row=5, col=1 in 1-indexed)
         assert_eq!(term.screen.cursor.row, 4);
@@ -322,9 +315,8 @@ mod tests {
     fn test_hvp_bounds() {
         let mut term = crate::TerminalCore::new(10, 50);
 
-        // Try to move beyond screen bounds
-        let params = vte::Params::default();
-        csi_hvp(&mut term, &params);
+        // Try to move beyond screen bounds (CSI 100;100 f)
+        term.advance(b"\x1b[100;100f");
 
         // Should clamp to screen boundaries
         assert_eq!(term.screen.cursor.row, 9); // 10 rows max

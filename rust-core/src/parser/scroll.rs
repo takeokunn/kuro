@@ -129,8 +129,7 @@ mod tests {
 
         // Set scroll region from row 3 to row 8 (1-indexed: CSI 3;8 r)
         // This becomes (2, 8) in 0-indexed
-        let params = vte::Params::default();
-        csi_decstbm(&mut term, &params);
+        term.advance(b"\x1b[3;8r");
 
         assert_eq!(term.screen.get_scroll_region().top, 2);
         assert_eq!(term.screen.get_scroll_region().bottom, 8);
@@ -144,9 +143,9 @@ mod tests {
         term.screen.move_cursor(5, 10);
         assert_eq!(term.screen.cursor.row, 5);
 
-        // Set scroll region
-        let params = vte::Params::default();
-        csi_decstbm(&mut term, &params);
+        // Set scroll region from row 2 to row 8 (1-indexed: CSI 2;8 r)
+        // top becomes 1 (0-indexed)
+        term.advance(b"\x1b[2;8r");
 
         // Cursor should move to top of scroll region (row 1, since top=1)
         assert_eq!(term.screen.cursor.row, 1);
@@ -217,9 +216,8 @@ mod tests {
             }
         }
 
-        // Scroll up 3 lines
-        let params = vte::Params::default();
-        csi_su(&mut term, &params);
+        // Scroll up 3 lines (CSI 3 S)
+        term.advance(b"\x1b[3S");
 
         // Line 0 should now have content from line 3
         let line = term.screen.get_line(0).unwrap();
@@ -300,9 +298,8 @@ mod tests {
             }
         }
 
-        // Scroll down 3 lines
-        let params = vte::Params::default();
-        csi_sd(&mut term, &params);
+        // Scroll down 3 lines (CSI 3 T)
+        term.advance(b"\x1b[3T");
 
         // First 3 lines should be blank
         for r in 0..3 {

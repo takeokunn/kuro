@@ -3,8 +3,7 @@
 ;; Copyright (C) 2025 takeokunn
 
 ;; Author: takeokunn
-;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1"))
+;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -14,31 +13,57 @@
 
 ;;; Code:
 
+(require 'kuro-config)  ;; for kuro-module-binary-path defcustom
 (require 'kuro-ffi)
 (require 'kuro-renderer)
 
+(defun kuro-module--platform-extension ()
+  "Return the platform-specific shared library extension."
+  (cond
+   ((eq system-type 'gnu/linux) "so")
+   ((eq system-type 'darwin) "dylib")
+   (t (error "Kuro: Unsupported platform: %s" system-type))))
+
+(defun kuro-module--find-library ()
+  "Find the kuro native module binary using 3-tier priority.
+1. kuro-module-binary-path defcustom (user override)
+2. XDG standard path: ~/.local/share/kuro/
+3. Development fallback: relative to this .el file"
+  (let* ((ext (kuro-module--platform-extension))
+         (lib-name (format "libkuro_core.%s" ext)))
+    (cond
+     ;; Tier 1: user-specified custom path
+     ((and kuro-module-binary-path (file-exists-p kuro-module-binary-path))
+      kuro-module-binary-path)
+     ;; Tier 2: XDG standard install path
+     ((file-exists-p (expand-file-name lib-name "~/.local/share/kuro/"))
+      (expand-file-name lib-name "~/.local/share/kuro/"))
+     ;; Tier 3: development checkout (relative to this file).
+     ;; load-file-name is only set during the initial `load' call; after that
+     ;; we fall back to locate-library so that batch-mode tests also work.
+     (t
+      (let* ((this-file (or load-file-name
+                            (locate-library "kuro-module")
+                            buffer-file-name))
+             (dev-path (expand-file-name
+                        (format "../target/release/%s" lib-name)
+                        (file-name-directory this-file))))
+        dev-path)))))
+
 ;;;###autoload
 (defun kuro-module-load ()
-  "Load the Kuro Rust dynamic module."
-  (let ((module-file
-         (cond
-          ((eq system-type 'gnu/linux)
-           (expand-file-name "target/release/libkuro_core.so"
-                             (if (file-directory-p (expand-file-name "../../" (locate-library "kuro-module")))
-                                 (expand-file-name "../../" (locate-library "kuro-module"))
-                               (expand-file-name "../.." (locate-library "kuro-module")))))
-          ((eq system-type 'darwin)
-           (expand-file-name "target/release/libkuro_core.dylib"
-                             (if (file-directory-p (expand-file-name "../../" (locate-library "kuro-module")))
-                                 (expand-file-name "../../" (locate-library "kuro-module"))
-                               (expand-file-name "../.." (locate-library "kuro-module")))))
-          (t
-           (error "Kuro: Unsupported platform")))))
-    (when (file-exists-p module-file)
-      (module-load module-file)
-      (message "Kuro: Loaded module from %s" module-file))))
-
-(kuro-module-load)
+  "Load the kuro native module if available.
+Searches for the binary in: custom path, XDG standard location, development path.
+Emits a warning but does not error if the module is not found.
+If the module is already loaded (kuro-core-init is fbound), does nothing."
+  (unless (fboundp 'kuro-core-init)
+    (let ((module-file (kuro-module--find-library)))
+      (if (file-exists-p module-file)
+          (progn
+            (message "Kuro: loading module from %s" module-file)
+            (module-load module-file))
+        (message "Kuro: native module not found. Run 'make install' to build it. (searched: %s)"
+                 module-file)))))
 
 (provide 'kuro-module)
 

@@ -78,6 +78,8 @@ pub struct Cell {
     pub width: CellWidth,
     /// Hyperlink ID (if any)
     pub hyperlink_id: Option<String>,
+    /// Image ID for Kitty Graphics Protocol (if any)
+    pub image_id: Option<u32>,
 }
 
 impl Cell {
@@ -88,6 +90,7 @@ impl Cell {
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
             hyperlink_id: None,
+            image_id: None,
         }
     }
 
@@ -98,6 +101,7 @@ impl Cell {
             attrs,
             width: CellWidth::Half,
             hyperlink_id: None,
+            image_id: None,
         }
     }
 
@@ -120,6 +124,7 @@ impl PartialEq for Cell {
             && self.attrs == other.attrs
             && self.width == other.width
             && self.hyperlink_id == other.hyperlink_id
+            && self.image_id == other.image_id
     }
 }
 
@@ -166,6 +171,15 @@ mod tests {
     }
 
     #[test]
+    fn test_cell_image_id_defaults_to_none() {
+        let cell_default = Cell::default();
+        assert_eq!(cell_default.image_id, None);
+
+        let cell_new = Cell::new('X');
+        assert_eq!(cell_new.image_id, None);
+    }
+
+    #[test]
     fn test_cell_equality() {
         let cell1 = Cell::new('A');
         let cell2 = Cell::new('A');
@@ -175,5 +189,28 @@ mod tests {
         attrs.bold = true;
         let cell3 = Cell::with_attrs('A', attrs);
         assert_ne!(cell1, cell3);
+    }
+
+    #[test]
+    fn test_cell_with_hyperlink() {
+        // A freshly created cell has no hyperlink
+        let cell = Cell::new('A');
+        assert_eq!(cell.hyperlink_id, None);
+
+        // with_hyperlink sets the hyperlink_id to the given String
+        let linked_cell = cell.with_hyperlink("https://example.com".to_string());
+        assert_eq!(
+            linked_cell.hyperlink_id,
+            Some("https://example.com".to_string())
+        );
+
+        // Replacing an existing hyperlink with a different one works correctly
+        let relinked = linked_cell.with_hyperlink("https://other.com".to_string());
+        assert_eq!(relinked.hyperlink_id, Some("https://other.com".to_string()));
+
+        // Other fields are preserved after setting a hyperlink
+        assert_eq!(relinked.c, 'A');
+        assert_eq!(relinked.width, CellWidth::Half);
+        assert!(!relinked.attrs.bold);
     }
 }

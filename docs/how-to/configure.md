@@ -1,320 +1,191 @@
 # Configuration Guide
 
-このガイドでは、kuro の詳細な設定方法を説明します。基本的な設定から高度なカスタマイズまで、幅広い設定項目をカバーします。
+This guide explains all user-configurable options for the kuro terminal emulator.
+All settings are defined as `defcustom` variables in `kuro-config.el` and
+integrate with Emacs' standard `M-x customize` interface.
 
-## 基本的な設定構造
+## Quick Start
 
-kuro の設定は、Emacs Lisp を通じて行います。以下の3つのレイヤーで設定を管理できます：
-
-1. **グローバル設定**: 全ての kuro セッションに適用
-2. **バッファローカル設定**: 特定のバッファにのみ適用
-3. **プロファイル設定**: 用途別のプリセット
-
-## 設定ファイルの場所
-
-設定は通常 `init.el` または専用の設定ファイルに記述します：
+Open the kuro customization group:
 
 ```
-~/.emacs.d/
-├── init.el              # メインの設定ファイル
-└── kuro-config.el       # kuro 専用の設定ファイル
+M-x customize-group RET kuro RET
 ```
 
-## 設定項目一覧
+Validate your current settings:
 
-### コア設定
+```
+M-x kuro-validate-config
+```
+
+## Core Settings
+
+### `kuro-shell`
+
+Shell program to run in the Kuro terminal.
+
+| Property | Value |
+|----------|-------|
+| Default | `$SHELL` environment variable, or `/bin/bash` |
+| Type | String (executable path) |
+| Group | `kuro` |
+
+The shell must be accessible via `PATH`. Setting a path to a non-existent
+executable signals a `user-error`. The variable `kuro-default-shell` is a
+backward-compatibility alias for `kuro-shell`.
 
 ```elisp
-;; デフォルトのシェル
-(setq kuro-default-shell "/bin/zsh")
-
-;; 動的モジュールのパス
-(setq kuro-module-path
-      (expand-file-name "rust-core/target/release/libkuro_core.so"
-                        (projectile-project-root)))
-
-;; スクロールバックのサイズ
-(setq kuro-scrollback-size 10000)
-
-;; 文字コード
-(setq kuro-default-coding-system 'utf-8-unix)
+(setq kuro-shell "/bin/zsh")
 ```
 
-### 表示設定
+### `kuro-scrollback-size`
+
+Maximum number of lines retained in the scrollback buffer.
+
+| Property | Value |
+|----------|-------|
+| Default | `10000` |
+| Type | Positive integer (> 0) |
+| Group | `kuro` |
+
+Changes take effect immediately in all running Kuro buffers.
 
 ```elisp
-;; カーソルの種類 (box, bar, underline)
-(setq kuro-cursor-type 'box)
-
-;; カーソルの点滅
-(setq kuro-cursor-blink-mode t)
-
-;; カーソルの色
-(setq kuro-cursor-color "#5c6370")
-
-;; 背景色と前景色
-(setq kuro-background-color "#282c34")
-(setq kuro-foreground-color "#abb2bf")
-
-;; Bold/Italic の有効化
-(setq kuro-enable-bold t)
-(setq kuro-enable-italic t)
+(setq kuro-scrollback-size 20000)
 ```
 
-### 動作設定
+## Display Settings
+
+### `kuro-frame-rate`
+
+Frame rate for terminal rendering, in frames per second.
+
+| Property | Value |
+|----------|-------|
+| Default | `30` |
+| Type | Positive integer (> 0) |
+| Group | `kuro-display` |
+
+Changes take effect immediately by restarting the render loop in all
+active Kuro buffers.
 
 ```elisp
-;; 自動スクロール
-(setq kuro-auto-scroll t)
-
-;; 自動スクロールのしきい値
-(setq kuro-auto-scroll-threshold 1)
-
-;; 更新間隔 (ミリ秒)
-(setq kuro-update-interval 16)
-
-;; 更新のスロットリング
-(setq kuro-update-throttle 10)
-
-;; 1回の更新で処理する最大行数
-(setq kuro-max-update-lines 1000)
-
-;; Dirty Line Tracking
-(setq kuro-dirty-line-tracking t)
+(setq kuro-frame-rate 60)
 ```
 
-### パフォーマンス設定
+### `kuro-font-family`
+
+Font family for Kuro terminal buffers.
+
+| Property | Value |
+|----------|-------|
+| Default | `nil` (inherit from default face) |
+| Type | String or `nil` |
+| Group | `kuro-display` |
+
+Only effective in graphical Emacs frames; no effect in terminal frames.
+Changes apply immediately via `face-remap-add-relative`.
 
 ```elisp
-;; メモリプールサイズ
-(setq kuro-cell-pool-size 10000)
-(setq kuro-line-pool-size 1000)
-
-;; GC 閾値
-(setq kuro-gc-threshold (* 100 1024 1024))
-
-;; 非同期レンダリング
-(setq kuro-async-rendering nil)
-
-;; バイトコンパイル
-(setq kuro-enable-byte-compile t)
+(setq kuro-font-family "Iosevka")
 ```
 
-### 高度な設定
+### `kuro-font-size`
+
+Font size in points for Kuro terminal buffers.
+
+| Property | Value |
+|----------|-------|
+| Default | `nil` (inherit from default face) |
+| Type | Positive integer in points, or `nil` |
+| Group | `kuro-display` |
+
+Only effective in graphical Emacs frames. Internally converted to Emacs
+face `:height` units (`(* 10 value)`), so `14` becomes `:height 140`.
 
 ```elisp
-;; 環境変数
-(setq kuro-environment-variables
-      '(("EDITOR" . "vim")
-        ("PAGER" . "less")
-        ("LANG" . "ja_JP.UTF-8")))
-
-;; TERM 環境変数
-(setq kuro-term-env "xterm-256color")
-
-;; カラーパレット
-(setq kuro-color-palette 'kuro)  ; 'kuro, 'standard, 'solarized
-
-;; Alt キーを Meta として扱う
-(setq kuro-alt-is-meta t)
+(setq kuro-font-size 14)
 ```
 
-## use-package を使用した設定
+## ANSI Color Palette
 
-モダンな Emacs 設定では `use-package` を使用して設定を整理できます：
+All 16 ANSI terminal colors are individually customizable. Each variable
+accepts a 6-digit hex color string in `#rrggbb` format. Color changes
+rebuild the internal color table and clear the face cache immediately.
+
+| Variable | ANSI Index | Default |
+|----------|-----------|---------|
+| `kuro-color-black` | 0 | `#000000` |
+| `kuro-color-red` | 1 | `#c23621` |
+| `kuro-color-green` | 2 | `#25bc24` |
+| `kuro-color-yellow` | 3 | `#adad27` |
+| `kuro-color-blue` | 4 | `#492ee1` |
+| `kuro-color-magenta` | 5 | `#d338d3` |
+| `kuro-color-cyan` | 6 | `#33bbc8` |
+| `kuro-color-white` | 7 | `#cbcccd` |
+| `kuro-color-bright-black` | 8 | `#808080` |
+| `kuro-color-bright-red` | 9 | `#ff0000` |
+| `kuro-color-bright-green` | 10 | `#00ff00` |
+| `kuro-color-bright-yellow` | 11 | `#ffff00` |
+| `kuro-color-bright-blue` | 12 | `#0000ff` |
+| `kuro-color-bright-magenta` | 13 | `#ff00ff` |
+| `kuro-color-bright-cyan` | 14 | `#00ffff` |
+| `kuro-color-bright-white` | 15 | `#ffffff` |
+
+Example: applying a Solarized-inspired palette:
+
+```elisp
+(setq kuro-color-black    "#073642"
+      kuro-color-red      "#dc322f"
+      kuro-color-green    "#859900"
+      kuro-color-yellow   "#b58900"
+      kuro-color-blue     "#268bd2"
+      kuro-color-magenta  "#d33682"
+      kuro-color-cyan     "#2aa198"
+      kuro-color-white    "#eee8d5")
+```
+
+## Configuration Validation
+
+`M-x kuro-validate-config` checks all settings and reports errors in the
+echo area. An empty result means everything is valid. It verifies:
+
+- `kuro-shell`: executable accessible via `PATH`
+- `kuro-scrollback-size`: positive integer (> 0)
+- `kuro-frame-rate`: positive integer (> 0)
+- `kuro-font-size`: positive integer or `nil`
+- All 16 `kuro-color-*` variables: 6-digit hex strings in `#rrggbb` format
+
+## `use-package` Example
 
 ```elisp
 (use-package kuro
-  :load-path "~/.emacs.d/site-lisp/kuro"
-  :init
-  ;; 初期化フェーズで設定する項目
-  (setq kuro-module-path
-        (expand-file-name "rust-core/target/release/libkuro_core.so"
-                          (projectile-project-root)))
   :config
-  ;; コンフィギュレーションフェーズで設定する項目
-  (setq kuro-default-shell "/bin/zsh")
-  (setq kuro-scrollback-size 10000)
-  (setq kuro-auto-scroll t)
-  :hook
-  ;; フックを設定
-  (kuro-mode . kuro-setup)
-  :bind
-  ;; キーバインドを設定
-  ("C-c t" . kuro)
-  (:map kuro-mode-map
-        ("C-c C-q" . kuro-quit)
-        ("C-c C-l" . kuro-clear-scrollback)))
+  (setq kuro-shell          "/bin/zsh"
+        kuro-scrollback-size 20000
+        kuro-frame-rate      60
+        kuro-font-family     "Iosevka"
+        kuro-font-size       14
+        kuro-color-black     "#1e1e2e"
+        kuro-color-white     "#cdd6f4")
+  :bind ("C-c t" . kuro-create))
 ```
 
-## プロファイル設定
+## Runtime Reconfiguration
 
-用途別にプロファイルを定義して、簡単に切り替えることができます：
+All `defcustom` variables support runtime changes via their `:set` handlers.
+Changes through `customize-set-variable`, `setopt`, or `M-x customize-group`
+take effect immediately:
 
 ```elisp
-;; デフォルトプロファイル
-(defvar kuro-default-profile
-  '((shell . "/bin/zsh")
-    (scrollback-size . 10000)
-    (cursor-type . box)
-    (background-color . "#282c34")
-    (foreground-color . "#abb2bf")))
+;; Increase scrollback at runtime
+(customize-set-variable 'kuro-scrollback-size 50000)
 
-;; 開発用プロファイル
-(defvar kuro-dev-profile
-  '((shell . "/bin/bash")
-    (scrollback-size . 50000)
-    (cursor-type . bar)
-    (background-color . "#1e1e1e")
-    (foreground-color . "#d4d4d4")
-    (env-vars . (("NODE_ENV" . "development")))))
-
-;; ライトテーマプロファイル
-(defvar kuro-light-profile
-  '((shell . "/bin/zsh")
-    (scrollback-size . 10000)
-    (cursor-type . box)
-    (background-color . "#ffffff")
-    (foreground-color . "#000000")))
-
-;; プロファイルを適用する関数
-(defun kuro-apply-profile (profile-name)
-  "Apply a kuro profile by name."
-  (interactive
-   (list (completing-read "Profile: "
-                          '(default dev light)
-                          nil t)))
-  (let* ((profile-symbol (intern (format "kuro-%s-profile" profile-name)))
-         (settings (symbol-value profile-symbol)))
-    (dolist (setting settings)
-      (setq (intern (format "kuro-%s" (car setting))) (cdr setting)))
-    (message "Applied kuro profile: %s" profile-name)))
-
-;; 使用例
-(kuro-apply-profile 'dev)
+;; Change frame rate at runtime (restarts render loop in all kuro buffers)
+(customize-set-variable 'kuro-frame-rate 60)
 ```
 
-## バッファローカル設定
+## Related Documentation
 
-特定のバッファにのみ設定を適用する場合：
-
-```elisp
-;; バッファローカル設定を追加する関数
-(defun kuro-set-buffer-local (key value)
-  "Set a buffer-local kuro setting."
-  (set (make-local-variable (intern (format "kuro-%s" key))) value))
-
-;; 使用例
-(defun my-kuro-dev-setup ()
-  "Setup kuro for development."
-  (kuro-set-buffer-local "scrollback-size" 50000)
-  (kuro-set-buffer-local "update-throttle" 50)
-  (kuro-set-buffer-local "max-update-lines" 5000))
-
-;; フックで適用
-(add-hook 'kuro-mode-hook #'my-kuro-dev-setup)
-```
-
-## 条件付き設定
-
-条件に応じて設定を変更する場合：
-
-```elisp
-;; システムに応じた設定
-(cond
- ((string-equal system-type "darwin")
-  ;; macOS 用の設定
-  (setq kuro-default-shell "/bin/zsh")
-  (setq kuro-module-path "/usr/local/lib/libkuro_core.dylib"))
- ((string-equal system-type "gnu/linux")
-  ;; Linux 用の設定
-  (setq kuro-default-shell "/bin/bash")
-  (setq kuro-module-path "/usr/local/lib/libkuro_core.so")))
-
-;; Emacs バージョンに応じた設定
-(when (version<= "28.1" emacs-version)
-  (setq kuro-use-new-features t))
-
-;; ディスプレイ環境に応じた設定
-(if (display-graphic-p)
-    (setq kuro-cursor-type 'box)
-  (setq kuro-cursor-type 'bar))
-```
-
-## 設定の検証
-
-設定が正しく適用されているか確認する方法：
-
-```elisp
-;; 変数の値を確認
-C-h v kuro-scrollback-size
-
-;; 現在の設定をすべて表示
-M-x kuro-show-config
-
-;; 設定をファイルにエクスポート
-M-x kuro-export-config
-```
-
-## 設定のデバッグ
-
-設定が期待通りに動作しない場合のデバッグ方法：
-
-```elisp
-;; デバッグモードを有効化
-(setq kuro-debug-mode t)
-
-;; デバッグ情報を表示
-M-x kuro-show-debug-info
-
-;; ログを記録
-(setq kuro-log-level 'debug)  ; 'debug, 'info, 'warn, 'error
-(setq kuro-log-file "~/.emacs.d/kuro.log")
-
-;; トレースを有効化
-(setq kuro-trace t)
-```
-
-## 設定のバックアップと復元
-
-```elisp
-;; 設定をバックアップ
-(defun kuro-backup-config ()
-  "Backup current kuro configuration."
-  (interactive)
-  (let ((backup-file (format-time-string
-                      "~/.emacs.d/kuro-config-backup-%Y%m%d-%H%M%S.el")))
-    (with-temp-file backup-file
-      (insert ";; Kuro configuration backup\n")
-      (insert (format ";; Created: %s\n" (current-time-string)))
-      (insert "\n")
-      (pp `(use-package kuro
-            :config
-            ,@(cl-loop for var in (apropos-internal "^kuro-" 'boundp)
-                       collect `(setq ,(intern var) ,(symbol-value var))))
-           (current-buffer)))
-    (message "Kuro configuration backed up to: %s" backup-file)))
-
-;; 設定を復元
-M-x kuro-restore-config
-```
-
-## ベストプラクティス
-
-1. **設定の整理**: 関連する設定をグループ化
-2. **ドキュメント**: 複雑な設定にはコメントを追加
-3. **バージョン管理**: 設定ファイルを Git で管理
-4. **段階的な変更**: 一度に複数の設定を変更せず、一つずつテスト
-5. **プロファイルの活用**: 用途別にプロファイルを作成
-
-## 次のステップ
-
-設定が完了したら、次のステップに進みましょう：
-
-- [Performance Tuning](./performance-tuning.md) — パフォーマンスの最適化
-- [Installation](./install.md) — インストール手順
-
-## 関連ドキュメント
-
-- [Architecture](../explanation/architecture.md) — アーキテクチャの理解
-- [Reference](../reference/) — 技術的なリファレンス
+- [Installation](./install.md) — Installing kuro
+- [Shell Integration](./shell-integration.md) — Shell configuration

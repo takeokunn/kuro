@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 takeokunn
 
 ;; Author: takeokunn
-;; Version: 0.1.0
+;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -26,6 +26,17 @@
 (declare-function kuro-core-set-scrollback-max-lines "ext:kuro-core" (max-lines))
 (declare-function kuro-core-get-scrollback-count  "ext:kuro-core" ())
 (declare-function kuro-core-get-cursor-visible    "ext:kuro-core" ())
+(declare-function kuro-core-get-app-cursor-keys   "ext:kuro-core" ())
+(declare-function kuro-core-get-app-keypad        "ext:kuro-core" ())
+(declare-function kuro-core-get-mouse-mode        "ext:kuro-core" ())
+(declare-function kuro-core-get-mouse-sgr         "ext:kuro-core" ())
+(declare-function kuro-core-get-and-clear-title   "ext:kuro-core" ())
+(declare-function kuro-core-get-bracketed-paste   "ext:kuro-core" ())
+(declare-function kuro-core-scroll-up        "ext:kuro-core" (n))
+(declare-function kuro-core-scroll-down      "ext:kuro-core" (n))
+(declare-function kuro-core-get-scroll-offset "ext:kuro-core" ())
+(declare-function kuro-core-get-image                "ext:kuro-core" (image-id))
+(declare-function kuro-core-poll-image-notifications "ext:kuro-core" ())
 
 (defvar kuro--initialized nil
   "Non-nil if Kuro has been initialized.")
@@ -44,12 +55,17 @@ Returns t if successful, nil otherwise."
      nil)))
 
 ;;;###autoload
-(defun kuro--send-key (bytes)
-  "Send BYTES (vector of integers) to the terminal.
+(defun kuro--send-key (data)
+  "Send DATA to the terminal.
+DATA may be a string or a vector of integer character codes.
+Vectors are converted to strings before being passed to the Rust FFI.
 Returns t if successful, nil otherwise."
   (when kuro--initialized
     (condition-case err
-        (kuro-core-send-key bytes)
+        (let ((bytes (if (stringp data)
+                         data
+                       (apply #'string (append data nil)))))
+          (kuro-core-send-key bytes))
       (error
        (message "Kuro send-key error: %s" err)
        nil))))
@@ -130,7 +146,9 @@ Returns a list of strings, or nil if not initialized."
 Returns t if successful, nil otherwise."
   (when kuro--initialized
     (condition-case err
-        (kuro-core-clear-scrollback)
+        (progn
+          (kuro-core-clear-scrollback)
+          (setq kuro--scroll-offset 0))
       (error
        (message "Kuro clear-scrollback error: %s" err)
        nil))))
@@ -167,6 +185,103 @@ Returns t if cursor is visible, nil if hidden."
       (error
        (message "Kuro get-cursor-visible error: %s" err)
        t))))
+
+;;;###autoload
+(defun kuro--get-app-cursor-keys ()
+  "Return t if application cursor keys mode (DECCKM) is active."
+  (when kuro--initialized
+    (condition-case nil
+        (kuro-core-get-app-cursor-keys)
+      (error nil))))
+
+;;;###autoload
+(defun kuro--get-app-keypad ()
+  "Return t if application keypad mode (DECKPAM) is active, nil otherwise."
+  (when kuro--initialized
+    (condition-case nil
+        (kuro-core-get-app-keypad)
+      (error nil))))
+
+;;;###autoload
+(defun kuro--get-mouse-mode ()
+  "Return the current mouse tracking mode as an integer.
+0 = disabled, 1000 = normal, 1002 = button-event, 1003 = any-event."
+  (when kuro--initialized
+    (condition-case nil
+        (kuro-core-get-mouse-mode)
+      (error 0))))
+
+;;;###autoload
+(defun kuro--get-mouse-sgr ()
+  "Return t if SGR extended coordinates mouse mode (mode 1006) is active."
+  (when kuro--initialized
+    (condition-case nil
+        (kuro-core-get-mouse-sgr)
+      (error nil))))
+
+;;;###autoload
+(defun kuro--get-and-clear-title ()
+  "Get and atomically clear the window title from Rust core.
+Returns the title string if it was dirty, nil otherwise."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-and-clear-title)
+      (error (message "kuro: get-and-clear-title error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--get-bracketed-paste ()
+  "Get the current bracketed paste mode state from Rust core.
+Returns t if bracketed paste mode (?2004) is active, nil otherwise."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-bracketed-paste)
+      (error (message "kuro: get-bracketed-paste error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--scroll-up (n)
+  "Scroll viewport up by N lines into scrollback history."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-scroll-up n)
+      (error (message "Kuro scroll-up error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--scroll-down (n)
+  "Scroll viewport down by N lines toward live terminal output."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-scroll-down n)
+      (error (message "Kuro scroll-down error: %s" err) nil))))
+
+(defun kuro--get-scroll-offset ()
+  "Get the current scrollback viewport offset from the Rust core."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-scroll-offset)
+      (error (message "Kuro get-scroll-offset error: %s" err) 0))))
+
+;;;###autoload
+(defun kuro--get-image (image-id)
+  "Retrieve image IMAGE-ID as a base64-encoded PNG string from the Rust core.
+Returns the base64 string if the image exists, nil if not found."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-image image-id)
+      (error
+       (message "kuro: get-image error for id %d: %s" image-id err)
+       nil))))
+
+;;;###autoload
+(defun kuro--poll-image-notifications ()
+  "Poll for pending Kitty Graphics image placement notifications.
+Returns a list of (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT) descriptors,
+or nil if none are pending."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-poll-image-notifications)
+      (error
+       (message "kuro: poll-image-notifications error: %s" err)
+       nil))))
 
 (provide 'kuro-ffi)
 

@@ -1,0 +1,61 @@
+[package]
+name = "kuro-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+kuro-core = { path = "../rust-core" }
+base64 = "0.22"
+
+[[bin]]
+name = "fuzz_advance"
+path = "fuzz_targets/fuzz_advance.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_kitty_params"
+path = "fuzz_targets/fuzz_kitty_params.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_apc_payload"
+path = "fuzz_targets/fuzz_apc_payload.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_decode_png"
+path = "fuzz_targets/fuzz_decode_png.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_sgr"
+path = "fuzz_targets/fuzz_sgr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_csi_sequence"
+path = "fuzz_targets/fuzz_csi_sequence.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_utf8_input"
+path = "fuzz_targets/fuzz_utf8_input.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_insert_delete"
+path = "fuzz_targets/fuzz_insert_delete.rs"
+test = false
+doc = false

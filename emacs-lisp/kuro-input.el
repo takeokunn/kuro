@@ -48,8 +48,19 @@
 
 ;;; Helper Function for Key Sequences
 
-(defvar kuro--application-cursor-keys-mode nil
-  "Non-nil when application cursor keys mode is active.")
+(defvar-local kuro--application-cursor-keys-mode nil
+  "Cached DECCKM (application cursor keys) mode state from Rust (?1), polled by render cycle.")
+(put 'kuro--application-cursor-keys-mode 'permanent-local t)
+
+(defvar-local kuro--scroll-offset 0
+  "Current scrollback offset. 0 means live terminal view.")
+(put 'kuro--scroll-offset 'permanent-local t)
+
+(defvar-local kuro--app-keypad-mode nil
+  "Cached application keypad mode (DECKPAM/DECKPNM) state from Rust, polled by render cycle.
+This is intentional P1 scaffolding: the variable is declared and polled now so that the
+numeric keypad bindings (kp-0 through kp-9, kp-enter, etc.) can read it when implemented.")
+(put 'kuro--app-keypad-mode 'permanent-local t)
 
 (defun kuro--send-key-sequence (normal-sequence application-sequence)
   "Send key sequence, switching between normal and application cursor modes.
@@ -115,6 +126,34 @@ APPLICATION-SEQUENCE is sent in application cursor keys mode."
   (interactive)
   (kuro--send-key-sequence "\e[6~" "\e[6~"))
 
+(defun kuro-scroll-up ()
+  "Scroll back into terminal history by one screenful."
+  (interactive)
+  (when kuro--initialized
+    (let ((lines (window-body-height)))
+      (kuro--scroll-up lines)
+      (setq kuro--scroll-offset (or (kuro--get-scroll-offset)
+                                     (+ kuro--scroll-offset lines)))
+      (kuro--render-cycle))))
+
+(defun kuro-scroll-down ()
+  "Scroll toward live terminal output by one screenful."
+  (interactive)
+  (when kuro--initialized
+    (let ((lines (window-body-height)))
+      (kuro--scroll-down lines)
+      (setq kuro--scroll-offset (or (kuro--get-scroll-offset)
+                                     (max 0 (- kuro--scroll-offset lines))))
+      (kuro--render-cycle))))
+
+(defun kuro-scroll-bottom ()
+  "Return immediately to live terminal output."
+  (interactive)
+  (when kuro--initialized
+    (kuro--scroll-down 999999)
+    (setq kuro--scroll-offset (or (kuro--get-scroll-offset) 0))
+    (kuro--render-cycle)))
+
 
 ;;; Function Keys F1-F12
 
@@ -154,18 +193,117 @@ APPLICATION-SEQUENCE is sent in application cursor keys mode."
 
 ;;; Bracketed Paste Mode
 
-(defvar kuro--bracketed-paste-mode nil
-  "Non-nil when bracketed paste mode is active.")
+(defvar-local kuro--bracketed-paste-mode nil
+  "Cached bracketed paste mode state from Rust (?2004), polled by render cycle.")
+(put 'kuro--bracketed-paste-mode 'permanent-local t)
 
-(defun kuro--enable-bracketed-paste ()
-  "Enable bracketed paste mode."
-  (kuro--send-key "\e[200~")
-  (setq kuro--bracketed-paste-mode t))
+(defun kuro--sanitize-paste (text)
+  "Sanitize TEXT before sending as bracketed paste.
+Removes all ESC (\\x1b) bytes to prevent bracketed paste escape injection,
+where clipboard content containing \\e[201~ could prematurely close the
+paste bracket and cause command injection."
+  (replace-regexp-in-string "\x1b" "" text))
 
-(defun kuro--disable-bracketed-paste ()
-  "Disable bracketed paste mode."
-  (kuro--send-key "\e[201~")
-  (setq kuro--bracketed-paste-mode nil))
+(defun kuro--yank (&optional arg)
+  "Yank from kill ring, wrapping with bracketed paste sequences when active."
+  (interactive "*P")
+  (let* ((n (if (numberp arg) (1- arg) 0))
+         (text (current-kill n)))
+    (if kuro--bracketed-paste-mode
+        (kuro--send-key (concat "\e[200~" (kuro--sanitize-paste text) "\e[201~"))
+      (kuro--send-key text))))
+
+(defun kuro--yank-pop (&optional arg)
+  "Cycle kill ring and yank, wrapping with bracketed paste sequences when active.
+Like `yank-pop', signals an error if the previous command was not a yank."
+  (interactive "p")
+  (unless (memq last-command '(yank kuro--yank kuro--yank-pop))
+    (user-error "Previous command was not a yank"))
+  (let ((text (current-kill (or arg 1))))
+    (if kuro--bracketed-paste-mode
+        (kuro--send-key (concat "\e[200~" (kuro--sanitize-paste text) "\e[201~"))
+      (kuro--send-key text))))
+
+
+;;; Mouse Tracking
+
+(defvar-local kuro--mouse-mode 0
+  "Cached mouse tracking mode from Rust: 0=off, 1000/1002/1003=on.")
+(put 'kuro--mouse-mode 'permanent-local t)
+
+(defvar-local kuro--mouse-sgr nil
+  "Cached mouse SGR extended coordinates modifier state from Rust.")
+(put 'kuro--mouse-sgr 'permanent-local t)
+
+(defun kuro--encode-mouse (event button press)
+  "Encode mouse EVENT with BUTTON index as a PTY byte string.
+BUTTON is 0=left, 1=middle, 2=right, 64=scroll-up, 65=scroll-down.
+PRESS is non-nil for button press, nil for button release.
+Returns the encoded string, or nil if mouse mode is off or position overflows."
+  (when (> kuro--mouse-mode 0)
+    (let* ((pos (event-start event))
+           (col-row (posn-col-row pos))
+           (col (car col-row))
+           (row (cdr col-row))
+           (col1 (1+ col))
+           (row1 (1+ row)))
+      (if kuro--mouse-sgr
+          ;; SGR format: ESC[<btn;col;rowM (press) / ESC[<btn;col;rowm (release)
+          (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))
+        ;; X10 format: ESC[M{btn+32}{col+32}{row+32} — discard if out of range
+        (when (and (< col 223) (< row 223))
+          (let ((btn-byte (+ (if press button 3) 32)))
+            (format "\e[M%c%c%c" btn-byte (+ col1 32) (+ row1 32))))))))
+
+(defun kuro--encode-mouse-sgr (event button press)
+  "Encode mouse EVENT in SGR format (used when kuro--mouse-sgr is set)."
+  (let* ((pos (event-start event))
+         (col-row (posn-col-row pos))
+         (col1 (1+ (car col-row)))
+         (row1 (1+ (cdr col-row))))
+    (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))))
+
+(defun kuro--mouse-press ()
+  "Handle mouse button press and forward to PTY."
+  (interactive)
+  (when (> kuro--mouse-mode 0)
+    (let* ((btn (pcase (event-basic-type last-input-event)
+                  ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil)))
+           (seq (when btn
+                  (if kuro--mouse-sgr
+                      (kuro--encode-mouse-sgr last-input-event btn t)
+                    (kuro--encode-mouse last-input-event btn t)))))
+      (when seq (kuro--send-key seq)))))
+
+(defun kuro--mouse-release ()
+  "Handle mouse button release and forward to PTY."
+  (interactive)
+  (when (> kuro--mouse-mode 0)
+    (let* ((btn (pcase (event-basic-type last-input-event)
+                  ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil)))
+           (seq (when btn
+                  (if kuro--mouse-sgr
+                      (kuro--encode-mouse-sgr last-input-event btn nil)
+                    (kuro--encode-mouse last-input-event btn nil)))))
+      (when seq (kuro--send-key seq)))))
+
+(defun kuro--mouse-scroll-up ()
+  "Handle scroll-up mouse event and forward to PTY."
+  (interactive)
+  (when (> kuro--mouse-mode 0)
+    (let ((seq (if kuro--mouse-sgr
+                   (kuro--encode-mouse-sgr last-input-event 64 t)
+                 (kuro--encode-mouse last-input-event 64 t))))
+      (when seq (kuro--send-key seq)))))
+
+(defun kuro--mouse-scroll-down ()
+  "Handle scroll-down mouse event and forward to PTY."
+  (interactive)
+  (when (> kuro--mouse-mode 0)
+    (let ((seq (if kuro--mouse-sgr
+                   (kuro--encode-mouse-sgr last-input-event 65 t)
+                 (kuro--encode-mouse last-input-event 65 t))))
+      (when seq (kuro--send-key seq)))))
 
 
 ;;; Keymap Bindings
@@ -191,6 +329,10 @@ APPLICATION-SEQUENCE is sent in application cursor keys mode."
     (define-key map [next]   'kuro--PAGE-DOWN)
     (define-key map [delete] 'kuro--DELETE)
     (define-key map [insert] 'kuro--INSERT)
+    ;; Scrollback viewport navigation (Shift+PgUp/PgDn/End)
+    (define-key map [S-prior] #'kuro-scroll-up)
+    (define-key map [S-next]  #'kuro-scroll-down)
+    (define-key map [S-end]   #'kuro-scroll-bottom)
     ;; Function keys
     (define-key map [f1]  'kuro--F1)
     (define-key map [f2]  'kuro--F2)
@@ -204,6 +346,60 @@ APPLICATION-SEQUENCE is sent in application cursor keys mode."
     (define-key map [f10] 'kuro--F10)
     (define-key map [f11] 'kuro--F11)
     (define-key map [f12] 'kuro--F12)
+    ;; Mouse tracking (forwarded to PTY when mouse mode is active)
+    (define-key map [down-mouse-1] 'kuro--mouse-press)
+    (define-key map [down-mouse-2] 'kuro--mouse-press)
+    (define-key map [down-mouse-3] 'kuro--mouse-press)
+    (define-key map [mouse-1]      'kuro--mouse-release)
+    (define-key map [mouse-2]      'kuro--mouse-release)
+    (define-key map [mouse-3]      'kuro--mouse-release)
+    (define-key map [mouse-4]      'kuro--mouse-scroll-up)
+    (define-key map [mouse-5]      'kuro--mouse-scroll-down)
+    ;; Yank remaps (bracketed paste aware)
+    (define-key map [remap yank]     #'kuro--yank)
+    (define-key map [remap yank-pop] #'kuro--yank-pop)
+    ;; Ctrl+letter keys (C-a through C-z, excluding C-c prefix key)
+    ;; Under lexical-binding, each let* iteration creates a fresh binding of `byte`,
+    ;; so each lambda captures a distinct value.  The inner (let ((b byte)) ...) is a
+    ;; belt-and-suspenders guard that would matter under dynamic binding but is not
+    ;; strictly necessary here.
+    (dotimes (i 26)
+      (let* ((char (+ ?a i))
+             (byte (logand char 31)))
+        (unless (= char ?c)                  ; C-c is a prefix key in kuro-mode-map
+          (define-key map (vector (list 'control char))
+            (let ((b byte))
+              (lambda () (interactive) (kuro--send-special b)))))))
+    ;; Ensure event-symbol bindings win over the loop's character-code bindings.
+    ;; In GUI Emacs, [backspace]/[tab]/[return] are distinct from [C-h]/[C-i]/[C-m].
+    (define-key map [backspace] #'kuro--DEL)
+    (define-key map [tab]       #'kuro--TAB)
+    (define-key map [return]    #'kuro--RET)
+    ;; Alt+letter: M-a through M-z (for systems where Option/Alt is the Meta key)
+    (dotimes (i 26)
+      (let ((char (+ ?a i)))
+        (define-key map (vector (list 'meta char))
+          (let ((c char))
+            (lambda () (interactive) (kuro--send-char ?\e) (kuro--send-char c))))))
+    ;; ESC+letter two-key fallback (for macOS where Option sends ESC prefix, not Meta)
+    (dotimes (i 26)
+      (let ((char (+ ?a i)))
+        (define-key map (kbd (format "ESC %c" char))
+          (let ((c char))
+            (lambda () (interactive) (kuro--send-char ?\e) (kuro--send-char c))))))
+    ;; Modifier+arrow keys — xterm CSI 1;Pm sequences (Shift=2, Alt=3, Ctrl=5)
+    (define-key map [S-up]    (lambda () (interactive) (kuro--send-key "\e[1;2A")))
+    (define-key map [M-up]    (lambda () (interactive) (kuro--send-key "\e[1;3A")))
+    (define-key map [C-up]    (lambda () (interactive) (kuro--send-key "\e[1;5A")))
+    (define-key map [S-down]  (lambda () (interactive) (kuro--send-key "\e[1;2B")))
+    (define-key map [M-down]  (lambda () (interactive) (kuro--send-key "\e[1;3B")))
+    (define-key map [C-down]  (lambda () (interactive) (kuro--send-key "\e[1;5B")))
+    (define-key map [S-right] (lambda () (interactive) (kuro--send-key "\e[1;2C")))
+    (define-key map [M-right] (lambda () (interactive) (kuro--send-key "\e[1;3C")))
+    (define-key map [C-right] (lambda () (interactive) (kuro--send-key "\e[1;5C")))
+    (define-key map [S-left]  (lambda () (interactive) (kuro--send-key "\e[1;2D")))
+    (define-key map [M-left]  (lambda () (interactive) (kuro--send-key "\e[1;3D")))
+    (define-key map [C-left]  (lambda () (interactive) (kuro--send-key "\e[1;5D")))
     map)
   "Keymap for Kuro terminal emulator.")
 

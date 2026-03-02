@@ -59,7 +59,7 @@ jobs:
             ${{ runner.os }}-cargo-build-target-
 
       - name: Install Emacs
-        uses: jcs090218/setup-emacs@master
+        uses: jcs090218/setup-emacs@v3
         with:
           version: ${{ matrix.emacs-version }}
 
@@ -69,11 +69,31 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --workspace -- -D warnings
 
+      # Security audit - if emacs crate 0.19.0 is flagged by RUSTSEC,
+      # document the advisory in .cargo/audit.toml with a rationale comment.
+      - name: Security audit
+        run: |
+          cargo install cargo-audit --quiet
+          cargo audit
+        continue-on-error: false
+
       - name: Run cargo test
         run: cargo test --workspace
 
       - name: Run cargo test (release)
         run: cargo test --workspace --release
+
+      - name: Install tmux
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y tmux
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install tmux
+          fi
+
+      - name: Run E2E tests
+        run: bash test/run-e2e.sh
+        if: runner.os != 'Windows'
 
   test-windows:
     name: Test on Windows (WSL2)
@@ -119,6 +139,23 @@ jobs:
         with:
           file: ./cobertura.xml
 
+  fuzz:
+    name: Fuzz (nightly, regression check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - name: Run fuzz targets (30s each)
+        run: |
+          cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
+          cargo fuzz run fuzz_kitty_params -- -max_total_time=30 -runs=1000
+          cargo fuzz run fuzz_apc_payload -- -max_total_time=30 -runs=1000
+          cargo fuzz run fuzz_decode_png -- -max_total_time=30 -runs=1000
+        working-directory: fuzz
+
   release:
     name: Build Release Artifacts
     runs-on: ${{ matrix.os }}
@@ -129,12 +166,15 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact-name: libkuro_core.so
+            release-name: libkuro_core-linux-x86_64.so
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact-name: libkuro_core.dylib
+            release-name: libkuro_core-macos-x86_64.dylib
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact-name: libkuro_core.dylib
+            release-name: libkuro_core-macos-aarch64.dylib
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
@@ -177,20 +217,19 @@ jobs:
       - name: Rename artifact
         run: |
           cd target/${{ matrix.target }}/release
-          mv ${{ matrix.artifact-name }} kuro_core_${{ matrix.target }}.${{ matrix.artifact-name == 'libkuro_core.dylib' && 'dylib' || matrix.artifact-name }}
+          mv ${{ matrix.artifact-name }} ${{ matrix.release-name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: kuro-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/kuro_core_${{ matrix.target }}.*
+          path: target/${{ matrix.target }}/release/${{ matrix.release-name }}
           retention-days: 90
 
       - name: Upload to GitHub Release
-        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            target/${{ matrix.target }}/release/kuro_core_${{ matrix.target }}.*
+            target/${{ matrix.target }}/release/${{ matrix.release-name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

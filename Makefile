@@ -6,6 +6,16 @@ EMACS = emacs
 RUST_CORE = rust-core
 TARGET_DIR = target/release
 
+# Detect platform-specific library extension
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    LIB_EXT := dylib
+else
+    LIB_EXT := so
+endif
+LIB_NAME := libkuro_core.$(LIB_EXT)
+INSTALL_DIR := $(HOME)/.local/share/kuro
+
 # Default target
 all: build
 
@@ -46,14 +56,12 @@ clean:
 	$(CARGO) clean
 	rm -f emacs-lisp/*.elc
 
-# Install the module to Emacs load path
-install: build
-	@echo "Installing Kuro module..."
-	@echo "Add this to your Emacs config:"
-	@echo "(add-to-list 'load-path \"$(PWD)/emacs-lisp\")"
-	@echo "(require 'kuro)"
-	@echo ""
-	@echo "Module location: $(TARGET_DIR)/libkuro_core.so"
+# Install the compiled binary to XDG install directory
+install:
+	$(CARGO) build --release
+	mkdir -p $(INSTALL_DIR)
+	cp target/release/$(LIB_NAME) $(INSTALL_DIR)/$(LIB_NAME)
+	@echo "Kuro: installed $(LIB_NAME) to $(INSTALL_DIR)"
 
 # Run development checks
 check-all: fmt lint test

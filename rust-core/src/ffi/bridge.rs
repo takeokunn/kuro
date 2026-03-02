@@ -49,12 +49,10 @@ pub fn switch_to_raw_ffi() {
 #[allow(dead_code)]
 fn get_ffi_type() -> FfiImplementation {
     let impl_guard = FFI_IMPLEMENTATION.lock().unwrap();
-    let impl_type = match &*impl_guard {
+    match &*impl_guard {
         FfiImplementation::EmacsModule => FfiImplementation::EmacsModule,
         FfiImplementation::Raw => FfiImplementation::Raw,
-    };
-    std::mem::forget(impl_guard);
-    impl_type
+    }
 }
 
 /// Primary FFI implementation using emacs-module-rs
@@ -367,6 +365,114 @@ fn kuro_core_get_cursor_visible<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
     }
 }
 
+/// Get application cursor keys mode (DECCKM state: t if active, nil if not)
+#[defun]
+fn kuro_core_get_app_cursor_keys<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let app_cursor_keys = if let Some(ref session) = *global {
+        session.core.dec_modes.app_cursor_keys
+    } else {
+        false
+    };
+    if app_cursor_keys {
+        env.intern("t")
+    } else {
+        env.intern("nil")
+    }
+}
+
+/// Get application keypad mode state (t if DECKPAM active, nil if DECKPNM)
+#[defun]
+fn kuro_core_get_app_keypad<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let app_keypad = if let Some(ref session) = *global {
+        session.core.dec_modes.app_keypad
+    } else {
+        false
+    };
+    if app_keypad {
+        env.intern("t")
+    } else {
+        env.intern("nil")
+    }
+}
+
+/// Get and atomically clear the pending window title (OSC 0/2)
+///
+/// Returns the new title string if one has been set since the last call,
+/// or nil if no title update is pending.
+#[defun]
+fn kuro_core_get_and_clear_title<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let mut global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    if let Some(ref mut session) = *global {
+        if session.core.title_dirty {
+            session.core.title_dirty = false;
+            let title = session.core.title.clone();
+            title.into_lisp(env)
+        } else {
+            false.into_lisp(env)
+        }
+    } else {
+        false.into_lisp(env)
+    }
+}
+
+/// Get bracketed paste mode state (t if active, nil if not)
+#[defun]
+fn kuro_core_get_bracketed_paste<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let bracketed_paste = if let Some(ref session) = *global {
+        session.core.dec_modes.bracketed_paste
+    } else {
+        false
+    };
+    if bracketed_paste {
+        env.intern("t")
+    } else {
+        env.intern("nil")
+    }
+}
+
+/// Get mouse tracking mode (0=disabled, 1000=normal, 1002=button-event, 1003=any-event)
+#[defun]
+fn kuro_core_get_mouse_mode<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let mouse_mode = if let Some(ref session) = *global {
+        session.core.dec_modes.mouse_mode as i64
+    } else {
+        0i64
+    };
+    mouse_mode.into_lisp(env)
+}
+
+/// Get mouse SGR extended coordinates modifier state (t if active, nil if not)
+#[defun]
+fn kuro_core_get_mouse_sgr<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let mouse_sgr = if let Some(ref session) = *global {
+        session.core.dec_modes.mouse_sgr
+    } else {
+        false
+    };
+    if mouse_sgr {
+        env.intern("t")
+    } else {
+        env.intern("nil")
+    }
+}
+
 /// Get scrollback buffer lines
 #[defun]
 fn kuro_core_get_scrollback<'e>(env: &'e Env, max_lines: usize) -> EmacsResult<Value<'e>> {
@@ -402,6 +508,28 @@ fn kuro_core_clear_scrollback<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
         } else {
             Ok(false)
         }
+    })
+}
+
+/// Scroll the viewport up by n lines (toward older scrollback content)
+#[defun]
+fn kuro_core_scroll_up<'e>(env: &'e Env, n: usize) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || {
+        with_session(|session| {
+            session.viewport_scroll_up(n);
+            Ok(true)
+        })
+    })
+}
+
+/// Scroll the viewport down by n lines (toward live content)
+#[defun]
+fn kuro_core_scroll_down<'e>(env: &'e Env, n: usize) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || {
+        with_session(|session| {
+            session.viewport_scroll_down(n);
+            Ok(true)
+        })
     })
 }
 
@@ -470,6 +598,12 @@ fn kuro_core_get_scrollback_count<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
     })
 }
 
+/// Get the current viewport scroll offset (0 = live view, N = scrolled back N lines)
+#[defun]
+fn kuro_core_get_scroll_offset<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || with_session(|session| Ok(session.scroll_offset())))
+}
+
 /// Poll for terminal updates and return dirty lines with face information
 #[defun]
 #[allow(clippy::type_complexity)]
@@ -536,6 +670,69 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
     }
 }
 
+/// Retrieve a stored Kitty Graphics image as a base64-encoded PNG string.
+///
+/// Returns the base64-encoded PNG string if the image exists, or nil if not found.
+/// The Elisp caller should decode: `(base64-decode-string data t)` to get unibyte PNG bytes
+/// suitable for `(create-image bytes 'png t)`.
+#[defun]
+fn kuro_core_get_image<'e>(env: &'e Env, image_id: u32) -> EmacsResult<Value<'e>> {
+    let global = super::abstraction::TERMINAL_SESSION
+        .lock()
+        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    if let Some(ref session) = *global {
+        let b64 = session.get_image_png_base64(image_id);
+        if b64.is_empty() {
+            false.into_lisp(env)
+        } else {
+            b64.into_lisp(env)
+        }
+    } else {
+        false.into_lisp(env)
+    }
+}
+
+/// Poll for pending Kitty Graphics image placement notifications.
+///
+/// Returns a list of image placement descriptors, each of the form:
+///   (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT)
+///
+/// This is separate from `kuro-core-poll-updates-with-faces` for backward compatibility.
+/// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
+#[defun]
+fn kuro_core_poll_image_notifications<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let notifications = {
+        let mut global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref mut session) = *global {
+            session.take_pending_image_notifications()
+        } else {
+            Vec::new()
+        }
+    };
+
+    // Build Elisp list: each item is (image-id row col cell-width cell-height)
+    let mut list = false.into_lisp(env)?;
+    for notif in notifications.into_iter().rev() {
+        let id_val = (notif.image_id as i64).into_lisp(env)?;
+        let row_val = (notif.row as i64).into_lisp(env)?;
+        let col_val = (notif.col as i64).into_lisp(env)?;
+        let cw_val = (notif.cell_width as i64).into_lisp(env)?;
+        let ch_val = (notif.cell_height as i64).into_lisp(env)?;
+
+        // Build proper list: (image-id row col cell-width cell-height)
+        let nil = false.into_lisp(env)?;
+        let item = env.cons(ch_val, nil)?;
+        let item = env.cons(cw_val, item)?;
+        let item = env.cons(col_val, item)?;
+        let item = env.cons(row_val, item)?;
+        let item = env.cons(id_val, item)?;
+        list = env.cons(item, list)?;
+    }
+    Ok(list)
+}
+
 /// Emacs plugin initialization (called from lib.rs via #[emacs::module])
 pub fn module_init(env: &Env) -> EmacsResult<()> {
     init_ffi_implementation();
@@ -568,7 +765,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test_switch_to_raw_ffi deadlocks due to get_ffi_type() using std::mem::forget on the MutexGuard"]
     fn test_switch_to_raw_ffi() {
         // Initialize with EmacsModule
         init_ffi_implementation();

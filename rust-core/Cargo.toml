@@ -7,18 +7,19 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 vte.workspace = true
 emacs.workspace = true
 unicode-width.workspace = true
-unicode-segmentation.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 nix.workspace = true
 which.workspace = true
-crossbeam-channel = "0.5"
+crossbeam-channel.workspace = true
+base64.workspace = true
+png.workspace = true
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]

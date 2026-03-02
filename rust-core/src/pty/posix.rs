@@ -85,7 +85,9 @@ impl Pty {
             let flags = libc::fcntl(fd, libc::F_GETFD);
             if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
                 libc::close(fd);
-                return Err(KuroError::Pty("Failed to set FD_CLOEXEC on reader fd".to_string()));
+                return Err(KuroError::Pty(
+                    "Failed to set FD_CLOEXEC on reader fd".to_string(),
+                ));
             }
             fd
         };
@@ -149,7 +151,16 @@ impl Pty {
                 // Inherited master fds interfere with process group management and can
                 // prevent the parent from detecting child exit (no EOF on master).
                 drop(master_file);
-                unsafe { libc::close(reader_fd); }
+                unsafe {
+                    libc::close(reader_fd);
+                }
+
+                // Clear terminal-multiplexer env vars so that programs such as tmux
+                // and GNU screen behave correctly when launched inside kuro.  Without
+                // this, inheriting $TMUX causes tmux to believe it is already nested
+                // inside an existing session and refuse to attach a new client.
+                std::env::remove_var("TMUX");
+                std::env::remove_var("STY");
 
                 // Execute shell
                 let shell_name = shell_path
@@ -210,7 +221,6 @@ impl Pty {
 
         Ok(())
     }
-
 }
 
 impl AsRawFd for Pty {
@@ -228,12 +238,11 @@ impl Drop for Pty {
     /// and exit on its own once the child has closed the slave side.
     fn drop(&mut self) {
         // Signal the reader thread to stop after its current read returns
-        self.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
 
         // Send SIGHUP to the child process so it exits gracefully
-        if let Err(e) =
-            nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP)
-        {
+        if let Err(e) = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP) {
             eprintln!("[PTY] Drop: failed to send SIGHUP: {}", e);
         }
 
@@ -252,6 +261,7 @@ impl Drop for Pty {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
@@ -271,12 +281,44 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn test_pty_spawn() {
         let pty = Pty::spawn("sh");
         assert!(pty.is_ok());
 
         let mut pty = pty.unwrap();
         pty.write(b"echo test\n").unwrap();
+    }
+
+    #[test]
+    fn test_validate_shell_empty_string_rejected() {
+        // An empty string should fail because `which` cannot resolve it
+        let result = Pty::validate_shell("");
+        assert!(result.is_err(), "empty string should be rejected");
+    }
+
+    #[test]
+    fn test_validate_shell_absolute_path_bash() {
+        let bash_path = std::path::Path::new("/bin/bash");
+        if bash_path.exists() {
+            // An absolute path to bash resolves to the "bash" basename which is in the whitelist
+            let result = Pty::validate_shell("/bin/bash");
+            assert!(result.is_ok(), "/bin/bash should be accepted when it exists");
+        }
+    }
+
+    #[test]
+    fn test_validate_shell_rejects_relative_path_slash_slash() {
+        // Relative paths like "../bash" cannot be resolved by `which` as an absolute path,
+        // so they should be rejected
+        let result = Pty::validate_shell("../bash");
+        assert!(result.is_err(), "relative path ../bash should be rejected");
+    }
+
+    #[test]
+    fn test_validate_shell_rejects_python() {
+        // "python3" is not in the ALLOWED_SHELLS whitelist
+        // If it isn't even installed, which() will fail — either way we expect Err
+        let result = Pty::validate_shell("python3");
+        assert!(result.is_err(), "python3 should be rejected (not in whitelist)");
     }
 }

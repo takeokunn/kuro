@@ -17,7 +17,7 @@ Zsh を使用する場合の基本設定：
 
 ```elisp
 ;; init.el での設定
-(setq kuro-default-shell "/bin/zsh")
+(setq kuro-shell "/bin/zsh")
 ```
 
 ### プロンプトのカスタマイズ
@@ -97,7 +97,7 @@ alias dirs='dirs -v'
 
 ```elisp
 ;; init.el での設定
-(setq kuro-default-shell "/bin/bash")
+(setq kuro-shell "/bin/bash")
 ```
 
 ### プロンプトのカスタマイズ
@@ -153,7 +153,7 @@ fi
 
 ```elisp
 ;; init.el での設定
-(setq kuro-default-shell "/usr/bin/fish")
+(setq kuro-shell "/usr/bin/fish")
 ```
 
 ### プロンプトのカスタマイズ
@@ -204,7 +204,7 @@ set fish_autosuggestion_enabled 1
 
 ```elisp
 ;; init.el での設定
-(setq kuro-default-shell "/usr/bin/nu")
+(setq kuro-shell "/usr/bin/nu")
 ```
 
 ### プロンプトのカスタマイズ

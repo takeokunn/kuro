@@ -322,4 +322,244 @@ mod tests {
         assert_eq!(term.screen.cursor.row, 9); // 10 rows max
         assert_eq!(term.screen.cursor.col, 49); // 50 cols max
     }
+
+    // --- CUU (Cursor Up) tests ---
+
+    #[test]
+    fn test_cuu_move_cursor_up() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to row 5 (0-indexed) via CUP: CSI 6;1H (1-indexed)
+        term.advance(b"\x1b[6;1H");
+        assert_eq!(term.screen.cursor.row, 5);
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // CUU 3: move up 3 rows (CSI 3 A)
+        term.advance(b"\x1b[3A");
+
+        // Should land at row 2 (0-indexed)
+        assert_eq!(term.screen.cursor.row, 2);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cuu_default() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to row 4 (0-indexed)
+        term.screen.move_cursor(4, 0);
+        assert_eq!(term.screen.cursor.row, 4);
+
+        // CUU with no parameter defaults to 1: CSI A
+        let params = vte::Params::default();
+        csi_cuu(&mut term, &params);
+
+        // Should move up 1 row to row 3
+        assert_eq!(term.screen.cursor.row, 3);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cuu_clamps_at_top() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Cursor starts at row 0 (top)
+        assert_eq!(term.screen.cursor.row, 0);
+
+        // CUU 5 from row 0: should clamp to row 0
+        term.advance(b"\x1b[5A");
+
+        assert_eq!(term.screen.cursor.row, 0);
+    }
+
+    // --- CUD (Cursor Down) tests ---
+
+    #[test]
+    fn test_cud_move_cursor_down() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Cursor starts at row 0
+        assert_eq!(term.screen.cursor.row, 0);
+
+        // CUD 4: move down 4 rows (CSI 4 B)
+        term.advance(b"\x1b[4B");
+
+        // Should land at row 4 (0-indexed)
+        assert_eq!(term.screen.cursor.row, 4);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cud_default() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to row 3 (0-indexed)
+        term.screen.move_cursor(3, 0);
+        assert_eq!(term.screen.cursor.row, 3);
+
+        // CUD with no parameter defaults to 1: CSI B
+        let params = vte::Params::default();
+        csi_cud(&mut term, &params);
+
+        // Should move down 1 row to row 4
+        assert_eq!(term.screen.cursor.row, 4);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cud_clamps_at_bottom() {
+        let mut term = crate::TerminalCore::new(10, 80);
+
+        // Move cursor to last row (row 9, 0-indexed)
+        term.screen.move_cursor(9, 0);
+        assert_eq!(term.screen.cursor.row, 9);
+
+        // CUD 5 from last row: should clamp to last row
+        term.advance(b"\x1b[5B");
+
+        assert_eq!(term.screen.cursor.row, 9);
+    }
+
+    // --- CUF (Cursor Forward / Right) tests ---
+
+    #[test]
+    fn test_cuf_move_cursor_right() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Cursor starts at col 0
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // CUF 10: move right 10 columns (CSI 10 C)
+        term.advance(b"\x1b[10C");
+
+        // Should land at col 10 (0-indexed)
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 10);
+    }
+
+    #[test]
+    fn test_cuf_default() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to col 5 (0-indexed)
+        term.screen.move_cursor(0, 5);
+        assert_eq!(term.screen.cursor.col, 5);
+
+        // CUF with no parameter defaults to 1: CSI C
+        let params = vte::Params::default();
+        csi_cuf(&mut term, &params);
+
+        // Should move right 1 column to col 6
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 6);
+    }
+
+    #[test]
+    fn test_cuf_clamps_at_right_margin() {
+        let mut term = crate::TerminalCore::new(24, 50);
+
+        // Move cursor to last col (col 49, 0-indexed)
+        term.screen.move_cursor(0, 49);
+        assert_eq!(term.screen.cursor.col, 49);
+
+        // CUF 5 from last col: should clamp to last col
+        term.advance(b"\x1b[5C");
+
+        assert_eq!(term.screen.cursor.col, 49);
+    }
+
+    // --- CUB (Cursor Back / Left) tests ---
+
+    #[test]
+    fn test_cub_move_cursor_left() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to col 15 (0-indexed)
+        term.screen.move_cursor(0, 15);
+        assert_eq!(term.screen.cursor.col, 15);
+
+        // CUB 7: move left 7 columns (CSI 7 D)
+        term.advance(b"\x1b[7D");
+
+        // Should land at col 8 (0-indexed)
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 8);
+    }
+
+    #[test]
+    fn test_cub_default() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to col 10 (0-indexed)
+        term.screen.move_cursor(0, 10);
+        assert_eq!(term.screen.cursor.col, 10);
+
+        // CUB with no parameter defaults to 1: CSI D
+        let params = vte::Params::default();
+        csi_cub(&mut term, &params);
+
+        // Should move left 1 column to col 9
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 9);
+    }
+
+    #[test]
+    fn test_cub_clamps_at_left_margin() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Cursor starts at col 0 (left margin)
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // CUB 5 from col 0: should clamp to col 0
+        term.advance(b"\x1b[5D");
+
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    // --- CUP (Cursor Position) tests ---
+
+    #[test]
+    fn test_cup_absolute_position() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Start at (0, 0)
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // CUP to (row=8, col=25) in 1-indexed: CSI 8;25H
+        term.advance(b"\x1b[8;25H");
+
+        // Should move to (7, 24) in 0-indexed
+        assert_eq!(term.screen.cursor.row, 7);
+        assert_eq!(term.screen.cursor.col, 24);
+    }
+
+    #[test]
+    fn test_cup_default() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to an arbitrary position first
+        term.screen.move_cursor(10, 30);
+        assert_eq!(term.screen.cursor.row, 10);
+        assert_eq!(term.screen.cursor.col, 30);
+
+        // CUP with no parameters defaults to (1, 1): CSI H
+        term.advance(b"\x1b[H");
+
+        // Should move to (0, 0) in 0-indexed (row=1, col=1 in 1-indexed)
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cup_bounds() {
+        let mut term = crate::TerminalCore::new(10, 50);
+
+        // CUP beyond screen bounds: CSI 100;100H
+        term.advance(b"\x1b[100;100H");
+
+        // Should clamp to screen boundaries
+        assert_eq!(term.screen.cursor.row, 9); // 10 rows max
+        assert_eq!(term.screen.cursor.col, 49); // 50 cols max
+    }
 }

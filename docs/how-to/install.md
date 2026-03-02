@@ -12,8 +12,8 @@
 
 すべてのプラットフォームで以下が必要です：
 
-- Emacs 28.1 以降 (動的モジュール機能が有効であること)
-- Rust 1.70.0 以降
+- Emacs 29.1 以降 (動的モジュール機能が有効であること)
+- Rust 1.84.0 以降
 - C Compiler (clang または GCC)
 
 ## Linux へのインストール
@@ -34,18 +34,10 @@ sudo apt install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
-# kuro のクローンとビルド
+# kuro のクローンとビルドとインストール
 git clone https://github.com/takeokunn/kuro.git
-cd kuro/rust-core
-cargo build --release
-
-# 動的ライブラリのインストール
-sudo cp target/release/libkuro_core.so /usr/local/lib/
-sudo ldconfig
-
-# Emacs Lisp ファイルのインストール
-mkdir -p ~/.emacs.d/site-lisp/kuro
-cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
+cd kuro
+make install
 ```
 
 ### Arch Linux
@@ -54,17 +46,10 @@ cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
 # 依存パッケージのインストール
 sudo pacman -S emacs rust clang cmake
 
-# kuro のクローンとビルド
+# kuro のクローンとビルドとインストール
 git clone https://github.com/takeokunn/kuro.git
-cd kuro/rust-core
-cargo build --release
-
-# 動的ライブラリのインストール
-sudo cp target/release/libkuro_core.so /usr/local/lib/
-
-# Emacs Lisp ファイルのインストール
-mkdir -p ~/.emacs.d/site-lisp/kuro
-cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
+cd kuro
+make install
 ```
 
 ### Fedora
@@ -73,18 +58,10 @@ cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
 # 依存パッケージのインストール
 sudo dnf install -y emacs rust clang cmake openssl-devel
 
-# kuro のクローンとビルド
+# kuro のクローンとビルドとインストール
 git clone https://github.com/takeokunn/kuro.git
-cd kuro/rust-core
-cargo build --release
-
-# 動的ライブラリのインストール
-sudo cp target/release/libkuro_core.so /usr/local/lib64/
-sudo ldconfig
-
-# Emacs Lisp ファイルのインストール
-mkdir -p ~/.emacs.d/site-lisp/kuro
-cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
+cd kuro
+make install
 ```
 
 ## macOS へのインストール
@@ -95,17 +72,10 @@ cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
 # 依存パッケージのインストール
 brew install emacs rust cmake
 
-# kuro のクローンとビルド
+# kuro のクローンとビルドとインストール
 git clone https://github.com/takeokunn/kuro.git
-cd kuro/rust-core
-cargo build --release
-
-# 動的ライブラリのインストール
-sudo cp target/release/libkuro_core.dylib /usr/local/lib/
-
-# Emacs Lisp ファイルのインストール
-mkdir -p ~/.emacs.d/site-lisp/kuro
-cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
+cd kuro
+make install
 ```
 
 ### Nix を使用する場合
@@ -142,18 +112,23 @@ sudo apt install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
-# kuro のクローンとビルド
+# kuro のクローンとビルドとインストール
 git clone https://github.com/takeokunn/kuro.git
-cd kuro/rust-core
-cargo build --release
+cd kuro
+make install
+```
 
-# 動的ライブラリのインストール
-sudo cp target/release/libkuro_core.so /usr/local/lib/
-sudo ldconfig
+## MELPA からのインストール (Emacs Lisp のみ)
 
-# Emacs Lisp ファイルのインストール
-mkdir -p ~/.emacs.d/site-lisp/kuro
-cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
+MELPA から Emacs Lisp ファイルのみをインストールできます。
+その場合、Rust バイナリは別途 `make install` でインストールが必要です。
+
+```elisp
+;; MELPA を package-archives に追加済みの場合
+(package-install 'kuro)
+
+;; バイナリのインストール（別途必要）
+;; git clone https://github.com/takeokunn/kuro.git && cd kuro && make install
 ```
 
 ## Emacs の設定
@@ -168,10 +143,8 @@ cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
 
 (require 'kuro)
 
-;; 動的モジュールのパスを設定
-(setq kuro-module-path
-      (expand-file-name "rust-core/target/release/libkuro_core.so"
-                        (projectile-project-root)))
+;; バイナリパスを明示的に指定する場合（省略可能 — make install 使用時は自動検出）
+;; (setq kuro-module-binary-path "~/.local/share/kuro/libkuro_core.so")
 
 ;; kuro を有効化
 (kuro-mode 1)
@@ -183,11 +156,10 @@ cp emacs-lisp/*.el ~/.emacs.d/site-lisp/kuro/
 (use-package kuro
   :load-path "~/.emacs.d/site-lisp/kuro"
   :init
-  (setq kuro-module-path
-        (expand-file-name "rust-core/target/release/libkuro_core.so"
-                          (projectile-project-root)))
+  ;; バイナリパスを明示的に指定する場合（make install 使用時は省略可能）
+  ;; (setq kuro-module-binary-path "~/.local/share/kuro/libkuro_core.so")
   :config
-  (setq kuro-default-shell "/bin/zsh")
+  (setq kuro-shell "/bin/zsh")
   (setq kuro-scrollback-size 10000)
   :hook
   (kuro-mode . kuro-setup))
@@ -210,11 +182,7 @@ kuro を最新版に更新する方法：
 ```bash
 cd kuro
 git pull
-cd rust-core
-cargo build --release
-
-# 動的ライブラリを再インストール
-sudo cp target/release/libkuro_core.so /usr/local/lib/
+make install
 ```
 
 ## アンインストール
@@ -223,7 +191,7 @@ kuro を完全に削除する場合：
 
 ```bash
 # 動的ライブラリの削除
-sudo rm /usr/local/lib/libkuro_core.*
+rm -f ~/.local/share/kuro/libkuro_core.*
 
 # Emacs Lisp ファイルの削除
 rm -rf ~/.emacs.d/site-lisp/kuro
@@ -244,7 +212,7 @@ Error: Cannot open shared object file
 
 **解決策**:
 
-1. `kuro-module-path` が正しいか確認
+1. `kuro-module-binary-path` が正しいか確認
 2. ライブラリが存在するか確認：
    ```bash
    ls -l /usr/local/lib/libkuro_core.*

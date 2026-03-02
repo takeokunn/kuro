@@ -282,4 +282,29 @@ mod tests {
         }
         assert_eq!(env_ref_count(), initial_count);
     }
+
+    /// A freshly created EnvRefRegistry starts with a count of 0.
+    #[test]
+    fn test_env_ref_registry_starts_empty() {
+        let registry = EnvRefRegistry::new();
+        assert_eq!(registry.count(), 0, "fresh registry should have count 0");
+    }
+
+    /// Calling register() once on a fresh registry increments the count to 1.
+    #[test]
+    fn test_env_ref_registry_register_increments_count() {
+        let registry = EnvRefRegistry::new();
+        registry.register();
+        assert_eq!(registry.count(), 1, "after one register the count should be 1");
+    }
+
+    /// Calling register() then unregister() on a fresh registry leaves the count at 0.
+    #[test]
+    fn test_env_ref_registry_unregister_decrements_count() {
+        let registry = EnvRefRegistry::new();
+        registry.register();
+        assert_eq!(registry.count(), 1);
+        registry.unregister();
+        assert_eq!(registry.count(), 0, "after register+unregister the count should be 0");
+    }
 }

@@ -1,0 +1,4 @@
+(kuro
+  :fetcher github
+  :repo "takeokunn/kuro"
+  :files ("emacs-lisp/*.el"))

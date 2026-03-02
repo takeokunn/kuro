@@ -1,23 +1,26 @@
 [workspace]
 members = ["rust-core"]
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["takeokunn"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/takeokunn/kuro"
-rust-version = "1.75.0"
+rust-version = "1.84.0"
 
 [workspace.dependencies]
 vte = "0.15.0"
 emacs = "0.19.0"
 unicode-width = "0.2"
-unicode-segmentation = "0.1"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 proptest = "1.5"
 criterion = "0.5"
 nix = { version = "0.29", features = ["process", "term", "fs", "signal"] }
 which = "7.0"
+base64 = "0.22"
+png = "0.17"
+crossbeam-channel = "0.5"

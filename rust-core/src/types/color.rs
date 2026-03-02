@@ -135,6 +135,7 @@ impl NamedColor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_named_to_rgb() {
@@ -166,5 +167,60 @@ mod tests {
     #[test]
     fn test_color_default() {
         assert_eq!(Color::default(), Color::Default);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+        #[test]
+        // INVARIANT: Color::Indexed(n).to_rgb() never panics for any n in 0..=255
+        // and always returns a valid (r, g, b) triple (complete 256-color table)
+        fn prop_indexed_to_rgb_complete(idx in 0u8..=255u8) {
+            let color = Color::Indexed(idx);
+            let (r, g, b) = color.to_rgb();
+            // Values are always valid u8 — this documents the guarantee
+            let _ = (r, g, b);
+        }
+    }
+
+    // Verify the three color regions explicitly
+    #[test]
+    fn test_indexed_system_colors_0_to_15() {
+        // System colors 0-15 have defined mappings
+        for idx in 0u8..=15u8 {
+            let color = Color::Indexed(idx);
+            // Must not panic — every index has a defined mapping
+            let (r, g, b) = color.to_rgb();
+            let _ = (r, g, b);
+        }
+    }
+
+    #[test]
+    fn test_indexed_6x6x6_cube_16_to_231() {
+        // 6x6x6 color cube: formula is v = idx-16, r=v/36, g=(v%36)/6, b=v%6, each * 51
+        for idx in 16u8..=231u8 {
+            let color = Color::Indexed(idx);
+            let (r, g, b) = color.to_rgb();
+            let _ = (r, g, b);
+        }
+        // Verify max value: idx=231 => n=215, r=5*51=255, g=5*51=255, b=5*51=255
+        let (r, g, b) = Color::Indexed(231).to_rgb();
+        assert_eq!(r, 255);
+        assert_eq!(g, 255);
+        assert_eq!(b, 255);
+    }
+
+    #[test]
+    fn test_indexed_grayscale_232_to_255() {
+        // Grayscale: v = (idx-232)*10 + 8
+        for idx in 232u8..=255u8 {
+            let color = Color::Indexed(idx);
+            let (r, g, b) = color.to_rgb();
+            let _ = (r, g, b);
+        }
+        // Verify: idx=232 => (0)*10+8=8, idx=255 => (23)*10+8=238
+        let (r232, _, _) = Color::Indexed(232).to_rgb();
+        assert_eq!(r232, 8);
+        let (r255, _, _) = Color::Indexed(255).to_rgb();
+        assert_eq!(r255, 238);
     }
 }

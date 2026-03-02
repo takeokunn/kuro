@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 takeokunn
 
 ;; Author: takeokunn
-;; Version: 0.1.0
+;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -13,21 +13,20 @@
 ;;; Code:
 
 (require 'kuro-ffi)
+(require 'kuro-input)
+(require 'kuro-config)
 
 ;; Bell functions provided by the Rust dynamic module at runtime.
 (declare-function kuro-core-bell-pending  "ext:kuro-core" ())
 (declare-function kuro-core-clear-bell   "ext:kuro-core" ())
 
-(defcustom kuro-frame-rate 30
-  "Frame rate for terminal rendering (frames per second)."
-  :type 'integer
-  :group 'kuro)
-
-(defcustom kuro-timer nil
-  "Timer for render loop.")
+(defvar-local kuro-timer nil
+  "Timer object for the Kuro render loop.
+Internal state; do not set directly.
+Each Kuro buffer maintains its own independent timer.")
 (put 'kuro-timer 'permanent-local t)
 
-(defvar kuro--cursor-marker nil
+(defvar-local kuro--cursor-marker nil
   "Marker for cursor position.")
 (put 'kuro--cursor-marker 'permanent-local t)
 
@@ -35,9 +34,19 @@
   "List of active blink overlays in the current kuro buffer.")
 (put 'kuro--blink-overlays 'permanent-local t)
 
+(defvar-local kuro--image-overlays nil
+  "List of image display overlays in the current kuro buffer.
+Each overlay has a `kuro-image' property and a `display' image spec.")
+(put 'kuro--image-overlays 'permanent-local t)
+
 (defvar-local kuro--blink-frame-count 0
   "Frame counter used for blink animation timing.")
 (put 'kuro--blink-frame-count 'permanent-local t)
+
+(defvar-local kuro--decckm-frame-count 9
+  "Frame counter used for DECCKM/mouse polling backoff (poll every 10 frames).
+Initialized to 9 so the first render frame triggers an immediate poll.")
+(put 'kuro--decckm-frame-count 'permanent-local t)
 
 (defvar-local kuro--blink-visible-slow t
   "Non-nil when slow-blink text is currently in the visible phase.")
@@ -52,27 +61,15 @@
 (defvar kuro--face-cache (make-hash-table :test 'equal)
   "Cache computed faces to avoid recreating them for same attribute combinations.")
 
+(defvar-local kuro--font-remap-cookie nil
+  "Cookie returned by `face-remap-add-relative' for font customization.
+Stored per-buffer so the remap can be cleanly removed when settings change
+or when the buffer is killed.  Internal state; do not set directly.")
+(put 'kuro--font-remap-cookie 'permanent-local t)
+
 (defvar kuro--truecolor-available-p nil
   "Cached result of checking TrueColor support.")
 
-(defconst kuro--named-colors
-  '(("black" . "#000000")
-    ("red" . "#c23621")
-    ("green" . "#25bc24")
-    ("yellow" . "#adad27")
-    ("blue" . "#492ee1")
-    ("magenta" . "#d338d3")
-    ("cyan" . "#33bbc8")
-    ("white" . "#cbcccd")
-    ("bright-black" . "#808080")
-    ("bright-red" . "#ff0000")
-    ("bright-green" . "#00ff00")
-    ("bright-yellow" . "#ffff00")
-    ("bright-blue" . "#0000ff")
-    ("bright-magenta" . "#ff00ff")
-    ("bright-cyan" . "#00ffff")
-    ("bright-white" . "#ffffff"))
-  "Mapping of named ANSI colors to hex strings.")
 
 ;;;###autoload
 (defun kuro--check-truecolor ()
@@ -80,6 +77,24 @@
   (or (display-graphic-p)
       (and (>= (display-color-cells) 16777216)
            (setq kuro--truecolor-available-p t))))
+
+(defun kuro--apply-font-to-buffer (buf)
+  "Apply `kuro-font-family' and `kuro-font-size' settings to BUF.
+Uses `face-remap-add-relative' to override the default face in the buffer.
+Removes any previously installed remap cookie before applying a new one.
+This function is a no-op in non-graphical (terminal) Emacs frames."
+  (when (display-graphic-p)
+    (with-current-buffer buf
+      (when kuro--font-remap-cookie
+        (face-remap-remove-relative kuro--font-remap-cookie)
+        (setq kuro--font-remap-cookie nil))
+      (when (or kuro-font-family kuro-font-size)
+        (setq kuro--font-remap-cookie
+              (apply #'face-remap-add-relative
+                     'default
+                     (append
+                      (when kuro-font-family (list :family kuro-font-family))
+                      (when kuro-font-size   (list :height (* 10 kuro-font-size))))))))))
 
 ;;; Color conversion functions
 
@@ -236,6 +251,63 @@ visibility state variable is consulted."
           (push ov remaining)))
       (setq kuro--blink-overlays (nreverse remaining)))))
 
+(defun kuro--clear-all-image-overlays ()
+  "Remove all Kitty Graphics image overlays from the current buffer."
+  (dolist (ov kuro--image-overlays)
+    (when (overlay-buffer ov)
+      (delete-overlay ov)))
+  (setq kuro--image-overlays nil))
+
+(defun kuro--clear-row-image-overlays (row)
+  "Remove image overlays that start on ROW."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line row)
+    (let ((line-start (point))
+          (line-end (1+ (line-end-position)))
+          (remaining nil))
+      (dolist (ov kuro--image-overlays)
+        (if (and (overlay-buffer ov)
+                 (>= (overlay-start ov) line-start)
+                 (< (overlay-start ov) line-end))
+            (delete-overlay ov)
+          (push ov remaining)))
+      (setq kuro--image-overlays (nreverse remaining)))))
+
+(defun kuro--render-image-notification (notif)
+  "Render a single Kitty Graphics image placement NOTIF in the terminal buffer.
+NOTIF is a list of the form (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT).
+Creates an overlay with a `display' image property at the correct grid position."
+  (let* ((image-id   (nth 0 notif))
+         (row        (nth 1 notif))
+         (col        (nth 2 notif))
+         (cell-width (max 1 (nth 3 notif)))
+         (b64        (kuro--get-image image-id)))
+    (when (and b64 (stringp b64) (not (string-empty-p b64)))
+      (condition-case err
+          (let* (;; Decode base64 → raw PNG bytes (unibyte string)
+                 (png-data (string-as-unibyte (base64-decode-string b64)))
+                 ;; Build Emacs image object
+                 (img      (create-image png-data 'png t))
+                 ;; Locate buffer position for (row, col)
+                 ;; Use forward-char rather than (+ line-pos col) so wide characters
+                 ;; (which occupy 2 terminal columns but 1 buffer position) are handled correctly.
+                 (start    (save-excursion
+                             (goto-char (point-min))
+                             (forward-line row)
+                             (forward-char col)
+                             (point)))
+                 ;; Span cell-width characters so the image occludes the right cells
+                 (end      (+ start cell-width)))
+            (when (and img (< start (point-max)))
+              (let ((ov (make-overlay start (min end (point-max)))))
+                (overlay-put ov 'kuro-image    t)
+                (overlay-put ov 'display       img)
+                (overlay-put ov 'evaporate     t)  ; auto-delete if region deleted
+                (push ov kuro--image-overlays))))
+        (error
+         (message "kuro: image render error for id %d: %s" image-id err))))))
+
 ;;; Face application functions
 
 (defun kuro--apply-face-range (start end attrs)
@@ -268,6 +340,14 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
 
 ;;; Render loop
 
+(defun kuro--sanitize-title (title)
+  "Sanitize TITLE string from PTY before using as buffer/frame name.
+Strips ASCII control characters (U+0000-U+001F, U+007F), null bytes,
+and Unicode bidirectional override codepoints (U+202A-U+202E, U+2066-U+2069)
+to prevent visual spoofing attacks via malicious OSC title sequences."
+  (replace-regexp-in-string
+   "[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200f]" "" title))
+
 ;;;###autoload
 (defun kuro--start-render-loop ()
   "Start the render loop targeting the current buffer."
@@ -292,6 +372,13 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
 ;;;###autoload
 (defun kuro--render-cycle ()
   "Single render cycle: poll updates and update buffer."
+  (setq kuro--decckm-frame-count (1+ kuro--decckm-frame-count))
+  (when (zerop (mod kuro--decckm-frame-count 10))
+    (setq kuro--application-cursor-keys-mode (kuro--get-app-cursor-keys))
+    (setq kuro--app-keypad-mode (kuro--get-app-keypad))
+    (setq kuro--mouse-mode (kuro--get-mouse-mode))
+    (setq kuro--mouse-sgr (kuro--get-mouse-sgr))
+    (setq kuro--bracketed-paste-mode (kuro--get-bracketed-paste)))
   (when (kuro-core-bell-pending)
     (ding)
     (kuro-core-clear-bell))
@@ -311,6 +398,14 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
       (when (and (overlay-buffer ov)
                  (eq (overlay-get ov 'kuro-blink-type) 'fast))
         (overlay-put ov 'invisible (not kuro--blink-visible-fast)))))
+  ;; Window title update (called every frame; Rust-side dirty flag gates cost)
+  (let ((title (kuro--get-and-clear-title)))
+    (when (and (stringp title) (not (string-empty-p title)))
+      (let ((safe-title (kuro--sanitize-title title)))
+        (rename-buffer (format "*kuro: %s*" safe-title) t)
+        (let ((win (get-buffer-window (current-buffer) t)))
+          (when win
+            (set-frame-parameter (window-frame win) 'name safe-title))))))
   ;; Process dirty lines: clear per-line blink overlays before rewriting,
   ;; then rebuild faces (including new blink overlays) for each updated line.
   ;; Overlays on lines NOT in this update batch are preserved intact.
@@ -325,12 +420,18 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
             (kuro--update-line row text)
             (when face-ranges
               (kuro--apply-faces-from-ffi row face-ranges))))))
-    (kuro--update-cursor)))
+    (kuro--update-cursor))
+  ;; Poll and render Kitty Graphics image placements
+  (let ((image-notifs (kuro--poll-image-notifications)))
+    (dolist (notif image-notifs)
+      (kuro--render-image-notification notif))))
 
 ;;;###autoload
 (defun kuro--update-line (row text)
   "Update line at ROW with TEXT."
   (when (and (integerp row) (stringp text))
+    ;; Remove any image overlays on this row before rewriting the line text
+    (kuro--clear-row-image-overlays row)
     (save-excursion
       (goto-char (point-min))
       (forward-line row)
@@ -345,18 +446,19 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
 ;;;###autoload
 (defun kuro--update-cursor ()
   "Update cursor position in buffer."
-  (let ((cursor-pos (kuro--get-cursor)))
-    (when cursor-pos
-      (let ((row (car cursor-pos))
-            (col (cdr cursor-pos)))
-        (save-excursion
-          (goto-char (point-min))
-          (forward-line row)
-          ;; Clamp column to line-end to avoid end-of-buffer signal
-          (goto-char (min (+ (point) col) (line-end-position)))
-          (when kuro--cursor-marker
-            (set-marker kuro--cursor-marker (point)))))
-      (setq-local cursor-type (if (kuro--get-cursor-visible) 'box nil)))))
+  (unless (> kuro--scroll-offset 0)
+    (let ((cursor-pos (kuro--get-cursor)))
+      (when cursor-pos
+        (let ((row (car cursor-pos))
+              (col (cdr cursor-pos)))
+          (save-excursion
+            (goto-char (point-min))
+            (forward-line row)
+            ;; Clamp column to line-end to avoid end-of-buffer signal
+            (goto-char (min (+ (point) col) (line-end-position)))
+            (when kuro--cursor-marker
+              (set-marker kuro--cursor-marker (point)))))
+        (setq-local cursor-type (if (kuro--get-cursor-visible) 'box nil))))))
 
 ;;;###autoload
 (defun kuro--apply-faces-simple (updates)
@@ -370,12 +472,12 @@ UPDATES should be a list of (LINE-NUM . FACE-RANGES) pairs."
 (defun kuro--decode-ffi-color (color-enc)
   "Decode FFI color encoding to Emacs color spec.
 COLOR-ENC is a u32 value encoding the color:
-  - 0 for default color
+  - #xFF000000 for default color (sentinel, distinct from true black)
   - Bit 31 set: named color (lower 8 bits = index)
   - Bit 30 set: indexed color (lower 8 bits = index)
-  - Otherwise: RGB packed into 24 bits (RRGGBB)"
+  - Otherwise: RGB packed into 24 bits (RRGGBB); 0 = true black Rgb(0,0,0)"
   (cond
-   ((= color-enc 0)
+   ((= color-enc #xFF000000)
     :default)
    ((/= 0 (logand color-enc #x80000000))
     (let* ((idx (logand color-enc #xFF))

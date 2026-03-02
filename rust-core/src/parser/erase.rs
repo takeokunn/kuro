@@ -76,8 +76,9 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                 if let Some(line) = term.screen.get_line_mut(r) {
                     line.clear();
                 }
-                term.screen.mark_line_dirty(r);
             }
+            term.screen.mark_all_dirty();
+            term.screen.active_graphics_mut().clear_all_placements();
 
             // Mode 3 also clears scrollback buffer
             if mode == 3 {

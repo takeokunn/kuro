@@ -216,4 +216,62 @@ mod tests {
             Err(KuroError::Init(InitError::AlreadyInitialized))
         ));
     }
+
+    /// Version (29, 1) is exactly the minimum — must be accepted.
+    #[test]
+    fn test_validate_emacs_version_minimum_29_1() {
+        let result = validate_emacs_version((29, 1));
+        assert!(result.is_ok(), "version (29, 1) should meet the minimum requirement");
+    }
+
+    /// Version (28, 9) is below the minimum major version — must be rejected.
+    #[test]
+    fn test_validate_emacs_version_below_minimum_28_x() {
+        let result = validate_emacs_version((28, 9));
+        assert!(
+            matches!(result, Err(KuroError::Init(InitError::VersionMismatch { .. }))),
+            "version (28, 9) should be rejected as below minimum"
+        );
+    }
+
+    /// Version (29, 0) has the right major but minor is below the minimum — must be rejected.
+    #[test]
+    fn test_validate_emacs_version_below_minimum_29_0() {
+        let result = validate_emacs_version((29, 0));
+        assert!(
+            matches!(result, Err(KuroError::Init(InitError::VersionMismatch { .. }))),
+            "version (29, 0) should be rejected because minor < 1"
+        );
+    }
+
+    /// Version (30, 0) is above the minimum — must be accepted.
+    #[test]
+    fn test_validate_emacs_version_future_30_x() {
+        let result = validate_emacs_version((30, 0));
+        assert!(result.is_ok(), "version (30, 0) should be accepted as above minimum");
+    }
+
+    /// The exported symbol list must contain "kuro-core-init".
+    #[test]
+    fn test_get_exported_symbols_contains_kuro_core_init() {
+        let symbols = get_exported_symbols();
+        assert!(
+            symbols.contains(&"kuro-core-init"),
+            "exported symbols should include 'kuro-core-init'"
+        );
+    }
+
+    /// All exported symbols must be unique — no duplicates allowed.
+    #[test]
+    fn test_get_exported_symbols_no_duplicates() {
+        let symbols = get_exported_symbols();
+        let mut seen = std::collections::HashSet::new();
+        for sym in &symbols {
+            assert!(
+                seen.insert(*sym),
+                "duplicate symbol found in exported list: {}",
+                sym
+            );
+        }
+    }
 }

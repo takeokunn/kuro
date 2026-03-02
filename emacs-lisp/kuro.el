@@ -2,8 +2,9 @@
 
 ;; Copyright (C) 2025 takeokunn
 
-;; Author: takeokunn
-;; Version: 0.1.0
+;; Author: takeokunn <takeokunn@users.noreply.github.com>
+;; URL: https://github.com/takeokunn/kuro
+;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: terminal, tools
 
@@ -20,24 +21,11 @@
 ;;; Code:
 
 (require 'kuro-module)
+(kuro-module-load)
 (require 'kuro-ffi)
 (require 'kuro-renderer)
 (require 'kuro-input)
-
-(defgroup kuro nil
-  "Kuro terminal emulator."
-  :group 'terminal
-  :prefix "kuro-")
-
-(defcustom kuro-default-shell "/bin/zsh"
-  "Default shell command to run."
-  :type 'string
-  :group 'kuro)
-
-(defcustom kuro-scrollback-size 10000
-  "Maximum scrollback buffer size (lines)."
-  :type 'integer
-  :group 'kuro)
+(require 'kuro-config)
 
 (defvar kuro-mode-map
   (let ((map (make-sparse-keymap)))
@@ -62,20 +50,23 @@
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)
   "Create a new Kuro terminal instance running COMMAND.
-If COMMAND is nil, use `kuro-default-shell'.
+If COMMAND is nil, use `kuro-shell'.
 BUFFER-NAME is the name for the new buffer.
 Switches to the terminal buffer after creation."
   (interactive
    (list
-    (read-string "Shell command: " kuro-default-shell)
+    (read-string "Shell command: " kuro-shell)
     (generate-new-buffer-name "*kuro*")))
-  (let* ((cmd (or command kuro-default-shell))
+  (let* ((cmd (or command kuro-shell))
          (buffer (get-buffer-create (or buffer-name (generate-new-buffer-name "*kuro*")))))
     (with-current-buffer buffer
       (kuro-mode)
       (when (kuro--init cmd)
         (setq kuro--cursor-marker (point-marker))
+        (kuro--set-scrollback-max-lines kuro-scrollback-size)
+        (setq kuro--scroll-offset 0)
         (kuro--start-render-loop)
+        (kuro--apply-font-to-buffer buffer)
         (message "Kuro: Started terminal with command: %s" cmd)))
     (unless noninteractive
       (switch-to-buffer buffer))
@@ -89,8 +80,7 @@ Switches to the terminal buffer after creation."
 (defun kuro-send-string (string)
   "Send STRING to the terminal."
   (interactive "sSend string: ")
-  (let ((bytes (vconcat (mapcar #'identity string))))
-    (kuro--send-key bytes)))
+  (kuro--send-key string))
 
 (defun kuro-send-interrupt ()
   "Send SIGINT (C-c) to the terminal."
@@ -115,6 +105,15 @@ Switches to the terminal buffer after creation."
     ;; Clean up blink overlays
     (remove-overlays (point-min) (point-max) 'kuro-blink t)
     (setq kuro--blink-overlays nil)
+    ;; Reset mouse state
+    (setq kuro--mouse-mode 0)
+    (setq kuro--mouse-sgr nil)
+    ;; Reset scroll offset
+    (setq kuro--scroll-offset 0)
+    ;; Clean up font remap
+    (when (and (boundp 'kuro--font-remap-cookie) kuro--font-remap-cookie)
+      (face-remap-remove-relative kuro--font-remap-cookie)
+      (setq kuro--font-remap-cookie nil))
     (kuro--shutdown)
     (let ((buffer (current-buffer)))
       (kill-buffer buffer))))

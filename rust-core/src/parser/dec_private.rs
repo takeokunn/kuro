@@ -27,6 +27,19 @@ pub struct DecModes {
     /// When set, paste operations are bracketed with ESC [ 200~ and ESC [ 201~
     /// When reset, paste is not bracketed
     pub bracketed_paste: bool,
+
+    /// Mouse tracking mode:
+    /// 0 = disabled, 1000 = normal, 1002 = button-event, 1003 = any-event
+    pub mouse_mode: u16,
+
+    /// SGR extended coordinate modifier (mode 1006)
+    /// When true, use SGR format \e[<btn;col;rowM/m instead of X10 format
+    pub mouse_sgr: bool,
+
+    /// Application Keypad Mode (DECKPAM / DECKPNM)
+    /// Set by ESC = (DECKPAM), cleared by ESC > (DECKPNM).
+    /// Not a CSI ?h/l mode — handled directly in esc_dispatch.
+    pub app_keypad: bool,
 }
 
 impl DecModes {
@@ -38,6 +51,9 @@ impl DecModes {
             cursor_visible: true, // Default: cursor visible
             alternate_screen: false,
             bracketed_paste: false,
+            mouse_mode: 0,
+            mouse_sgr: false,
+            app_keypad: false,
         }
     }
 
@@ -49,6 +65,8 @@ impl DecModes {
             25 => self.cursor_visible = true,
             1049 => self.alternate_screen = true,
             2004 => self.bracketed_paste = true,
+            1000 | 1002 | 1003 => self.mouse_mode = mode,
+            1006 => self.mouse_sgr = true,
             _ => {}
         }
     }
@@ -61,6 +79,8 @@ impl DecModes {
             25 => self.cursor_visible = false,
             1049 => self.alternate_screen = false,
             2004 => self.bracketed_paste = false,
+            1000 | 1002 | 1003 => self.mouse_mode = 0,
+            1006 => self.mouse_sgr = false,
             _ => {}
         }
     }
@@ -73,6 +93,10 @@ impl DecModes {
             25 => Some(self.cursor_visible),
             1049 => Some(self.alternate_screen),
             2004 => Some(self.bracketed_paste),
+            1000 => Some(self.mouse_mode == 1000),
+            1002 => Some(self.mouse_mode == 1002),
+            1003 => Some(self.mouse_mode == 1003),
+            1006 => Some(self.mouse_sgr),
             _ => None,
         }
     }
@@ -113,6 +137,7 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_dec_modes_default() {
@@ -229,9 +254,119 @@ mod tests {
     }
 
     #[test]
+    fn test_app_keypad_default_is_false() {
+        let modes = DecModes::new();
+        assert!(!modes.app_keypad);
+    }
+
+    #[test]
+    fn test_app_keypad_set_and_clear() {
+        let mut modes = DecModes::new();
+        modes.app_keypad = true;
+        assert!(modes.app_keypad);
+        modes.app_keypad = false;
+        assert!(!modes.app_keypad);
+    }
+
+    #[test]
     fn test_unknown_mode_no_panic() {
         let mut modes = DecModes::new();
         modes.set_mode(9999); // Unknown mode, should not panic
         modes.reset_mode(9999); // Should also not panic
+    }
+
+    #[test]
+    fn test_mouse_mode_default_is_zero() {
+        let modes = DecModes::new();
+        assert_eq!(modes.mouse_mode, 0);
+        assert!(!modes.mouse_sgr);
+    }
+
+    #[test]
+    fn test_set_mouse_mode_1000() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1000);
+        assert_eq!(modes.mouse_mode, 1000);
+    }
+
+    #[test]
+    fn test_set_mouse_mode_1002() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1002);
+        assert_eq!(modes.mouse_mode, 1002);
+    }
+
+    #[test]
+    fn test_set_mouse_mode_1003() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1003);
+        assert_eq!(modes.mouse_mode, 1003);
+    }
+
+    #[test]
+    fn test_reset_mouse_mode_sets_zero() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1002);
+        modes.reset_mode(1002);
+        assert_eq!(modes.mouse_mode, 0);
+    }
+
+    #[test]
+    fn test_reset_any_mouse_mode_clears_all() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1003);
+        // Resetting mode 1000 still clears mouse_mode
+        modes.reset_mode(1000);
+        assert_eq!(modes.mouse_mode, 0);
+    }
+
+    #[test]
+    fn test_set_mouse_mode_replaces_previous() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1000);
+        modes.set_mode(1002); // switch to a different mode
+        assert_eq!(modes.mouse_mode, 1002);
+    }
+
+    #[test]
+    fn test_set_mouse_sgr() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1006);
+        assert!(modes.mouse_sgr);
+    }
+
+    #[test]
+    fn test_reset_mouse_sgr() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1006);
+        modes.reset_mode(1006);
+        assert!(!modes.mouse_sgr);
+    }
+
+    #[test]
+    fn test_get_mode_mouse_1000_active() {
+        let mut modes = DecModes::new();
+        modes.set_mode(1000);
+        assert_eq!(modes.get_mode(1000), Some(true));
+        assert_eq!(modes.get_mode(1002), Some(false));
+        assert_eq!(modes.get_mode(1003), Some(false));
+    }
+
+    #[test]
+    fn test_get_mode_mouse_sgr() {
+        let mut modes = DecModes::new();
+        assert_eq!(modes.get_mode(1006), Some(false));
+        modes.set_mode(1006);
+        assert_eq!(modes.get_mode(1006), Some(true));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_dec_modes_set_reset_no_panic(mode in 0u16..=65535u16) {
+            let mut modes = DecModes::new();
+            modes.set_mode(mode);   // must not panic
+            modes.reset_mode(mode); // must not panic
+            let _ = modes.get_mode(mode);
+        }
     }
 }

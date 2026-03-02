@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Clean up any orphaned tmux sessions from failed tests
+trap 'tmux kill-session -t kuro-test 2>/dev/null || true' EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
@@ -21,4 +24,24 @@ emacs -Q --batch \
   --eval "(require 'kuro)" \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")" \
+  2>&1
+
+echo ""
+echo "--- Running config unit tests ---"
+emacs -Q --batch \
+  -L "$PROJECT_DIR/emacs-lisp" \
+  -L "$PROJECT_DIR/test" \
+  --eval "(require 'kuro-config)" \
+  --eval "(require 'kuro-config-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")" \
+  2>&1
+
+echo ""
+echo "--- Running unit tests (kuro-unit-* in kuro-e2e-test.el) ---"
+emacs -Q --batch \
+  -L "$PROJECT_DIR/emacs-lisp" \
+  -L "$PROJECT_DIR/test" \
+  --eval "(require 'kuro)" \
+  --eval "(require 'kuro-e2e-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")" \
   2>&1

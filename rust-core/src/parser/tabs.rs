@@ -385,4 +385,67 @@ mod tests {
 
         assert!(!stops.contains(&100));
     }
+
+    /// ESC H (HTS) sets a tab stop at the cursor's current column. Sending a
+    /// horizontal tab (0x09) from column 0 should then jump to that column.
+    #[test]
+    fn test_hts_sets_tab_stop_at_current_column() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to column 5 via cursor-right CSI sequence
+        term.advance(b"\x1b[6G"); // CSI 6 G -> column 6 (1-indexed) = 5 (0-indexed)
+        assert_eq!(term.screen.cursor.col, 5, "cursor should be at column 5");
+
+        // ESC H: set a tab stop at column 5
+        term.advance(b"\x1bH");
+
+        // Move cursor back to column 0
+        term.advance(b"\r"); // CR
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // HT (tab) from col 0: the default stop at col 8 exists, but col 5 is
+        // now also a stop. The `next_stop(1)` scan will find col 5 first.
+        term.advance(b"\t");
+        assert_eq!(
+            term.screen.cursor.col, 5,
+            "tab from col 0 should stop at the custom tab stop set at col 5"
+        );
+    }
+
+    /// TBC with mode 3 (CSI 3 g) in this implementation resets tab stops to
+    /// default positions (every 8 columns) rather than clearing to empty.
+    #[test]
+    fn test_tbc_clears_and_resets_to_defaults() {
+        // TBC with mode 3 (CSI 3 g) in this implementation resets tab stops
+        // to default positions (every 8 columns) rather than clearing to empty.
+        let mut term = crate::TerminalCore::new(24, 80);
+        // First set a custom tab stop at column 5
+        term.advance(b"\x1b[1;6H"); // move to col 5 (1-indexed)
+        term.advance(b"\x1bH");      // HTS: set tab stop at col 5
+        // Now clear all (resets to defaults)
+        term.advance(b"\x1b[3g");
+        // After reset, the default stop at col 8 should be present
+        term.advance(b"\x1b[1;1H"); // move to col 0
+        term.advance(b"\t");         // tab
+        assert_eq!(term.screen.cursor.col, 8, "Default tab stop at col 8 should be restored");
+    }
+
+    /// Tab from column 0 with no custom modifications should move to column 8
+    /// (the first default tab stop).
+    #[test]
+    fn test_tab_movement_basic() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Cursor starts at column 0
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // Send a horizontal tab
+        term.advance(b"\t");
+
+        // Default first tab stop is at column 8
+        assert_eq!(
+            term.screen.cursor.col, 8,
+            "tab from col 0 should jump to default stop at col 8"
+        );
+    }
 }

@@ -1,6 +1,7 @@
 //! Cell and attribute types
 
 use super::color::Color;
+use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 
 /// Cell width for Unicode/CJK character support
@@ -13,6 +14,18 @@ pub enum CellWidth {
     Full,
     /// Placeholder for second cell of wide character
     Wide,
+}
+
+/// Underline style for SGR 4:x sub-parameters
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum UnderlineStyle {
+    #[default]
+    None,
+    Straight, // SGR 4 or 4:1
+    Double,   // SGR 4:2 (or SGR 21)
+    Curly,    // SGR 4:3 (undercurl)
+    Dotted,   // SGR 4:4
+    Dashed,   // SGR 4:5
 }
 
 /// SGR (Select Graphic Rendition) attributes for a cell
@@ -28,8 +41,10 @@ pub struct SgrAttributes {
     pub dim: bool,
     /// Italic text
     pub italic: bool,
-    /// Underline text
-    pub underline: bool,
+    /// Underline style (replaces the old `underline: bool`)
+    pub underline_style: UnderlineStyle,
+    /// Underline color (SGR 58/59)
+    pub underline_color: Color,
     /// Blink (slow)
     pub blink_slow: bool,
     /// Blink (rapid)
@@ -50,7 +65,8 @@ impl Default for SgrAttributes {
             bold: false,
             dim: false,
             italic: false,
-            underline: false,
+            underline_style: UnderlineStyle::None,
+            underline_color: Color::Default,
             blink_slow: false,
             blink_fast: false,
             inverse: false,
@@ -65,13 +81,18 @@ impl SgrAttributes {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// Returns true if any underline style is active
+    pub fn underline(&self) -> bool {
+        self.underline_style != UnderlineStyle::None
+    }
 }
 
 /// A single cell in the terminal grid
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cell {
-    /// Character at this position
-    pub c: char,
+    /// Grapheme cluster at this position (may include combining characters)
+    pub grapheme: CompactString,
     /// SGR attributes
     pub attrs: SgrAttributes,
     /// Cell width (for Unicode/CJK support)
@@ -86,7 +107,7 @@ impl Cell {
     /// Create a new cell with the given character
     pub fn new(c: char) -> Self {
         Self {
-            c,
+            grapheme: CompactString::new(c.to_string()),
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
             hyperlink_id: None,
@@ -97,7 +118,7 @@ impl Cell {
     /// Create a new cell with character and attributes
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
         Self {
-            c,
+            grapheme: CompactString::new(c.to_string()),
             attrs,
             width: CellWidth::Half,
             hyperlink_id: None,
@@ -110,17 +131,33 @@ impl Cell {
         self.hyperlink_id = Some(id);
         self
     }
+
+    /// Append a combining character to this cell's grapheme cluster
+    pub fn push_combining(&mut self, c: char) {
+        self.grapheme.push(c);
+    }
+
+    /// Get the first (base) character of the grapheme cluster (backward compat)
+    pub fn char(&self) -> char {
+        self.grapheme.chars().next().unwrap_or(' ')
+    }
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self::new(' ')
+        Self {
+            grapheme: CompactString::new(" "),
+            attrs: SgrAttributes::default(),
+            width: CellWidth::Half,
+            hyperlink_id: None,
+            image_id: None,
+        }
     }
 }
 
 impl PartialEq for Cell {
     fn eq(&self, other: &Self) -> bool {
-        self.c == other.c
+        self.grapheme == other.grapheme
             && self.attrs == other.attrs
             && self.width == other.width
             && self.hyperlink_id == other.hyperlink_id
@@ -135,14 +172,14 @@ mod tests {
     #[test]
     fn test_cell_default() {
         let cell = Cell::default();
-        assert_eq!(cell.c, ' ');
+        assert_eq!(cell.grapheme.as_str(), " ");
         assert_eq!(cell.attrs.foreground, Color::Default);
     }
 
     #[test]
     fn test_cell_new() {
         let cell = Cell::new('A');
-        assert_eq!(cell.c, 'A');
+        assert_eq!(cell.grapheme.as_str(), "A");
         assert_eq!(cell.attrs.bold, false);
     }
 
@@ -153,7 +190,7 @@ mod tests {
         attrs.foreground = Color::Rgb(255, 0, 0);
 
         let cell = Cell::with_attrs('B', attrs);
-        assert_eq!(cell.c, 'B');
+        assert_eq!(cell.grapheme.as_str(), "B");
         assert!(cell.attrs.bold);
         assert_eq!(cell.attrs.foreground, Color::Rgb(255, 0, 0));
     }
@@ -209,8 +246,33 @@ mod tests {
         assert_eq!(relinked.hyperlink_id, Some("https://other.com".to_string()));
 
         // Other fields are preserved after setting a hyperlink
-        assert_eq!(relinked.c, 'A');
+        assert_eq!(relinked.char(), 'A');
         assert_eq!(relinked.width, CellWidth::Half);
         assert!(!relinked.attrs.bold);
+    }
+
+    #[test]
+    fn test_underline_style_default_is_none() {
+        let attrs = SgrAttributes::default();
+        assert_eq!(attrs.underline_style, UnderlineStyle::None);
+        assert!(!attrs.underline());
+    }
+
+    #[test]
+    fn test_underline_helper_method() {
+        let mut attrs = SgrAttributes::default();
+        assert!(!attrs.underline());
+        attrs.underline_style = UnderlineStyle::Straight;
+        assert!(attrs.underline());
+        attrs.underline_style = UnderlineStyle::Curly;
+        assert!(attrs.underline());
+        attrs.underline_style = UnderlineStyle::None;
+        assert!(!attrs.underline());
+    }
+
+    #[test]
+    fn test_underline_color_default() {
+        let attrs = SgrAttributes::default();
+        assert_eq!(attrs.underline_color, Color::Default);
     }
 }

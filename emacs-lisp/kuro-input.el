@@ -197,6 +197,16 @@ APPLICATION-SEQUENCE is sent in application cursor keys mode."
   "Cached bracketed paste mode state from Rust (?2004), polled by render cycle.")
 (put 'kuro--bracketed-paste-mode 'permanent-local t)
 
+(defvar-local kuro--keyboard-flags 0
+  "Cached Kitty keyboard protocol flags, polled by render cycle.
+This is a bitmask integer:
+  Bit 0 (1): Disambiguate escape codes
+  Bit 1 (2): Report event types (press/repeat/release)
+  Bit 2 (4): Report alternate keys
+  Bit 3 (8): Report all keys as escape codes
+  Bit 4 (16): Report associated text")
+(put 'kuro--keyboard-flags 'permanent-local t)
+
 (defun kuro--sanitize-paste (text)
   "Sanitize TEXT before sending as bracketed paste.
 Removes all ESC (\\x1b) bytes to prevent bracketed paste escape injection,
@@ -402,6 +412,17 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
     (define-key map [C-left]  (lambda () (interactive) (kuro--send-key "\e[1;5D")))
     map)
   "Keymap for Kuro terminal emulator.")
+
+;;; Kitty Keyboard Protocol
+
+(defun kuro--encode-kitty-key (key modifiers)
+  "Encode KEY with MODIFIERS in Kitty keyboard protocol format.
+KEY is a Unicode codepoint integer.
+MODIFIERS is a bitmask: shift=1, alt=2, ctrl=4, super=8, hyper=16, meta=32.
+Returns the encoded escape sequence string."
+  (if (= modifiers 0)
+      (format "\e[%du" key)
+    (format "\e[%d;%du" key (1+ modifiers))))
 
 (provide 'kuro-input)
 

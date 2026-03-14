@@ -161,6 +161,18 @@ Changes take effect immediately in all running Kuro buffers."
   :group 'kuro
   :set #'kuro--set-scrollback-size)
 
+;;; Security Settings
+
+(defcustom kuro-clipboard-policy 'write-only
+  "Security policy for OSC 52 clipboard access.
+`write-only' allows terminal apps to set the clipboard but not read it.
+`allow' permits both read and write access.
+`prompt' asks for confirmation on each clipboard access."
+  :type '(choice (const :tag "Write only (safest)" write-only)
+                 (const :tag "Allow read and write" allow)
+                 (const :tag "Prompt for each access" prompt))
+  :group 'kuro)
+
 ;;; Display Settings
 
 (defcustom kuro-frame-rate 30

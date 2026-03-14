@@ -295,7 +295,11 @@ mod tests {
     fn test_env_ref_registry_register_increments_count() {
         let registry = EnvRefRegistry::new();
         registry.register();
-        assert_eq!(registry.count(), 1, "after one register the count should be 1");
+        assert_eq!(
+            registry.count(),
+            1,
+            "after one register the count should be 1"
+        );
     }
 
     /// Calling register() then unregister() on a fresh registry leaves the count at 0.
@@ -305,6 +309,10 @@ mod tests {
         registry.register();
         assert_eq!(registry.count(), 1);
         registry.unregister();
-        assert_eq!(registry.count(), 0, "after register+unregister the count should be 0");
+        assert_eq!(
+            registry.count(),
+            0,
+            "after register+unregister the count should be 0"
+        );
     }
 }

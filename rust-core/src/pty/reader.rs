@@ -125,10 +125,11 @@ mod tests {
         drop(_write_file);
 
         // Wait up to 2 seconds for the thread to finish
-        let finished = handle
-            .join()
-            .is_ok();
-        assert!(finished, "reader thread should finish when shutdown flag is set");
+        let finished = handle.join().is_ok();
+        assert!(
+            finished,
+            "reader thread should finish when shutdown flag is set"
+        );
 
         // Channel should be empty (no data was written)
         assert!(rx.try_recv().is_err(), "channel should be empty");

@@ -14,6 +14,7 @@ pub mod parser;
 pub mod pty;
 pub mod types;
 
+use base64::Engine;
 use emacs::Env;
 use parser::dec_private::DecModes;
 use parser::tabs::TabStops;
@@ -90,6 +91,8 @@ pub struct TerminalCore {
     pub(crate) kitty_chunk: Option<parser::kitty::KittyChunkState>,
     /// Image placement notifications waiting to be sent to Elisp
     pub(crate) pending_image_notifications: Vec<grid::screen::ImageNotification>,
+    /// OSC data storage (CWD, hyperlinks, clipboard, prompt marks, etc.)
+    pub(crate) osc_data: types::osc::OscData,
 }
 
 impl TerminalCore {
@@ -111,6 +114,7 @@ impl TerminalCore {
             apc_buf: Vec::new(),
             kitty_chunk: None,
             pending_image_notifications: Vec::new(),
+            osc_data: Default::default(),
         }
     }
 
@@ -367,7 +371,7 @@ impl TerminalCore {
 
     /// Get whether underline SGR attribute is currently set
     pub fn current_underline(&self) -> bool {
-        self.current_attrs.underline
+        self.current_attrs.underline()
     }
 
     /// Get a cell from the screen at the given (row, col) position
@@ -386,8 +390,70 @@ impl TerminalCore {
         self.screen
             .get_scrollback_lines(max_lines)
             .into_iter()
-            .map(|line| line.cells.iter().map(|c| c.c).collect())
+            .map(|line| line.cells.iter().map(|c| c.char()).collect())
             .collect()
+    }
+
+    /// Get current DEC modes state (read-only reference)
+    pub fn dec_modes(&self) -> &parser::dec_private::DecModes {
+        &self.dec_modes
+    }
+
+    /// Get current SGR attributes (read-only reference)
+    pub fn current_attrs(&self) -> &types::cell::SgrAttributes {
+        &self.current_attrs
+    }
+
+    /// Get current OSC data (read-only reference)
+    pub fn osc_data(&self) -> &types::osc::OscData {
+        &self.osc_data
+    }
+
+    /// Get the current window title
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Get whether the title has been updated and not yet read
+    pub fn title_dirty(&self) -> bool {
+        self.title_dirty
+    }
+
+    /// Get pending terminal responses (for DA1, DA2, Kitty keyboard, etc.)
+    pub fn pending_responses(&self) -> &[Vec<u8>] {
+        &self.pending_responses
+    }
+
+    /// Get current foreground color
+    pub fn current_foreground(&self) -> &types::Color {
+        &self.current_attrs.foreground
+    }
+
+    /// Soft terminal reset (DECSTR - CSI ! p)
+    ///
+    /// Resets modes but preserves screen content and scrollback.
+    pub fn soft_reset(&mut self) {
+        // Reset cursor keys to normal mode
+        self.dec_modes.app_cursor_keys = false;
+        // Reset origin mode
+        self.dec_modes.origin_mode = false;
+        // Auto-wrap back on
+        self.dec_modes.auto_wrap = true;
+        // Cursor visible
+        self.dec_modes.cursor_visible = true;
+        // Reset SGR attributes
+        self.current_attrs = types::cell::SgrAttributes::default();
+        // Reset scroll region to full screen
+        let rows = self.screen.rows() as usize;
+        self.screen.set_scroll_region(0, rows);
+        // Move cursor to home
+        self.screen.move_cursor(0, 0);
+        // Reset cursor shape
+        self.dec_modes.cursor_shape = types::cursor::CursorShape::BlinkingBlock;
+        // Reset Kitty keyboard protocol flags
+        self.dec_modes.keyboard_flags = 0;
+        self.dec_modes.keyboard_flags_stack.clear();
+        // Note: does NOT clear scrollback, does NOT switch screens, does NOT clear screen
     }
 
     /// Full terminal reset (RIS - ESC c)
@@ -419,16 +485,29 @@ impl TerminalCore {
         self.apc_buf.clear();
         self.kitty_chunk = None;
         self.pending_image_notifications.clear();
+        // Clear OSC data
+        self.osc_data = Default::default();
     }
 }
 
 impl vte::Perform for TerminalCore {
     fn print(&mut self, c: char) {
-        // Combining characters (Unicode width 0) are filtered here.
-        // They are not yet attached to the previous cell — that requires a Cell model
-        // change deferred to a future phase (see OI-001 in Phase 11 requirements).
-        // This prevents width-0 chars from being placed as erroneous Half-width cells.
+        // Combining characters (Unicode width 0) are attached to the previous cell.
         if UnicodeWidthChar::width(c) == Some(0) {
+            // Attach to the cell just before the current cursor position
+            let cursor = *self.screen.cursor();
+            let (row, col) = if cursor.col > 0 {
+                (cursor.row, cursor.col - 1)
+            } else if cursor.row > 0 {
+                // Cursor is at column 0; attach to last cell of previous row
+                let prev_row = cursor.row - 1;
+                let last_col = self.screen.cols().saturating_sub(1) as usize;
+                (prev_row, last_col)
+            } else {
+                // No previous cell available; discard
+                return;
+            };
+            self.screen.attach_combining(row, col, c);
             return;
         }
         self.screen
@@ -455,29 +534,90 @@ impl vte::Perform for TerminalCore {
     }
 
     fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, c: char) {
-        // Check for DEC private mode sequences (CSI ? Pm h/l)
+        // Check for DEC private mode sequences (CSI ? Pm h/l) and CSI ? u (query keyboard flags)
         if !intermediates.is_empty() && intermediates[0] == b'?' {
-            // DEC private mode
-            let set = match c {
-                'h' => true,  // Set mode
-                'l' => false, // Reset mode
-                _ => return,  // Other DEC private sequences not supported yet
-            };
-            parser::dec_private::handle_dec_modes(self, params, set);
+            match c {
+                'h' | 'l' => {
+                    let set = c == 'h';
+                    parser::dec_private::handle_dec_modes(self, params, set);
+                }
+                'u' => {
+                    // CSI ? u — Query keyboard flags
+                    let response = format!("\x1b[?{}u", self.dec_modes.keyboard_flags);
+                    self.pending_responses.push(response.into_bytes());
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
+        if !intermediates.is_empty() && intermediates[0] == b'>' {
+            match c {
+                'u' => {
+                    let flags = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first().copied())
+                        .unwrap_or(0);
+                    if self.dec_modes.keyboard_flags_stack.len() < 64 {
+                        self.dec_modes
+                            .keyboard_flags_stack
+                            .push(self.dec_modes.keyboard_flags);
+                    }
+                    self.dec_modes.keyboard_flags = flags as u32;
+                }
+                'c' => {
+                    // DA2 (Secondary Device Attributes): ESC[>c or ESC[>0c
+                    self.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
+        if !intermediates.is_empty() && intermediates[0] == b'<' {
+            if c == 'u' {
+                if let Some(prev) = self.dec_modes.keyboard_flags_stack.pop() {
+                    self.dec_modes.keyboard_flags = prev;
+                } else {
+                    self.dec_modes.keyboard_flags = 0;
+                }
+            }
             return;
         }
 
         // Handle standard CSI sequences
         match c {
             // Device Attribute queries — terminal must respond to avoid shell hangs
+            // DA2 (Secondary, ESC[>c) is handled above in the '>' intermediates block.
             'c' => {
                 if intermediates.is_empty() {
                     // DA1 (Primary): ESC[c or ESC[0c → respond with VT100 + advanced video
                     self.pending_responses.push(b"\x1b[?1;2c".to_vec());
-                } else if intermediates == b">" {
-                    // DA2 (Secondary): ESC[>c or ESC[>0c → respond with VT220 emulation
-                    self.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
                 }
+            }
+            // DECSCUSR - Set Cursor Style (CSI Ps SP q)
+            'q' if intermediates == &[b' '] => {
+                let ps = params
+                    .iter()
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(0);
+                self.dec_modes.cursor_shape = match ps {
+                    0 | 1 => types::cursor::CursorShape::BlinkingBlock,
+                    2 => types::cursor::CursorShape::SteadyBlock,
+                    3 => types::cursor::CursorShape::BlinkingUnderline,
+                    4 => types::cursor::CursorShape::SteadyUnderline,
+                    5 => types::cursor::CursorShape::BlinkingBar,
+                    6 => types::cursor::CursorShape::SteadyBar,
+                    _ => types::cursor::CursorShape::BlinkingBlock,
+                };
+            }
+            // DECSTR - Soft Terminal Reset (CSI ! p)
+            'p' if intermediates == &[b'!'] => {
+                self.soft_reset();
             }
             // Cursor positioning
             'H' | 'A' | 'B' | 'C' | 'D' | 'd' | 'G' | 'f' | 'n' => {
@@ -499,10 +639,12 @@ impl vte::Perform for TerminalCore {
             'L' | 'M' | '@' | 'P' | 'X' => {
                 parser::insert_delete::handle_insert_delete(self, params, c);
             }
-            // SGR and other sequences handled by existing sgr module
-            _ => {
-                parser::sgr::handle_csi(self, params, intermediates, c);
+            // SGR - Select Graphic Rendition
+            'm' => {
+                parser::sgr::handle_sgr(self, params);
             }
+            // Unknown/unhandled CSI sequences are silently ignored
+            _ => {}
         }
     }
 
@@ -531,6 +673,94 @@ impl vte::Perform for TerminalCore {
                     self.title = title;
                     self.title_dirty = true;
                 }
+            }
+            b"7" => {
+                // OSC 7 - Current Working Directory: file://host/path
+                if let Some(raw) = params.get(1) {
+                    let url = String::from_utf8_lossy(raw);
+                    // Strip file://hostname prefix to get just the path
+                    if let Some(after_scheme) = url.strip_prefix("file://") {
+                        // Skip hostname part (up to next /)
+                        let path = after_scheme
+                            .find('/')
+                            .map(|i| &after_scheme[i..])
+                            .unwrap_or(after_scheme);
+                        if path.len() <= 4096 {
+                            self.osc_data.cwd = Some(path.to_string());
+                            self.osc_data.cwd_dirty = true;
+                        }
+                    }
+                }
+            }
+            b"8" => {
+                // OSC 8 - Hyperlinks: ESC]8;params;uri ST
+                if let Some(params_raw) = params.get(1) {
+                    let params_str = String::from_utf8_lossy(params_raw);
+                    if let Some(uri_raw) = params.get(2) {
+                        let uri = String::from_utf8_lossy(uri_raw);
+                        if uri.is_empty() {
+                            // Close hyperlink
+                            self.osc_data.hyperlink = types::osc::HyperlinkState::default();
+                        } else if uri.len() <= 8192 {
+                            // Extract id from params if present
+                            let id = params_str
+                                .split(';')
+                                .find_map(|p| p.strip_prefix("id="))
+                                .map(String::from);
+                            self.osc_data.hyperlink = types::osc::HyperlinkState {
+                                uri: Some(uri.into_owned()),
+                                id,
+                            };
+                        }
+                    }
+                }
+            }
+            b"52" => {
+                // OSC 52 - Clipboard: ESC]52;selection;base64data ST
+                if let Some(data_raw) = params.get(2) {
+                    if data_raw == b"?" {
+                        self.osc_data
+                            .clipboard_actions
+                            .push(types::osc::ClipboardAction::Query);
+                    } else if data_raw.len() <= 1_048_576 {
+                        // 1MB cap
+                        if let Ok(decoded) =
+                            base64::engine::general_purpose::STANDARD.decode(data_raw)
+                        {
+                            if let Ok(text) = String::from_utf8(decoded) {
+                                self.osc_data
+                                    .clipboard_actions
+                                    .push(types::osc::ClipboardAction::Write(text));
+                            }
+                        }
+                    }
+                }
+            }
+            b"133" => {
+                // OSC 133 - Shell integration prompt marks
+                if let Some(mark_raw) = params.get(1) {
+                    let mark = match mark_raw.first() {
+                        Some(b'A') => Some(types::osc::PromptMark::PromptStart),
+                        Some(b'B') => Some(types::osc::PromptMark::PromptEnd),
+                        Some(b'C') => Some(types::osc::PromptMark::CommandStart),
+                        Some(b'D') => Some(types::osc::PromptMark::CommandEnd),
+                        _ => None,
+                    };
+                    if let Some(m) = mark {
+                        let cursor = *self.screen.cursor();
+                        self.osc_data
+                            .prompt_marks
+                            .push(types::osc::PromptMarkEvent {
+                                mark: m,
+                                row: cursor.row,
+                                col: cursor.col,
+                            });
+                    }
+                }
+            }
+            b"104" => {
+                // OSC 104 - Reset color palette
+                self.osc_data.palette_dirty = true;
             }
             _ => {} // all other OSC numbers: silently ignore
         }
@@ -578,7 +808,7 @@ mod tests {
         term.advance(b"Hello");
         // Check first cell
         let cell = term.screen.get_cell(0, 0).unwrap();
-        assert_eq!(cell.c, 'H');
+        assert_eq!(cell.char(), 'H');
     }
 
     #[test]
@@ -879,7 +1109,7 @@ mod tests {
         const MAX_APC_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
         let mut core = TerminalCore::new(24, 80);
         let mut input = vec![0x1b, b'_']; // ESC _
-        // Send MORE than the cap
+                                          // Send MORE than the cap
         input.extend(std::iter::repeat(b'X').take(MAX_APC_PAYLOAD_BYTES + 100));
         input.extend_from_slice(b"\x1b\\"); // ESC \
         core.advance(&input);
@@ -920,8 +1150,14 @@ mod tests {
         assert_eq!(term.screen.rows(), 30);
         assert_eq!(term.screen.cols(), 100);
         // Cursor position must remain in bounds after resize
-        assert!(term.screen.cursor().row < 30, "cursor row out of bounds after resize");
-        assert!(term.screen.cursor().col < 100, "cursor col out of bounds after resize");
+        assert!(
+            term.screen.cursor().row < 30,
+            "cursor row out of bounds after resize"
+        );
+        assert!(
+            term.screen.cursor().col < 100,
+            "cursor col out of bounds after resize"
+        );
         // Cursor should not have moved to an impossible position
         let _ = (row_before, col_before); // used for context
     }
@@ -941,8 +1177,8 @@ mod tests {
         // Send an incomplete CSI sequence in the first call, complete it in the second.
         // After both calls, bold should be set.
         let mut term = TerminalCore::new(24, 80);
-        term.advance(b"\x1b[");   // incomplete CSI
-        term.advance(b"1m");      // complete: SGR bold
+        term.advance(b"\x1b["); // incomplete CSI
+        term.advance(b"1m"); // complete: SGR bold
         assert!(
             term.current_attrs.bold,
             "bold should be set after split CSI sequence"
@@ -979,32 +1215,343 @@ mod tests {
         term.advance(b"\x1b]99;some_data\x07");
         // Title must not have changed (OSC 99 is not handled)
         assert_eq!(term.title, "", "unknown OSC number must not update title");
-        assert!(!term.title_dirty, "unknown OSC number must not set title_dirty");
+        assert!(
+            !term.title_dirty,
+            "unknown OSC number must not set title_dirty"
+        );
+    }
+
+    #[test]
+    fn test_combining_char_attached_to_base() {
+        let mut term = TerminalCore::new(24, 80);
+        // Print 'e' followed by combining acute accent U+0301
+        term.advance("e\u{0301}".as_bytes());
+        let cell = term.get_cell(0, 0).unwrap();
+        assert_eq!(cell.grapheme.as_str(), "e\u{0301}");
+    }
+
+    #[test]
+    fn test_combining_char_at_col_zero_discarded() {
+        let mut term = TerminalCore::new(24, 80);
+        // Send combining char at position (0,0) with no previous cell
+        term.advance("\u{0301}".as_bytes());
+        // Should not panic; cell at (0,0) should still be default space
+        let cell = term.get_cell(0, 0).unwrap();
+        assert_eq!(cell.grapheme.as_str(), " ");
+    }
+
+    #[test]
+    fn test_normal_chars_unchanged_after_grapheme_support() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"ABC");
+        assert_eq!(term.get_cell(0, 0).unwrap().char(), 'A');
+        assert_eq!(term.get_cell(0, 1).unwrap().char(), 'B');
+        assert_eq!(term.get_cell(0, 2).unwrap().char(), 'C');
+    }
+
+    #[test]
+    fn test_osc_7_stores_cwd() {
+        let mut core = TerminalCore::new(24, 80);
+        core.advance(b"\x1b]7;file://localhost/tmp/test\x07");
+        assert!(core.osc_data.cwd_dirty);
+        assert_eq!(core.osc_data.cwd, Some("/tmp/test".to_string()));
+    }
+
+    #[test]
+    fn test_osc_133_stores_prompt_marks() {
+        let mut core = TerminalCore::new(24, 80);
+        core.advance(b"\x1b]133;A\x07");
+        assert_eq!(core.osc_data.prompt_marks.len(), 1);
+        assert_eq!(
+            core.osc_data.prompt_marks[0].mark,
+            types::osc::PromptMark::PromptStart
+        );
+    }
+
+    #[test]
+    fn test_osc_8_hyperlink() {
+        let mut core = TerminalCore::new(24, 80);
+        core.advance(b"\x1b]8;;https://example.com\x07");
+        assert_eq!(
+            core.osc_data.hyperlink.uri,
+            Some("https://example.com".to_string())
+        );
+        // Close hyperlink
+        core.advance(b"\x1b]8;;\x07");
+        assert!(core.osc_data.hyperlink.uri.is_none());
+    }
+
+    #[test]
+    fn test_osc_104_clears_palette() {
+        let mut core = TerminalCore::new(24, 80);
+        core.advance(b"\x1b]104\x07");
+        assert!(core.osc_data.palette_dirty);
+    }
+
+    #[test]
+    fn test_decscusr_sets_cursor_shape() {
+        let mut term = TerminalCore::new(24, 80);
+        // CSI 5 SP q → blinking bar
+        term.advance(b"\x1b[5 q");
+        assert_eq!(
+            term.dec_modes.cursor_shape,
+            types::cursor::CursorShape::BlinkingBar
+        );
+        // CSI 2 SP q → steady block
+        term.advance(b"\x1b[2 q");
+        assert_eq!(
+            term.dec_modes.cursor_shape,
+            types::cursor::CursorShape::SteadyBlock
+        );
+    }
+
+    #[test]
+    fn test_decstr_soft_reset() {
+        let mut term = TerminalCore::new(24, 80);
+        // Set some modes
+        term.advance(b"\x1b[?1h"); // DECCKM on
+        term.advance(b"\x1b[1m"); // Bold on
+        term.advance(b"\x1b[10;20H"); // Move cursor
+                                      // Soft reset
+        term.advance(b"\x1b[!p");
+        // Cursor keys should be reset
+        assert!(!term.dec_modes.app_cursor_keys);
+        // SGR should be reset
+        assert!(!term.current_attrs.bold);
+        // Cursor should be at home
+        assert_eq!(term.cursor_row(), 0);
+        assert_eq!(term.cursor_col(), 0);
+        // Auto-wrap should be on
+        assert!(term.dec_modes.auto_wrap);
+    }
+
+    #[test]
+    fn test_decstr_preserves_screen_content() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"Hello");
+        term.advance(b"\x1b[!p"); // Soft reset
+                                  // Content should be preserved
+        let cell = term.get_cell(0, 0).unwrap();
+        assert_eq!(cell.char(), 'H');
+    }
+
+    #[test]
+    fn test_kitty_keyboard_push_pop() {
+        let mut term = TerminalCore::new(24, 80);
+        assert_eq!(term.dec_modes.keyboard_flags, 0);
+        // Push flags=1 (disambiguate)
+        term.advance(b"\x1b[>1u");
+        assert_eq!(term.dec_modes.keyboard_flags, 1);
+        // Push flags=3 (disambiguate + event types)
+        term.advance(b"\x1b[>3u");
+        assert_eq!(term.dec_modes.keyboard_flags, 3);
+        assert_eq!(term.dec_modes.keyboard_flags_stack.len(), 2);
+        // Pop
+        term.advance(b"\x1b[<u");
+        assert_eq!(term.dec_modes.keyboard_flags, 1);
+        // Pop again
+        term.advance(b"\x1b[<u");
+        assert_eq!(term.dec_modes.keyboard_flags, 0);
+        // Pop on empty stack → stays at 0
+        term.advance(b"\x1b[<u");
+        assert_eq!(term.dec_modes.keyboard_flags, 0);
+    }
+
+    #[test]
+    fn test_kitty_keyboard_query() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[>5u"); // Set flags=5
+        term.advance(b"\x1b[?u"); // Query
+        assert_eq!(term.pending_responses.len(), 1);
+        assert_eq!(term.pending_responses[0], b"\x1b[?5u");
+    }
+
+    // === Resource limit tests ===
+
+    #[test]
+    fn test_oversized_osc7_cwd_rejected() {
+        let mut term = TerminalCore::new(24, 80);
+        let long_path = format!("\x1b]7;file://localhost/{}\x07", "a".repeat(5000));
+        term.advance(long_path.as_bytes());
+        // CWD should NOT be stored (over 4096 limit)
+        assert!(
+            term.osc_data.cwd.is_none() || term.osc_data.cwd.as_ref().unwrap().len() <= 4096,
+            "CWD over 4096 bytes should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_oversized_osc8_uri_rejected() {
+        let mut term = TerminalCore::new(24, 80);
+        let long_uri = format!("\x1b]8;;https://example.com/{}\x07", "x".repeat(9000));
+        term.advance(long_uri.as_bytes());
+        // Hyperlink should NOT be stored (over 8192 limit)
+        assert!(
+            term.osc_data.hyperlink.uri.is_none()
+                || term.osc_data.hyperlink.uri.as_ref().unwrap().len() <= 8192,
+            "Hyperlink URI over 8192 bytes should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_apc_payload_cap_enforced() {
+        let mut term = TerminalCore::new(24, 80);
+        // Send an APC with payload > 4MiB
+        let large_payload = vec![b'A'; 5 * 1024 * 1024];
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b_G");
+        data.extend_from_slice(&large_payload);
+        data.extend_from_slice(b"\x1b\\");
+        term.advance(&data);
+        // Should not panic and apc_buf should be cleared after sequence completes
+        assert_eq!(
+            term.apc_buf.len(),
+            0,
+            "apc_buf should be cleared after oversized APC sequence"
+        );
+    }
+
+    #[test]
+    fn test_title_sanitization_strips_control_chars() {
+        let mut term = TerminalCore::new(24, 80);
+        // Title with embedded BEL control character — the OSC parser splits on BEL,
+        // so the title will be "Hello" (everything before the first BEL terminator)
+        term.advance(b"\x1b]2;Hello\x07World\x07");
+        // The title should not contain control characters
+        assert!(
+            !term.title.contains('\x07'),
+            "Title should not contain BEL control character"
+        );
+    }
+
+    // === SGR underline style tests ===
+
+    #[test]
+    fn test_sgr_4_colon_3_sets_curly_underline() {
+        let mut term = TerminalCore::new(24, 80);
+        // CSI 4:3 m — curly underline (colon sub-parameter form)
+        term.advance(b"\x1b[4:3m");
+        assert_eq!(
+            term.current_attrs.underline_style,
+            types::cell::UnderlineStyle::Curly,
+            "SGR 4:3 should set curly underline"
+        );
+    }
+
+    #[test]
+    fn test_sgr_4_colon_5_sets_dashed_underline() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[4:5m");
+        assert_eq!(
+            term.current_attrs.underline_style,
+            types::cell::UnderlineStyle::Dashed,
+            "SGR 4:5 should set dashed underline"
+        );
+    }
+
+    #[test]
+    fn test_sgr_21_sets_double_underline() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[21m");
+        assert_eq!(
+            term.current_attrs.underline_style,
+            types::cell::UnderlineStyle::Double,
+            "SGR 21 should set double underline"
+        );
+    }
+
+    #[test]
+    fn test_sgr_24_clears_underline() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[4:3m"); // Set curly
+        assert!(
+            term.current_attrs.underline(),
+            "Curly underline should be active"
+        );
+        term.advance(b"\x1b[24m"); // Clear
+        assert!(
+            !term.current_attrs.underline(),
+            "SGR 24 should clear underline"
+        );
+        assert_eq!(
+            term.current_attrs.underline_style,
+            types::cell::UnderlineStyle::None,
+            "SGR 24 should set underline_style to None"
+        );
+    }
+
+    #[test]
+    fn test_sgr_58_5_sets_underline_color_indexed() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[58;5;196m");
+        assert_eq!(
+            term.current_attrs.underline_color,
+            types::color::Color::Indexed(196),
+            "SGR 58;5;196 should set indexed underline color 196"
+        );
+    }
+
+    #[test]
+    fn test_sgr_58_2_sets_underline_color_rgb() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[58;2;255;128;0m");
+        assert_eq!(
+            term.current_attrs.underline_color,
+            types::color::Color::Rgb(255, 128, 0),
+            "SGR 58;2;255;128;0 should set RGB underline color"
+        );
+    }
+
+    #[test]
+    fn test_sgr_59_resets_underline_color() {
+        let mut term = TerminalCore::new(24, 80);
+        term.advance(b"\x1b[58;5;196m");
+        assert_ne!(
+            term.current_attrs.underline_color,
+            types::color::Color::Default,
+            "Underline color should be set before reset"
+        );
+        term.advance(b"\x1b[59m");
+        assert_eq!(
+            term.current_attrs.underline_color,
+            types::color::Color::Default,
+            "SGR 59 should reset underline color to Default"
+        );
+    }
+
+    // === Clean shutdown / drop test ===
+
+    #[test]
+    fn test_terminal_drop_does_not_panic() {
+        // Create and immediately drop a terminal
+        let term = TerminalCore::new(24, 80);
+        drop(term);
+        // If we get here, no panic during cleanup
     }
 
     proptest! {
-        #[test]
-        fn prop_vte_parse_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..256)) {
-            let mut term = TerminalCore::new(24, 80);
-            term.advance(&bytes);
-            // Must not panic. Cursor stays in bounds.
-            prop_assert!(term.screen.cursor().row < 24);
-            prop_assert!(term.screen.cursor().col < 80);
-        }
-
-        #[test]
-        fn prop_resize_cursor_always_in_bounds(
-            new_rows in 1u16..50,
-            new_cols in 1u16..50,
-        ) {
-            let mut term = TerminalCore::new(24, 80);
-            // Move cursor to somewhere potentially out of bounds after resize
-            term.advance(b"\x1b[20;70H");
-            term.resize(new_rows, new_cols);
-            prop_assert!(term.screen.cursor().row < new_rows as usize,
-                "cursor row {} >= {}", term.screen.cursor().row, new_rows);
-            prop_assert!(term.screen.cursor().col < new_cols as usize,
-                "cursor col {} >= {}", term.screen.cursor().col, new_cols);
-        }
+            #[test]
+            fn prop_vte_parse_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..256)) {
+                let mut term = TerminalCore::new(24, 80);
+                term.advance(&bytes);
+                // Must not panic. Cursor stays in bounds.
+                prop_assert!(term.screen.cursor().row < 24);
+                prop_assert!(term.screen.cursor().col < 80);
     }
+
+            #[test]
+            fn prop_resize_cursor_always_in_bounds(
+                new_rows in 1u16..50,
+                new_cols in 1u16..50,
+            ) {
+                let mut term = TerminalCore::new(24, 80);
+                // Move cursor to somewhere potentially out of bounds after resize
+                term.advance(b"\x1b[20;70H");
+                term.resize(new_rows, new_cols);
+                prop_assert!(term.screen.cursor().row < new_rows as usize,
+                    "cursor row {} >= {}", term.screen.cursor().row, new_rows);
+                prop_assert!(term.screen.cursor().col < new_cols as usize,
+                    "cursor col {} >= {}", term.screen.cursor().col, new_cols);
+            }
+        }
 }

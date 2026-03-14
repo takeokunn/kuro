@@ -265,18 +265,20 @@ fn kuro_core_send_key<'e>(env: &'e Env, data: String) -> EmacsResult<Value<'e>> 
 /// Poll for terminal updates and return dirty lines
 #[defun]
 fn kuro_core_poll_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result: std::result::Result<Vec<(usize, String)>, KuroError> = {
-        let mut global = super::abstraction::TERMINAL_SESSION
-            .lock()
-            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+    let result: std::result::Result<Vec<(usize, String)>, KuroError> =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut global = super::abstraction::TERMINAL_SESSION
+                .lock()
+                .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
 
-        if let Some(ref mut session) = *global {
-            session.poll_output()?;
-            Ok(session.get_dirty_lines())
-        } else {
-            Ok(Vec::new())
-        }
-    };
+            if let Some(ref mut session) = *global {
+                session.poll_output()?;
+                Ok(session.get_dirty_lines())
+            } else {
+                Ok(Vec::new())
+            }
+        }))
+        .unwrap_or_else(|_| Err(KuroError::Ffi("panic in poll_updates".to_string())));
 
     match result {
         Ok(dirty_lines) => {
@@ -334,70 +336,131 @@ fn kuro_core_shutdown<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// Get cursor position as a (ROW . COL) cons pair
 #[defun]
 fn kuro_core_get_cursor<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let (row, col) = if let Some(ref session) = *global {
-        session.get_cursor()
-    } else {
-        (0, 0)
-    };
-    let row_val = (row as i64).into_lisp(env)?;
-    let col_val = (col as i64).into_lisp(env)?;
-    env.cons(row_val, col_val)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let (row, col) = if let Some(ref session) = *global {
+            session.get_cursor()
+        } else {
+            (0, 0)
+        };
+        Ok::<(usize, usize), KuroError>((row, col))
+    }));
+    match result {
+        Ok(Ok((row, col))) => {
+            let row_val = (row as i64).into_lisp(env)?;
+            let col_val = (col as i64).into_lisp(env)?;
+            env.cons(row_val, col_val)
+        }
+        Ok(Err(e)) => {
+            let msg = format!("kuro: error in get_cursor: {}", e);
+            let _ = env.message(&msg);
+            false.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_cursor");
+            false.into_lisp(env)
+        }
+    }
 }
 
 /// Get cursor visibility (DECTCEM state: t if visible, nil if hidden)
 #[defun]
 fn kuro_core_get_cursor_visible<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let visible = if let Some(ref session) = *global {
-        session.get_cursor_visible()
-    } else {
-        true
-    };
-    if visible {
-        env.intern("t")
-    } else {
-        env.intern("nil")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let visible = if let Some(ref session) = *global {
+            session.get_cursor_visible()
+        } else {
+            true
+        };
+        Ok::<bool, KuroError>(visible)
+    }));
+    match result {
+        Ok(Ok(visible)) => {
+            if visible {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_cursor_visible: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_cursor_visible");
+            env.intern("nil")
+        }
     }
 }
 
 /// Get application cursor keys mode (DECCKM state: t if active, nil if not)
 #[defun]
 fn kuro_core_get_app_cursor_keys<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let app_cursor_keys = if let Some(ref session) = *global {
-        session.core.dec_modes.app_cursor_keys
-    } else {
-        false
-    };
-    if app_cursor_keys {
-        env.intern("t")
-    } else {
-        env.intern("nil")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let app_cursor_keys = if let Some(ref session) = *global {
+            session.core.dec_modes.app_cursor_keys
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(app_cursor_keys)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_app_cursor_keys: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_app_cursor_keys");
+            env.intern("nil")
+        }
     }
 }
 
 /// Get application keypad mode state (t if DECKPAM active, nil if DECKPNM)
 #[defun]
 fn kuro_core_get_app_keypad<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let app_keypad = if let Some(ref session) = *global {
-        session.core.dec_modes.app_keypad
-    } else {
-        false
-    };
-    if app_keypad {
-        env.intern("t")
-    } else {
-        env.intern("nil")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let app_keypad = if let Some(ref session) = *global {
+            session.core.dec_modes.app_keypad
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(app_keypad)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_app_keypad: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_app_keypad");
+            env.intern("nil")
+        }
     }
 }
 
@@ -407,91 +470,158 @@ fn kuro_core_get_app_keypad<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// or nil if no title update is pending.
 #[defun]
 fn kuro_core_get_and_clear_title<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let mut global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    if let Some(ref mut session) = *global {
-        if session.core.title_dirty {
-            session.core.title_dirty = false;
-            let title = session.core.title.clone();
-            title.into_lisp(env)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref mut session) = *global {
+            if session.core.title_dirty {
+                session.core.title_dirty = false;
+                Ok::<Option<String>, KuroError>(Some(session.core.title.clone()))
+            } else {
+                Ok(None)
+            }
         } else {
+            Ok(None)
+        }
+    }));
+    match result {
+        Ok(Ok(Some(title))) => title.into_lisp(env),
+        Ok(Ok(None)) => false.into_lisp(env),
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_and_clear_title: {}", e));
             false.into_lisp(env)
         }
-    } else {
-        false.into_lisp(env)
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_and_clear_title");
+            false.into_lisp(env)
+        }
     }
 }
 
 /// Get bracketed paste mode state (t if active, nil if not)
 #[defun]
 fn kuro_core_get_bracketed_paste<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let bracketed_paste = if let Some(ref session) = *global {
-        session.core.dec_modes.bracketed_paste
-    } else {
-        false
-    };
-    if bracketed_paste {
-        env.intern("t")
-    } else {
-        env.intern("nil")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let bracketed_paste = if let Some(ref session) = *global {
+            session.core.dec_modes.bracketed_paste
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(bracketed_paste)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_bracketed_paste: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_bracketed_paste");
+            env.intern("nil")
+        }
     }
 }
 
 /// Get mouse tracking mode (0=disabled, 1000=normal, 1002=button-event, 1003=any-event)
 #[defun]
 fn kuro_core_get_mouse_mode<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let mouse_mode = if let Some(ref session) = *global {
-        session.core.dec_modes.mouse_mode as i64
-    } else {
-        0i64
-    };
-    mouse_mode.into_lisp(env)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let mouse_mode = if let Some(ref session) = *global {
+            session.core.dec_modes.mouse_mode as i64
+        } else {
+            0i64
+        };
+        Ok::<i64, KuroError>(mouse_mode)
+    }));
+    match result {
+        Ok(Ok(v)) => v.into_lisp(env),
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_mouse_mode: {}", e));
+            0i64.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_mouse_mode");
+            0i64.into_lisp(env)
+        }
+    }
 }
 
 /// Get mouse SGR extended coordinates modifier state (t if active, nil if not)
 #[defun]
 fn kuro_core_get_mouse_sgr<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    let mouse_sgr = if let Some(ref session) = *global {
-        session.core.dec_modes.mouse_sgr
-    } else {
-        false
-    };
-    if mouse_sgr {
-        env.intern("t")
-    } else {
-        env.intern("nil")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let mouse_sgr = if let Some(ref session) = *global {
+            session.core.dec_modes.mouse_sgr
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(mouse_sgr)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_mouse_sgr: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_mouse_sgr");
+            env.intern("nil")
+        }
     }
 }
 
 /// Get scrollback buffer lines
 #[defun]
 fn kuro_core_get_scrollback<'e>(env: &'e Env, max_lines: usize) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-
-    if let Some(ref session) = *global {
-        let scrollback_lines = session.get_scrollback(max_lines);
-
-        // Convert to Emacs list
-        let mut list = false.into_lisp(env)?;
-        for line in scrollback_lines.into_iter().rev() {
-            let line_val = line.into_lisp(env)?;
-            list = env.cons(line_val, list)?;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref session) = *global {
+            Ok::<Vec<String>, KuroError>(session.get_scrollback(max_lines))
+        } else {
+            Ok(Vec::new())
         }
-        Ok(list)
-    } else {
-        Ok(false.into_lisp(env)?)
+    }));
+    match result {
+        Ok(Ok(scrollback_lines)) => {
+            let mut list = false.into_lisp(env)?;
+            for line in scrollback_lines.into_iter().rev() {
+                let line_val = line.into_lisp(env)?;
+                list = env.cons(line_val, list)?;
+            }
+            Ok(list)
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_scrollback: {}", e));
+            false.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_scrollback");
+            false.into_lisp(env)
+        }
     }
 }
 
@@ -611,7 +741,7 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
     let result: std::result::Result<
         Vec<(usize, String, Vec<(usize, usize, u32, u32, u64)>)>,
         KuroError,
-    > = {
+    > = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = super::abstraction::TERMINAL_SESSION
             .lock()
             .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
@@ -622,7 +752,12 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
         } else {
             Ok(Vec::new())
         }
-    };
+    }))
+    .unwrap_or_else(|_| {
+        Err(KuroError::Ffi(
+            "panic in poll_updates_with_faces".to_string(),
+        ))
+    });
 
     match result {
         Ok(lines) => {
@@ -677,18 +812,32 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
 /// suitable for `(create-image bytes 'png t)`.
 #[defun]
 fn kuro_core_get_image<'e>(env: &'e Env, image_id: u32) -> EmacsResult<Value<'e>> {
-    let global = super::abstraction::TERMINAL_SESSION
-        .lock()
-        .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
-    if let Some(ref session) = *global {
-        let b64 = session.get_image_png_base64(image_id);
-        if b64.is_empty() {
-            false.into_lisp(env)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref session) = *global {
+            Ok::<String, KuroError>(session.get_image_png_base64(image_id))
         } else {
-            b64.into_lisp(env)
+            Ok(String::new())
         }
-    } else {
-        false.into_lisp(env)
+    }));
+    match result {
+        Ok(Ok(b64)) => {
+            if b64.is_empty() {
+                false.into_lisp(env)
+            } else {
+                b64.into_lisp(env)
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_image: {}", e));
+            false.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_image");
+            false.into_lisp(env)
+        }
     }
 }
 
@@ -701,16 +850,18 @@ fn kuro_core_get_image<'e>(env: &'e Env, image_id: u32) -> EmacsResult<Value<'e>
 /// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
 #[defun]
 fn kuro_core_poll_image_notifications<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let notifications = {
+    let notifications = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = super::abstraction::TERMINAL_SESSION
             .lock()
             .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
         if let Some(ref mut session) = *global {
-            session.take_pending_image_notifications()
+            Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications())
         } else {
-            Vec::new()
+            Ok(Vec::new())
         }
-    };
+    }))
+    .unwrap_or_else(|_| Ok(Vec::new()))
+    .unwrap_or_default();
 
     // Build Elisp list: each item is (image-id row col cell-width cell-height)
     let mut list = false.into_lisp(env)?;
@@ -731,6 +882,263 @@ fn kuro_core_poll_image_notifications<'e>(env: &'e Env) -> EmacsResult<Value<'e>
         list = env.cons(item, list)?;
     }
     Ok(list)
+}
+
+/// Get the current working directory from OSC 7 and atomically clear the dirty flag.
+///
+/// Returns the CWD path string if one has been set since the last call,
+/// or nil if no CWD update is pending.
+#[defun]
+fn kuro_core_get_cwd<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref mut session) = *global {
+            if session.core.osc_data.cwd_dirty {
+                session.core.osc_data.cwd_dirty = false;
+                Ok::<Option<String>, KuroError>(session.core.osc_data.cwd.clone())
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }));
+    match result {
+        Ok(Ok(Some(cwd))) => cwd.into_lisp(env),
+        Ok(Ok(None)) => false.into_lisp(env),
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_cwd: {}", e));
+            false.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_cwd");
+            false.into_lisp(env)
+        }
+    }
+}
+
+/// Poll for pending clipboard actions from OSC 52 and clear them.
+///
+/// Returns a list of clipboard actions. Each action is either:
+///   - ("write" . TEXT) for a write action
+///   - ("query" . nil) for a query action
+#[defun]
+fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let actions = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref mut session) = *global {
+            Ok::<Vec<_>, KuroError>(std::mem::take(&mut session.core.osc_data.clipboard_actions))
+        } else {
+            Ok(Vec::new())
+        }
+    }))
+    .unwrap_or_else(|_| Ok(Vec::new()))
+    .unwrap_or_default();
+
+    let mut list = false.into_lisp(env)?;
+    for action in actions.into_iter().rev() {
+        let item = match action {
+            crate::types::osc::ClipboardAction::Write(text) => {
+                let tag = "write".into_lisp(env)?;
+                let text_val = text.into_lisp(env)?;
+                env.cons(tag, text_val)?
+            }
+            crate::types::osc::ClipboardAction::Query => {
+                let tag = "query".into_lisp(env)?;
+                let nil = false.into_lisp(env)?;
+                env.cons(tag, nil)?
+            }
+        };
+        list = env.cons(item, list)?;
+    }
+    Ok(list)
+}
+
+/// Poll for pending prompt mark events from OSC 133 and clear them.
+///
+/// Returns a list of prompt mark descriptors, each of the form:
+///   (MARK-TYPE ROW COL)
+/// where MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end"
+#[defun]
+fn kuro_core_poll_prompt_marks<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let marks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref mut session) = *global {
+            Ok::<Vec<_>, KuroError>(std::mem::take(&mut session.core.osc_data.prompt_marks))
+        } else {
+            Ok(Vec::new())
+        }
+    }))
+    .unwrap_or_else(|_| Ok(Vec::new()))
+    .unwrap_or_default();
+
+    let mut list = false.into_lisp(env)?;
+    for event in marks.into_iter().rev() {
+        let mark_str = match event.mark {
+            crate::types::osc::PromptMark::PromptStart => "prompt-start",
+            crate::types::osc::PromptMark::PromptEnd => "prompt-end",
+            crate::types::osc::PromptMark::CommandStart => "command-start",
+            crate::types::osc::PromptMark::CommandEnd => "command-end",
+        };
+        let mark_val = mark_str.into_lisp(env)?;
+        let row_val = (event.row as i64).into_lisp(env)?;
+        let col_val = (event.col as i64).into_lisp(env)?;
+
+        // Build proper list: (mark-type row col)
+        let nil = false.into_lisp(env)?;
+        let item = env.cons(col_val, nil)?;
+        let item = env.cons(row_val, item)?;
+        let item = env.cons(mark_val, item)?;
+        list = env.cons(item, list)?;
+    }
+    Ok(list)
+}
+
+/// Get focus events mode state (t if active, nil if not)
+#[defun]
+fn kuro_core_get_focus_events<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let focus_events = if let Some(ref session) = *global {
+            session.core.dec_modes.focus_events
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(focus_events)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_focus_events: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_focus_events");
+            env.intern("nil")
+        }
+    }
+}
+
+/// Get synchronized output mode state (t if active, nil if not)
+#[defun]
+fn kuro_core_get_sync_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let sync_output = if let Some(ref session) = *global {
+            session.core.dec_modes.synchronized_output
+        } else {
+            false
+        };
+        Ok::<bool, KuroError>(sync_output)
+    }));
+    match result {
+        Ok(Ok(v)) => {
+            if v {
+                env.intern("t")
+            } else {
+                env.intern("nil")
+            }
+        }
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_sync_output: {}", e));
+            env.intern("nil")
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_sync_output");
+            env.intern("nil")
+        }
+    }
+}
+
+/// Get cursor shape as an integer (DECSCUSR value)
+///
+/// Returns:
+///   0 = BlinkingBlock (default)
+///   2 = SteadyBlock
+///   3 = BlinkingUnderline
+///   4 = SteadyUnderline
+///   5 = BlinkingBar
+///   6 = SteadyBar
+#[defun]
+fn kuro_core_get_cursor_shape<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        let shape_int: i64 = if let Some(ref session) = *global {
+            match session.core.dec_modes.cursor_shape {
+                crate::types::cursor::CursorShape::BlinkingBlock => 0,
+                crate::types::cursor::CursorShape::SteadyBlock => 2,
+                crate::types::cursor::CursorShape::BlinkingUnderline => 3,
+                crate::types::cursor::CursorShape::SteadyUnderline => 4,
+                crate::types::cursor::CursorShape::BlinkingBar => 5,
+                crate::types::cursor::CursorShape::SteadyBar => 6,
+            }
+        } else {
+            0
+        };
+        Ok::<i64, KuroError>(shape_int)
+    }));
+    match result {
+        Ok(Ok(v)) => v.into_lisp(env),
+        Ok(Err(e)) => {
+            let _ = env.message(&format!("kuro: error in get_cursor_shape: {}", e));
+            0i64.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in get_cursor_shape");
+            0i64.into_lisp(env)
+        }
+    }
+}
+
+/// Get current Kitty keyboard protocol flags as an integer
+///
+/// Returns the current keyboard flags bitmask:
+///   Bit 0 (1): Disambiguate escape codes
+///   Bit 1 (2): Report event types (press/repeat/release)
+///   Bit 2 (4): Report alternate keys
+///   Bit 3 (8): Report all keys as escape codes
+///   Bit 4 (16): Report associated text
+#[defun]
+fn kuro_core_get_keyboard_flags<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let global = super::abstraction::TERMINAL_SESSION
+            .lock()
+            .map_err(|e| KuroError::Ffi(format!("Mutex poisoned: {}", e)))?;
+        if let Some(ref session) = *global {
+            Ok::<i64, KuroError>(session.core.dec_modes.keyboard_flags as i64)
+        } else {
+            Ok(0i64)
+        }
+    }));
+    match result {
+        Ok(Ok(flags)) => flags.into_lisp(env),
+        Ok(Err(e)) => {
+            env.message(&format!("kuro: get-keyboard-flags error: {}", e))?;
+            0i64.into_lisp(env)
+        }
+        Err(_) => {
+            env.message("kuro: panic in get-keyboard-flags")?;
+            0i64.into_lisp(env)
+        }
+    }
 }
 
 /// Emacs plugin initialization (called from lib.rs via #[emacs::module])

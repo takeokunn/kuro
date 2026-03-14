@@ -160,10 +160,15 @@ mod tests {
         // Check that cursor line from col 5+ is cleared
         let line = term.screen.get_line(2).unwrap();
         for c in 0..5 {
-            assert_eq!(line.cells[c].c, 'X', "Column {} should still be 'X'", c);
+            assert_eq!(
+                line.cells[c].char(),
+                'X',
+                "Column {} should still be 'X'",
+                c
+            );
         }
         for c in 5..20 {
-            assert_eq!(line.cells[c].c, ' ', "Column {} should be cleared", c);
+            assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
         }
 
         // Check that all lines below are cleared
@@ -171,9 +176,11 @@ mod tests {
             let line = term.screen.get_line(r).unwrap();
             for c in 0..20 {
                 assert_eq!(
-                    line.cells[c].c, ' ',
+                    line.cells[c].char(),
+                    ' ',
                     "Row {} column {} should be cleared",
-                    r, c
+                    r,
+                    c
                 );
             }
         }
@@ -183,9 +190,11 @@ mod tests {
             let line = term.screen.get_line(r).unwrap();
             for c in 0..20 {
                 assert_eq!(
-                    line.cells[c].c, 'X',
+                    line.cells[c].char(),
+                    'X',
                     "Row {} column {} should still be 'X'",
-                    r, c
+                    r,
+                    c
                 );
             }
         }
@@ -213,16 +222,16 @@ mod tests {
 
         // Row 0 should be unchanged
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, 'A');
+        assert_eq!(line.cells[0].char(), 'A');
 
         // Row 1, cols 0-4 unchanged, cols 5-9 cleared
         let line = term.screen.get_line(1).unwrap();
-        assert_eq!(line.cells[4].c, 'A');
-        assert_eq!(line.cells[5].c, ' ');
+        assert_eq!(line.cells[4].char(), 'A');
+        assert_eq!(line.cells[5].char(), ' ');
 
         // Row 2 should be completely cleared
         let line = term.screen.get_line(2).unwrap();
-        assert_eq!(line.cells[0].c, ' ');
+        assert_eq!(line.cells[0].char(), ' ');
     }
 
     #[test]
@@ -246,16 +255,16 @@ mod tests {
 
         // Row 0 should be cleared
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, ' ');
+        assert_eq!(line.cells[0].char(), ' ');
 
         // Row 1, cols 0-5 cleared, cols 6-9 unchanged
         let line = term.screen.get_line(1).unwrap();
-        assert_eq!(line.cells[5].c, ' ');
-        assert_eq!(line.cells[6].c, 'B');
+        assert_eq!(line.cells[5].char(), ' ');
+        assert_eq!(line.cells[6].char(), 'B');
 
         // Row 2 should be unchanged
         let line = term.screen.get_line(2).unwrap();
-        assert_eq!(line.cells[0].c, 'B');
+        assert_eq!(line.cells[0].char(), 'B');
     }
 
     #[test]
@@ -280,9 +289,11 @@ mod tests {
             let line = term.screen.get_line(r).unwrap();
             for c in 0..10 {
                 assert_eq!(
-                    line.cells[c].c, ' ',
+                    line.cells[c].char(),
+                    ' ',
                     "Row {} col {} should be cleared",
-                    r, c
+                    r,
+                    c
                 );
             }
         }
@@ -328,10 +339,15 @@ mod tests {
         // Check line
         let line = term.screen.get_line(row).unwrap();
         for c in 0..5 {
-            assert_eq!(line.cells[c].c, 'Y', "Column {} should still be 'Y'", c);
+            assert_eq!(
+                line.cells[c].char(),
+                'Y',
+                "Column {} should still be 'Y'",
+                c
+            );
         }
         for c in 5..20 {
-            assert_eq!(line.cells[c].c, ' ', "Column {} should be cleared", c);
+            assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
         }
     }
 
@@ -353,8 +369,8 @@ mod tests {
         csi_el(&mut term, &params);
 
         let line = term.screen.get_line(row).unwrap();
-        assert_eq!(line.cells[2].c, 'Z');
-        assert_eq!(line.cells[3].c, ' ');
+        assert_eq!(line.cells[2].char(), 'Z');
+        assert_eq!(line.cells[3].char(), ' ');
     }
 
     #[test]
@@ -374,8 +390,8 @@ mod tests {
         term.advance(b"\x1b[1K");
 
         let line = term.screen.get_line(row).unwrap();
-        assert_eq!(line.cells[5].c, ' ');
-        assert_eq!(line.cells[6].c, 'W');
+        assert_eq!(line.cells[5].char(), ' ');
+        assert_eq!(line.cells[6].char(), 'W');
     }
 
     #[test]
@@ -396,7 +412,7 @@ mod tests {
 
         let line = term.screen.get_line(row).unwrap();
         for c in 0..10 {
-            assert_eq!(line.cells[c].c, ' ', "Column {} should be cleared", c);
+            assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
         }
     }
 
@@ -421,7 +437,7 @@ mod tests {
 
         // Erased cell should have default colors
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, ' ');
+        assert_eq!(line.cells[0].char(), ' ');
         assert_eq!(line.cells[0].attrs.foreground, Color::Default);
         assert_eq!(line.cells[0].attrs.background, Color::Default);
     }

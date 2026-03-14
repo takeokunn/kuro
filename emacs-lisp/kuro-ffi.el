@@ -37,6 +37,13 @@
 (declare-function kuro-core-get-scroll-offset "ext:kuro-core" ())
 (declare-function kuro-core-get-image                "ext:kuro-core" (image-id))
 (declare-function kuro-core-poll-image-notifications "ext:kuro-core" ())
+(declare-function kuro-core-get-cwd                  "ext:kuro-core" ())
+(declare-function kuro-core-get-focus-events         "ext:kuro-core" ())
+(declare-function kuro-core-get-sync-output          "ext:kuro-core" ())
+(declare-function kuro-core-get-cursor-shape         "ext:kuro-core" ())
+(declare-function kuro-core-poll-clipboard-actions   "ext:kuro-core" ())
+(declare-function kuro-core-poll-prompt-marks        "ext:kuro-core" ())
+(declare-function kuro-core-get-keyboard-flags       "ext:kuro-core" ())
 
 (defvar kuro--initialized nil
   "Non-nil if Kuro has been initialized.")
@@ -282,6 +289,88 @@ or nil if none are pending."
       (error
        (message "kuro: poll-image-notifications error: %s" err)
        nil))))
+
+;;;###autoload
+(defun kuro--get-cwd ()
+  "Get current working directory from OSC 7.
+Returns a directory string if available, nil otherwise."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-cwd)
+      (error (message "kuro: get-cwd error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--get-focus-events ()
+  "Return t if focus event reporting (mode 1004) is active.
+Returns nil if not initialized or focus events are disabled."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-focus-events)
+      (error (message "kuro: get-focus-events error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--get-sync-output ()
+  "Return t if synchronized output mode (DEC 2026) is active.
+Returns nil if not initialized or synchronized output is disabled."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-sync-output)
+      (error (message "kuro: get-sync-output error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--get-cursor-shape ()
+  "Get the current cursor shape from the Rust core.
+Returns an integer:
+  0 = blinking block (default)
+  1 = blinking block
+  2 = steady block
+  3 = blinking underline
+  4 = steady underline
+  5 = blinking bar
+  6 = steady bar
+Returns 0 (blinking block) on error."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-cursor-shape)
+      (error (message "kuro: get-cursor-shape error: %s" err) 0))))
+
+;;;###autoload
+(defun kuro--poll-clipboard-actions ()
+  "Poll for pending OSC 52 clipboard actions from the terminal.
+Returns a list of (TYPE . DATA) pairs where TYPE is `write' or `query'.
+For `write' actions, DATA is the text string to place on the clipboard.
+For `query' actions, DATA is nil (terminal is requesting clipboard contents).
+Returns nil if no actions are pending."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-poll-clipboard-actions)
+      (error (message "kuro: poll-clipboard-actions error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--poll-prompt-marks ()
+  "Poll for pending OSC 133 shell prompt mark notifications.
+Returns a list of (ROW . MARK-TYPE) pairs where MARK-TYPE is a symbol
+such as `prompt-start', `prompt-end', `command-start', or `command-end'.
+Returns nil if no marks are pending."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-poll-prompt-marks)
+      (error (message "kuro: poll-prompt-marks error: %s" err) nil))))
+
+;;;###autoload
+(defun kuro--get-keyboard-flags ()
+  "Get current Kitty keyboard protocol flags.
+Returns an integer bitmask:
+  Bit 0 (1): Disambiguate escape codes
+  Bit 1 (2): Report event types (press/repeat/release)
+  Bit 2 (4): Report alternate keys
+  Bit 3 (8): Report all keys as escape codes
+  Bit 4 (16): Report associated text
+Returns 0 if not initialized or on error."
+  (when kuro--initialized
+    (condition-case err
+        (kuro-core-get-keyboard-flags)
+      (error (message "kuro: get-keyboard-flags error: %s" err) 0))))
 
 (provide 'kuro-ffi)
 

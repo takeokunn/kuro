@@ -3,6 +3,7 @@
 pub mod cell;
 pub mod color;
 pub mod cursor;
+pub mod osc;
 
 // Re-exports
 pub use cell::{Cell, CellWidth, SgrAttributes};

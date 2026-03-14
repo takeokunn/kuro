@@ -70,14 +70,17 @@ mod tests {
     fn fill_line(term: &mut crate::TerminalCore, row: usize, c: char) {
         if let Some(line) = term.screen.get_line_mut(row) {
             for cell in &mut line.cells {
-                cell.c = c;
+                cell.grapheme = compact_str::CompactString::new(c.to_string());
             }
         }
     }
 
     /// Return the character at (row, col), or ' ' if out of bounds
     fn char_at(term: &crate::TerminalCore, row: usize, col: usize) -> char {
-        term.screen.get_cell(row, col).map(|c| c.c).unwrap_or(' ')
+        term.screen
+            .get_cell(row, col)
+            .map(|c| c.char())
+            .unwrap_or(' ')
     }
 
     // ── IL (Insert Lines) ──────────────────────────────────────────────────
@@ -347,7 +350,8 @@ mod tests {
         // Fill row 0 with '0'..'9'
         if let Some(line) = term.screen.get_line_mut(0) {
             for (i, cell) in line.cells.iter_mut().enumerate() {
-                cell.c = (b'0' + i as u8) as char;
+                cell.grapheme =
+                    compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
             }
         }
         term.screen.move_cursor(0, 2);
@@ -426,7 +430,7 @@ mod tests {
         term.advance(b"\x1b[3X"); // ECH 3
 
         let cell = term.screen.get_cell(0, 2).unwrap();
-        assert_eq!(cell.c, ' ');
+        assert_eq!(cell.char(), ' ');
         // Erased cell must carry the current SGR background (not the default)
         assert_ne!(cell.attrs.background, crate::Color::Default);
     }

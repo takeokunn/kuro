@@ -40,7 +40,10 @@ fn test_integration_sgr_reset_clears_attrs() {
     term.advance(b"\x1b[1m");
     assert!(term.current_bold());
     term.advance(b"\x1b[0m");
-    assert!(!term.current_bold(), "Bold should be cleared after \\x1b[0m");
+    assert!(
+        !term.current_bold(),
+        "Bold should be cleared after \\x1b[0m"
+    );
 }
 
 #[test]
@@ -102,7 +105,7 @@ fn test_integration_erase_display() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     term.advance(b"\x1b[2J"); // erase entire display
-    // cursor position may vary, but must remain in bounds
+                              // cursor position may vary, but must remain in bounds
     assert!(term.cursor_row() < 24);
     assert!(term.cursor_col() < 80);
 }
@@ -119,7 +122,7 @@ fn test_integration_erase_display_clears_cells() {
     // Verify cells are now blank (space or empty)
     let cell_after = term.get_cell(0, 0);
     if let Some(c) = cell_after {
-        assert_eq!(c.c, ' ', "Cell should be space after erase display");
+        assert_eq!(c.char(), ' ', "Cell should be space after erase display");
     }
     assert!(term.cursor_row() < 24);
     assert!(term.cursor_col() < 80);
@@ -140,7 +143,7 @@ fn test_integration_erase_line_clears_cells() {
     term.advance(b"\x1b[2K"); // erase entire line
     let cell = term.get_cell(0, 0);
     if let Some(c) = cell {
-        assert_eq!(c.c, ' ', "Cell should be space after erase line");
+        assert_eq!(c.char(), ' ', "Cell should be space after erase line");
     }
 }
 
@@ -148,7 +151,7 @@ fn test_integration_erase_line_clears_cells() {
 fn test_integration_scroll_region_set() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[5;20r"); // set scroll region rows 5-20
-    // must not panic
+                                 // must not panic
     assert!(term.cursor_row() < 24);
 }
 
@@ -176,7 +179,7 @@ fn test_integration_print_content_stored_in_cell() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     let cell = term.get_cell(0, 0).expect("cell at (0,0) should exist");
-    assert_eq!(cell.c, 'H');
+    assert_eq!(cell.char(), 'H');
 }
 
 #[test]
@@ -223,7 +226,10 @@ fn test_integration_line_wrap_at_right_margin() {
     assert_eq!(term.cursor_col(), 1, "Cursor should be at col 1 after wrap");
     // Verify the wrapped character landed on row 1
     let wrapped_cell = term.get_cell(1, 0);
-    assert!(wrapped_cell.is_some(), "Row 1 col 0 should have content after wrap");
+    assert!(
+        wrapped_cell.is_some(),
+        "Row 1 col 0 should have content after wrap"
+    );
 }
 
 #[test]
@@ -277,6 +283,13 @@ fn test_scrollback_max_lines_respected() {
     term.advance(b"1\n2\n3\n4\n5\n6");
     let full = term.scrollback_chars(100);
     let partial = term.scrollback_chars(1);
-    assert_eq!(partial.len(), 1, "scrollback_chars(1) should return exactly 1 line");
-    assert!(full.len() > partial.len(), "Full fetch should return more lines than partial");
+    assert_eq!(
+        partial.len(),
+        1,
+        "scrollback_chars(1) should return exactly 1 line"
+    );
+    assert!(
+        full.len() > partial.len(),
+        "Full fetch should return more lines than partial"
+    );
 }

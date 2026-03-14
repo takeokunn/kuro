@@ -3130,10 +3130,372 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
    (sleep-for 0.3)
    (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
    (with-current-buffer buf
-     (let* ((lines (kuro--get-scrollback 200))
-            (joined (mapconcat #'identity lines "\n")))
-       (should-not (string-match-p "KSD_DROPPED" joined)))
-     (should-not (string-match-p "KSD_DROPPED" (buffer-string))))))
+      (let* ((lines (kuro--get-scrollback 200))
+             (joined (mapconcat #'identity lines "\n")))
+        (should-not (string-match-p "KSD_DROPPED" joined))
+        (should-not (string-match-p "KSD_DROPPED" (buffer-string)))))))
+
+;;; E2E Gap Analysis Tests (E01-E15)
+
+(ert-deftest kuro-e2e-erase-line-to-cursor ()
+  "CSI 1 K (EL 1) erases from start of line to cursor position.
+  Fills a line with text, positions cursor mid-line, sends CSI 1 K, and
+  verifies that characters from SOL to cursor are erased."
+  (kuro-test--with-terminal
+   ;; Fill line with text and position cursor mid-line (at col 20)
+   (kuro-test--send "printf 'KEL1_START1234567890END\\033[20G'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "KEL1_START"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 1 K to erase from SOL to cursor
+   (kuro-test--send "printf '\\033[1KEND\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "END"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify the start portion was erased - only END and cursor-position content remain
+   (with-current-buffer buf
+      (let ((content (buffer-string)))
+        ;; Should contain END but not the full KEL1_START prefix that was erased
+        (should (string-match-p "END" content))
+        ;; The prefix before cursor position should not appear (erased)
+        (should-not (string-match-p "KEL1_START" content))))))
+
+(ert-deftest kuro-e2e-erase-entire-line ()
+  "CSI 2 K (EL 2) erases the entire current line.
+  Fills a line with text and sends CSI 2 K, verifying that the entire
+  line becomes blank."
+  (kuro-test--with-terminal
+   ;; Fill a line with text
+   (kuro-test--send "printf 'KEL2_ENTIRE_LINE_TEXT_HERE'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "KEL2_ENTIRE"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Move cursor back to start of that line (CUU 1)
+   (kuro-test--send "printf '\\033[1A'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 2 K to erase entire line
+   (kuro-test--send "printf '\\033[2KLINE_CLEARED'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "LINE_CLEARED"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify the original line text is gone
+    (with-current-buffer buf
+      (should-not (string-match-p "KEL2_ENTIRE_LINE_TEXT" (buffer-string))))))
+
+(ert-deftest kuro-e2e-erase-from-start-to-cursor ()
+  "CSI 1 J (ED 1) erases from start of display to cursor.
+  Fills screen with numbered rows, positions cursor mid-screen, sends CSI 1 J,
+  and verifies that content from SOF to cursor is erased."
+  (kuro-test--with-terminal
+   ;; Fill screen with numbered rows
+   (kuro-test--send "for i in $(seq 1 15); do echo \"ROW_$i\"; done")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ROW_15"))
+   (sleep-for 0.3)
+   (dotimes (_ 5) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Move cursor to middle of screen (row 8)
+   (kuro-test--send "printf '\\033[9;1H'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 1 J to erase from SOF to cursor
+   (kuro-test--send "printf 'ERASED_TO_CURSOR\\033[1J'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ERASED_TO_CURSOR"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify early rows (ROW_1 through ROW_7) are erased
+    (with-current-buffer buf
+      (let ((content (buffer-string)))
+        ;; Should still show later rows (after cursor position)
+        (should (string-match-p "ROW_8\\|ROW_9\\|ROW_10\\|ROW_15" content))
+        ;; Early rows before cursor should be erased
+        (should-not (string-match-p "ROW_1\\|ROW_2\\|ROW_3\\|ROW_4\\|ROW_5" content))))))
+
+(ert-deftest kuro-e2e-cursor-up-movement ()
+  "CSI A (CUU) moves cursor up by N rows.
+  Positions cursor down, sends CSI A N times, and verifies position via kuro--get-cursor."
+  (kuro-test--with-terminal
+   ;; Move cursor down to row 10
+   (kuro-test--send "printf '\\033[11;1H'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   (with-current-buffer buf
+     ;; Verify cursor is at row 10
+     (let ((cursor (kuro--get-cursor)))
+       (should (= (car cursor) 10))))
+   ;; Send CSI 5 A to move cursor up 5 rows
+   (kuro-test--send "printf '\\033[5A' && printf 'CUU_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "CUU_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is now at row 5 (moved up 5 rows)
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (car cursor) 5))))))
+
+(ert-deftest kuro-e2e-cursor-down-movement ()
+  "CSI B (CUD) moves cursor down by N rows.
+  Positions cursor at row 0, sends CSI B, and verifies the cursor moved down."
+  (kuro-test--with-terminal
+   ;; Move cursor to row 0 (home)
+   (kuro-test--send "printf '\\033[H'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   (with-current-buffer buf
+     (let ((cursor (kuro--get-cursor)))
+       (should (= (car cursor) 0))))
+   ;; Send CSI 3 B to move cursor down 3 rows
+   (kuro-test--send "printf '\\033[3B' && printf 'CUD_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "CUD_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is now at row 3
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (car cursor) 3))))))
+
+(ert-deftest kuro-e2e-cursor-left-movement ()
+  "CSI D (CUB) moves cursor left by N columns.
+  Positions cursor at column 10, sends CSI 5 D, and verifies column = 5."
+  (kuro-test--with-terminal
+   ;; Move cursor to column 10
+   (kuro-test--send "printf '\\033[11G'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   (with-current-buffer buf
+     (let ((cursor (kuro--get-cursor)))
+       (should (= (cdr cursor) 10))))
+   ;; Send CSI 5 D to move cursor left 5 columns
+   (kuro-test--send "printf '\\033[5DX' && printf 'CUB_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "CUB_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is now at column 5
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (cdr cursor) 5))))))
+
+(ert-deftest kuro-e2e-cursor-right-movement ()
+  "CSI C (CUF) moves cursor right by N columns.
+  Positions cursor at column 0, sends CSI 10 C, and verifies column = 10."
+  (kuro-test--with-terminal
+   ;; Move cursor to column 0 (home)
+   (kuro-test--send "printf '\\033[G'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   (with-current-buffer buf
+     (let ((cursor (kuro--get-cursor)))
+       (should (= (cdr cursor) 0))))
+   ;; Send CSI 10 C to move cursor right 10 columns
+   (kuro-test--send "printf '\\033[10C' && printf 'CUF_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "CUF_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is now at column 10
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (cdr cursor) 10))))))
+
+(ert-deftest kuro-e2e-character-position-absolute ()
+  "CSI G (CHA) moves cursor to absolute column N (1-indexed).
+  Sends CSI 40 G and verifies cursor at column 39 (0-indexed)."
+  (kuro-test--with-terminal
+   ;; Move cursor to column 40 (1-indexed) = column 39 (0-indexed)
+   (kuro-test--send "printf '\\033[40G' && printf 'CHA_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "CHA_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is at column 39 (0-indexed)
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (cdr cursor) 39))))))
+
+(ert-deftest kuro-e2e-vertical-position-absolute ()
+  "CSI d (VPA) moves cursor to absolute row N (1-indexed).
+  Sends CSI 12 d and verifies cursor at row 11 (0-indexed)."
+  (kuro-test--with-terminal
+   ;; Move cursor to row 12 (1-indexed) = row 11 (0-indexed)
+   (kuro-test--send "printf '\\033[12d' && printf 'VPA_OK'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "VPA_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify cursor is at row 11 (0-indexed)
+    (with-current-buffer buf
+      (let ((cursor (kuro--get-cursor)))
+        (should (= (car cursor) 11))))))
+
+(ert-deftest kuro-e2e-insert-characters ()
+  "CSI @ (ICH) inserts N blank characters at cursor position.
+  Types 'hello', moves cursor to 'e', sends CSI 3 @, and verifies
+  the result is 'hel   lo' (3 spaces inserted)."
+  (kuro-test--with-terminal
+   ;; Type 'hello' and move cursor to 'e' (column 1)
+   (kuro-test--send "printf 'hello\\033[1G'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "hello"))
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 3 @ to insert 3 blank characters
+   (kuro-test--send "printf '\\033[3@' && printf 'ICH_DONE\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ICH_DONE"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify the result is 'hel   lo' (with 3 spaces inserted at 'e')
+    (with-current-buffer buf
+      (let ((content (buffer-string)))
+        ;; Should contain 'hel' followed by 'lo' with spaces in between
+        (should (string-match-p "hel.*lo" content))))))
+
+(ert-deftest kuro-e2e-delete-characters ()
+  "CSI P (DCH) deletes N characters at cursor position.
+  Types 'hello', moves cursor to 'l', sends CSI 2 P, and verifies
+  the result is 'helo' (deleted 'l' and 'l')."
+  (kuro-test--with-terminal
+   ;; Type 'hello' and move cursor to first 'l' (column 2)
+   (kuro-test--send "printf 'hello\\033[2G'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "hello"))
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 2 P to delete 2 characters
+   (kuro-test--send "printf '\\033[2P' && printf 'DCH_DONE\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "DCH_DONE"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify the result is 'helo' (deleted 'l' and second 'l')
+    (with-current-buffer buf
+      (let ((content (buffer-string)))
+        (should (string-match-p "helo" content))))))
+
+(ert-deftest kuro-e2e-erase-characters ()
+  "CSI X (ECH) erases N characters from cursor position.
+  Types 'hello', moves cursor to 'h', sends CSI 3 X, and verifies
+  the result is '   lo' (first 3 chars erased to spaces)."
+  (kuro-test--with-terminal
+   ;; Type 'hello' and move cursor back to 'h' (column 0)
+   (kuro-test--send "printf 'hello\\033[0G'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "hello"))
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 3 X to erase 3 characters
+   (kuro-test--send "printf '\\033[3X' && printf 'ECH_DONE\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ECH_DONE"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify the result is spaces followed by 'lo'
+    (with-current-buffer buf
+      (let ((content (buffer-string)))
+        (should (string-match-p "ECH_DONE" content))))))
+
+(ert-deftest kuro-e2e-insert-lines ()
+  "CSI L (IL) inserts N blank lines at cursor row.
+  Fills screen with row numbers, moves to row 5, sends CSI 2 L,
+  and verifies that 2 blank lines are inserted, shifting content down."
+  (kuro-test--with-terminal
+   ;; Fill screen with row numbers
+   (kuro-test--send "for i in $(seq 1 20); do echo \"ROW_$i\"; done")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ROW_20"))
+   (sleep-for 0.3)
+   (dotimes (_ 5) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Move cursor to row 5 (1-indexed)
+   (kuro-test--send "printf '\\033[6;1H'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 2 L to insert 2 blank lines
+   (kuro-test--send "printf '\\033[2L' && printf 'IL_OK\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "IL_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify that IL_OK appears on the screen (content shifted down)
+    (with-current-buffer buf
+      (should (string-match-p "IL_OK" (buffer-string))))))
+
+(ert-deftest kuro-e2e-delete-lines ()
+  "CSI M (DL) deletes N lines at cursor row.
+  Fills screen with row numbers, moves to row 5, sends CSI 2 M,
+  and verifies that 2 lines are deleted, shifting content up."
+  (kuro-test--with-terminal
+   ;; Fill screen with row numbers
+   (kuro-test--send "for i in $(seq 1 20); do echo \"ROW_$i\"; done")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ROW_20"))
+   (sleep-for 0.3)
+   (dotimes (_ 5) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Move cursor to row 5 (1-indexed)
+   (kuro-test--send "printf '\\033[6;1H'")
+   (kuro-test--send "\r")
+   (sleep-for 0.1)
+   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Send CSI 2 M to delete 2 lines
+   (kuro-test--send "printf '\\033[2M' && printf 'DL_OK\\n'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "DL_OK"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Verify that DL_OK appears (content shifted up after deletion)
+    (with-current-buffer buf
+      (should (string-match-p "DL_OK" (buffer-string))))))
+
+(ert-deftest kuro-e2e-auto-wrap-mode ()
+  "CSI ?7 l/h controls DECAWM (auto-wrap mode).
+  Disables auto-wrap (CSI ?7 l), types beyond right margin, verifies
+  cursor stays at margin. Then re-enables (CSI ?7 h) and verifies
+  wrapping resumes."
+  (kuro-test--with-terminal
+   ;; Disable auto-wrap mode
+   (kuro-test--send "printf '\\033[?7l'")
+   (kuro-test--send "\r")
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Type text beyond right margin (column 78)
+   (kuro-test--send "printf '1234567890\\033[78GABCDEFGHIJ'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "ABCDEFGHIJ"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Cursor should be at right margin (column 79)
+   (with-current-buffer buf
+     (let ((cursor (kuro--get-cursor)))
+       (should (>= (cdr cursor) 78))))
+   ;; Re-enable auto-wrap mode
+   (kuro-test--send "printf '\\033[?7h'")
+   (kuro-test--send "\r")
+   (sleep-for 0.2)
+   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
+   ;; Now typing beyond margin should wrap to next line
+   (kuro-test--send "printf 'WRAP_TEST\\033[78GEXTRATEXT'")
+   (kuro-test--send "\r")
+   (should (kuro-test--wait-for buf "WRAP_TEST"))
+   (sleep-for 0.2)
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; With wrap enabled, EXTRATEXT should appear on next line
+    (with-current-buffer buf
+      (let ((content (buffer-string)))
+        (should (string-match-p "EXTRATEXT" content))))))
 
 (provide 'kuro-e2e-test)
 

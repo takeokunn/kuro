@@ -2,16 +2,22 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Cursor shape variants
+/// Cursor shape variants (DECSCUSR)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CursorShape {
-    /// Block cursor (underscoring the character)
+    /// Blinking block cursor (DECSCUSR 0 or 1)
     #[default]
-    Block,
-    /// Underline cursor
-    Underline,
-    /// Bar cursor (vertical line)
-    Bar,
+    BlinkingBlock,
+    /// Steady block cursor (DECSCUSR 2)
+    SteadyBlock,
+    /// Blinking underline cursor (DECSCUSR 3)
+    BlinkingUnderline,
+    /// Steady underline cursor (DECSCUSR 4)
+    SteadyUnderline,
+    /// Blinking bar cursor (DECSCUSR 5)
+    BlinkingBar,
+    /// Steady bar cursor (DECSCUSR 6)
+    SteadyBar,
 }
 
 /// Cursor state
@@ -73,7 +79,7 @@ mod tests {
         assert_eq!(cursor.col, 10);
         assert_eq!(cursor.row, 5);
         assert!(cursor.visible);
-        assert_eq!(cursor.shape, CursorShape::Block);
+        assert_eq!(cursor.shape, CursorShape::BlinkingBlock);
     }
 
     #[test]

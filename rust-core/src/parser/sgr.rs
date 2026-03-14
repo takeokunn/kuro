@@ -1,167 +1,13 @@
 //! SGR (Select Graphic Rendition) parameter parsing
 
+use crate::types::cell::UnderlineStyle;
 use crate::types::{Color, NamedColor};
 
-/// Handle CSI (Control Sequence Introducer) sequences
-pub fn handle_csi(
-    term: &mut crate::TerminalCore,
-    params: &vte::Params,
-    intermediates: &[u8],
-    c: char,
-) {
-    match c {
-        // Cursor movement
-        'A' => csi_cuu(term, params),       // Cursor Up
-        'B' => csi_cud(term, params),       // Cursor Down
-        'C' => csi_cuf(term, params),       // Cursor Forward
-        'D' => csi_cub(term, params),       // Cursor Back
-        'H' | 'f' => csi_cup(term, params), // Cursor Position
-        'J' => csi_ed(term, params),        // Erase Display
-        'K' => csi_el(term, params),        // Erase Line
-        'm' => csi_sgr(term, params),       // Select Graphic Rendition
-        'r' => csi_decstbm(term, params),   // Set Scroll Region
-        _ => {}
-    }
-
-    let _ = intermediates;
-}
-
-/// CUU - Cursor Up
-fn csi_cuu(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1);
-    term.screen.move_cursor_by(-((n as i32).max(1)), 0);
-}
-
-/// CUD - Cursor Down
-fn csi_cud(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1);
-    term.screen.move_cursor_by((n as i32).max(1), 0);
-}
-
-/// CUF - Cursor Forward
-fn csi_cuf(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1);
-    term.screen.move_cursor_by(0, (n as i32).max(1));
-}
-
-/// CUB - Cursor Backward
-fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1);
-    term.screen.move_cursor_by(0, -((n as i32).max(1)));
-}
-
-/// CUP - Cursor Position
-fn csi_cup(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let row = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1);
-    let col = params
-        .iter()
-        .nth(1)
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1);
-    term.screen.move_cursor(row as usize, col as usize);
-}
-
-/// ED - Erase Display
-fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let mode = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(0);
-
-    match mode {
-        0 => {
-            // Erase from cursor to end of screen
-            let row = term.screen.cursor().row;
-            for r in row..term.screen.rows() as usize {
-                if let Some(line) = term.screen.get_line_mut(r) {
-                    line.clear();
-                }
-            }
-        }
-        1 => {
-            // Erase from start of screen to cursor
-            let row = term.screen.cursor().row;
-            for r in 0..=row {
-                if let Some(line) = term.screen.get_line_mut(r) {
-                    line.clear();
-                }
-            }
-        }
-        2 | 3 => {
-            // Erase entire screen
-            term.screen.clear_lines(0, term.screen.rows() as usize);
-        }
-        _ => {}
-    }
-}
-
-/// EL - Erase Line
-fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let mode = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(0);
-    let col = term.screen.cursor().col;
-    let row = term.screen.cursor().row;
-
-    if let Some(line) = term.screen.get_line_mut(row) {
-        match mode {
-            0 => {
-                // Erase from cursor to end of line
-                for c in col..line.cells.len() {
-                    line.cells[c] = Default::default();
-                }
-            }
-            1 => {
-                // Erase from start of line to cursor
-                for c in 0..=col {
-                    line.cells[c] = Default::default();
-                }
-            }
-            2 => {
-                // Erase entire line
-                line.clear();
-            }
-            _ => {}
-        }
-        line.is_dirty = true;
-    }
-}
-
-/// SGR - Select Graphic Rendition
-fn csi_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
+/// Handle SGR (Select Graphic Rendition) — CSI 'm' sequences only.
+///
+/// All other CSI sequences (cursor movement, erase, scroll) are handled
+/// by their dedicated modules (`parser::csi`, `parser::erase`, `parser::scroll`).
+pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
     // Collect all param groups into a fixed stack array for index-based cross-group consumption.
     // This handles both forms of extended color sequences:
     //   Semicolon form: \e[38;5;196m  → groups [[38], [5], [196]] (3 separate groups)
@@ -195,7 +41,23 @@ fn csi_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
             1 => term.current_attrs.bold = true,
             2 => term.current_attrs.dim = true,
             3 => term.current_attrs.italic = true,
-            4 => term.current_attrs.underline = true,
+            4 => {
+                // SGR 4 with no sub-params = straight underline; sub-params handled below
+                if group.len() > 1 {
+                    // 4:0 = none, 4:1 = straight, 4:2 = double, 4:3 = curly, 4:4 = dotted, 4:5 = dashed
+                    term.current_attrs.underline_style = match group[1] {
+                        0 => UnderlineStyle::None,
+                        1 => UnderlineStyle::Straight,
+                        2 => UnderlineStyle::Double,
+                        3 => UnderlineStyle::Curly,
+                        4 => UnderlineStyle::Dotted,
+                        5 => UnderlineStyle::Dashed,
+                        _ => UnderlineStyle::Straight,
+                    };
+                } else {
+                    term.current_attrs.underline_style = UnderlineStyle::Straight;
+                }
+            }
             5 => term.current_attrs.blink_slow = true,
             6 => term.current_attrs.blink_fast = true,
             7 => term.current_attrs.inverse = true,
@@ -206,11 +68,12 @@ fn csi_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
                 term.current_attrs.dim = false;
             }
             23 => term.current_attrs.italic = false,
-            24 => term.current_attrs.underline = false,
+            24 => term.current_attrs.underline_style = UnderlineStyle::None,
             25 => {
                 term.current_attrs.blink_slow = false;
                 term.current_attrs.blink_fast = false;
             }
+            21 => term.current_attrs.underline_style = UnderlineStyle::Double, // SGR 21: double underline
             27 => term.current_attrs.inverse = false,
             28 => term.current_attrs.hidden = false,
             29 => term.current_attrs.strikethrough = false,
@@ -250,6 +113,10 @@ fn csi_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
             }
             48 => parse_extended_color(term, groups, &mut i, group, false),
             49 => term.current_attrs.background = Color::Default,
+
+            // Underline color (SGR 58/59)
+            58 => parse_underline_color(term, groups, &mut i, group),
+            59 => term.current_attrs.underline_color = Color::Default,
 
             // Bright foreground (90-97)
             90..=97 => {
@@ -387,23 +254,73 @@ fn parse_extended_color(
     }
 }
 
-/// DECSTBM - Set Top and Bottom Margins (scroll region)
-fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let top = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(0)
-        .saturating_sub(1);
-    let bottom = params
-        .iter()
-        .nth(1)
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(term.screen.rows());
-
-    term.screen.set_scroll_region(top as usize, bottom as usize);
+/// Parse underline color from SGR 58 parameters (same structure as extended color).
+fn parse_underline_color(
+    term: &mut crate::TerminalCore,
+    groups: &[&[u16]],
+    i: &mut usize,
+    current_group: &[u16],
+) {
+    let color = if current_group.len() > 1 {
+        match current_group.get(1).copied() {
+            Some(5) => match current_group.get(2).copied() {
+                Some(n) => Color::Indexed(n as u8),
+                None => return,
+            },
+            Some(2) => {
+                let r = current_group.get(2).copied().unwrap_or(0) as u8;
+                let g = current_group.get(3).copied().unwrap_or(0) as u8;
+                let b = current_group.get(4).copied().unwrap_or(0) as u8;
+                Color::Rgb(r, g, b)
+            }
+            _ => return,
+        }
+    } else {
+        let mode = if *i < groups.len() && !groups[*i].is_empty() {
+            let m = groups[*i][0];
+            *i += 1;
+            m
+        } else {
+            return;
+        };
+        match mode {
+            5 => {
+                if *i < groups.len() && !groups[*i].is_empty() {
+                    let n = groups[*i][0] as u8;
+                    *i += 1;
+                    Color::Indexed(n)
+                } else {
+                    return;
+                }
+            }
+            2 => {
+                let r = if *i < groups.len() && !groups[*i].is_empty() {
+                    let v = groups[*i][0] as u8;
+                    *i += 1;
+                    v
+                } else {
+                    0
+                };
+                let g = if *i < groups.len() && !groups[*i].is_empty() {
+                    let v = groups[*i][0] as u8;
+                    *i += 1;
+                    v
+                } else {
+                    0
+                };
+                let b = if *i < groups.len() && !groups[*i].is_empty() {
+                    let v = groups[*i][0] as u8;
+                    *i += 1;
+                    v
+                } else {
+                    0
+                };
+                Color::Rgb(r, g, b)
+            }
+            _ => return,
+        }
+    };
+    term.current_attrs.underline_color = color;
 }
 
 #[cfg(test)]
@@ -417,7 +334,7 @@ mod tests {
         term.current_attrs.italic = true;
 
         let params = vte::Params::default();
-        csi_sgr(&mut term, &params);
+        handle_sgr(&mut term, &params);
 
         assert!(!term.current_attrs.bold);
         assert!(!term.current_attrs.italic);
@@ -475,7 +392,7 @@ mod tests {
         let mut term = crate::TerminalCore::new(24, 80);
         term.advance(b"\x1b[1;38;5;196;4m");
         assert!(term.current_attrs.bold, "bold should be set");
-        assert!(term.current_attrs.underline, "underline should be set");
+        assert!(term.current_attrs.underline(), "underline should be set");
         assert_eq!(
             term.current_attrs.foreground,
             crate::types::Color::Indexed(196)
@@ -571,7 +488,10 @@ mod tests {
         term.advance(b"\x1b[38;2;300;300;300m");
         // Should not panic; values are silently truncated via as u8
         assert!(
-            matches!(term.current_attrs.foreground, crate::types::Color::Rgb(_, _, _)),
+            matches!(
+                term.current_attrs.foreground,
+                crate::types::Color::Rgb(_, _, _)
+            ),
             "Overflow truecolor should still produce an Rgb color (truncated)"
         );
         assert_eq!(
@@ -599,9 +519,12 @@ mod tests {
         // First set some attributes
         term.advance(b"\x1b[1;3;4m"); // bold, italic, underline
         assert!(term.current_attrs.bold, "bold should be set before reset");
-        assert!(term.current_attrs.italic, "italic should be set before reset");
         assert!(
-            term.current_attrs.underline,
+            term.current_attrs.italic,
+            "italic should be set before reset"
+        );
+        assert!(
+            term.current_attrs.underline(),
             "underline should be set before reset"
         );
         // Now reset with empty sequence
@@ -609,7 +532,7 @@ mod tests {
         // All attributes should be reset
         assert!(!term.current_attrs.bold, "bold should be reset");
         assert!(!term.current_attrs.italic, "italic should be reset");
-        assert!(!term.current_attrs.underline, "underline should be reset");
+        assert!(!term.current_attrs.underline(), "underline should be reset");
     }
 
     #[test]
@@ -618,13 +541,13 @@ mod tests {
         let mut term = crate::TerminalCore::new(24, 80);
         term.advance(b"\x1b[999m"); // Unknown code
         term.advance(b"\x1b[38;9m"); // Invalid extended color mode
-        // Should complete without panic
+                                     // Should complete without panic
     }
 
     #[test]
     fn test_sgr_bold_turn_off_code_22() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[1m");  // bold on
+        term.advance(b"\x1b[1m"); // bold on
         assert!(term.current_attrs.bold);
         term.advance(b"\x1b[22m"); // turn off bold+dim
         assert!(!term.current_attrs.bold, "Bold should be off after CSI 22m");
@@ -633,63 +556,84 @@ mod tests {
     #[test]
     fn test_sgr_italic_turn_off_code_23() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[3m");  // italic on
+        term.advance(b"\x1b[3m"); // italic on
         assert!(term.current_attrs.italic);
         term.advance(b"\x1b[23m"); // turn off italic
-        assert!(!term.current_attrs.italic, "Italic should be off after CSI 23m");
+        assert!(
+            !term.current_attrs.italic,
+            "Italic should be off after CSI 23m"
+        );
     }
 
     #[test]
     fn test_sgr_underline_turn_off_code_24() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[4m");  // underline on
-        assert!(term.current_attrs.underline);
+        term.advance(b"\x1b[4m"); // underline on
+        assert!(term.current_attrs.underline());
         term.advance(b"\x1b[24m"); // turn off underline
-        assert!(!term.current_attrs.underline, "Underline should be off after CSI 24m");
+        assert!(
+            !term.current_attrs.underline(),
+            "Underline should be off after CSI 24m"
+        );
     }
 
     #[test]
     fn test_sgr_inverse_turn_off_code_27() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[7m");  // inverse on
+        term.advance(b"\x1b[7m"); // inverse on
         assert!(term.current_attrs.inverse);
         term.advance(b"\x1b[27m"); // turn off inverse
-        assert!(!term.current_attrs.inverse, "Inverse should be off after CSI 27m");
+        assert!(
+            !term.current_attrs.inverse,
+            "Inverse should be off after CSI 27m"
+        );
     }
 
     #[test]
     fn test_sgr_blink_turn_off_code_25_clears_slow() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[5m");  // blink_slow on
+        term.advance(b"\x1b[5m"); // blink_slow on
         assert!(term.current_attrs.blink_slow);
         term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
-        assert!(!term.current_attrs.blink_slow, "blink_slow should be off after CSI 25m");
+        assert!(
+            !term.current_attrs.blink_slow,
+            "blink_slow should be off after CSI 25m"
+        );
     }
 
     #[test]
     fn test_sgr_blink_turn_off_code_25_clears_fast() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[6m");  // blink_fast on
+        term.advance(b"\x1b[6m"); // blink_fast on
         assert!(term.current_attrs.blink_fast);
         term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
-        assert!(!term.current_attrs.blink_fast, "blink_fast should be off after CSI 25m");
+        assert!(
+            !term.current_attrs.blink_fast,
+            "blink_fast should be off after CSI 25m"
+        );
     }
 
     #[test]
     fn test_sgr_hidden_turn_off_code_28() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[8m");  // hidden on
+        term.advance(b"\x1b[8m"); // hidden on
         assert!(term.current_attrs.hidden);
         term.advance(b"\x1b[28m"); // turn off hidden
-        assert!(!term.current_attrs.hidden, "Hidden should be off after CSI 28m");
+        assert!(
+            !term.current_attrs.hidden,
+            "Hidden should be off after CSI 28m"
+        );
     }
 
     #[test]
     fn test_sgr_strikethrough_turn_off_code_29() {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[9m");  // strikethrough on
+        term.advance(b"\x1b[9m"); // strikethrough on
         assert!(term.current_attrs.strikethrough);
         term.advance(b"\x1b[29m"); // turn off strikethrough
-        assert!(!term.current_attrs.strikethrough, "Strikethrough should be off after CSI 29m");
+        assert!(
+            !term.current_attrs.strikethrough,
+            "Strikethrough should be off after CSI 29m"
+        );
     }
 }

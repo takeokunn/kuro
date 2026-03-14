@@ -1,6 +1,7 @@
 //! Line type representing a single row in the terminal screen
 
 use super::super::types::{Cell, SgrAttributes};
+use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -35,14 +36,14 @@ impl Line {
     /// Update cell at column index
     pub fn update_cell(&mut self, col: usize, c: char, attrs: SgrAttributes) {
         if let Some(cell) = self.cells.get_mut(col) {
-            let old_c = cell.c;
+            let old_grapheme = cell.grapheme.clone();
             let old_attrs = cell.attrs;
 
-            cell.c = c;
+            cell.grapheme = CompactString::new(c.to_string());
             cell.attrs = attrs;
 
             // Mark dirty if something changed
-            if old_c != c || old_attrs != attrs {
+            if old_grapheme.as_str() != c.to_string().as_str() || old_attrs != attrs {
                 self.is_dirty = true;
             }
         }
@@ -95,7 +96,7 @@ impl Line {
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for cell in &self.cells {
-            write!(f, "{}", cell.c)?;
+            write!(f, "{}", cell.grapheme.as_str())?;
         }
         Ok(())
     }
@@ -120,7 +121,7 @@ mod tests {
         line.update_cell(5, 'X', attrs);
 
         assert!(line.is_dirty);
-        assert_eq!(line.get_cell(5).unwrap().c, 'X');
+        assert_eq!(line.get_cell(5).unwrap().char(), 'X');
     }
 
     #[test]
@@ -131,7 +132,7 @@ mod tests {
         line.clear();
 
         assert!(line.is_dirty);
-        assert_eq!(line.get_cell(0).unwrap().c, ' ');
+        assert_eq!(line.get_cell(0).unwrap().char(), ' ');
     }
 
     #[test]

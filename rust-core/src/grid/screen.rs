@@ -306,6 +306,33 @@ impl Screen {
         }
     }
 
+    /// Get mutable cell at position
+    pub fn get_cell_mut(&mut self, row: usize, col: usize) -> Option<&mut Cell> {
+        if self.is_alternate_active {
+            self.alternate_screen
+                .as_mut()
+                .unwrap()
+                .lines
+                .get_mut(row)?
+                .cells
+                .get_mut(col)
+        } else {
+            self.lines.get_mut(row)?.cells.get_mut(col)
+        }
+    }
+
+    /// Attach a combining character to the cell at (row, col).
+    /// If the cell exists, appends the combining char to its grapheme cluster
+    /// and marks the line dirty.
+    pub fn attach_combining(&mut self, row: usize, col: usize, c: char) {
+        if let Some(cell) = self.get_cell_mut(row, col) {
+            cell.push_combining(c);
+        }
+        // Mark the line dirty
+        let screen = self.active_screen_mut();
+        screen.dirty_set.insert(row);
+    }
+
     /// Print a character at the cursor position
     pub fn print(&mut self, c: char, attrs: SgrAttributes, auto_wrap: bool) {
         let screen = self.active_screen_mut();
@@ -638,8 +665,7 @@ impl Screen {
         }
     }
 
-    /// Get scroll region (for testing)
-    #[cfg(test)]
+    /// Get scroll region
     pub fn get_scroll_region(&self) -> &ScrollRegion {
         if self.is_alternate_active {
             &self.alternate_screen.as_ref().unwrap().scroll_region
@@ -1078,7 +1104,7 @@ mod tests {
 
         screen.print('A', attrs, true);
 
-        assert_eq!(screen.get_cell(0, 0).unwrap().c, 'A');
+        assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'A');
         assert_eq!(screen.cursor.col, 1);
     }
 
@@ -1441,12 +1467,12 @@ mod tests {
 
         // Full cell at col 0
         let full_cell = screen.get_cell(0, 0).unwrap();
-        assert_eq!(full_cell.c, '日');
+        assert_eq!(full_cell.char(), '日');
         assert_eq!(full_cell.width, CellWidth::Full);
 
         // Wide placeholder at col 1
         let wide_cell = screen.get_cell(0, 1).unwrap();
-        assert_eq!(wide_cell.c, ' ');
+        assert_eq!(wide_cell.char(), ' ');
         assert_eq!(wide_cell.width, CellWidth::Wide);
 
         // Cursor advanced by 2
@@ -1485,7 +1511,7 @@ mod tests {
 
         // CJK did not fit at col 79; it wrapped to row 1, cols 0-1
         let full_cell = screen.get_cell(1, 0).unwrap();
-        assert_eq!(full_cell.c, '日');
+        assert_eq!(full_cell.char(), '日');
         assert_eq!(full_cell.width, CellWidth::Full);
 
         let wide_cell = screen.get_cell(1, 1).unwrap();
@@ -1501,7 +1527,7 @@ mod tests {
         screen.print('🎉', attrs, true);
 
         let full_cell = screen.get_cell(0, 0).unwrap();
-        assert_eq!(full_cell.c, '🎉');
+        assert_eq!(full_cell.char(), '🎉');
         assert_eq!(full_cell.width, CellWidth::Full);
 
         let wide_cell = screen.get_cell(0, 1).unwrap();
@@ -1530,7 +1556,7 @@ mod tests {
             CellWidth::Half,
             "Full partner must be blanked when DCH hits Wide placeholder"
         );
-        assert_eq!(col0.c, ' ');
+        assert_eq!(col0.char(), ' ');
     }
 
     #[test]
@@ -1576,7 +1602,7 @@ mod tests {
             CellWidth::Half,
             "Full partner must be blanked when ICH inserts at Wide placeholder"
         );
-        assert_eq!(col0.c, ' ');
+        assert_eq!(col0.char(), ' ');
     }
 
     #[test]
@@ -1600,7 +1626,7 @@ mod tests {
             CellWidth::Half,
             "Wide partner must be blanked when ECH range ends on Full cell"
         );
-        assert_eq!(col2.c, ' ');
+        assert_eq!(col2.char(), ' ');
     }
 
     #[test]
@@ -1623,7 +1649,7 @@ mod tests {
             CellWidth::Half,
             "Full partner must be blanked when ECH starts at Wide placeholder"
         );
-        assert_eq!(col0.c, ' ');
+        assert_eq!(col0.char(), ' ');
 
         // Wide cell itself is also erased
         let col1 = screen.get_cell(0, 1).unwrap();
@@ -1742,7 +1768,7 @@ mod tests {
         assert!(line.is_some());
         let line = line.unwrap();
         // The line should contain 'A' at column 0 (we printed 'A' earlier)
-        assert_eq!(line.cells[0].c, 'A');
+        assert_eq!(line.cells[0].char(), 'A');
     }
 
     #[test]
@@ -1835,8 +1861,16 @@ mod tests {
         assert_eq!(screen.cursor.col, 79);
         // Resize to smaller dimensions
         screen.resize(10, 40);
-        assert!(screen.cursor.row < 10, "cursor.row {} should be < 10", screen.cursor.row);
-        assert!(screen.cursor.col < 40, "cursor.col {} should be < 40", screen.cursor.col);
+        assert!(
+            screen.cursor.row < 10,
+            "cursor.row {} should be < 10",
+            screen.cursor.row
+        );
+        assert!(
+            screen.cursor.col < 40,
+            "cursor.col {} should be < 40",
+            screen.cursor.col
+        );
     }
 
     #[test]
@@ -1855,14 +1889,20 @@ mod tests {
         let mut screen = Screen::new(10, 80);
         screen.resize(0, 80);
         // After the saturating_sub fix: cursor.row is clamped to min(old_row, 0.saturating_sub(1)) = 0
-        assert_eq!(screen.cursor.row, 0, "cursor.row should be clamped to 0 when resizing to 0 rows");
+        assert_eq!(
+            screen.cursor.row, 0,
+            "cursor.row should be clamped to 0 when resizing to 0 rows"
+        );
     }
 
     #[test]
     fn test_resize_zero_cols_does_not_panic() {
         let mut screen = Screen::new(10, 80);
         screen.resize(10, 0);
-        assert_eq!(screen.cursor.col, 0, "cursor.col should be clamped to 0 when resizing to 0 cols");
+        assert_eq!(
+            screen.cursor.col, 0,
+            "cursor.col should be clamped to 0 when resizing to 0 cols"
+        );
     }
 
     #[test]

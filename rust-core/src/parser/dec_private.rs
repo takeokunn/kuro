@@ -1,7 +1,9 @@
 //! DEC private mode handling
 
+use crate::types::cursor::CursorShape;
+
 /// DEC private mode state
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 pub struct DecModes {
     /// Application Cursor Keys mode (DECCKM - ?1)
     /// When set, cursor keys send application codes (ESC OA etc.)
@@ -40,6 +42,30 @@ pub struct DecModes {
     /// Set by ESC = (DECKPAM), cleared by ESC > (DECKPNM).
     /// Not a CSI ?h/l mode — handled directly in esc_dispatch.
     pub app_keypad: bool,
+
+    /// DECOM (?6) - Origin Mode. When set, cursor addressing is relative to scroll region.
+    pub origin_mode: bool,
+
+    /// Focus events (?1004) - When set, terminal sends CSI I / CSI O on focus in/out
+    pub focus_events: bool,
+
+    /// Synchronized output (?2026) - When set, screen updates are batched
+    pub synchronized_output: bool,
+
+    /// Cursor shape (DECSCUSR)
+    pub cursor_shape: CursorShape,
+
+    /// Kitty keyboard protocol flags (current active flags bitmask)
+    pub keyboard_flags: u32,
+
+    /// Stack for push/pop keyboard flags (CSI > Ps u / CSI < u)
+    pub keyboard_flags_stack: Vec<u32>,
+}
+
+impl Default for DecModes {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DecModes {
@@ -54,6 +80,12 @@ impl DecModes {
             mouse_mode: 0,
             mouse_sgr: false,
             app_keypad: false,
+            origin_mode: false,
+            focus_events: false,
+            synchronized_output: false,
+            cursor_shape: CursorShape::BlinkingBlock,
+            keyboard_flags: 0,
+            keyboard_flags_stack: Vec::new(),
         }
     }
 
@@ -61,12 +93,15 @@ impl DecModes {
     pub fn set_mode(&mut self, mode: u16) {
         match mode {
             1 => self.app_cursor_keys = true,
+            6 => self.origin_mode = true,
             7 => self.auto_wrap = true,
             25 => self.cursor_visible = true,
+            1004 => self.focus_events = true,
             1049 => self.alternate_screen = true,
             2004 => self.bracketed_paste = true,
             1000 | 1002 | 1003 => self.mouse_mode = mode,
             1006 => self.mouse_sgr = true,
+            2026 => self.synchronized_output = true,
             _ => {}
         }
     }
@@ -75,12 +110,15 @@ impl DecModes {
     pub fn reset_mode(&mut self, mode: u16) {
         match mode {
             1 => self.app_cursor_keys = false,
+            6 => self.origin_mode = false,
             7 => self.auto_wrap = false,
             25 => self.cursor_visible = false,
+            1004 => self.focus_events = false,
             1049 => self.alternate_screen = false,
             2004 => self.bracketed_paste = false,
             1000 | 1002 | 1003 => self.mouse_mode = 0,
             1006 => self.mouse_sgr = false,
+            2026 => self.synchronized_output = false,
             _ => {}
         }
     }
@@ -89,14 +127,17 @@ impl DecModes {
     pub fn get_mode(&self, mode: u16) -> Option<bool> {
         match mode {
             1 => Some(self.app_cursor_keys),
+            6 => Some(self.origin_mode),
             7 => Some(self.auto_wrap),
             25 => Some(self.cursor_visible),
+            1004 => Some(self.focus_events),
             1049 => Some(self.alternate_screen),
             2004 => Some(self.bracketed_paste),
             1000 => Some(self.mouse_mode == 1000),
             1002 => Some(self.mouse_mode == 1002),
             1003 => Some(self.mouse_mode == 1003),
             1006 => Some(self.mouse_sgr),
+            2026 => Some(self.synchronized_output),
             _ => None,
         }
     }
@@ -118,11 +159,24 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
             if set {
                 term.dec_modes.set_mode(mode);
 
+                // Handle side effects for mode 6 (DECOM - origin mode)
+                // When set, move cursor to home position within scroll region
+                if mode == 6 {
+                    let top = term.screen.get_scroll_region().top;
+                    term.screen.move_cursor(top, 0);
+                }
+
                 // Handle side effects for mode 1049 (alternate screen)
                 if mode == 1049 {
                     term.screen.switch_to_alternate();
                 }
             } else {
+                // Handle side effects for mode 6 (DECOM - origin mode)
+                // When reset, move cursor to home position
+                if mode == 6 {
+                    term.screen.move_cursor(0, 0);
+                }
+
                 // Handle side effects for mode 1049 before resetting
                 if mode == 1049 && term.dec_modes.alternate_screen {
                     term.screen.switch_to_primary();
@@ -358,6 +412,79 @@ mod tests {
         assert_eq!(modes.get_mode(1006), Some(false));
         modes.set_mode(1006);
         assert_eq!(modes.get_mode(1006), Some(true));
+    }
+
+    #[test]
+    fn test_decom_mode_set_reset() {
+        let mut modes = DecModes::new();
+        assert!(!modes.origin_mode, "origin_mode should default to false");
+
+        modes.set_mode(6);
+        assert!(
+            modes.origin_mode,
+            "origin_mode should be set after set_mode(6)"
+        );
+
+        modes.reset_mode(6);
+        assert!(
+            !modes.origin_mode,
+            "origin_mode should be cleared after reset_mode(6)"
+        );
+    }
+
+    #[test]
+    fn test_focus_events_mode_set_reset() {
+        let mut modes = DecModes::new();
+        assert!(!modes.focus_events, "focus_events should default to false");
+
+        modes.set_mode(1004);
+        assert!(
+            modes.focus_events,
+            "focus_events should be set after set_mode(1004)"
+        );
+
+        modes.reset_mode(1004);
+        assert!(
+            !modes.focus_events,
+            "focus_events should be cleared after reset_mode(1004)"
+        );
+    }
+
+    #[test]
+    fn test_sync_output_mode_set_reset() {
+        let mut modes = DecModes::new();
+        assert!(
+            !modes.synchronized_output,
+            "synchronized_output should default to false"
+        );
+
+        modes.set_mode(2026);
+        assert!(
+            modes.synchronized_output,
+            "synchronized_output should be set after set_mode(2026)"
+        );
+
+        modes.reset_mode(2026);
+        assert!(
+            !modes.synchronized_output,
+            "synchronized_output should be cleared after reset_mode(2026)"
+        );
+    }
+
+    #[test]
+    fn test_get_mode_new_modes() {
+        let mut modes = DecModes::new();
+        assert_eq!(modes.get_mode(6), Some(false));
+        assert_eq!(modes.get_mode(1004), Some(false));
+        assert_eq!(modes.get_mode(2026), Some(false));
+
+        modes.set_mode(6);
+        modes.set_mode(1004);
+        modes.set_mode(2026);
+
+        assert_eq!(modes.get_mode(6), Some(true));
+        assert_eq!(modes.get_mode(1004), Some(true));
+        assert_eq!(modes.get_mode(2026), Some(true));
     }
 
     proptest! {

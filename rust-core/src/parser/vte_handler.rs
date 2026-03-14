@@ -9,11 +9,11 @@ mod tests {
         let mut term = TerminalCore::new(24, 80);
         term.advance(b"Hello");
 
-        assert_eq!(term.screen.get_cell(0, 0).unwrap().c, 'H');
-        assert_eq!(term.screen.get_cell(0, 1).unwrap().c, 'e');
-        assert_eq!(term.screen.get_cell(0, 2).unwrap().c, 'l');
-        assert_eq!(term.screen.get_cell(0, 3).unwrap().c, 'l');
-        assert_eq!(term.screen.get_cell(0, 4).unwrap().c, 'o');
+        assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'H');
+        assert_eq!(term.screen.get_cell(0, 1).unwrap().char(), 'e');
+        assert_eq!(term.screen.get_cell(0, 2).unwrap().char(), 'l');
+        assert_eq!(term.screen.get_cell(0, 3).unwrap().char(), 'l');
+        assert_eq!(term.screen.get_cell(0, 4).unwrap().char(), 'o');
     }
 
     #[test]
@@ -53,9 +53,15 @@ mod tests {
         let mut term = TerminalCore::new(24, 80);
         // Move cursor to a non-zero column first
         term.advance(b"Hello");
-        assert!(term.screen.cursor.col > 0, "cursor should be past col 0 after printing");
+        assert!(
+            term.screen.cursor.col > 0,
+            "cursor should be past col 0 after printing"
+        );
         term.advance(b"\r");
-        assert_eq!(term.screen.cursor.col, 0, "CR should return cursor to column 0");
+        assert_eq!(
+            term.screen.cursor.col, 0,
+            "CR should return cursor to column 0"
+        );
     }
 
     /// BS (0x08) at column 0 should not underflow — cursor stays at 0.
@@ -65,7 +71,10 @@ mod tests {
         // Cursor starts at (0, 0)
         assert_eq!(term.screen.cursor.col, 0);
         term.advance(b"\x08");
-        assert_eq!(term.screen.cursor.col, 0, "BS at col 0 should keep cursor at 0");
+        assert_eq!(
+            term.screen.cursor.col, 0,
+            "BS at col 0 should keep cursor at 0"
+        );
     }
 
     /// HT (0x09) should move cursor right by at least one column to the next tab stop.

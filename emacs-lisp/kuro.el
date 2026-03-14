@@ -33,6 +33,9 @@
     (define-key map [?\C-c ?\C-c] 'kuro-send-interrupt)
     (define-key map [?\C-c ?\C-z] 'kuro-send-sigstop)
     (define-key map [?\C-c ?\C-\\] 'kuro-send-sigquit)
+    ;; Prompt navigation (OSC 133)
+    (define-key map [?\C-c ?\C-p] #'kuro-previous-prompt)
+    (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
     map)
   "Keymap for Kuro major mode.")
 
@@ -45,7 +48,10 @@
     (cursor-intangible-mode 1))
   (setq-local show-trailing-whitespace nil)
   ;; Install terminal input keymap as parent so all key presses reach the PTY
-  (set-keymap-parent kuro-mode-map kuro--keymap))
+  (set-keymap-parent kuro-mode-map kuro--keymap)
+  ;; Focus event reporting (mode 1004): forward Emacs focus events to PTY
+  (add-hook 'focus-in-hook  #'kuro--handle-focus-in  nil t)
+  (add-hook 'focus-out-hook #'kuro--handle-focus-out nil t))
 
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)

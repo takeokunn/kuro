@@ -156,7 +156,7 @@ fn test_get_cell_returns_printed_char() {
     let cell_x = term.get_cell(0, 0).expect("cell (0,0) should exist");
     let cell_y = term.get_cell(0, 1).expect("cell (0,1) should exist");
     let cell_z = term.get_cell(0, 2).expect("cell (0,2) should exist");
-    assert_eq!(cell_x.c, 'X');
-    assert_eq!(cell_y.c, 'Y');
-    assert_eq!(cell_z.c, 'Z');
+    assert_eq!(cell_x.char(), 'X');
+    assert_eq!(cell_y.char(), 'Y');
+    assert_eq!(cell_z.char(), 'Z');
 }

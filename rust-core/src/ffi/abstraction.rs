@@ -206,7 +206,7 @@ impl TerminalSession {
             let text_opt: Option<String> = self.core.screen.get_line(row).map(|line| {
                 // Wide placeholder cells (CellWidth::Wide) are included as ' ' chars,
                 // maintaining the grid_col == buffer_char_offset invariant (Phase 11).
-                let s: String = line.cells.iter().map(|c| c.c).collect();
+                let s: String = line.cells.iter().map(|c| c.char()).collect();
                 // Trim trailing spaces so Emacs doesn't fill lines with whitespace
                 s.trim_end_matches(' ').to_string()
             });
@@ -274,7 +274,7 @@ impl TerminalSession {
         let mut current_flags = 0u64;
 
         for (col, cell) in cells.iter().enumerate() {
-            self.render_buffer.push(cell.c);
+            self.render_buffer.push(cell.char());
 
             let fg = Self::encode_color(&cell.attrs.foreground);
             let bg = Self::encode_color(&cell.attrs.background);
@@ -321,9 +321,19 @@ impl TerminalSession {
         if attrs.italic {
             flags |= 0x4;
         }
-        if attrs.underline {
+        if attrs.underline() {
             flags |= 0x8;
         }
+        // Encode underline style in bits 9-11 (0=None, 1=Straight, 2=Double, 3=Curly, 4=Dotted, 5=Dashed)
+        let style_bits = match attrs.underline_style {
+            crate::types::cell::UnderlineStyle::None => 0u64,
+            crate::types::cell::UnderlineStyle::Straight => 1u64,
+            crate::types::cell::UnderlineStyle::Double => 2u64,
+            crate::types::cell::UnderlineStyle::Curly => 3u64,
+            crate::types::cell::UnderlineStyle::Dotted => 4u64,
+            crate::types::cell::UnderlineStyle::Dashed => 5u64,
+        };
+        flags |= style_bits << 9;
         if attrs.blink_slow {
             flags |= 0x10;
         }
@@ -636,7 +646,8 @@ mod tests {
             bold: true,
             dim: true,
             italic: true,
-            underline: true,
+            underline_style: crate::types::cell::UnderlineStyle::Straight,
+            underline_color: Color::Default,
             blink_slow: true,
             blink_fast: true,
             inverse: true,
@@ -739,7 +750,12 @@ mod tests {
                         bold,
                         dim,
                         italic,
-                        underline,
+                        underline_style: if underline {
+                            crate::types::cell::UnderlineStyle::Straight
+                        } else {
+                            crate::types::cell::UnderlineStyle::None
+                        },
+                        underline_color: Color::Default,
                         blink_slow,
                         blink_fast,
                         inverse,
@@ -781,13 +797,13 @@ mod tests {
         }
 
         /// Property: encode_attrs must never panic with arbitrary flag combinations,
-        /// and the result must only have bits 0–8 set (9 defined SGR flags).
+        /// and the result must only have bits 0–11 set (9 SGR flags + 3 underline style bits).
         #[test]
         fn prop_encode_attrs_all_flags(attrs in arb_sgr_attrs()) {
             let result = TerminalSession::encode_attrs(&attrs);
-            // Only bits 0..=8 are defined; upper bits must be clear
-            prop_assert_eq!(result & !0x1FFu64, 0u64,
-                "encode_attrs must not set bits outside the 9 defined flag positions");
+            // Bits 0..=8 are the 9 SGR boolean flags; bits 9..=11 encode underline style (0-5)
+            prop_assert_eq!(result & !0xFFFu64, 0u64,
+                "encode_attrs must not set bits outside the 12 defined flag positions");
         }
 
         /// Property: encode_line_faces must never panic with arbitrary cell slices.
@@ -859,14 +875,23 @@ mod tests {
         assert!(!results.is_empty(), "Expected dirty lines after advancing");
         let (_row, text, face_ranges) = &results[0];
         assert_eq!(text.trim_end(), "X", "Expected 'X' in line text");
-        assert!(!face_ranges.is_empty(), "Expected face ranges for styled text");
+        assert!(
+            !face_ranges.is_empty(),
+            "Expected face ranges for styled text"
+        );
 
         // The FIRST face range covers the styled 'X' at column 0
         let (start, end, fg, bg, flags) = face_ranges[0];
         assert_eq!(start, 0, "First range should start at column 0");
         assert_eq!(end, 1, "First range for 'X' should end at column 1");
-        assert_eq!(fg, 0x00FF0080u32, "fg should be Rgb(255,0,128) = 0x00FF0080");
-        assert_eq!(bg, 0xFF000000u32, "bg should be Default sentinel = 0xFF000000");
+        assert_eq!(
+            fg, 0x00FF0080u32,
+            "fg should be Rgb(255,0,128) = 0x00FF0080"
+        );
+        assert_eq!(
+            bg, 0xFF000000u32,
+            "bg should be Default sentinel = 0xFF000000"
+        );
         assert_eq!(flags, 0x01u64, "flags should have bold bit set (0x01)");
     }
 
@@ -922,7 +947,10 @@ mod tests {
 
         let (_, _, fg, bg, _) = face_ranges[0];
         // True black: Rgb(0,0,0) = 0
-        assert_eq!(fg, 0u32, "Rgb(0,0,0) must encode as 0 (true black), not 0xFF000000");
+        assert_eq!(
+            fg, 0u32,
+            "Rgb(0,0,0) must encode as 0 (true black), not 0xFF000000"
+        );
         // Background is still default
         assert_eq!(bg, 0xFF000000u32, "Default bg should encode as 0xFF000000");
     }
@@ -934,12 +962,24 @@ mod tests {
         session.core.advance(b"D");
         let results = session.get_dirty_lines_with_faces();
 
-        assert!(!results.is_empty(), "Expected dirty output after printing 'D'");
+        assert!(
+            !results.is_empty(),
+            "Expected dirty output after printing 'D'"
+        );
         let (_row, _text, face_ranges) = &results[0];
-        assert!(!face_ranges.is_empty(), "Expected face ranges for default-color cell");
+        assert!(
+            !face_ranges.is_empty(),
+            "Expected face ranges for default-color cell"
+        );
         let (_, _, fg, bg, flags) = face_ranges[0];
-        assert_eq!(fg, 0xFF000000u32, "Default fg should be 0xFF000000 sentinel");
-        assert_eq!(bg, 0xFF000000u32, "Default bg should be 0xFF000000 sentinel");
+        assert_eq!(
+            fg, 0xFF000000u32,
+            "Default fg should be 0xFF000000 sentinel"
+        );
+        assert_eq!(
+            bg, 0xFF000000u32,
+            "Default bg should be 0xFF000000 sentinel"
+        );
         assert_eq!(flags, 0u64, "No attributes set");
     }
 
@@ -1041,7 +1081,10 @@ mod tests {
     fn test_encode_color_named_bright_yellow() {
         let encoded = TerminalSession::encode_color(&Color::Named(NamedColor::BrightYellow));
         let expected = 0x80000000u32 | 11u32;
-        assert_eq!(encoded, expected, "BrightYellow should encode as 0x8000000B");
+        assert_eq!(
+            encoded, expected,
+            "BrightYellow should encode as 0x8000000B"
+        );
         assert_ne!(encoded, 0);
         assert_ne!(encoded, 0xFF000000u32);
     }
@@ -1059,7 +1102,10 @@ mod tests {
     fn test_encode_color_named_bright_magenta() {
         let encoded = TerminalSession::encode_color(&Color::Named(NamedColor::BrightMagenta));
         let expected = 0x80000000u32 | 13u32;
-        assert_eq!(encoded, expected, "BrightMagenta should encode as 0x8000000D");
+        assert_eq!(
+            encoded, expected,
+            "BrightMagenta should encode as 0x8000000D"
+        );
         assert_ne!(encoded, 0);
         assert_ne!(encoded, 0xFF000000u32);
     }
@@ -1087,17 +1133,32 @@ mod tests {
         // All 16 named colors must produce distinct encoded values.
         use std::collections::HashSet;
         let colors = [
-            NamedColor::Black, NamedColor::Red, NamedColor::Green, NamedColor::Yellow,
-            NamedColor::Blue, NamedColor::Magenta, NamedColor::Cyan, NamedColor::White,
-            NamedColor::BrightBlack, NamedColor::BrightRed, NamedColor::BrightGreen,
-            NamedColor::BrightYellow, NamedColor::BrightBlue, NamedColor::BrightMagenta,
-            NamedColor::BrightCyan, NamedColor::BrightWhite,
+            NamedColor::Black,
+            NamedColor::Red,
+            NamedColor::Green,
+            NamedColor::Yellow,
+            NamedColor::Blue,
+            NamedColor::Magenta,
+            NamedColor::Cyan,
+            NamedColor::White,
+            NamedColor::BrightBlack,
+            NamedColor::BrightRed,
+            NamedColor::BrightGreen,
+            NamedColor::BrightYellow,
+            NamedColor::BrightBlue,
+            NamedColor::BrightMagenta,
+            NamedColor::BrightCyan,
+            NamedColor::BrightWhite,
         ];
         let encoded_set: HashSet<u32> = colors
             .iter()
             .map(|c| TerminalSession::encode_color(&Color::Named(*c)))
             .collect();
-        assert_eq!(encoded_set.len(), 16, "All 16 named colors must have unique encodings");
+        assert_eq!(
+            encoded_set.len(),
+            16,
+            "All 16 named colors must have unique encodings"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1125,9 +1186,9 @@ mod tests {
     #[test]
     fn test_encode_attrs_underline() {
         let mut attrs = SgrAttributes::default();
-        attrs.underline = true;
+        attrs.underline_style = crate::types::cell::UnderlineStyle::Straight;
         let result = TerminalSession::encode_attrs(&attrs);
-        assert_eq!(result, 0x8u64, "underline sets bit 3 (0x8)");
+        assert_eq!(result & 0x8u64, 0x8u64, "underline sets bit 3 (0x8)");
         assert_ne!(result, 0);
     }
 
@@ -1183,14 +1244,16 @@ mod tests {
         let mut bits = HashSet::new();
 
         let flags: &[(&str, fn(&mut SgrAttributes))] = &[
-            ("bold",          |a| a.bold = true),
-            ("dim",           |a| a.dim = true),
-            ("italic",        |a| a.italic = true),
-            ("underline",     |a| a.underline = true),
-            ("blink_slow",    |a| a.blink_slow = true),
-            ("blink_fast",    |a| a.blink_fast = true),
-            ("inverse",       |a| a.inverse = true),
-            ("hidden",        |a| a.hidden = true),
+            ("bold", |a| a.bold = true),
+            ("dim", |a| a.dim = true),
+            ("italic", |a| a.italic = true),
+            ("underline", |a: &mut SgrAttributes| {
+                a.underline_style = crate::types::cell::UnderlineStyle::Straight
+            }),
+            ("blink_slow", |a| a.blink_slow = true),
+            ("blink_fast", |a| a.blink_fast = true),
+            ("inverse", |a| a.inverse = true),
+            ("hidden", |a| a.hidden = true),
             ("strikethrough", |a| a.strikethrough = true),
         ];
 
@@ -1198,8 +1261,16 @@ mod tests {
             let mut attrs = SgrAttributes::default();
             setter(&mut attrs);
             let encoded = TerminalSession::encode_attrs(&attrs);
-            assert_ne!(encoded, 0, "Flag '{}' must produce a non-zero bitmask", name);
-            assert!(bits.insert(encoded), "Flag '{}' produced a duplicate bitmask", name);
+            assert_ne!(
+                encoded, 0,
+                "Flag '{}' must produce a non-zero bitmask",
+                name
+            );
+            assert!(
+                bits.insert(encoded),
+                "Flag '{}' produced a duplicate bitmask",
+                name
+            );
         }
     }
 
@@ -1215,7 +1286,10 @@ mod tests {
         let (row, text, face_ranges) = session.encode_line_faces(0, &cells);
         assert_eq!(row, 0);
         assert_eq!(text, "", "empty cell slice should produce empty text");
-        assert!(face_ranges.is_empty(), "empty cell slice should produce no face ranges");
+        assert!(
+            face_ranges.is_empty(),
+            "empty cell slice should produce no face ranges"
+        );
     }
 
     #[test]
@@ -1223,6 +1297,9 @@ mod tests {
         // send_input with an empty byte slice must not panic and must return Ok.
         let mut session = make_session();
         let result = session.send_input(&[]);
-        assert!(result.is_ok(), "send_input with empty slice should return Ok");
+        assert!(
+            result.is_ok(),
+            "send_input with empty slice should return Ok"
+        );
     }
 }

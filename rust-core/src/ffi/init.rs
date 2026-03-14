@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn test_validate_emacs_version_minimum_29_1() {
         let result = validate_emacs_version((29, 1));
-        assert!(result.is_ok(), "version (29, 1) should meet the minimum requirement");
+        assert!(
+            result.is_ok(),
+            "version (29, 1) should meet the minimum requirement"
+        );
     }
 
     /// Version (28, 9) is below the minimum major version — must be rejected.
@@ -229,7 +232,10 @@ mod tests {
     fn test_validate_emacs_version_below_minimum_28_x() {
         let result = validate_emacs_version((28, 9));
         assert!(
-            matches!(result, Err(KuroError::Init(InitError::VersionMismatch { .. }))),
+            matches!(
+                result,
+                Err(KuroError::Init(InitError::VersionMismatch { .. }))
+            ),
             "version (28, 9) should be rejected as below minimum"
         );
     }
@@ -239,7 +245,10 @@ mod tests {
     fn test_validate_emacs_version_below_minimum_29_0() {
         let result = validate_emacs_version((29, 0));
         assert!(
-            matches!(result, Err(KuroError::Init(InitError::VersionMismatch { .. }))),
+            matches!(
+                result,
+                Err(KuroError::Init(InitError::VersionMismatch { .. }))
+            ),
             "version (29, 0) should be rejected because minor < 1"
         );
     }
@@ -248,7 +257,10 @@ mod tests {
     #[test]
     fn test_validate_emacs_version_future_30_x() {
         let result = validate_emacs_version((30, 0));
-        assert!(result.is_ok(), "version (30, 0) should be accepted as above minimum");
+        assert!(
+            result.is_ok(),
+            "version (30, 0) should be accepted as above minimum"
+        );
     }
 
     /// The exported symbol list must contain "kuro-core-init".

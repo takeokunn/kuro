@@ -140,6 +140,57 @@ For rapid development, use this workflow:
 
 ### Testing
 
+#### Elisp Tests (ERT)
+
+Kuro uses Emacs Lisp's built-in testing framework (ERT) for testing the Elisp components.
+
+```bash
+# Run all Elisp tests (unit + E2E)
+make test-e2e
+
+# Run specific test file
+emacs --batch -L emacs-lisp -L test \
+  --eval "(require 'kuro-renderer-unit-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
+
+# Run all tests including Rust
+make test-all
+
+# Run only Rust tests
+make test
+```
+
+**Test Files:**
+- `test/kuro-renderer-unit-test.el` - Unit tests for kuro-renderer.el (pure Elisp, no Rust module needed)
+- `test/kuro-e2e-test.el` - End-to-end tests requiring Rust module and PTY
+- `test/kuro-config-test.el` - Unit tests for kuro-config.el
+
+**Running Specific Test Categories:**
+
+```bash
+# Run only E2E tests (requires built module)
+emacs --batch -L emacs-lisp -L test \
+  --eval "(require 'kuro)" \
+  --eval "(require 'kuro-e2e-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")"
+
+# Run only config unit tests
+emacs --batch -L emacs-lisp -L test \
+  --eval "(require 'kuro-config)" \
+  --eval "(require 'kuro-config-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
+
+# Run only unit tests from kuro-e2e-test.el
+emacs --batch -L emacs-lisp -L test \
+  --eval "(require 'kuro)" \
+  --eval "(require 'kuro-e2e-test)" \
+  --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")"
+```
+
+For more detailed test documentation, see [test/README.md](test/README.md).
+
+#### Rust Tests
+
 ```bash
 # Unit tests
 make test

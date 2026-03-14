@@ -118,6 +118,7 @@ fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
 ///
 /// Move cursor to the specified row (1-indexed).
 /// Column position is unchanged.
+/// When DECOM (origin mode) is active, row is relative to scroll region top.
 fn csi_vpa(term: &mut crate::TerminalCore, params: &vte::Params) {
     // VPA takes a 1-indexed row parameter
     let row = params
@@ -126,11 +127,20 @@ fn csi_vpa(term: &mut crate::TerminalCore, params: &vte::Params) {
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1); // Convert to 0-indexed
+        .saturating_sub(1) as usize; // Convert to 0-indexed
+
+    let target_row = if term.dec_modes.origin_mode {
+        // In origin mode, row is relative to scroll region top
+        let scroll_top = term.screen.get_scroll_region().top;
+        let scroll_bottom = term.screen.get_scroll_region().bottom;
+        (scroll_top + row).min(scroll_bottom.saturating_sub(1))
+    } else {
+        row
+    };
 
     // Move cursor to absolute row, keep current column
     term.screen
-        .move_cursor(row as usize, term.screen.cursor().col);
+        .move_cursor(target_row, term.screen.cursor().col);
 }
 
 /// CHA - Character Position Absolute (CSI G)
@@ -156,6 +166,7 @@ fn csi_cha(term: &mut crate::TerminalCore, params: &vte::Params) {
 ///
 /// Move cursor to the specified row and column (1-indexed).
 /// This is functionally identical to CUP (CSI H).
+/// When DECOM (origin mode) is active, coordinates are relative to scroll region.
 fn csi_hvp(term: &mut crate::TerminalCore, params: &vte::Params) {
     // HVP takes row, column parameters (both 1-indexed)
     let row = params
@@ -164,17 +175,27 @@ fn csi_hvp(term: &mut crate::TerminalCore, params: &vte::Params) {
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1); // Convert to 0-indexed
+        .saturating_sub(1) as usize; // Convert to 0-indexed
     let col = params
         .iter()
         .nth(1)
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1); // Convert to 0-indexed
+        .saturating_sub(1) as usize; // Convert to 0-indexed
+
+    let (target_row, target_col) = if term.dec_modes.origin_mode {
+        // In origin mode, coordinates are relative to scroll region
+        let scroll_top = term.screen.get_scroll_region().top;
+        let scroll_bottom = term.screen.get_scroll_region().bottom;
+        let abs_row = (scroll_top + row).min(scroll_bottom.saturating_sub(1));
+        (abs_row, col)
+    } else {
+        (row, col)
+    };
 
     // Move cursor to absolute position
-    term.screen.move_cursor(row as usize, col as usize);
+    term.screen.move_cursor(target_row, target_col);
 }
 
 #[cfg(test)]

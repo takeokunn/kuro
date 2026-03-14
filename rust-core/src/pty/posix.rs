@@ -302,7 +302,10 @@ mod tests {
         if bash_path.exists() {
             // An absolute path to bash resolves to the "bash" basename which is in the whitelist
             let result = Pty::validate_shell("/bin/bash");
-            assert!(result.is_ok(), "/bin/bash should be accepted when it exists");
+            assert!(
+                result.is_ok(),
+                "/bin/bash should be accepted when it exists"
+            );
         }
     }
 
@@ -319,6 +322,9 @@ mod tests {
         // "python3" is not in the ALLOWED_SHELLS whitelist
         // If it isn't even installed, which() will fail — either way we expect Err
         let result = Pty::validate_shell("python3");
-        assert!(result.is_err(), "python3 should be rejected (not in whitelist)");
+        assert!(
+            result.is_err(),
+            "python3 should be rejected (not in whitelist)"
+        );
     }
 }

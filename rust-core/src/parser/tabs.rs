@@ -421,13 +421,16 @@ mod tests {
         let mut term = crate::TerminalCore::new(24, 80);
         // First set a custom tab stop at column 5
         term.advance(b"\x1b[1;6H"); // move to col 5 (1-indexed)
-        term.advance(b"\x1bH");      // HTS: set tab stop at col 5
-        // Now clear all (resets to defaults)
+        term.advance(b"\x1bH"); // HTS: set tab stop at col 5
+                                // Now clear all (resets to defaults)
         term.advance(b"\x1b[3g");
         // After reset, the default stop at col 8 should be present
         term.advance(b"\x1b[1;1H"); // move to col 0
-        term.advance(b"\t");         // tab
-        assert_eq!(term.screen.cursor.col, 8, "Default tab stop at col 8 should be restored");
+        term.advance(b"\t"); // tab
+        assert_eq!(
+            term.screen.cursor.col, 8,
+            "Default tab stop at col 8 should be restored"
+        );
     }
 
     /// Tab from column 0 with no custom modifications should move to column 8

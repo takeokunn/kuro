@@ -158,10 +158,10 @@ mod tests {
         let mut term = crate::TerminalCore::new(10, 80);
         // First set a valid scroll region to verify it doesn't change
         term.advance(b"\x1b[2;8r"); // valid: top=2, bottom=8
-        // Now try invalid: top > bottom
+                                    // Now try invalid: top > bottom
         term.advance(b"\x1b[8;3r"); // invalid: should be ignored
-        // The valid region from before should still be active
-        // (cursor will be at home after DECSTBM per spec)
+                                    // The valid region from before should still be active
+                                    // (cursor will be at home after DECSTBM per spec)
         assert!(term.screen.cursor.row < 10);
         assert!(term.screen.cursor.col < 80);
     }
@@ -193,7 +193,7 @@ mod tests {
 
         // Line 0 should now be blank (original line 1 moved there)
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, '1');
+        assert_eq!(line.cells[0].char(), '1');
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
 
         // Line 0 should now have content from line 3
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, 'D');
+        assert_eq!(line.cells[0].char(), 'D');
     }
 
     #[test]
@@ -239,18 +239,18 @@ mod tests {
 
         // Lines outside scroll region should be unchanged
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, '0');
+        assert_eq!(line.cells[0].char(), '0');
 
         let line = term.screen.get_line(1).unwrap();
-        assert_eq!(line.cells[0].c, '1');
+        assert_eq!(line.cells[0].char(), '1');
 
         // Lines inside scroll region should have scrolled
         let line = term.screen.get_line(2).unwrap();
-        assert_eq!(line.cells[0].c, '3'); // Was '2', now '3'
+        assert_eq!(line.cells[0].char(), '3'); // Was '2', now '3'
 
         // Bottom of scroll region should be blank
         let line = term.screen.get_line(7).unwrap();
-        assert_eq!(line.cells[0].c, ' ');
+        assert_eq!(line.cells[0].char(), ' ');
     }
 
     #[test]
@@ -272,10 +272,10 @@ mod tests {
 
         // Content moves up
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, ' '); // Line 0 becomes blank
+        assert_eq!(line.cells[0].char(), ' '); // Line 0 becomes blank
 
         let line = term.screen.get_line(1).unwrap();
-        assert_eq!(line.cells[0].c, 'A'); // Line 1 now has what was in line 0
+        assert_eq!(line.cells[0].char(), 'A'); // Line 1 now has what was in line 0
     }
 
     #[test]
@@ -297,12 +297,12 @@ mod tests {
         // First 3 lines should be blank
         for r in 0..3 {
             let line = term.screen.get_line(r).unwrap();
-            assert_eq!(line.cells[0].c, ' ');
+            assert_eq!(line.cells[0].char(), ' ');
         }
 
         // Line 3 should now have content from line 0
         let line = term.screen.get_line(3).unwrap();
-        assert_eq!(line.cells[0].c, '0');
+        assert_eq!(line.cells[0].char(), '0');
     }
 
     #[test]
@@ -327,21 +327,21 @@ mod tests {
 
         // Lines outside scroll region should be unchanged
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, '0');
+        assert_eq!(line.cells[0].char(), '0');
 
         let line = term.screen.get_line(1).unwrap();
-        assert_eq!(line.cells[0].c, '1');
+        assert_eq!(line.cells[0].char(), '1');
 
         // Lines inside scroll region should have scrolled
         let line = term.screen.get_line(2).unwrap();
-        assert_eq!(line.cells[0].c, ' '); // Top of scroll region becomes blank
+        assert_eq!(line.cells[0].char(), ' '); // Top of scroll region becomes blank
 
         let line = term.screen.get_line(3).unwrap();
-        assert_eq!(line.cells[0].c, '2'); // Was '3', now '2'
+        assert_eq!(line.cells[0].char(), '2'); // Was '3', now '2'
 
         // Bottom of scroll region should have content from above
         let line = term.screen.get_line(7).unwrap();
-        assert_eq!(line.cells[0].c, '6');
+        assert_eq!(line.cells[0].char(), '6');
     }
 
     #[test]
@@ -388,7 +388,11 @@ mod tests {
 
         // Row 0 should now contain the character that was in row 1 ('B')
         let line = term.screen.get_line(0).unwrap();
-        assert_eq!(line.cells[0].c, 'B', "after SU 1, row 0 should have former row 1 content");
+        assert_eq!(
+            line.cells[0].char(),
+            'B',
+            "after SU 1, row 0 should have former row 1 content"
+        );
     }
 
     /// SU with content: the line that scrolled off the top should no longer be
@@ -411,12 +415,17 @@ mod tests {
 
         // Row 0 should no longer be '0' — it was scrolled off
         let line0 = term.screen.get_line(0).unwrap();
-        assert_ne!(line0.cells[0].c, '0', "row 0 character should have changed after scroll up");
+        assert_ne!(
+            line0.cells[0].char(),
+            '0',
+            "row 0 character should have changed after scroll up"
+        );
 
         // Bottom row (4) should be blank (newly introduced empty line)
         let bottom = term.screen.get_line(4).unwrap();
         assert_eq!(
-            bottom.cells[0].c, ' ',
+            bottom.cells[0].char(),
+            ' ',
             "bottom row should be blank after scrolling up"
         );
     }
@@ -441,11 +450,19 @@ mod tests {
 
         // Row 0 should now be blank
         let top = term.screen.get_line(0).unwrap();
-        assert_eq!(top.cells[0].c, ' ', "after SD 1, row 0 should be blank");
+        assert_eq!(
+            top.cells[0].char(),
+            ' ',
+            "after SD 1, row 0 should be blank"
+        );
 
         // Row 1 should contain what was previously in row 0 ('A')
         let row1 = term.screen.get_line(1).unwrap();
-        assert_eq!(row1.cells[0].c, 'A', "after SD 1, row 1 should have former row 0 content");
+        assert_eq!(
+            row1.cells[0].char(),
+            'A',
+            "after SD 1, row 1 should have former row 0 content"
+        );
     }
 
     /// Scrolling up by more lines than the screen has should not panic and should
@@ -469,7 +486,12 @@ mod tests {
         // All rows should now be blank (or at least no panic occurred)
         for r in 0..5usize {
             let line = term.screen.get_line(r).unwrap();
-            assert_eq!(line.cells[0].c, ' ', "row {} should be blank after over-scroll", r);
+            assert_eq!(
+                line.cells[0].char(),
+                ' ',
+                "row {} should be blank after over-scroll",
+                r
+            );
         }
     }
 }

@@ -148,28 +148,34 @@ COLOR can be:
 (defun kuro--decode-attrs (attr-flags)
   "Decode attribute bit flags from Rust core into individual boolean values.
 ATTR-FLAGS is a bitmask matching Rust encode_attrs:
-  bit 0 (0x01) = bold
-  bit 1 (0x02) = dim
-  bit 2 (0x04) = italic
-  bit 3 (0x08) = underline
-  bit 4 (0x10) = blink-slow
-  bit 5 (0x20) = blink-fast
-  bit 6 (0x40) = inverse
-  bit 7 (0x80) = hidden
-  bit 8 (0x100) = strikethrough
+  bit 0  (0x001) = bold
+  bit 1  (0x002) = dim
+  bit 2  (0x004) = italic
+  bit 3  (0x008) = underline (any style)
+  bit 4  (0x010) = blink-slow
+  bit 5  (0x020) = blink-fast
+  bit 6  (0x040) = inverse
+  bit 7  (0x080) = hidden
+  bit 8  (0x100) = strikethrough
+  bits 9-11 (0xE00, shift 9) = underline style:
+    0 = None, 1 = Straight, 2 = Double, 3 = Curly, 4 = Dotted, 5 = Dashed
 Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is falsy."
-  (let ((bold          (/= 0 (logand attr-flags #x01)))
-        (dim           (/= 0 (logand attr-flags #x02)))
-        (italic        (/= 0 (logand attr-flags #x04)))
-        (underline     (/= 0 (logand attr-flags #x08)))
-        (blink-slow    (/= 0 (logand attr-flags #x10)))
-        (blink-fast    (/= 0 (logand attr-flags #x20)))
-        (inverse       (/= 0 (logand attr-flags #x40)))
-        (hidden        (/= 0 (logand attr-flags #x80)))
-        (strikethrough (/= 0 (logand attr-flags #x100))))
+  (let ((bold           (/= 0 (logand attr-flags #x01)))
+        (dim            (/= 0 (logand attr-flags #x02)))
+        (italic         (/= 0 (logand attr-flags #x04)))
+        (underline      (/= 0 (logand attr-flags #x08)))
+        (blink-slow     (/= 0 (logand attr-flags #x10)))
+        (blink-fast     (/= 0 (logand attr-flags #x20)))
+        (inverse        (/= 0 (logand attr-flags #x40)))
+        (hidden         (/= 0 (logand attr-flags #x80)))
+        (strikethrough  (/= 0 (logand attr-flags #x100)))
+        ;; Underline style: bits 9-11 (mask 0xE00, shift right 9)
+        ;; 0=None, 1=Straight, 2=Double, 3=Curly, 4=Dotted, 5=Dashed
+        (underline-style (ash (logand attr-flags #xE00) -9)))
     (list :bold bold
           :italic italic
           :underline underline
+          :underline-style underline-style
           :strike-through strikethrough
           :inverse inverse
           :dim dim
@@ -177,9 +183,50 @@ Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is 
           :blink-fast blink-fast
           :hidden hidden)))
 
+(defun kuro--underline-style-to-face-prop (style underline-color)
+  "Convert underline STYLE integer and UNDERLINE-COLOR to an Emacs :underline value.
+STYLE is the decoded underline style integer (0-5):
+  0 = None (no underline)
+  1 = Straight
+  2 = Double
+  3 = Curly (undercurl / wave)
+  4 = Dotted
+  5 = Dashed
+UNDERLINE-COLOR is an Emacs color string or nil.
+Returns the value for the :underline face attribute, or nil for no underline."
+  (pcase style
+    (0 nil)   ; None
+    (1 (if underline-color
+           (list :color underline-color :style 'line)
+         t))
+    (2 (if underline-color
+           (list :color underline-color :style 'line)
+         ;; Emacs 29+ supports double underline via :style 'double-line
+         ;; Fall back to plain underline on older versions
+         (if (boundp 'face-underline-style)
+             (list :style 'double-line)
+           t)))
+    (3 (if underline-color
+           (list :color underline-color :style 'wave)
+         (list :style 'wave)))
+    (4 (if underline-color
+           (list :color underline-color :style 'dots)
+         ;; :style 'dots is Emacs 29+; fall back to plain underline
+         (if (boundp 'face-underline-style)
+             (list :style 'dots)
+           t)))
+    (5 (if underline-color
+           (list :color underline-color :style 'dashes)
+         ;; :style 'dashes is Emacs 29+; fall back to plain underline
+         (if (boundp 'face-underline-style)
+             (list :style 'dashes)
+           t)))
+    (_ t)))  ; Unknown style: plain underline
+
 (defun kuro--attrs-to-face-props (attrs)
   "Convert SGR attributes plist to Emacs face property list.
-ATTRS is a plist with keys :foreground, :background, and :flags."
+ATTRS is a plist with keys :foreground, :background, :flags, and
+optionally :underline-color (an Emacs color string for the underline)."
   (let* ((fg (plist-get attrs :foreground))
          (bg (plist-get attrs :background))
          (fg-color (kuro--color-to-emacs fg))
@@ -189,16 +236,27 @@ ATTRS is a plist with keys :foreground, :background, and :flags."
          (bold (plist-get decoded :bold))
          (italic (plist-get decoded :italic))
          (underline (plist-get decoded :underline))
+         (underline-style (plist-get decoded :underline-style))
          (strikethrough (plist-get decoded :strike-through))
          (inverse (plist-get decoded :inverse))
          (dim (plist-get decoded :dim))
+         (underline-color (plist-get attrs :underline-color))
          (weight (cond (bold 'bold) (dim 'light) (t 'normal)))
-         (slant (if italic 'italic 'normal)))
+         (slant (if italic 'italic 'normal))
+         ;; Build :underline value: prefer explicit style if underline bit is set
+         (underline-val
+          (when underline
+            (if (and underline-style (> underline-style 0))
+                (kuro--underline-style-to-face-prop underline-style underline-color)
+              ;; Straight underline (style 0 or no style bits set)
+              (if underline-color
+                  (list :color underline-color :style 'line)
+                t)))))
     (nconc
      (when fg-color (list :foreground fg-color))
      (when bg-color (list :background bg-color))
      (list :weight weight :slant slant)
-     (when underline (list :underline t))
+     (when underline-val (list :underline underline-val))
      (when strikethrough (list :strike-through t))
      (when inverse (list :inverse-video t)))))
 
@@ -211,10 +269,12 @@ ATTRS is a plist with keys :foreground, :background, and :flags."
 
 (defun kuro--get-cached-face (attrs)
   "Get or create a cached face for given attributes.
-ATTRS is a plist containing :foreground, :background, and :flags."
+ATTRS is a plist containing :foreground, :background, :flags, and
+optionally :underline-color."
   (let ((key (list (plist-get attrs :foreground)
                    (plist-get attrs :background)
-                   (plist-get attrs :flags))))
+                   (plist-get attrs :flags)
+                   (plist-get attrs :underline-color))))
     (or (gethash key kuro--face-cache)
         (puthash key (kuro--make-face attrs) kuro--face-cache))))
 
@@ -338,6 +398,94 @@ are column positions (0-indexed) and ATTRS is a plist with SGR attributes."
           (when (> end-pos start-pos)
             (kuro--apply-face-range start-pos end-pos attrs)))))))
 
+;;; Prompt navigation (OSC 133)
+
+(defvar-local kuro--prompt-positions nil
+  "List of (ROW . MARK-TYPE) for OSC 133 prompt marks.
+MARK-TYPE is a symbol such as `prompt-start', `prompt-end',
+`command-start', or `command-end'.  Updated each render cycle
+by polling `kuro--poll-prompt-marks'.")
+(put 'kuro--prompt-positions 'permanent-local t)
+
+(defun kuro-previous-prompt ()
+  "Jump to the previous shell prompt (OSC 133 mark)."
+  (interactive)
+  (let* ((cur-line (1- (line-number-at-pos)))
+         (candidates
+          (seq-filter (lambda (entry)
+                        (and (< (car entry) cur-line)
+                             (eq (cdr entry) 'prompt-start)))
+                      kuro--prompt-positions))
+         (target (car (last candidates))))
+    (if target
+        (progn
+          (goto-char (point-min))
+          (forward-line (car target)))
+      (message "kuro: no previous prompt"))))
+
+(defun kuro-next-prompt ()
+  "Jump to the next shell prompt (OSC 133 mark)."
+  (interactive)
+  (let* ((cur-line (1- (line-number-at-pos)))
+         (candidates
+          (seq-filter (lambda (entry)
+                        (and (> (car entry) cur-line)
+                             (eq (cdr entry) 'prompt-start)))
+                      kuro--prompt-positions))
+         (target (car candidates)))
+    (if target
+        (progn
+          (goto-char (point-min))
+          (forward-line (car target)))
+      (message "kuro: no next prompt"))))
+
+;;; Hyperlink overlays (OSC 8)
+
+(defvar-local kuro--hyperlink-overlays nil
+  "List of active hyperlink overlays in the current kuro buffer.")
+(put 'kuro--hyperlink-overlays 'permanent-local t)
+
+(defun kuro--clear-all-hyperlink-overlays ()
+  "Remove all hyperlink overlays from the current buffer."
+  (dolist (ov kuro--hyperlink-overlays)
+    (when (overlay-buffer ov)
+      (delete-overlay ov)))
+  (setq kuro--hyperlink-overlays nil))
+
+(defun kuro--make-hyperlink-keymap (uri)
+  "Return a sparse keymap that opens URI on RET or mouse-1."
+  (let ((map (make-sparse-keymap)))
+    (define-key map [return]
+      (lambda () (interactive) (browse-url uri)))
+    (define-key map [mouse-1]
+      (lambda (_event) (interactive "e") (browse-url uri)))
+    map))
+
+(defun kuro--apply-hyperlink-overlay (start end uri)
+  "Create a hyperlink overlay from START to END pointing to URI."
+  (let ((ov (make-overlay start end)))
+    (overlay-put ov 'kuro-hyperlink t)
+    (overlay-put ov 'help-echo (format "URI: %s\nRET or mouse-1 to open" uri))
+    (overlay-put ov 'mouse-face 'highlight)
+    (overlay-put ov 'keymap (kuro--make-hyperlink-keymap uri))
+    (push ov kuro--hyperlink-overlays)))
+
+;;; Focus event handlers
+
+(defun kuro--handle-focus-in ()
+  "Handle Emacs focus-in event for terminal focus reporting (mode 1004)."
+  (when (and (derived-mode-p 'kuro-mode)
+             kuro--initialized
+             (kuro--get-focus-events))
+    (kuro--send-key "\e[I")))
+
+(defun kuro--handle-focus-out ()
+  "Handle Emacs focus-out event for terminal focus reporting (mode 1004)."
+  (when (and (derived-mode-p 'kuro-mode)
+             kuro--initialized
+             (kuro--get-focus-events))
+    (kuro--send-key "\e[O")))
+
 ;;; Render loop
 
 (defun kuro--sanitize-title (title)
@@ -378,7 +526,8 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
     (setq kuro--app-keypad-mode (kuro--get-app-keypad))
     (setq kuro--mouse-mode (kuro--get-mouse-mode))
     (setq kuro--mouse-sgr (kuro--get-mouse-sgr))
-    (setq kuro--bracketed-paste-mode (kuro--get-bracketed-paste)))
+    (setq kuro--bracketed-paste-mode (kuro--get-bracketed-paste))
+    (setq kuro--keyboard-flags (or (kuro--get-keyboard-flags) 0)))
   (when (kuro-core-bell-pending)
     (ding)
     (kuro-core-clear-bell))
@@ -406,6 +555,48 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
         (let ((win (get-buffer-window (current-buffer) t)))
           (when win
             (set-frame-parameter (window-frame win) 'name safe-title))))))
+  ;; Update default-directory from OSC 7 CWD notification
+  (let ((cwd (kuro--get-cwd)))
+    (when (and cwd (stringp cwd) (not (string-empty-p cwd)))
+      (setq default-directory (file-name-as-directory cwd))))
+  ;; Process OSC 52 clipboard actions
+  (let ((actions (kuro--poll-clipboard-actions)))
+    (dolist (action actions)
+      (pcase (car action)
+        ('write
+         (pcase kuro-clipboard-policy
+           ((or 'write-only 'allow)
+            (kill-new (cdr action))
+            (message "kuro: clipboard updated from terminal"))
+           ('prompt
+            (when (yes-or-no-p
+                   (format "kuro: terminal wants to set clipboard (%d chars). Allow? "
+                           (length (cdr action))))
+              (kill-new (cdr action))))))
+        ('query
+         (pcase kuro-clipboard-policy
+           ('allow
+            (let ((text (condition-case nil (current-kill 0 t) (error ""))))
+              (kuro--send-key
+               (format "\e]52;c;%s\a"
+                       (base64-encode-string (or text "") t)))))
+           ('prompt
+            (when (yes-or-no-p "kuro: terminal wants to read clipboard. Allow? ")
+              (let ((text (condition-case nil (current-kill 0 t) (error ""))))
+                (kuro--send-key
+                 (format "\e]52;c;%s\a"
+                         (base64-encode-string (or text "") t)))))))))))
+  ;; Collect OSC 133 prompt marks
+  (let ((marks (kuro--poll-prompt-marks)))
+    (when marks
+      (dolist (mark marks)
+        (push mark kuro--prompt-positions))
+      ;; Keep list sorted by row, bounded to last 1000 entries
+      (setq kuro--prompt-positions
+            (seq-take
+             (sort kuro--prompt-positions
+                   (lambda (a b) (< (car a) (car b))))
+             1000))))
   ;; Process dirty lines: clear per-line blink overlays before rewriting,
   ;; then rebuild faces (including new blink overlays) for each updated line.
   ;; Overlays on lines NOT in this update batch are preserved intact.
@@ -445,7 +636,7 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
 
 ;;;###autoload
 (defun kuro--update-cursor ()
-  "Update cursor position in buffer."
+  "Update cursor position and shape in buffer."
   (unless (> kuro--scroll-offset 0)
     (let ((cursor-pos (kuro--get-cursor)))
       (when cursor-pos
@@ -458,7 +649,20 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
             (goto-char (min (+ (point) col) (line-end-position)))
             (when kuro--cursor-marker
               (set-marker kuro--cursor-marker (point)))))
-        (setq-local cursor-type (if (kuro--get-cursor-visible) 'box nil))))))
+        (if (kuro--get-cursor-visible)
+            ;; Apply cursor shape from terminal DECSCUSR (CSI Ps SP q)
+            (let ((shape (or (kuro--get-cursor-shape) 0)))
+              (setq-local cursor-type
+                          (pcase shape
+                            (0 'box)          ; default blinking block
+                            (1 'box)          ; blinking block
+                            (2 'box)          ; steady block
+                            (3 '(hbar . 2))   ; blinking underline
+                            (4 '(hbar . 2))   ; steady underline
+                            (5 '(bar . 2))    ; blinking bar (I-beam)
+                            (6 '(bar . 2))    ; steady bar (I-beam)
+                            (_ 'box))))
+          (setq-local cursor-type nil))))))
 
 ;;;###autoload
 (defun kuro--apply-faces-simple (updates)
@@ -498,7 +702,10 @@ COLOR-ENC is a u32 value encoding the color:
 (defun kuro--apply-faces-from-ffi (line-num face-ranges)
   "Apply SGR faces from FFI data to a line.
 LINE-NUM is the 0-indexed line number.
-FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) tuples."
+FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) or
+(START-COL END-COL FG BG FLAGS UL-COLOR) tuples.
+The optional 6th element UL-COLOR is an encoded underline color (u32, same
+encoding as FG/BG) or 0/#xFF000000 for default (no underline color)."
   (save-excursion
     (goto-char (point-min))
     (forward-line line-num)
@@ -511,9 +718,17 @@ FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) tuples."
                (end-col (cadr range))
                (fg-enc (caddr range))
                (bg-enc (cadddr range))
-               (flags (or (car (cddddr range)) 0))
+               (rest (cddddr range))
+               (flags (or (car rest) 0))
+               (ul-color-enc (cadr rest))
                (fg (kuro--decode-ffi-color fg-enc))
                (bg (kuro--decode-ffi-color bg-enc))
+               ;; Decode underline color: nil means use default (no color override)
+               (ul-color (when (and ul-color-enc
+                                    (/= ul-color-enc 0)
+                                    (/= ul-color-enc #xFF000000))
+                           (kuro--rgb-to-emacs
+                            (logand ul-color-enc #xFFFFFF))))
                ;; Cap positions at line-end to prevent face bleeding into next line
                (start-pos (min (+ line-start start-col) line-end))
                (end-pos (min (+ line-start end-col) line-end)))
@@ -521,7 +736,8 @@ FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) tuples."
             (kuro--apply-face-range start-pos end-pos
                                     (list :foreground fg
                                           :background bg
-                                          :flags flags))
+                                          :flags flags
+                                          :underline-color ul-color))
             ;; Apply blink overlay (fast takes priority over slow)
             (cond
              ((/= 0 (logand flags #x20))

@@ -49,7 +49,7 @@ fn test_ris_full_reset_clears_screen() {
 fn test_sgr_true_color_foreground_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[38;2;255;128;0m"); // truecolor orange foreground
-    // Must not panic, and cursor remains in bounds
+                                           // Must not panic, and cursor remains in bounds
     assert!(term.cursor_row() < 24);
 }
 
@@ -66,7 +66,7 @@ fn test_insert_and_delete_chars_no_panic() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;3H"); // move to row 1, col 3 (1-indexed → row 0, col 2)
     term.advance(b"\x1b[1P"); // DCH: delete 1 char
-    // Must not panic
+                              // Must not panic
     assert!(term.cursor_col() < 80);
 }
 
@@ -76,7 +76,7 @@ fn test_scroll_up_with_region_no_panic() {
     term.advance(b"\x1b[3;7r"); // scroll region rows 3-7
     term.advance(b"\x1b[3;1H"); // move to top of region (1-indexed → row 2, col 0)
     term.advance(b"\x1b[S"); // SU: scroll up
-    // Must not panic, cursor in bounds
+                             // Must not panic, cursor in bounds
     assert!(term.cursor_row() < 10);
 }
 
@@ -95,7 +95,7 @@ fn test_complex_sequence_does_not_panic() {
 fn test_osc_title_set() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b]2;hello title\x07"); // OSC 2: set window title
-    // Must not panic, cursor in bounds
+                                             // Must not panic, cursor in bounds
     assert!(term.cursor_row() < 24);
 }
 
@@ -134,7 +134,7 @@ fn test_deckpam_deckpnm_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b="); // DECKPAM: application keypad
     term.advance(b"\x1b>"); // DECKPNM: normal keypad
-    // Must not panic
+                            // Must not panic
     assert!(term.cursor_row() < 24);
 }
 

@@ -55,17 +55,32 @@ impl Pty {
         Ok(path)
     }
 
-    /// Spawn a new PTY with the given shell command
+    /// Spawn a new PTY with the given shell command and initial terminal dimensions.
+    ///
+    /// Passing `rows` and `cols` to `openpty` is critical: it sets the PTY window
+    /// size **before** the child process is created, so bash/readline sees the
+    /// correct dimensions when it calls `TIOCGWINSZ` on startup.  Without this,
+    /// the PTY is created with a 0×0 window size and readline falls back to dumb
+    /// terminal mode — causing control characters to be echoed as `^X` instead of
+    /// being handled as cursor-movement commands.
     ///
     /// This creates a proper PTY master/slave pair using openpty(),
     /// forks a child process, and executes the shell with the slave
     /// PTY as stdin/stdout/stderr.
-    pub fn spawn(command: &str) -> Result<Self> {
+    pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
 
-        // Open PTY master/slave pair
-        let OpenptyResult { master, slave } = openpty(None, None)
+        // Open PTY master/slave pair with the correct initial window size.
+        // Setting the winsize here (before fork) ensures the child process sees
+        // the correct dimensions from TIOCGWINSZ on its very first query.
+        let winsize = Winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        let OpenptyResult { master, slave } = openpty(Some(&winsize), None)
             .map_err(|e| KuroError::Pty(format!("Failed to open PTY: {}", e)))?;
 
         // Create bounded channel for backpressure
@@ -162,18 +177,64 @@ impl Pty {
                 std::env::remove_var("TMUX");
                 std::env::remove_var("STY");
 
-                // Execute shell
+                // Set TERM so that readline/ncurses programs (bash, vim, etc.) know
+                // what escape sequences to use.  Without TERM set, bash readline will
+                // not handle cursor-movement keys correctly and may echo raw control
+                // characters such as ^B, ^F instead of moving the cursor.
+                std::env::set_var("TERM", "xterm-256color");
+                // COLORTERM signals 24-bit truecolor support to color-aware programs.
+                std::env::set_var("COLORTERM", "truecolor");
+                // Set COLUMNS and LINES so bash/readline uses the correct terminal
+                // dimensions even before it can call TIOCGWINSZ.  This is a belt-and-
+                // suspenders complement to passing winsize to openpty: some shells read
+                // these env vars first and only fall back to the ioctl if they are unset.
+                std::env::set_var("COLUMNS", cols.to_string());
+                std::env::set_var("LINES", rows.to_string());
+
+                // Set the window size on fd 0 (stdin = slave PTY) inside the child.
+                //
+                // Even though we already called openpty(Some(&winsize), ...) before
+                // the fork, calling TIOCSWINSZ again here on fd 0 is the most reliable
+                // guarantee that readline's very first TIOCGWINSZ call — which happens
+                // during terminal initialisation, before the shell's own SIGWINCH handler
+                // fires — returns non-zero columns.  Without this, some readline builds
+                // see 0 columns and permanently fall back to dumb/novis mode, causing
+                // C-b/C-f/C-e to be echoed as literal ^X characters instead of moving
+                // the cursor.
+                unsafe {
+                    let ws = libc::winsize {
+                        ws_row: rows,
+                        ws_col: cols,
+                        ws_xpixel: 0,
+                        ws_ypixel: 0,
+                    };
+                    libc::ioctl(0, libc::TIOCSWINSZ, &ws);
+                }
+
+                // Execute shell using the full absolute path validated above.
+                //
+                // We intentionally use execv (not execvp) so the kernel runs exactly
+                // the binary that validate_shell() resolved — e.g. /bin/bash — rather
+                // than whatever "bash" $PATH resolves to first (which on a Homebrew
+                // macOS system can be a different version at /opt/homebrew/bin/bash).
+                // Using argv[0] = basename keeps ps/top output readable.
+                let shell_full_cstr =
+                    std::ffi::CString::new(shell_path.to_str().ok_or_else(|| {
+                        KuroError::Pty("Shell path is not valid UTF-8".to_string())
+                    })?)
+                    .map_err(|e| KuroError::Pty(format!("Invalid shell path: {}", e)))?;
+
                 let shell_name = shell_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("sh");
-
-                let shell_cstr = std::ffi::CString::new(shell_name)
+                let shell_name_cstr = std::ffi::CString::new(shell_name)
                     .map_err(|e| KuroError::Pty(format!("Invalid shell name: {}", e)))?;
 
-                // execvp expects the program name and arguments as separate C strings
-                // First argument is the program name (argv[0])
-                nix::unistd::execvp(&shell_cstr, &[shell_cstr.as_c_str()])
+                // argv[0] = basename (e.g. "bash"), argv[1..] = empty (interactive login
+                // flags can be added here if needed, but the default is interactive mode
+                // because stdin is a TTY).
+                nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
                     .map_err(|e| KuroError::Pty(format!("Failed to exec shell: {}", e)))?;
 
                 // execvp should not return, but if it does, exit
@@ -204,6 +265,11 @@ impl Pty {
         }
 
         Ok(all_data)
+    }
+
+    /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
+    pub fn has_pending_data(&self) -> bool {
+        !self.receiver.is_empty()
     }
 
     /// Set PTY window size
@@ -282,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_pty_spawn() {
-        let pty = Pty::spawn("sh");
+        let pty = Pty::spawn("sh", 24, 80);
         assert!(pty.is_ok());
 
         let mut pty = pty.unwrap();
@@ -325,6 +391,100 @@ mod tests {
         assert!(
             result.is_err(),
             "python3 should be rejected (not in whitelist)"
+        );
+    }
+
+    // --- Regression tests: readline visual mode requires non-zero PTY dimensions ---
+    //
+    // Root cause of the C-b/C-f/C-e bug:
+    //   readline calls TIOCGWINSZ at startup. If it sees 0 columns it falls back to
+    //   dumb/novis mode and echoes control characters as literal ^X instead of moving
+    //   the cursor.  Two fixes prevent this:
+    //     1. Pass winsize to openpty() before fork.
+    //     2. Call TIOCSWINSZ on fd 0 inside the child after dup2.
+    //
+    // These tests verify the structural guarantees that make the fixes correct.
+
+    #[test]
+    fn test_spawn_with_nonzero_dimensions_succeeds() {
+        // Spawning with explicit non-zero rows/cols must succeed.
+        // This exercises the openpty(Some(&winsize), ...) path.
+        let pty = Pty::spawn("sh", 24, 80);
+        assert!(
+            pty.is_ok(),
+            "Pty::spawn with rows=24 cols=80 must succeed: {:?}",
+            pty.err()
+        );
+    }
+
+    #[test]
+    fn test_spawn_rows_cols_passed_through() {
+        // After spawn, the parent can immediately set_winsize to the same value
+        // without error — confirming the master fd is valid and TIOCSWINSZ works.
+        let pty = Pty::spawn("sh", 24, 80);
+        assert!(pty.is_ok());
+        let mut pty = pty.unwrap();
+        // This mirrors what kuro does on resize; it must not error.
+        assert!(
+            pty.set_winsize(24, 80).is_ok(),
+            "set_winsize on a freshly spawned PTY must succeed"
+        );
+    }
+
+    #[test]
+    fn test_validate_shell_returns_absolute_path() {
+        // validate_shell must return an absolute PathBuf so that execv uses
+        // the exact binary we validated, not whatever PATH finds first.
+        // Regression: previously execvp("bash", ...) was used, which could
+        // resolve to a different bash (e.g. Homebrew) than validate_shell chose.
+        let result = Pty::validate_shell("sh");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(
+            path.is_absolute(),
+            "validate_shell must return an absolute path, got: {:?}",
+            path
+        );
+    }
+
+    #[test]
+    fn test_validate_shell_bash_returns_absolute_path() {
+        // Same as above, specifically for bash.
+        if which::which("bash").is_ok() {
+            let result = Pty::validate_shell("bash");
+            assert!(result.is_ok());
+            let path = result.unwrap();
+            assert!(
+                path.is_absolute(),
+                "validate_shell('bash') must return an absolute path, got: {:?}",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn test_pty_tiocgwinsz_via_master_after_spawn() {
+        // After spawn, querying TIOCGWINSZ on the master must return the dimensions
+        // we requested.  This is the parent-side proof that openpty(Some(&winsize))
+        // correctly propagated the size.  If this returns 0×0, readline in the child
+        // will enter dumb mode.
+        use std::os::unix::io::AsRawFd;
+        let pty = Pty::spawn("sh", 42, 120);
+        assert!(pty.is_ok());
+        let pty = pty.unwrap();
+
+        let mut ws = libc::winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        let ret = unsafe { libc::ioctl(pty.as_raw_fd(), libc::TIOCGWINSZ, &mut ws) };
+        assert_eq!(ret, 0, "TIOCGWINSZ ioctl failed");
+        assert_eq!(ws.ws_row, 42, "ws_row must equal requested rows");
+        assert_eq!(
+            ws.ws_col, 120,
+            "ws_col must equal requested cols — 0 here would cause readline dumb mode"
         );
     }
 }

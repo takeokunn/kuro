@@ -25,20 +25,26 @@
    (t (error "Kuro: Unsupported platform: %s" system-type))))
 
 (defun kuro-module--find-library ()
-  "Find the kuro native module binary using 3-tier priority.
+  "Find the kuro native module binary using 4-tier priority.
 1. kuro-module-binary-path defcustom (user override)
-2. XDG standard path: ~/.local/share/kuro/
-3. Development fallback: relative to this .el file"
+2. KURO_MODULE_PATH environment variable (CI/dev override)
+3. XDG standard path: ~/.local/share/kuro/
+4. Development fallback: relative to this .el file"
   (let* ((ext (kuro-module--platform-extension))
          (lib-name (format "libkuro_core.%s" ext)))
     (cond
      ;; Tier 1: user-specified custom path
      ((and kuro-module-binary-path (file-exists-p kuro-module-binary-path))
       kuro-module-binary-path)
-     ;; Tier 2: XDG standard install path
+     ;; Tier 2: KURO_MODULE_PATH environment variable
+     ((let ((env-dir (getenv "KURO_MODULE_PATH")))
+        (and env-dir
+             (file-exists-p (expand-file-name lib-name env-dir))
+             (expand-file-name lib-name env-dir))))
+     ;; Tier 3: XDG standard install path
      ((file-exists-p (expand-file-name lib-name "~/.local/share/kuro/"))
       (expand-file-name lib-name "~/.local/share/kuro/"))
-     ;; Tier 3: development checkout (relative to this file).
+     ;; Tier 4: development checkout (relative to this file).
      ;; load-file-name is only set during the initial `load' call; after that
      ;; we fall back to locate-library so that batch-mode tests also work.
      (t

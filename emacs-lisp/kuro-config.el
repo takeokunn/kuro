@@ -175,10 +175,13 @@ Changes take effect immediately in all running Kuro buffers."
 
 ;;; Display Settings
 
-(defcustom kuro-frame-rate 30
+(defcustom kuro-frame-rate 60
   "Frame rate for terminal rendering in frames per second.
 Must be a positive integer (greater than zero).
-Changes take effect immediately by restarting the render loop."
+Changes take effect immediately by restarting the render loop.
+60 fps (≈16 ms between frames) matches modern terminal emulators such as kitty
+and wezterm.  The idle-timer mechanism in kuro--self-insert also triggers an
+immediate render after each keypress, so input echo is not limited by this rate."
   :type '(integer :tag "Positive integer (> 0)")
   :group 'kuro-display
   :set #'kuro--set-frame-rate)

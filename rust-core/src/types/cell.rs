@@ -19,13 +19,19 @@ pub enum CellWidth {
 /// Underline style for SGR 4:x sub-parameters
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum UnderlineStyle {
+    /// No underline (default)
     #[default]
     None,
-    Straight, // SGR 4 or 4:1
-    Double,   // SGR 4:2 (or SGR 21)
-    Curly,    // SGR 4:3 (undercurl)
-    Dotted,   // SGR 4:4
-    Dashed,   // SGR 4:5
+    /// Single straight line (SGR 4 or 4:1)
+    Straight,
+    /// Double line (SGR 4:2 or SGR 21)
+    Double,
+    /// Curly/wavy line (SGR 4:3, undercurl)
+    Curly,
+    /// Dotted line (SGR 4:4)
+    Dotted,
+    /// Dashed line (SGR 4:5)
+    Dashed,
 }
 
 /// SGR (Select Graphic Rendition) attributes for a cell

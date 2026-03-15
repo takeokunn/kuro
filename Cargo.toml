@@ -12,6 +12,7 @@ repository = "https://github.com/takeokunn/kuro"
 rust-version = "1.84.0"
 
 [workspace.dependencies]
+bitvec = "1.0"
 vte = "0.15.0"
 emacs = "0.19.0"
 unicode-width = "0.2"
@@ -24,3 +25,4 @@ which = "7.0"
 base64 = "0.22"
 png = "0.17"
 crossbeam-channel = "0.5"
+memchr = "2.7"

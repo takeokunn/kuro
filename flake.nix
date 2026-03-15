@@ -110,7 +110,7 @@ Manual testing in Emacs:
     --eval "(add-to-list 'load-path \"$PWD/emacs-lisp\")" \\
     --eval "(setenv \"KURO_MODULE_PATH\" \"$PWD/target/release\")" \\
     --eval "(require 'kuro)" \\
-    --eval "(kuro-create)"
+    --eval "(kuro-create \"/bin/bash\")"
 
 Phase 2 acceptance tests (run inside kuro buffer):
   echo "Hello World"              # Test 1: basic text output

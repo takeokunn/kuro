@@ -27,7 +27,7 @@ fn bench_grid_update(c: &mut Criterion) {
             b.iter(|| {
                 // Fill the entire screen with characters
                 for row in 0..rows {
-                    for col in 0..cols {
+                    for _col in 0..cols {
                         screen.print(black_box('A'), attrs, false);
                     }
                     // Return to start of line for next row

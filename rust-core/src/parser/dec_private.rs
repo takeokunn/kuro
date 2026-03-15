@@ -60,6 +60,9 @@ pub struct DecModes {
 
     /// Stack for push/pop keyboard flags (CSI > Ps u / CSI < u)
     pub keyboard_flags_stack: Vec<u32>,
+
+    /// SGR pixel mouse mode (?1016) — report mouse positions in pixels
+    pub mouse_pixel: bool,
 }
 
 impl Default for DecModes {
@@ -86,6 +89,7 @@ impl DecModes {
             cursor_shape: CursorShape::BlinkingBlock,
             keyboard_flags: 0,
             keyboard_flags_stack: Vec::new(),
+            mouse_pixel: false,
         }
     }
 
@@ -101,6 +105,7 @@ impl DecModes {
             2004 => self.bracketed_paste = true,
             1000 | 1002 | 1003 => self.mouse_mode = mode,
             1006 => self.mouse_sgr = true,
+            1016 => self.mouse_pixel = true,
             2026 => self.synchronized_output = true,
             _ => {}
         }
@@ -118,6 +123,7 @@ impl DecModes {
             2004 => self.bracketed_paste = false,
             1000 | 1002 | 1003 => self.mouse_mode = 0,
             1006 => self.mouse_sgr = false,
+            1016 => self.mouse_pixel = false,
             2026 => self.synchronized_output = false,
             _ => {}
         }
@@ -137,6 +143,7 @@ impl DecModes {
             1002 => Some(self.mouse_mode == 1002),
             1003 => Some(self.mouse_mode == 1003),
             1006 => Some(self.mouse_sgr),
+            1016 => Some(self.mouse_pixel),
             2026 => Some(self.synchronized_output),
             _ => None,
         }
@@ -180,6 +187,14 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
                 // Handle side effects for mode 1049 before resetting
                 if mode == 1049 && term.dec_modes.alternate_screen {
                     term.screen.switch_to_primary();
+                }
+
+                // Handle side effects for mode 2026 (Synchronized Output)
+                // When disabled, the terminal has finished batch-updating; force
+                // a full redraw so all changes accumulated during the sync period
+                // are rendered in a single coherent frame.
+                if mode == 2026 && term.dec_modes.synchronized_output {
+                    term.screen.mark_all_dirty();
                 }
 
                 term.dec_modes.reset_mode(mode);

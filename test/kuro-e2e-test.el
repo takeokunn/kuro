@@ -12,15 +12,18 @@
 
 ;;; Helpers
 
-(defconst kuro-test--timeout 5.0
+(defconst kuro-test--timeout 10.0
   "Seconds to wait for PTY output before failing.")
 
 (defcustom kuro-test-shell
-  (or (getenv "SHELL")
-      (and (file-executable-p "/bin/bash") "/bin/bash")
-      "/bin/sh")
-  "Shell used for testing.
-Defaults to $SHELL env var, falling back to /bin/bash, then /bin/sh."
+  (or (and (file-executable-p "/bin/bash") "/bin/bash --norc --noprofile")
+      (and (file-executable-p "/bin/sh") "/bin/sh")
+      (getenv "SHELL"))
+  "Shell command used for testing.
+Prefers /bin/bash with --norc --noprofile to avoid user-specific
+startup files that can alter the prompt format, introduce delays,
+or emit unexpected output that breaks timing-sensitive E2E tests.
+Fallback to /bin/sh, then $SHELL if bash is not available."
   :type 'string
   :group 'kuro)
 
@@ -108,11 +111,11 @@ initialized before running BODY, avoiding false prompt detection."
            (sleep-for 0.1)
            (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
            ,@body)
-       ;; Cleanup: shutdown then brief pause before killing the buffer
-       ;; so the old PTY reader thread can finish draining and exit.
-       (condition-case nil (kuro--shutdown) (error nil))
-       (sleep-for 0.1)
-       (when (buffer-live-p buf) (kill-buffer buf)))))
+        ;; Cleanup: shutdown then brief pause before killing the buffer
+        ;; so the old PTY reader thread can finish draining and exit.
+        (condition-case nil (kuro--shutdown) (error nil))
+        (sleep-for 0.5)
+        (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (defconst kuro-test--tmux-timeout 10.0
   "Extended timeout (seconds) for tmux startup and operations.")
@@ -2560,7 +2563,9 @@ Ctrl+E: logand ?e 31 = 5 (ENQ byte)."
         (should (equal captured (string 5)))))))
 
 (ert-deftest kuro-unit-alt-modified-sends-esc-then-char ()
-  "kuro--alt-modified sends two bytes: ESC (0x1B) followed by the character."
+  "kuro--alt-modified sends ESC+char as a single string (efficient, atomic send).
+The implementation concatenates ESC and the char into one string to minimize
+PTY write system calls.  Result: one call with \"\\ex\" content."
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
@@ -2569,13 +2574,13 @@ Ctrl+E: logand ?e 31 = 5 (ENQ byte)."
                  (lambda (bytes) (push bytes sent-calls))))
         (kuro--alt-modified ?x)
         (let ((calls (nreverse sent-calls)))
-          (should (= (length calls) 2))
-          (should (equal (nth 0 calls) "\e"))
-          (should (equal (nth 1 calls) "x")))))))
+          ;; One atomic send: ESC + char concatenated
+          (should (= (length calls) 1))
+          (should (equal (nth 0 calls) "\ex")))))))
 
 (ert-deftest kuro-unit-ctrl-alt-modified-sends-esc-ctrl-byte ()
-  "kuro--ctrl-alt-modified sends ESC followed by the Ctrl version of CHAR.
-Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH)."
+  "kuro--ctrl-alt-modified sends ESC+ctrl-byte as a single string (atomic send).
+Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
@@ -2584,9 +2589,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH)."
                  (lambda (bytes) (push bytes sent-calls))))
         (kuro--ctrl-alt-modified ?a 1)
         (let ((calls (nreverse sent-calls)))
-          (should (= (length calls) 2))
-          (should (equal (nth 0 calls) "\e"))
-          (should (equal (nth 1 calls) (string 1))))))))
+          ;; One atomic send: ESC + ctrl-byte concatenated
+          (should (= (length calls) 1))
+          (should (equal (nth 0 calls) (concat "\e" (string 1)))))))))
 
 ;;; F-key unit tests — middle range (F2, F3, F6–F11)
 

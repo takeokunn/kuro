@@ -293,3 +293,129 @@ fn test_scrollback_max_lines_respected() {
         "Full fetch should return more lines than partial"
     );
 }
+
+// -----------------------------------------------------------------------------
+// REGRESSION TESTS — SPC cursor movement
+//
+// Bug: encode_line() trimmed trailing spaces before passing the line text to
+// Emacs.  kuro--update-cursor computes the buffer position as:
+//
+//   (min (+ line-start col) line-end)
+//
+// After trimming, `line-end` was shorter than the cursor column when the
+// cursor was inside trailing whitespace, so the visual cursor was clamped
+// to the last non-space character.  Symptom: pressing SPC at a bash prompt
+// did not move the cursor.
+//
+// The fix: remove trailing-space trimming from encode_line and get_dirty_lines.
+// The tests below pin the correct behaviour at the TerminalCore level so that
+// any future regression is caught before it reaches the Emacs render layer.
+// -----------------------------------------------------------------------------
+
+/// A single SPC byte must advance the cursor one column to the right.
+///
+/// This is the minimal reproduction of the original bug:
+///   1. kuro sends 0x20 to the PTY.
+///   2. The shell echoes 0x20 back.
+///   3. VTE calls screen.print(' ') → cursor_col += 1.
+/// If encode_line trimmed the space away, the Emacs buffer line became empty,
+/// causing kuro--update-cursor to clamp the cursor back to col 0.
+#[test]
+fn test_spc_advances_cursor_rightward() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b" ");
+    assert_eq!(
+        term.cursor_col(),
+        1,
+        "cursor col must be 1 after a single SPC — \
+         regression: trailing-space trimming must not discard the echoed space"
+    );
+    // The cell at column 0 must contain a space, not a default/empty cell.
+    let cell = term.get_cell(0, 0).expect("cell (0,0) must exist");
+    assert_eq!(
+        cell.char(),
+        ' ',
+        "cell (0,0) must be ' ' after advancing through a space"
+    );
+}
+
+/// After text followed by a trailing space, cursor lands after the space.
+///
+/// Simulates the typical bash readline echo of "echo hello ":
+///   - 10 chars of "echo hello"
+///   - 1 trailing space typed by the user
+/// The cursor must land at col 11, not col 10 (the trimmed position).
+#[test]
+fn test_cursor_lands_after_trailing_space() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"echo hello ");
+    assert_eq!(
+        term.cursor_col(),
+        11,
+        "cursor col must be 11 after 'echo hello ' \
+         (10 non-space chars + 1 trailing space)"
+    );
+}
+
+/// Multiple consecutive spaces must each advance the cursor.
+#[test]
+fn test_multiple_trailing_spaces_advance_cursor() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"AB   "); // 2 non-space + 3 trailing spaces
+    assert_eq!(
+        term.cursor_col(),
+        5,
+        "cursor col must be 5 after 'AB   ' (2 chars + 3 trailing spaces)"
+    );
+}
+
+/// Backspace after a space must move the cursor back.
+///
+/// Guards the cursor movement round-trip:
+///   SPC → cursor right, BS → cursor left.
+/// If SPC didn't advance the cursor, BS from the wrong position would
+/// compound the error.
+#[test]
+fn test_backspace_after_space_moves_cursor_left() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"A "); // 'A' at col 0, space at col 1 → cursor at 2
+    assert_eq!(term.cursor_col(), 2, "cursor must be at col 2 after 'A '");
+    term.advance(b"\x08"); // BS → cursor back to col 1
+    assert_eq!(
+        term.cursor_col(),
+        1,
+        "cursor must be at col 1 after backspace"
+    );
+}
+
+/// C-b (0x02), C-f (0x06), C-e (0x05) must NOT write printable characters.
+///
+/// These bytes are C0 control characters handled by VTE's `execute` callback,
+/// not `print`.  If they leaked into the cell grid as printable glyphs, it
+/// would mean the PTY is echoing them as the two-char sequences "^B"/"^F"/"^E"
+/// (ECHOCTL mode), which indicates readline is in dumb-terminal mode due to
+/// the PTY window size being 0×0 at shell startup.
+///
+/// At the TerminalCore level these bytes are not printable, so cells stay
+/// empty and the cursor stays at col 0.
+#[test]
+fn test_control_chars_do_not_print_visible_glyphs() {
+    let mut term = TerminalCore::new(24, 80);
+    // Feed raw C-b, C-f, C-e (as the terminal core would see them from the PTY
+    // when readline is operating correctly and does NOT echo them as ^X).
+    term.advance(&[0x02, 0x06, 0x05]);
+    assert_eq!(
+        term.cursor_col(),
+        0,
+        "C-b/C-f/C-e must not advance the cursor — they are control chars, not printable"
+    );
+    // All cells on row 0 must be default (space) — no "^B", "^F", "^E" glyphs.
+    for col in 0..5 {
+        let cell = term.get_cell(0, col).expect("cell must exist");
+        assert_eq!(
+            cell.char(),
+            ' ',
+            "cell (0,{col}) must be a space — control chars must not write glyphs"
+        );
+    }
+}

@@ -45,7 +45,7 @@ pub enum ClipboardAction {
 }
 
 /// OSC data storage
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OscData {
     /// Current working directory from OSC 7
     pub cwd: Option<String>,
@@ -65,4 +65,26 @@ pub struct OscData {
     pub default_bg: Option<Color>,
     /// Cursor color from OSC 12
     pub cursor_color: Option<Color>,
+    /// 256-color palette overrides from OSC 4 (index → [R,G,B] or None=unset)
+    pub palette: Vec<Option<[u8; 3]>>,
+    /// Pending default-color-change notifications for FFI (fg, bg, cursor)
+    pub default_colors_dirty: bool,
+}
+
+impl Default for OscData {
+    fn default() -> Self {
+        Self {
+            cwd: None,
+            cwd_dirty: false,
+            hyperlink: HyperlinkState::default(),
+            clipboard_actions: Vec::new(),
+            prompt_marks: Vec::new(),
+            palette_dirty: false,
+            default_fg: None,
+            default_bg: None,
+            cursor_color: None,
+            palette: vec![None; 256],
+            default_colors_dirty: false,
+        }
+    }
 }

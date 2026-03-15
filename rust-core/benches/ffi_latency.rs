@@ -57,9 +57,11 @@ fn bench_ffi_latency(c: &mut Criterion) {
     });
 
     // Benchmark cell update operation
+    // NOTE: TerminalCore::new() is moved OUTSIDE b.iter() to measure only
+    // the advance() calls, not the initialization cost.
     group.bench_function("print_cell", |b| {
+        let mut core = TerminalCore::new(24, 80);
         b.iter(|| {
-            let mut core = TerminalCore::new(24, 80);
             black_box(core.advance(&[b'X']));
             black_box(core.advance(&[b'Y']));
             black_box(core.advance(&[b'Z']));

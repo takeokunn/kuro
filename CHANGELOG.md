@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ESC M (RI — Reverse Index)**: moves cursor up one line; scrolls down when at top of scroll region. Enables correct `less`, `man`, and vim reverse-scroll behavior.
+- **ESC D (IND — Index)**: moves cursor down one line, scrolling up at bottom of scroll region. Completes the vertical motion ESC set.
+- **ESC E (NEL — Next Line)**: combined CR+LF in a single escape sequence. Required for correct ANSI compliance.
+- `KURO_MODULE_PATH` environment variable support (Tier 2 in 4-tier module discovery): enables CI and development override without `make install`.
+- `test/vttest-compliance.sh`: runs VTE compliance tests and reports pass rate against 80% target (no PTY required).
+- `test/bench-validate.sh`: runs criterion benchmarks and validates >100 MB/s parse throughput target.
+- `make test-safe`: new Makefile target running only unit tests that are safe inside tmux/opencode sessions (no PTY spawning).
+- `make vttest-compliance`: convenience target for VTE compliance check.
+- `make bench-validate`: convenience target for throughput benchmark validation.
+- 11 new VTE compliance tests in `vt_compliance.rs`: RI, IND, NEL, scroll region restriction, HVP, ED3 (erase scrollback), SGR invisible/strikethrough, CUP boundary clamping, IL/DL operations.
+- 5 new property-based tests in `lib.rs` proptest block: SGR reset invariant, CUP boundary clamping, ESC M no-panic, large input cursor bounds, combined attribute reset.
+- 5 new unit tests for ESC M/D/E edge cases (no-underflow, scroll at top, basic movement).
+
+### Fixed
+
+- Removed `tmux kill-session` trap from `test/run-e2e.sh` that could kill the user's outer tmux session.
+- 23 Clippy warnings (`needless_borrows_for_generic_args`, `op_ref`) fixed across `bridge.rs` and `lib.rs`.
+- Code formatting applied via `cargo fmt`.
+
 ## [1.0.0] - 2026-03-01
 
 ### Added

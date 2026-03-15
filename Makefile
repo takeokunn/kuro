@@ -1,4 +1,4 @@
-.PHONY: all build test clean install lint fmt check
+.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate
 
 # Variables
 CARGO = cargo
@@ -35,6 +35,23 @@ test:
 # Run E2E tests (requires built module)
 test-e2e: build
 	bash test/run-e2e.sh
+
+# Run safe unit tests only (no PTY, no tmux — safe inside tmux/opencode sessions)
+test-safe:
+	$(CARGO) test --workspace
+	emacs -Q --batch \
+	  -L emacs-lisp -L test \
+	  --eval "(require 'kuro-config)" \
+	  --eval "(require 'kuro-config-test)" \
+	  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
+
+# VTE compliance check (Rust-only, no PTY required)
+vttest-compliance:
+	bash test/vttest-compliance.sh
+
+# Benchmark validation (checks >100MB/s parse rate)
+bench-validate:
+	bash test/bench-validate.sh
 
 # Run all tests
 test-all: test test-e2e

@@ -47,6 +47,22 @@ fn generate_vte_output(size_mb: usize) -> Vec<u8> {
     output
 }
 
+/// Generate plain text output (no escape sequences) to test memchr fast path
+fn generate_plain_text(size_mb: usize) -> Vec<u8> {
+    // Repeat a pattern that fills a line nicely
+    let pattern = b"Hello, World! This is plain text for parser benchmarking. ";
+    let pattern_len = pattern.len();
+    let target_size = size_mb * 1024 * 1024;
+
+    let repeats = target_size / pattern_len + 1;
+    let mut output: Vec<u8> = Vec::with_capacity(target_size);
+    for _ in 0..repeats {
+        output.extend_from_slice(pattern);
+    }
+    output.truncate(target_size);
+    output
+}
+
 /// Benchmark VTE parser throughput with different input sizes
 fn bench_parser_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_throughput");
@@ -69,5 +85,33 @@ fn bench_parser_throughput(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_parser_throughput);
+/// Benchmark plain text throughput (memchr fast path - no escape sequences)
+/// This tests the optimization added in Wave 4 where we skip the APC pre-scanner
+/// when no ESC bytes are present in the buffer.
+fn bench_plain_text_throughput(c: &mut Criterion) {
+    let mut group = c.benchmark_group("plain_text_throughput");
+
+    // Test with different input sizes: 1MB, 5MB, 10MB
+    for size_mb in [1, 5, 10].iter() {
+        let output = generate_plain_text(*size_mb);
+
+        group.throughput(Throughput::Bytes(output.len() as u64));
+
+        group.bench_with_input(format!("{}MB", size_mb), size_mb, |b, &_size_mb| {
+            let mut term = TerminalCore::new(24, 80);
+
+            b.iter(|| {
+                term.advance(black_box(&output));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_parser_throughput,
+    bench_plain_text_throughput
+);
 criterion_main!(benches);

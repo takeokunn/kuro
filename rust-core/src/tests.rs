@@ -582,13 +582,34 @@ fn test_combining_char_attached_to_base() {
 }
 
 #[test]
-fn test_combining_char_at_col_zero_discarded() {
+fn test_combining_char_at_col_zero_printed_standalone() {
     let mut term = TerminalCore::new(24, 80);
     // Send combining char at position (0,0) with no previous cell
     term.advance("\u{0301}".as_bytes());
-    // Should not panic; cell at (0,0) should still be default space
+    // Should not panic; cell at (0,0) should contain the combining char as standalone
     let cell = term.get_cell(0, 0).unwrap();
-    assert_eq!(cell.grapheme.as_str(), " ");
+    assert_eq!(cell.grapheme.as_str(), "\u{0301}");
+}
+
+#[test]
+fn test_combining_char_attaches_to_previous_row_last_col() {
+    // When cursor is at col=0 of row>0, a combining char should attach to the
+    // last cell of the previous row (not be discarded or printed standalone).
+    let mut term = TerminalCore::new(24, 80);
+    // Print 'e' at end of row 0 (col 79), then move cursor to row 1 col 0
+    term.advance(b"\x1b[1;80H"); // CSI 1;80H -> row 0, col 79 (1-indexed)
+    term.advance(b"e");
+    // Cursor is now at row 0, col 79 (after printing 'e' auto-wrap is pending)
+    // Move to row 1, col 0
+    term.advance(b"\x1b[2;1H");
+    // Send combining acute accent — should attach to 'e' at (row=0, col=79)
+    term.advance("\u{0301}".as_bytes());
+    let cell = term.get_cell(0, 79).unwrap();
+    assert_eq!(
+        cell.grapheme.as_str(),
+        "e\u{0301}",
+        "Combining char should attach to 'e' at previous row's last col"
+    );
 }
 
 #[test]

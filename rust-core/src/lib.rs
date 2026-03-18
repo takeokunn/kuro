@@ -71,6 +71,8 @@ pub struct TerminalCore {
     pub(crate) saved_cursor: Option<types::Cursor>,
     /// Saved SGR attributes for DECSC/DECRC (ESC 7 / ESC 8)
     pub(crate) saved_attrs: Option<types::cell::SgrAttributes>,
+    /// Saved primary screen SGR attributes (for DEC mode 1049 restore)
+    pub(crate) saved_primary_attrs: Option<types::cell::SgrAttributes>,
     /// APC byte-stream state machine for Kitty Graphics pre-scanning
     pub(crate) apc_state: ApcScanState,
     /// Accumulation buffer for the current APC payload (cleared on each new APC)
@@ -100,6 +102,7 @@ impl TerminalCore {
             pending_responses: Vec::new(),
             saved_cursor: None,
             saved_attrs: None,
+            saved_primary_attrs: None,
             apc_state: ApcScanState::Idle,
             apc_buf: Vec::new(),
             kitty_chunk: None,
@@ -277,6 +280,8 @@ impl TerminalCore {
         // Reset Kitty keyboard protocol flags
         self.dec_modes.keyboard_flags = 0;
         self.dec_modes.keyboard_flags_stack.clear();
+        // Clear alt-screen SGR snapshot so a subsequent ?1049l cannot restore stale attrs
+        self.saved_primary_attrs = None;
         // Note: does NOT clear scrollback, does NOT switch screens, does NOT clear screen
     }
 
@@ -293,6 +298,7 @@ impl TerminalCore {
         // Clear saved cursor state
         self.saved_cursor = None;
         self.saved_attrs = None;
+        self.saved_primary_attrs = None;
         // Reset DEC private modes to correct terminal defaults
         self.dec_modes = DecModes::new();
         // Reset tab stops to every 8th column

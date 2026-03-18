@@ -64,14 +64,16 @@ Buffer-local so that multiple kuro buffers each track their own
 session state independently.  When nil, all FFI calls are suppressed.")
 (put 'kuro--initialized 'permanent-local t)
 
-(defvar-local kuro--col-to-buf nil
-  "Vector mapping grid column index → buffer char offset for the current frame.
-Updated each render cycle from `kuro--poll-updates-with-faces'.
-Used by `kuro--update-cursor' to translate the terminal cursor column
-(which counts grid columns including wide-char placeholders) to the
-corresponding Emacs buffer character offset (which skips wide placeholders).
-nil means no mapping available; fall back to col = buf-offset (ASCII-only).")
-(put 'kuro--col-to-buf 'permanent-local t)
+(defvar-local kuro--col-to-buf-map (make-hash-table :test 'eql)
+  "Per-row mapping of grid column → buffer char offset.
+Each key is a row number (integer), each value is a vector mapping
+grid column index to buffer character offset.")
+(put 'kuro--col-to-buf-map 'permanent-local t)
+
+(defvar-local kuro--resize-pending nil
+  "Non-nil when a resize event is pending from the window-size-change hook.
+Value is a (NEW-ROWS . NEW-COLS) cons cell, or nil when no resize is pending.")
+(put 'kuro--resize-pending 'permanent-local t)
 
 ;;; Core dispatch macro
 
@@ -143,8 +145,10 @@ Returns a list of (ROW . TEXT) pairs for dirty lines."
 ;;;###autoload
 (defun kuro--poll-updates-with-faces ()
   "Poll for terminal updates with face information.
-Returns a list of ((ROW . TEXT) . FACE-RANGES) where FACE-RANGES is
-a list of (START-COL END-COL FG BG FLAGS) for each text segment."
+Returns (DIRTY-LINES . COL-TO-BUF-VECTOR) where DIRTY-LINES is a list
+of ((ROW . TEXT) . FACE-RANGES) and COL-TO-BUF-VECTOR is a vector mapping
+grid columns to buffer character offsets.  FACE-RANGES is a list of
+\(START-COL END-COL FG BG FLAGS) for each text segment."
   (kuro--call nil (kuro-core-poll-updates-with-faces)))
 
 ;;;###autoload

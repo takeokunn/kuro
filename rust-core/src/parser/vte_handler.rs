@@ -23,7 +23,9 @@ impl vte::Perform for TerminalCore {
                 let last_col = self.screen.cols().saturating_sub(1) as usize;
                 (prev_row, last_col)
             } else {
-                // No previous cell available; discard
+                // No previous cell available; print as standalone character
+                self.screen
+                    .print(c, self.current_attrs, self.dec_modes.auto_wrap);
                 return;
             };
             self.screen.attach_combining(row, col, c);

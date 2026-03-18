@@ -175,6 +175,11 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
 
                 // Handle side effects for mode 1049 (alternate screen)
                 if mode == 1049 {
+                    // Save SGR attributes before entering alternate screen.
+                    // Applications like vim/htop set colors before entering the alt screen;
+                    // without saving/restoring, the primary screen would inherit those colors
+                    // when the application exits.
+                    term.saved_primary_attrs = Some(term.current_attrs);
                     term.screen.switch_to_alternate();
                 }
             } else {
@@ -187,6 +192,11 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
                 // Handle side effects for mode 1049 before resetting
                 if mode == 1049 && term.dec_modes.alternate_screen {
                     term.screen.switch_to_primary();
+                    // Restore SGR attributes saved when entering alternate screen.
+                    // .take() ensures the saved state is consumed and cannot be restored twice.
+                    if let Some(attrs) = term.saved_primary_attrs.take() {
+                        term.current_attrs = attrs;
+                    }
                 }
 
                 // Handle side effects for mode 2026 (Synchronized Output)
@@ -500,6 +510,50 @@ mod tests {
         assert_eq!(modes.get_mode(6), Some(true));
         assert_eq!(modes.get_mode(1004), Some(true));
         assert_eq!(modes.get_mode(2026), Some(true));
+    }
+
+    #[test]
+    fn test_alt_screen_saves_and_restores_sgr_attrs() {
+        use crate::types::{Color, NamedColor};
+
+        let mut term = crate::TerminalCore::new(5, 10);
+
+        // Set bold and foreground color
+        term.current_attrs.bold = true;
+        term.current_attrs.foreground = Color::Named(NamedColor::Red);
+
+        // Enter alternate screen (CSI ? 1049 h)
+        term.advance(b"\x1b[?1049h");
+
+        // Verify saved_primary_attrs is Some
+        assert!(
+            term.saved_primary_attrs.is_some(),
+            "saved_primary_attrs should be Some after entering alt screen"
+        );
+
+        // Change attrs while in alternate screen
+        term.current_attrs.bold = false;
+        term.current_attrs.foreground = Color::Named(NamedColor::Green);
+
+        // Exit alternate screen (CSI ? 1049 l)
+        term.advance(b"\x1b[?1049l");
+
+        // Original attrs should be restored
+        assert!(
+            term.current_attrs.bold,
+            "bold should be restored to true after exiting alt screen"
+        );
+        assert_eq!(
+            term.current_attrs.foreground,
+            Color::Named(NamedColor::Red),
+            "foreground should be restored to Red after exiting alt screen"
+        );
+
+        // saved_primary_attrs should be consumed (None after take())
+        assert!(
+            term.saved_primary_attrs.is_none(),
+            "saved_primary_attrs should be None after exiting alt screen (consumed by take())"
+        );
     }
 
     proptest! {

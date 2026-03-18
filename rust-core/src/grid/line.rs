@@ -1,6 +1,6 @@
 //! Line type representing a single row in the terminal screen
 
-use super::super::types::{Cell, SgrAttributes};
+use crate::types::{Cell, Color, SgrAttributes};
 use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -66,6 +66,17 @@ impl Line {
     pub fn clear(&mut self) {
         for cell in &mut self.cells {
             *cell = Cell::default();
+        }
+        self.is_dirty = true;
+    }
+
+    /// Clear all cells, setting background to specified color.
+    /// Implements Background Color Erase (BCE) per VT220: erased cells
+    /// receive the given background color rather than the terminal default.
+    pub fn clear_with_bg(&mut self, bg: Color) {
+        for cell in &mut self.cells {
+            *cell = Cell::default();
+            cell.attrs.background = bg;
         }
         self.is_dirty = true;
     }

@@ -1,4 +1,11 @@
 //! Erase operations (ED and EL sequences)
+//!
+//! All erase operations implement BCE (Background Color Erase) per the VT220
+//! specification: erased cells receive the current SGR background color, not
+//! the default background.
+
+use crate::types::cell::CellWidth;
+use crate::types::Cell;
 
 /// Handle erase sequences
 ///
@@ -32,14 +39,24 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
 
     let row = term.screen.cursor().row;
     let col = term.screen.cursor().col;
+    // BCE: erased cells inherit the current SGR background color
+    let bg = term.current_attrs.background;
 
     match mode {
         0 => {
             // Erase from cursor to end of screen
             // First, erase from cursor to end of current line
             if let Some(line) = term.screen.get_line_mut(row) {
-                for c in col..line.cells.len() {
-                    line.cells[c] = Default::default();
+                // Wide pair safety: if start lands on a Wide placeholder, also erase its Full partner
+                let erase_start =
+                    if col > 0 && col < line.cells.len() && line.cells[col].width == CellWidth::Wide {
+                        col - 1
+                    } else {
+                        col
+                    };
+                for c in erase_start..line.cells.len() {
+                    line.cells[c] = Cell::default();
+                    line.cells[c].attrs.background = bg;
                 }
             }
             term.screen.mark_line_dirty(row);
@@ -47,7 +64,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
             // Then erase all lines below
             for r in (row + 1)..term.screen.rows() as usize {
                 if let Some(line) = term.screen.get_line_mut(r) {
-                    line.clear();
+                    line.clear_with_bg(bg);
                 }
                 term.screen.mark_line_dirty(r);
             }
@@ -57,15 +74,23 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
             // First, erase all lines above
             for r in 0..row {
                 if let Some(line) = term.screen.get_line_mut(r) {
-                    line.clear();
+                    line.clear_with_bg(bg);
                 }
                 term.screen.mark_line_dirty(r);
             }
 
             // Then erase from start of cursor line to cursor
             if let Some(line) = term.screen.get_line_mut(row) {
-                for c in 0..=col {
-                    line.cells[c] = Default::default();
+                // Wide pair safety: if end lands on a Full cell, also erase its Wide partner
+                let erase_end =
+                    if col + 1 < line.cells.len() && line.cells[col].width == CellWidth::Full {
+                        col + 2
+                    } else {
+                        col + 1
+                    };
+                for c in 0..erase_end {
+                    line.cells[c] = Cell::default();
+                    line.cells[c].attrs.background = bg;
                 }
             }
             term.screen.mark_line_dirty(row);
@@ -74,7 +99,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
             // Erase entire screen
             for r in 0..term.screen.rows() as usize {
                 if let Some(line) = term.screen.get_line_mut(r) {
-                    line.clear();
+                    line.clear_with_bg(bg);
                 }
             }
             term.screen.mark_all_dirty();
@@ -107,24 +132,42 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
 
     let col = term.screen.cursor().col;
     let row = term.screen.cursor().row;
+    // BCE: erased cells inherit the current SGR background color
+    let bg = term.current_attrs.background;
 
     if let Some(line) = term.screen.get_line_mut(row) {
         match mode {
             0 => {
                 // Erase from cursor to end of line
-                for c in col..line.cells.len() {
-                    line.cells[c] = Default::default();
+                // Wide pair safety: if start lands on a Wide placeholder, also erase its Full partner
+                let erase_start =
+                    if col > 0 && col < line.cells.len() && line.cells[col].width == CellWidth::Wide {
+                        col - 1
+                    } else {
+                        col
+                    };
+                for c in erase_start..line.cells.len() {
+                    line.cells[c] = Cell::default();
+                    line.cells[c].attrs.background = bg;
                 }
             }
             1 => {
                 // Erase from start of line to cursor (including cursor)
-                for c in 0..=col {
-                    line.cells[c] = Default::default();
+                // Wide pair safety: if end lands on a Full cell, also erase its Wide partner
+                let erase_end =
+                    if col + 1 < line.cells.len() && line.cells[col].width == CellWidth::Full {
+                        col + 2
+                    } else {
+                        col + 1
+                    };
+                for c in 0..erase_end {
+                    line.cells[c] = Cell::default();
+                    line.cells[c].attrs.background = bg;
                 }
             }
             2 => {
                 // Erase entire line
-                line.clear();
+                line.clear_with_bg(bg);
             }
             _ => {}
         }
@@ -135,6 +178,7 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::cell::CellWidth;
     use crate::types::{Cell, Color, NamedColor, SgrAttributes};
 
     #[test]
@@ -280,9 +324,8 @@ mod tests {
             }
         }
 
-        // ED mode 2: entire screen
-        let params = vte::Params::default();
-        csi_ed(&mut term, &params);
+        // ED mode 2: entire screen (CSI 2 J)
+        term.advance(b"\x1b[2J");
 
         // All rows should be cleared
         for r in 0..3 {
@@ -417,29 +460,96 @@ mod tests {
     }
 
     #[test]
-    fn test_erase_preserves_default_colors() {
+    fn test_erase_with_default_bg_preserves_default() {
         let mut term = crate::TerminalCore::new(5, 10);
-
-        // Set non-default foreground color
-        let mut attrs = SgrAttributes::default();
-        attrs.foreground = Color::Named(NamedColor::Red);
-        term.current_attrs = attrs;
-
-        // Print character with red color
-        term.screen.print('A', attrs, true);
-
-        // Move cursor back
+        // No background color set (default attrs)
+        term.screen.print('A', SgrAttributes::default(), true);
         term.screen.move_cursor(0, 0);
-
-        // Erase the line
         let params = vte::Params::default();
         csi_el(&mut term, &params);
-
-        // Erased cell should have default colors
         let line = term.screen.get_line(0).unwrap();
         assert_eq!(line.cells[0].char(), ' ');
-        assert_eq!(line.cells[0].attrs.foreground, Color::Default);
         assert_eq!(line.cells[0].attrs.background, Color::Default);
+    }
+
+    #[test]
+    fn test_erase_with_colored_bg_applies_bce() {
+        let mut term = crate::TerminalCore::new(5, 10);
+        let mut attrs = SgrAttributes::default();
+        attrs.background = Color::Named(NamedColor::Blue);
+        term.current_attrs = attrs;
+        term.screen.print('A', attrs, true);
+        term.screen.move_cursor(0, 0);
+        let params = vte::Params::default();
+        csi_el(&mut term, &params);
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(line.cells[0].char(), ' ');
+        assert_eq!(line.cells[0].attrs.background, Color::Named(NamedColor::Blue));
+    }
+
+    #[test]
+    fn test_ed_with_colored_bg_applies_bce() {
+        let mut term = crate::TerminalCore::new(5, 10);
+
+        // Fill screen with content
+        for r in 0..5 {
+            for c in 0..10 {
+                if let Some(line) = term.screen.get_line_mut(r) {
+                    line.update_cell_with(c, Cell::new('X'));
+                }
+            }
+        }
+
+        // Move cursor to row 2, col 0
+        term.screen.move_cursor(2, 0);
+
+        // Set a non-default background color
+        term.current_attrs.background = Color::Named(NamedColor::Blue);
+
+        // ED mode 0: erase from cursor to end of screen (CSI J)
+        term.advance(b"\x1b[J");
+
+        // Rows 2-4 (erased) should have Blue background
+        for r in 2..5 {
+            let line = term.screen.get_line(r).unwrap();
+            for c in 0..10 {
+                assert_eq!(
+                    line.cells[c].attrs.background,
+                    Color::Named(NamedColor::Blue),
+                    "Row {} col {} should have Blue background after ED",
+                    r,
+                    c
+                );
+                assert_eq!(
+                    line.cells[c].char(),
+                    ' ',
+                    "Row {} col {} should be cleared",
+                    r,
+                    c
+                );
+            }
+        }
+
+        // Rows above cursor (0-1) should retain original default background
+        for r in 0..2 {
+            let line = term.screen.get_line(r).unwrap();
+            for c in 0..10 {
+                assert_eq!(
+                    line.cells[c].char(),
+                    'X',
+                    "Row {} col {} should still be 'X'",
+                    r,
+                    c
+                );
+                assert_eq!(
+                    line.cells[c].attrs.background,
+                    Color::Default,
+                    "Row {} col {} should retain default background",
+                    r,
+                    c
+                );
+            }
+        }
     }
 
     #[test]
@@ -476,5 +586,246 @@ mod tests {
         // All lines should be dirty
         let dirty = term.screen.take_dirty_lines();
         assert!(dirty.len() > 0);
+    }
+
+    #[test]
+    fn test_el_mode0_splits_wide_char() {
+        // EL mode 0 starting at the Wide placeholder of a CJK character should
+        // also erase the Full partner cell.
+        let mut term = crate::TerminalCore::new(5, 20);
+        // Print a wide character at columns 0-1 (Full + Wide)
+        term.screen.print('\u{65E5}', SgrAttributes::default(), true); // '日'
+        // Verify setup: col 0 is Full, col 1 is Wide
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(line.cells[0].width, CellWidth::Full);
+        assert_eq!(line.cells[1].width, CellWidth::Wide);
+
+        // Move cursor to column 1 (the Wide placeholder)
+        term.screen.move_cursor(0, 1);
+
+        // EL mode 0: erase from cursor to end of line
+        let params = vte::Params::default();
+        csi_el(&mut term, &params);
+
+        // Both cells 0 and 1 should be cleared
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(
+            line.cells[0].char(),
+            ' ',
+            "Full cell (col 0) should be cleared when its Wide partner is erased"
+        );
+        assert_eq!(line.cells[0].width, CellWidth::Half);
+        assert_eq!(
+            line.cells[1].char(),
+            ' ',
+            "Wide cell (col 1) should be cleared"
+        );
+        assert_eq!(line.cells[1].width, CellWidth::Half);
+    }
+
+    #[test]
+    fn test_el_mode1_splits_wide_char() {
+        // EL mode 1 ending at the Full cell of a CJK character should
+        // also erase the Wide partner cell.
+        let mut term = crate::TerminalCore::new(5, 20);
+        // Print some filler then a wide character at columns 4-5
+        for c in 0..4 {
+            if let Some(line) = term.screen.get_line_mut(0) {
+                line.update_cell_with(c, Cell::new('A'));
+            }
+        }
+        term.screen.move_cursor(0, 4);
+        term.screen.print('\u{65E5}', SgrAttributes::default(), true); // '日'
+        // Verify setup: col 4 is Full, col 5 is Wide
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(line.cells[4].width, CellWidth::Full);
+        assert_eq!(line.cells[5].width, CellWidth::Wide);
+
+        // Move cursor to column 4 (the Full cell)
+        term.screen.move_cursor(0, 4);
+
+        // EL mode 1: erase from start of line to cursor
+        term.advance(b"\x1b[1K");
+
+        // Cells 0-5 should all be cleared (0-4 by the erase range, 5 as the Wide partner)
+        let line = term.screen.get_line(0).unwrap();
+        for c in 0..=5 {
+            assert_eq!(
+                line.cells[c].char(),
+                ' ',
+                "Column {} should be cleared",
+                c
+            );
+            assert_eq!(
+                line.cells[c].width,
+                CellWidth::Half,
+                "Column {} should be Half width after clearing",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn test_ed_mode0_splits_wide_char() {
+        // ED mode 0 starting at the Wide placeholder should also erase the Full partner
+        let mut term = crate::TerminalCore::new(3, 20);
+        term.screen.print('\u{65E5}', SgrAttributes::default(), true);
+        term.screen.move_cursor(0, 1); // on the Wide placeholder
+
+        let params = vte::Params::default();
+        csi_ed(&mut term, &params);
+
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(line.cells[0].char(), ' ', "Full cell should be cleared by ED mode 0");
+        assert_eq!(line.cells[0].width, CellWidth::Half);
+    }
+
+    #[test]
+    fn test_ed_mode1_splits_wide_char() {
+        // ED mode 1 ending at the Full cell should also erase the Wide partner
+        let mut term = crate::TerminalCore::new(3, 20);
+        term.screen.move_cursor(0, 4);
+        term.screen.print('\u{65E5}', SgrAttributes::default(), true);
+        term.screen.move_cursor(0, 4); // on the Full cell
+
+        term.advance(b"\x1b[1J");
+
+        let line = term.screen.get_line(0).unwrap();
+        assert_eq!(line.cells[5].char(), ' ', "Wide partner should be cleared by ED mode 1");
+        assert_eq!(line.cells[5].width, CellWidth::Half);
+    }
+
+    #[test]
+    fn test_el_mode1_with_colored_bg_applies_bce() {
+        // EL mode 1 (erase from start of line to cursor) should use the current SGR background.
+        let mut term = crate::TerminalCore::new(5, 10);
+        let mut attrs = SgrAttributes::default();
+        attrs.background = Color::Named(NamedColor::Red);
+        term.current_attrs = attrs;
+
+        // Fill row 2 with content, then erase from start to col 5
+        let row = 2;
+        for c in 0..10 {
+            if let Some(line) = term.screen.get_line_mut(row) {
+                line.update_cell_with(c, Cell::new('Q'));
+            }
+        }
+        term.screen.move_cursor(row, 5);
+        term.advance(b"\x1b[1K");
+
+        let line = term.screen.get_line(row).unwrap();
+        // Cells 0..=5 should be cleared with Red background (BCE)
+        for c in 0..=5 {
+            assert_eq!(
+                line.cells[c].attrs.background,
+                Color::Named(NamedColor::Red),
+                "EL mode 1: col {} should have Red background",
+                c
+            );
+            assert_eq!(line.cells[c].char(), ' ');
+        }
+        // Cells 6-9 should be untouched ('Q' with default background)
+        for c in 6..10 {
+            assert_eq!(line.cells[c].char(), 'Q');
+        }
+    }
+
+    #[test]
+    fn test_el_mode2_with_colored_bg_applies_bce() {
+        // EL mode 2 (erase entire line) should use the current SGR background.
+        let mut term = crate::TerminalCore::new(5, 10);
+        let mut attrs = SgrAttributes::default();
+        attrs.background = Color::Named(NamedColor::Green);
+        term.current_attrs = attrs;
+
+        let row = 1;
+        for c in 0..10 {
+            if let Some(line) = term.screen.get_line_mut(row) {
+                line.update_cell_with(c, Cell::new('P'));
+            }
+        }
+        term.screen.move_cursor(row, 3);
+        term.advance(b"\x1b[2K");
+
+        let line = term.screen.get_line(row).unwrap();
+        for c in 0..10 {
+            assert_eq!(
+                line.cells[c].attrs.background,
+                Color::Named(NamedColor::Green),
+                "EL mode 2: col {} should have Green background",
+                c
+            );
+            assert_eq!(line.cells[c].char(), ' ');
+        }
+    }
+
+    #[test]
+    fn test_ed_mode1_with_colored_bg_applies_bce() {
+        // ED mode 1 (erase from start of screen to cursor) should use the current SGR background.
+        let mut term = crate::TerminalCore::new(5, 10);
+        for r in 0..5 {
+            for c in 0..10 {
+                if let Some(line) = term.screen.get_line_mut(r) {
+                    line.update_cell_with(c, Cell::new('M'));
+                }
+            }
+        }
+        term.current_attrs.background = Color::Named(NamedColor::Cyan);
+        // Cursor at row 2, col 5; erase from start of screen to here
+        term.screen.move_cursor(2, 5);
+        term.advance(b"\x1b[1J");
+
+        // Rows 0-1 (fully erased) should have Cyan background
+        for r in 0..2 {
+            let line = term.screen.get_line(r).unwrap();
+            for c in 0..10 {
+                assert_eq!(
+                    line.cells[c].attrs.background,
+                    Color::Named(NamedColor::Cyan),
+                    "ED mode 1: row {} col {} should have Cyan background",
+                    r,
+                    c
+                );
+            }
+        }
+        // Row 2, cols 0..=5 also erased with Cyan background
+        let line = term.screen.get_line(2).unwrap();
+        for c in 0..=5 {
+            assert_eq!(
+                line.cells[c].attrs.background,
+                Color::Named(NamedColor::Cyan),
+                "ED mode 1: row 2 col {} should have Cyan background",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn test_ed_mode2_with_colored_bg_applies_bce() {
+        // ED mode 2 (erase entire screen) should use the current SGR background.
+        let mut term = crate::TerminalCore::new(3, 8);
+        for r in 0..3 {
+            for c in 0..8 {
+                if let Some(line) = term.screen.get_line_mut(r) {
+                    line.update_cell_with(c, Cell::new('N'));
+                }
+            }
+        }
+        term.current_attrs.background = Color::Named(NamedColor::Magenta);
+        term.advance(b"\x1b[2J");
+
+        for r in 0..3 {
+            let line = term.screen.get_line(r).unwrap();
+            for c in 0..8 {
+                assert_eq!(
+                    line.cells[c].attrs.background,
+                    Color::Named(NamedColor::Magenta),
+                    "ED mode 2: row {} col {} should have Magenta background",
+                    r,
+                    c
+                );
+                assert_eq!(line.cells[c].char(), ' ');
+            }
+        }
     }
 }

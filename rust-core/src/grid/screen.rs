@@ -1730,4 +1730,53 @@ mod tests {
         assert_eq!(screen.cursor.row, 9);
         assert_eq!(screen.cursor.col, 39);
     }
+
+    #[test]
+    fn test_line_feed_at_scroll_region_bottom() {
+        let mut screen = Screen::new(24, 80);
+        // Set scroll region rows 5-10 (top=5, bottom=10)
+        screen.set_scroll_region(5, 10);
+        // Position cursor at the bottom of scroll region (row 9, since bottom is exclusive)
+        screen.cursor.row = 9;
+        screen.cursor.col = 0;
+
+        // Fill some content in the scroll region for verification
+        if let Some(line) = screen.lines.get_mut(5) {
+            line.update_cell_with(0, Cell::new('A'));
+        }
+        if let Some(line) = screen.lines.get_mut(9) {
+            line.update_cell_with(0, Cell::new('Z'));
+        }
+
+        // line_feed at bottom of scroll region should scroll, cursor stays at row 9
+        screen.line_feed();
+
+        assert_eq!(
+            screen.cursor.row, 9,
+            "Cursor should stay at bottom of scroll region"
+        );
+
+        // The content should have scrolled:
+        // - Row 5 originally had 'A'; after scroll_up within region [5..10),
+        //   row 5 now gets the content that was at row 6 (which was empty).
+        assert_eq!(
+            screen.lines[5].cells[0].char(),
+            ' ',
+            "Row 5 should be cleared after scroll (original 'A' scrolled out)"
+        );
+
+        // - Row 9 originally had 'Z' but it was at the bottom of the scroll region.
+        //   After scrolling, row 8 should now hold the old row 9 content ('Z'),
+        //   and row 9 (new blank line) should be empty.
+        assert_eq!(
+            screen.lines[8].cells[0].char(),
+            'Z',
+            "Row 8 should now have 'Z' (shifted up from row 9)"
+        );
+        assert_eq!(
+            screen.lines[9].cells[0].char(),
+            ' ',
+            "Row 9 should be a fresh blank line after scroll"
+        );
+    }
 }

@@ -87,7 +87,8 @@ COLOR can be:
     (:default nil)
     ((pred consp)
      (pcase (car color)
-       ('named (cdr (assoc (cdr color) kuro--named-colors)))
+       ('named (or (cdr (assoc (cdr color) kuro--named-colors))
+                   (cdr color)))
        ('indexed (kuro--indexed-to-emacs (cdr color)))
        ('rgb (kuro--rgb-to-emacs (cdr color)))))
     (_ nil)))
@@ -139,8 +140,10 @@ COLOR-ENC is a u32 value:
                    "blue" "magenta" "cyan" "white"
                    "bright-black" "bright-red" "bright-green" "bright-yellow"
                    "bright-blue" "bright-magenta" "bright-cyan" "bright-white"])
-           (name (aref names idx)))
-      (cons 'named name)))
+           (name (when (< idx 16)
+                   (aref names idx))))
+      (when name
+        (cons 'named name))))
    ((/= 0 (logand color-enc #x40000000))
     (cons 'indexed (logand color-enc #xFF)))
    (t
@@ -281,7 +284,10 @@ Emacs does not need to recompute font metrics for every cell."
 (defun kuro--get-cached-face (attrs)
   "Get or create a cached face for given attributes ATTRS.
 ATTRS is a plist containing :foreground, :background, :flags, and
-optionally :underline-color."
+optionally :underline-color.
+When cache exceeds 4096 entries, flush it to prevent unbounded growth."
+  (when (> (hash-table-count kuro--face-cache) 4096)
+    (clrhash kuro--face-cache))
   (let ((key (list (plist-get attrs :foreground)
                    (plist-get attrs :background)
                    (plist-get attrs :flags)

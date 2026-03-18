@@ -98,38 +98,34 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
 (defun kuro--render-cycle ()
   "Single render cycle: poll updates and update buffer."
   ;; --- Window size sync ---
-  ;; Detect window dimension changes and resize the PTY.  This runs every cycle
-  ;; as a cheap safety net; `kuro--window-size-change' (registered in kuro-mode)
-  ;; handles the frame-level hook, but the render cycle catches edge cases where
-  ;; the hook fires before the buffer variables are fully initialised.
-  (let ((win (get-buffer-window (current-buffer) t)))
-    (when win
-      (let ((new-rows (window-body-height win))
-            (new-cols (window-body-width win)))
-        (when (and kuro--initialized
-                   (> new-rows 0)
-                   (> new-cols 0)
-                   (or (/= new-rows kuro--last-rows)
-                       (/= new-cols kuro--last-cols)))
-          (setq kuro--last-rows new-rows
-                kuro--last-cols new-cols)
-          (kuro--resize new-rows new-cols)
-          ;; Adjust buffer line count to match new rows
-          (let ((inhibit-read-only t)
-                (current-rows (count-lines (point-min) (point-max))))
-            (cond
-             ((< current-rows new-rows)
-              (save-excursion
-                (goto-char (point-max))
-                (dotimes (_ (- new-rows current-rows))
-                  (insert "\n"))))
-             ((> current-rows new-rows)
-              (save-excursion
-                (goto-char (point-max))
-                (dotimes (_ (- current-rows new-rows))
-                  (when (> (point) (point-min))
-                    (forward-line -1)
-                    (delete-region (line-end-position) (point-max))))))))))))
+  ;; Process any pending resize from `kuro--window-size-change'.
+  ;; The hook sets `kuro--resize-pending' to (NEW-ROWS . NEW-COLS); the render
+  ;; cycle is the single authority that calls `kuro--resize' and adjusts the
+  ;; buffer, eliminating the previous race where both paths could resize.
+  (when kuro--resize-pending
+    (let ((new-rows (car kuro--resize-pending))
+          (new-cols (cdr kuro--resize-pending)))
+      (setq kuro--resize-pending nil)
+      (when (and kuro--initialized (> new-rows 0) (> new-cols 0))
+        (setq kuro--last-rows new-rows
+              kuro--last-cols new-cols)
+        (kuro--resize new-rows new-cols)
+        ;; Adjust buffer line count to match new rows
+        (let ((inhibit-read-only t)
+              (current-rows (count-lines (point-min) (point-max))))
+          (cond
+           ((< current-rows new-rows)
+            (save-excursion
+              (goto-char (point-max))
+              (dotimes (_ (- new-rows current-rows))
+                (insert "\n"))))
+           ((> current-rows new-rows)
+            (save-excursion
+              (goto-char (point-max))
+              (dotimes (_ (- current-rows new-rows))
+                (when (> (point) (point-min))
+                  (forward-line -1)
+                  (delete-region (line-end-position) (point-max)))))))))))
   ;; --- Mode polling (every 10 frames) ---
   (setq kuro--decckm-frame-count (1+ kuro--decckm-frame-count))
   (when (zerop (mod kuro--decckm-frame-count 10))
@@ -216,15 +212,28 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
                (row           (car line-data))
                (text          (cdr line-data)))
           ;; Save col→buf mapping for cursor placement.
-          ;; We accumulate all rows; kuro--update-cursor reads kuro--col-to-buf
-          ;; to convert cursor_col to buffer offset.
+          ;; We store per-row so kuro--update-cursor can look up the correct
+          ;; row's mapping instead of only seeing the last dirty line's vector.
           (when (vectorp col-to-buf)
-            (setq kuro--col-to-buf col-to-buf))
+            (puthash row col-to-buf kuro--col-to-buf-map))
           (kuro--clear-line-blink-overlays row)
           (kuro--update-line row text)
           (when face-ranges
             (kuro--apply-faces-from-ffi row face-ranges)))))
     (kuro--update-cursor))
+  ;; Evict stale col-to-buf entries outside terminal row range.
+  ;; Guard kuro--last-rows > 0 to avoid spurious eviction before first resize.
+  ;; 2x hysteresis: tolerate up to twice the current row count before evicting.
+  (when (and (> kuro--last-rows 0)
+             (> (hash-table-count kuro--col-to-buf-map) (* 2 kuro--last-rows)))
+    (let ((max-row kuro--last-rows))
+      (let (stale-keys)
+        (maphash (lambda (k _v)
+                   (when (>= k max-row)
+                     (push k stale-keys)))
+                 kuro--col-to-buf-map)
+        (dolist (k stale-keys)
+          (remhash k kuro--col-to-buf-map)))))
   ;; --- Kitty Graphics image placements ---
   (let ((image-notifs (kuro--poll-image-notifications)))
     (dolist (notif image-notifs)
@@ -279,13 +288,15 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
                ;; col_to_buf[col] gives the buffer offset for cursor column col.
                ;; For pure ASCII lines, col == buf-offset; for CJK lines, col > buf-offset
                ;; because wide placeholder cells are skipped in the buffer.
-               ;; We use kuro--col-to-buf which is updated each frame from the FFI.
+               ;; We look up the per-row mapping from kuro--col-to-buf-map (a hash table
+               ;; keyed by row number) so each row's mapping is independent.
                ;; If the vector is shorter than col (e.g. cursor past last content),
                ;; fall back to col (works for trailing spaces which are pure ASCII).
+               (row-col-to-buf (gethash row kuro--col-to-buf-map))
                (buf-offset
-                (if (and kuro--col-to-buf
-                         (< col (length kuro--col-to-buf)))
-                    (aref kuro--col-to-buf col)
+                (if (and row-col-to-buf
+                         (< col (length row-col-to-buf)))
+                    (aref row-col-to-buf col)
                   col))
                (target-pos
                 (save-excursion

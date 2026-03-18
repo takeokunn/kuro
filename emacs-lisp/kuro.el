@@ -49,9 +49,10 @@
 (defun kuro--window-size-change (frame)
   "Handle window size changes for kuro buffers in FRAME.
 Called from `window-size-change-functions'.  For every kuro buffer
-whose window dimensions changed, resizes the PTY to match and
-pre-fills/trims the buffer to the new row count so kuro--update-line
-can always navigate to any row without hitting end-of-buffer."
+whose window dimensions changed, records the new size in
+`kuro--resize-pending' so the render cycle can process it
+synchronously -- avoiding a race where both this hook and the render
+cycle independently call `kuro--resize'."
   (dolist (win (window-list frame))
     (let ((buf (window-buffer win)))
       (when (and (buffer-live-p buf)
@@ -62,29 +63,9 @@ can always navigate to any row without hitting end-of-buffer."
             (when (and kuro--initialized
                        (or (/= new-rows kuro--last-rows)
                            (/= new-cols kuro--last-cols)))
-              ;; Resize PTY first so SIGWINCH delivers the new size.
-              (kuro--resize new-rows new-cols)
-              (setq kuro--last-rows new-rows
-                    kuro--last-cols new-cols)
-              ;; Adjust the buffer line count to match.
-              (let ((inhibit-read-only t)
-                    (current-rows (count-lines (point-min) (point-max))))
-                (cond
-                 ((< current-rows new-rows)
-                  ;; Add missing blank lines at the end.
-                  (save-excursion
-                    (goto-char (point-max))
-                    (dotimes (_ (- new-rows current-rows))
-                      (insert "\n"))))
-                 ((> current-rows new-rows)
-                  ;; Remove excess lines from the end (they will be blank).
-                  (save-excursion
-                    (goto-char (point-max))
-                    (dotimes (_ (- current-rows new-rows))
-                      (when (> (point) (point-min))
-                        (forward-line -1)
-                        (delete-region (line-end-position) (point-max))))))
-                 )))))))))
+              ;; Record pending resize; the render cycle will process it
+              ;; synchronously, avoiding a race where both paths call kuro--resize.
+              (setq kuro--resize-pending (cons new-rows new-cols))))))))))
 
 (defvar-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")

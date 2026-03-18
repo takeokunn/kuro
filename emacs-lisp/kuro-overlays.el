@@ -283,21 +283,14 @@ encoding as FG/BG) or 0/#xFF000000 for default (no underline color)."
                        (or (null ul-color-enc)
                            (= ul-color-enc 0)
                            (= ul-color-enc #xFF000000)))
-            (let* ((fg (kuro--decode-ffi-color fg-enc))
-                   (bg (kuro--decode-ffi-color bg-enc))
-                   (ul-color (when (and ul-color-enc
-                                        (/= ul-color-enc 0)
-                                        (/= ul-color-enc #xFF000000))
-                               (kuro--rgb-to-emacs
-                                (logand ul-color-enc #xFFFFFF))))
-                   (start-pos (min (+ line-start start-col) line-end))
+            (let* ((start-pos (min (+ line-start start-col) line-end))
                    (end-pos (min (+ line-start end-col) line-end)))
               (when (> end-pos start-pos)
-                (kuro--apply-face-range start-pos end-pos
-                                        (list :foreground fg
-                                              :background bg
-                                              :flags flags
-                                              :underline-color ul-color))
+                ;; Use raw-integer cache: avoids color decoding and cons-cell key
+                ;; allocation on cache hits (majority of calls for repeated colors).
+                (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags
+                                                       (or ul-color-enc 0))))
+                  (add-text-properties start-pos end-pos `(face ,face)))
                 (cond
                  ((/= 0 (logand flags #x20))
                   (kuro--apply-blink-overlay start-pos end-pos 'fast))

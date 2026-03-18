@@ -9,6 +9,7 @@
 
 ;;; Code:
 
+(require 'kuro-config)
 (require 'kuro-ffi)
 
 ;; Forward reference: kuro--render-cycle is defined in kuro-renderer.el,
@@ -403,7 +404,19 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
   (kuro--send-key (string ?\e char))
   (kuro--schedule-immediate-render))
 
-(defvar kuro--keymap
+(defun kuro--keymap-exception-p (key)
+  "Return non-nil if KEY string is listed in `kuro-keymap-exceptions'."
+  (and (boundp 'kuro-keymap-exceptions)
+       (member key kuro-keymap-exceptions)))
+
+(defvar kuro--keymap nil
+  "Keymap for Kuro terminal emulator.  Built by `kuro--build-keymap'.")
+
+(defun kuro--build-keymap ()
+  "Build and return the Kuro terminal input keymap.
+Keys listed in `kuro-keymap-exceptions' are omitted so they fall through
+to the standard Emacs global keymap.  Also stores the result in
+`kuro--keymap' for use as the parent of `kuro-mode-map'."
   (let ((map (make-sparse-keymap)))
     ;; ── Printable characters ──────────────────────────────────────────────────
     ;; Intercept all printable character input and forward to PTY.
@@ -630,16 +643,68 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
     (define-key map [remap yank]     #'kuro--yank)
     (define-key map [remap yank-pop] #'kuro--yank-pop)
 
-    map)
-  "Keymap for Kuro terminal emulator.
+    ;; Remove bindings for keys listed in kuro-keymap-exceptions so they fall
+    ;; through to the standard Emacs global keymap (e.g. M-x, C-g, C-x).
+    (dolist (exc (bound-and-true-p kuro-keymap-exceptions))
+      (condition-case nil
+          (progn
+            (define-key map (kbd exc) nil)
+            ;; For M-* keys also clear the ESC+char two-key fallback used on
+            ;; macOS where the Option key sends an ESC prefix instead of Meta.
+            (when (string-prefix-p "M-" exc)
+              (let* ((rest (substring exc 2))
+                     (char (and (= (length rest) 1) (aref rest 0))))
+                (when char
+                  (define-key map (vector ?\e char) nil)))))
+        (error nil)))
+    (setq kuro--keymap map)
+    map))
 
-All Ctrl+letter keys (C-a through C-z) are bound explicitly using (kbd \"C-x\")
-descriptors rather than (vector \\='(control ?x)) so that Emacs resolves them
-correctly in GUI frames.  The two representations are NOT equivalent: the
-vector form is ignored by the Emacs event dispatcher in GUI mode, causing
-global-map bindings (e.g. backward-char for C-b) to shadow our PTY forwarders.
+;;; Keymap initialization
 
-Alt/Meta bindings likewise use (kbd \"M-x\") descriptors.")
+;; Build kuro--keymap at load time so it is available immediately for tests
+;; and for any kuro-mode buffer that calls (set-keymap-parent kuro-mode-map kuro--keymap).
+(kuro--build-keymap)
+
+
+;;; kuro-send-next-key — bypass keymap exceptions
+
+(defun kuro-send-next-key ()
+  "Read the next key event and send it directly to the PTY.
+This bypasses `kuro-keymap-exceptions', allowing exception keys such as
+C-g, M-x, or C-l to reach terminal applications when needed.
+
+Bound to C-c C-q in `kuro-mode-map'."
+  (interactive)
+  (message "Send key to PTY: ")
+  (let* ((event (read-event))
+         (modifiers (event-modifiers event))
+         (base (event-basic-type event))
+         (str (cond
+               ;; Control+Meta combined: send ESC + control byte (C-M-x → ESC ^X)
+               ((and (memq 'control modifiers) (memq 'meta modifiers) (characterp base))
+                (string ?\e (logand base 31)))
+               ;; Control modifier: send raw control byte
+               ((and (memq 'control modifiers) (characterp base))
+                (string (logand base 31)))
+               ;; Meta modifier: send ESC + base character
+               ((and (memq 'meta modifiers) (characterp base))
+                (string ?\e base))
+               ;; Plain character (incl. control chars already encoded)
+               ((characterp base)
+                (string base))
+               ;; Named special keys
+               ((eq base 'return)    (string ?\r))
+               ((eq base 'tab)       (string ?\t))
+               ((eq base 'backspace) (string ?\x7f))
+               ((eq base 'escape)    (string ?\e))
+               (t nil))))
+    (if str
+        (progn (kuro--send-key str)
+               (kuro--schedule-immediate-render))
+      (message "kuro-send-next-key: unsupported key event %s"
+               (key-description (vector event))))))
+
 
 ;;; Kitty Keyboard Protocol
 

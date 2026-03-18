@@ -158,8 +158,8 @@ impl vte::Perform for TerminalCore {
             'p' if intermediates == b"!" => {
                 self.soft_reset();
             }
-            // Cursor positioning
-            'H' | 'A' | 'B' | 'C' | 'D' | 'd' | 'G' | 'f' | 'n' => {
+            // Cursor positioning (includes CNL=E and CPL=F)
+            'H' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'd' | 'G' | 'f' | 'n' => {
                 parser::csi::handle_csi_cursor(self, params, c);
             }
             // Erase operations

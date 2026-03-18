@@ -109,6 +109,16 @@ Used to detect AI agent activity and apply appropriate rendering strategy.")
 When this reaches `kuro--stream-idle-threshold', streaming mode is deactivated.")
 (put 'kuro--stream-idle-count 'permanent-local t)
 
+(defvar-local kuro--stream-last-render-time 0.0
+  "Float-time of last render triggered by the streaming idle timer.
+Used to rate-limit idle renders to at most `kuro-frame-rate' times/second.")
+(put 'kuro--stream-last-render-time 'permanent-local t)
+
+(defvar-local kuro--stream-min-interval nil
+  "Minimum seconds between idle-timer render cycles, derived from `kuro-frame-rate'.
+Computed lazily: nil means unset, will be computed on first idle render.")
+(put 'kuro--stream-min-interval 'permanent-local t)
+
 (defconst kuro--stream-idle-threshold 10
   "Number of empty render cycles before exiting active streaming mode.")
 

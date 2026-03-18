@@ -30,9 +30,11 @@
 (require 'kuro-stream)
 (require 'kuro-renderer)
 
-;; face-remap-remove-relative is provided by the C core (face-remap.el);
+;;; face-remap-remove-relative is provided by the C core (face-remap.el);
 ;; declare it to suppress byte-compiler warnings in kuro-kill.
 (declare-function face-remap-remove-relative "face-remap" (cookie))
+;; kuro-send-next-key is defined in kuro-input.el (loaded before kuro.el uses it).
+(declare-function kuro-send-next-key "kuro-input" ())
 
 (defvar kuro-mode-map
   (let ((map (make-sparse-keymap)))
@@ -43,6 +45,10 @@
     ;; Prompt navigation (OSC 133)
     (define-key map [?\C-c ?\C-p] #'kuro-previous-prompt)
     (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
+    ;; Copy mode: suspend PTY input and enable normal Emacs navigation/selection
+    (define-key map [?\C-c ?\C-t] #'kuro-copy-mode)
+    ;; Send next key directly to PTY, bypassing kuro-keymap-exceptions
+    (define-key map [?\C-c ?\C-q] #'kuro-send-next-key)
     map)
   "Keymap for Kuro major mode.")
 
@@ -65,7 +71,52 @@ cycle independently call `kuro--resize'."
                            (/= new-cols kuro--last-cols)))
               ;; Record pending resize; the render cycle will process it
               ;; synchronously, avoiding a race where both paths call kuro--resize.
-              (setq kuro--resize-pending (cons new-rows new-cols))))))))))
+              (setq kuro--resize-pending (cons new-rows new-cols)))))))))
+
+(defvar-local kuro--copy-mode nil
+  "Non-nil when Kuro copy mode is active.
+In copy mode the PTY keymap parent is detached so standard Emacs
+navigation and text-selection commands work in the terminal buffer.")
+(put 'kuro--copy-mode 'permanent-local t)
+
+(defun kuro--enter-copy-mode ()
+  "Enter Kuro copy mode: suspend PTY input and enable Emacs navigation.
+Uses `use-local-map' so only the current buffer is affected; other Kuro
+buffers keep their normal terminal keymaps."
+  (setq-local kuro--copy-mode t)
+  ;; Install a minimal buffer-local keymap: only C-c C-t to exit.
+  ;; No parent → the global keymap applies, giving full Emacs navigation.
+  (let ((copy-map (make-sparse-keymap)))
+    (define-key copy-map [?\C-c ?\C-t] #'kuro-copy-mode)
+    (use-local-map copy-map))
+  (setq mode-name "Kuro[Copy]")
+  (force-mode-line-update)
+  (message "Kuro copy mode on (C-c C-t to exit)"))
+
+(defun kuro--exit-copy-mode ()
+  "Exit Kuro copy mode: restore PTY input keymap."
+  (setq-local kuro--copy-mode nil)
+  ;; Restore the standard kuro-mode-map (includes kuro--keymap as parent).
+  (use-local-map kuro-mode-map)
+  (setq mode-name "Kuro")
+  (force-mode-line-update)
+  ;; Re-render so the terminal cursor is restored to its correct position.
+  (when (fboundp 'kuro--render-cycle)
+    (kuro--render-cycle))
+  (message "Kuro copy mode off"))
+
+(defun kuro-copy-mode ()
+  "Toggle Kuro copy mode.
+In copy mode the PTY keymap is suspended and standard Emacs cursor
+movement, region selection, and copy commands (M-w, C-w, C-s…) become
+available.  The buffer remains read-only; only navigation and selection
+are enabled.  Press C-c C-t again to return to terminal mode."
+  (interactive)
+  (unless (derived-mode-p 'kuro-mode)
+    (user-error "kuro-copy-mode: not in a Kuro terminal buffer"))
+  (if kuro--copy-mode
+      (kuro--exit-copy-mode)
+    (kuro--enter-copy-mode)))
 
 (defvar-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")

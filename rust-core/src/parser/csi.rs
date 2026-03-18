@@ -8,10 +8,15 @@
 /// - CUD (CSI B): Cursor Down
 /// - CUF (CSI C): Cursor Forward (right)
 /// - CUB (CSI D): Cursor Back (left)
+/// - CNL (CSI E): Cursor Next Line (down N, column 0)
+/// - CPL (CSI F): Cursor Previous Line (up N, column 0)
 /// - VPA (CSI d): Vertical Position Absolute
 /// - CHA (CSI G): Character Position Absolute
 /// - HVP (CSI f): Horizontal and Vertical Position (same as CUP)
 /// - DSR (CSI n): Device Status Report (cursor position query)
+///
+/// Note: cursor boundary clamping uses screen bounds (rows-1 / 0), not
+/// scroll-region margins. This matches CUU/CUD behaviour in this codebase.
 pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c: char) {
     match c {
         'H' => csi_cup(term, params), // CUP - Cursor Position
@@ -19,6 +24,8 @@ pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c
         'B' => csi_cud(term, params), // CUD - Cursor Down
         'C' => csi_cuf(term, params), // CUF - Cursor Forward
         'D' => csi_cub(term, params), // CUB - Cursor Back
+        'E' => csi_cnl(term, params), // CNL - Cursor Next Line
+        'F' => csi_cpl(term, params), // CPL - Cursor Previous Line
         'd' => csi_vpa(term, params), // VPA - Vertical Position Absolute
         'G' => csi_cha(term, params), // CHA - Character Position Absolute
         'f' => csi_hvp(term, params), // HVP - Horizontal and Vertical Position
@@ -93,6 +100,44 @@ fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
         .max(1) as i32;
 
     term.screen.move_cursor_by(0, -n);
+}
+
+/// CNL - Cursor Next Line (CSI E)
+///
+/// Move cursor down by N rows (default 1) and to column 0.
+/// Does not cause scrolling (unlike LF, which scrolls at the scroll region's bottom margin).
+/// Stops at the bottom of the screen (screen boundary, not scroll region).
+fn csi_cnl(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as i32;
+
+    term.screen.move_cursor_by(n, 0);
+    let row = term.screen.cursor().row;
+    term.screen.move_cursor(row, 0);
+}
+
+/// CPL - Cursor Previous Line (CSI F)
+///
+/// Move cursor up by N rows (default 1) and to column 0.
+/// Used by progress-bar libraries (e.g. nix) to overwrite previous output lines.
+/// Stops at the top of the screen (screen boundary, not scroll region).
+fn csi_cpl(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as i32;
+
+    term.screen.move_cursor_by(-n, 0);
+    let row = term.screen.cursor().row;
+    term.screen.move_cursor(row, 0);
 }
 
 /// DSR - Device Status Report (CSI n)
@@ -582,5 +627,136 @@ mod tests {
         // Should clamp to screen boundaries
         assert_eq!(term.screen.cursor.row, 9); // 10 rows max
         assert_eq!(term.screen.cursor.col, 49); // 50 cols max
+    }
+
+    // --- CNL (Cursor Next Line) tests ---
+
+    #[test]
+    fn test_cnl_moves_down_and_to_col0() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Position cursor at (row=3, col=15)
+        term.screen.move_cursor(3, 15);
+
+        // CNL 2: move down 2 lines, column 0 (CSI 2 E)
+        term.advance(b"\x1b[2E");
+
+        assert_eq!(term.screen.cursor.row, 5);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cnl_default_is_1() {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(5, 20);
+
+        // CNL with no param defaults to 1
+        term.advance(b"\x1b[E");
+
+        assert_eq!(term.screen.cursor.row, 6);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    // --- CPL (Cursor Previous Line) tests ---
+
+    #[test]
+    fn test_cpl_moves_up_and_to_col0() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Position cursor at (row=10, col=40)
+        term.screen.move_cursor(10, 40);
+
+        // CPL 3: move up 3 lines, column 0 (CSI 3 F)
+        term.advance(b"\x1b[3F");
+
+        assert_eq!(term.screen.cursor.row, 7);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cpl_default_is_1() {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(5, 20);
+
+        // CPL with no param defaults to 1
+        term.advance(b"\x1b[F");
+
+        assert_eq!(term.screen.cursor.row, 4);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cpl_clamps_at_top() {
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Move cursor to row 2, col 30
+        term.screen.move_cursor(2, 30);
+
+        // CPL 10: would go to row -8, should clamp to row 0 col 0
+        term.advance(b"\x1b[10F");
+
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cnl_clamps_at_bottom() {
+        let mut term = crate::TerminalCore::new(10, 80);
+        // Place cursor on the last row, mid-column
+        term.screen.move_cursor(9, 20);
+
+        // CNL 5 from the last row: row should clamp to 9, col should be 0
+        term.advance(b"\x1b[5E");
+
+        assert_eq!(term.screen.cursor.row, 9);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cnl_zero_param_treated_as_1() {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(3, 15);
+
+        // CSI 0 E — explicit zero must be clamped to 1 by .max(1)
+        term.advance(b"\x1b[0E");
+
+        assert_eq!(term.screen.cursor.row, 4);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cpl_zero_param_treated_as_1() {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(5, 20);
+
+        // CSI 0 F — explicit zero must be clamped to 1 by .max(1)
+        term.advance(b"\x1b[0F");
+
+        assert_eq!(term.screen.cursor.row, 4);
+        assert_eq!(term.screen.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cpl_nix_progress_pattern() {
+        // Simulate the nix progress overwrite pattern:
+        // 1. Print 3 progress lines
+        // 2. CPL 3 to go back to the first one
+        // 3. Overwrite them
+        let mut term = crate::TerminalCore::new(24, 80);
+
+        // Print 3 lines of "progress"
+        term.advance(b"line1\nline2\nline3\n");
+        // Cursor is now at row 3, col 0
+
+        // CPL 3: go back 3 lines to row 0, col 0
+        term.advance(b"\x1b[3F");
+
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 0);
+
+        // Overwrite line 1 with new content
+        term.advance(b"updated1");
+        assert_eq!(term.screen.cursor.row, 0);
+        assert_eq!(term.screen.cursor.col, 8);
     }
 }

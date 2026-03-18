@@ -285,11 +285,31 @@ The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ rema
 ;;   (backward-char, forward-char, etc.) win instead.  We must use (kbd "C-x")
 ;;   descriptors.  These tests verify that lookup-key on kuro--keymap resolves
 ;;   every critical Ctrl+letter to a non-nil (our PTY-forwarding) binding.
+;;
+;; Note: keys in `kuro-keymap-exceptions' (default: C-c C-x C-u C-g C-h C-l
+;;   M-x M-o C-y M-y) are intentionally NOT bound in kuro--keymap so they fall
+;;   through to the Emacs global keymap.  The tests below reflect this.
 
 (defun kuro-input-test--keymap-bound-p (key)
   "Return non-nil if KEY is bound in kuro--keymap."
   (let ((binding (lookup-key kuro--keymap (kbd key))))
     (and binding (not (numberp binding)))))  ; numberp = key sequence prefix
+
+(defmacro kuro-input-test--with-empty-exceptions (&rest body)
+  "Run BODY with `kuro--keymap' temporarily rebuilt without any exceptions.
+Saves and restores `kuro--keymap' via `unwind-protect' (which wraps the
+build call too) so the test leaves the global keymap in its original state
+regardless of whether the build or BODY signals an error."
+  `(let ((orig-keymap kuro--keymap))
+     (unwind-protect
+         (progn
+           ;; Rebuild inside a nested let so kuro-keymap-exceptions reverts
+           ;; after the let exits, before unwind-protect cleanup runs.
+           (let ((kuro-keymap-exceptions nil))
+             (kuro--build-keymap))
+           ,@body)
+       ;; Restore the original keymap directly.
+       (setq kuro--keymap orig-keymap))))
 
 (ert-deftest kuro-input-keymap-c-a-bound ()
   "C-a (readline: beginning-of-line) is bound in kuro--keymap."
@@ -318,9 +338,15 @@ Regression: was missing, causing global-map forward-char to shadow it."
   "C-k (readline: kill-line) is bound in kuro--keymap."
   (should (kuro-input-test--keymap-bound-p "C-k")))
 
-(ert-deftest kuro-input-keymap-c-l-bound ()
-  "C-l (shell: clear screen) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-l")))
+(ert-deftest kuro-input-keymap-c-l-not-bound-by-default ()
+  "C-l is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
+C-l falls through to the Emacs global keymap (recenter-top-bottom)."
+  (should-not (kuro-input-test--keymap-bound-p "C-l")))
+
+(ert-deftest kuro-input-keymap-c-l-bound-without-exceptions ()
+  "C-l IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
+  (kuro-input-test--with-empty-exceptions
+   (should (kuro-input-test--keymap-bound-p "C-l"))))
 
 (ert-deftest kuro-input-keymap-c-n-bound ()
   "C-n (readline: next-history) is bound in kuro--keymap."
@@ -342,21 +368,43 @@ Regression: was missing, causing global-map forward-char to shadow it."
   "C-t (readline: transpose-chars) is bound in kuro--keymap."
   (should (kuro-input-test--keymap-bound-p "C-t")))
 
-(ert-deftest kuro-input-keymap-c-u-bound ()
-  "C-u (readline: unix-line-discard) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-u")))
+(ert-deftest kuro-input-keymap-c-u-not-bound-by-default ()
+  "C-u is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
+C-u falls through to the Emacs global keymap (universal-argument)."
+  (should-not (kuro-input-test--keymap-bound-p "C-u")))
+
+(ert-deftest kuro-input-keymap-c-u-bound-without-exceptions ()
+  "C-u IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
+  (kuro-input-test--with-empty-exceptions
+   (should (kuro-input-test--keymap-bound-p "C-u"))))
 
 (ert-deftest kuro-input-keymap-c-w-bound ()
   "C-w (readline: unix-word-rubout) is bound in kuro--keymap."
   (should (kuro-input-test--keymap-bound-p "C-w")))
 
-(ert-deftest kuro-input-keymap-c-x-bound ()
-  "C-x (readline prefix) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-x")))
+(ert-deftest kuro-input-keymap-c-x-not-bound-by-default ()
+  "C-x is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
+C-x falls through to the Emacs global keymap (C-x prefix)."
+  (should-not (kuro-input-test--keymap-bound-p "C-x")))
+
+(ert-deftest kuro-input-keymap-c-x-bound-without-exceptions ()
+  "C-x IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
+  (kuro-input-test--with-empty-exceptions
+   (should (kuro-input-test--keymap-bound-p "C-x"))))
 
 (ert-deftest kuro-input-keymap-c-z-bound ()
   "C-z (SIGTSTP) is bound in kuro--keymap."
   (should (kuro-input-test--keymap-bound-p "C-z")))
+
+(ert-deftest kuro-input-keymap-m-x-not-bound-by-default ()
+  "M-x is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
+M-x falls through to execute-extended-command."
+  (should-not (kuro-input-test--keymap-bound-p "M-x")))
+
+(ert-deftest kuro-input-keymap-m-x-bound-without-exceptions ()
+  "M-x IS bound (sends ESC+x to PTY) when kuro-keymap-exceptions is empty."
+  (kuro-input-test--with-empty-exceptions
+   (should (kuro-input-test--keymap-bound-p "M-x"))))
 
 ;;; Group 11: Regression — Alt/Meta keybindings use correct (kbd) descriptors
 ;;
@@ -387,6 +435,9 @@ Regression: was missing, causing global-map forward-char to shadow it."
   (should (kuro-input-test--keymap-bound-p "M-u")))
 
 ;;; Group 12: Ctrl+letter sends correct control bytes to PTY
+;;
+;; Keys that are in kuro-keymap-exceptions by default (C-l=12, C-u=21) are
+;; tested using kuro-input-test--with-empty-exceptions so the binding exists.
 
 (defmacro kuro-input-test--ctrl-sends (key expected-byte)
   "Assert that KEY (kbd string) in kuro--keymap sends EXPECTED-BYTE to the PTY."
@@ -403,18 +454,36 @@ Regression: was missing, causing global-map forward-char to shadow it."
          (funcall binding))
        (should (equal sent (list (string ,expected-byte)))))))
 
+(defmacro kuro-input-test--ctrl-sends-no-exc (key expected-byte)
+  "Like `kuro-input-test--ctrl-sends' but runs with empty exceptions."
+  `(ert-deftest ,(intern (format "kuro-input-ctrl-%d-sends-byte-no-exc" expected-byte)) ()
+     ,(format "Pressing %s sends control byte %d (^%c) to PTY (exceptions cleared)."
+              key expected-byte (+ expected-byte 64))
+     (kuro-input-test--with-empty-exceptions
+      (let* ((binding (lookup-key kuro--keymap (kbd ,key)))
+             (sent nil))
+        (should (functionp binding))
+        (cl-letf (((symbol-function 'kuro--send-key)
+                   (lambda (s) (push s sent)))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () nil)))
+          (funcall binding))
+        (should (equal sent (list (string ,expected-byte))))))))
+
 (kuro-input-test--ctrl-sends "C-a" 1)
 (kuro-input-test--ctrl-sends "C-b" 2)
 (kuro-input-test--ctrl-sends "C-d" 4)
 (kuro-input-test--ctrl-sends "C-e" 5)
 (kuro-input-test--ctrl-sends "C-f" 6)
 (kuro-input-test--ctrl-sends "C-k" 11)
-(kuro-input-test--ctrl-sends "C-l" 12)
+;; C-l (12) is in kuro-keymap-exceptions by default; test with empty exceptions.
+(kuro-input-test--ctrl-sends-no-exc "C-l" 12)
 (kuro-input-test--ctrl-sends "C-n" 14)
 (kuro-input-test--ctrl-sends "C-p" 16)
 (kuro-input-test--ctrl-sends "C-r" 18)
 (kuro-input-test--ctrl-sends "C-t" 20)
-(kuro-input-test--ctrl-sends "C-u" 21)
+;; C-u (21) is in kuro-keymap-exceptions by default; test with empty exceptions.
+(kuro-input-test--ctrl-sends-no-exc "C-u" 21)
 (kuro-input-test--ctrl-sends "C-w" 23)
 (kuro-input-test--ctrl-sends "C-z" 26)
 

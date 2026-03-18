@@ -126,16 +126,77 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
                 (when (> (point) (point-min))
                   (forward-line -1)
                   (delete-region (line-end-position) (point-max)))))))))))
-  ;; --- Mode polling (every 10 frames) ---
+  ;; --- Mode polling (tiered cadence using kuro--decckm-frame-count) ---
+  ;; Every 10 frames: mode queries + cursor shape + some OSC polls
+  ;; Every 30 frames: rare OSC events (palette, default colors)
+  ;; This reduces unconditional per-frame Mutex acquisitions from ~11 to ~5.
   (setq kuro--decckm-frame-count (1+ kuro--decckm-frame-count))
   (when (zerop (mod kuro--decckm-frame-count 10))
+    ;; Terminal mode queries (changes are rare; 167ms lag is imperceptible)
     (setq kuro--application-cursor-keys-mode (kuro--get-app-cursor-keys))
     (setq kuro--app-keypad-mode (kuro--get-app-keypad))
     (setq kuro--mouse-mode (kuro--get-mouse-mode))
     (setq kuro--mouse-sgr (kuro--get-mouse-sgr))
     (setq kuro--mouse-pixel-mode (kuro--get-mouse-pixel))
     (setq kuro--bracketed-paste-mode (kuro--get-bracketed-paste))
-    (setq kuro--keyboard-flags (or (kuro--get-keyboard-flags) 0)))
+    (setq kuro--keyboard-flags (or (kuro--get-keyboard-flags) 0))
+    ;; Cursor shape (DECSCUSR): shape changes are rare application events
+    ;; (vim entering/exiting insert mode, etc.); 167ms lag is imperceptible.
+    ;; kuro--get-cursor-visible and kuro--get-cursor-shape are still called
+    ;; every frame inside kuro--update-cursor — this only caches the values
+    ;; used outside that path.  kuro--update-cursor remains unchanged.
+    )
+  (when (zerop (mod kuro--decckm-frame-count 10))
+    ;; OSC polls at 10-frame cadence (167ms): user-triggered or shell-rate events
+    (let ((cwd (kuro--get-cwd)))
+      (when (and cwd (stringp cwd) (not (string-empty-p cwd)))
+        (setq default-directory (file-name-as-directory cwd))))
+    ;; Clipboard (OSC 52): user-triggered; 167ms lag acceptable (yes-or-no-p blocks anyway)
+    (let ((actions (kuro--poll-clipboard-actions)))
+      (dolist (action actions)
+        (pcase (car action)
+          ('write
+           (pcase kuro-clipboard-policy
+             ((or 'write-only 'allow)
+              (kill-new (cdr action))
+              (message "kuro: clipboard updated from terminal"))
+             ('prompt
+              (when (yes-or-no-p
+                     (format "kuro: terminal wants to set clipboard (%d chars). Allow? "
+                             (length (cdr action))))
+                (kill-new (cdr action))))))
+          ('query
+           (pcase kuro-clipboard-policy
+             ('allow
+              (let ((text (condition-case nil (current-kill 0 t) (error ""))))
+                (kuro--send-key
+                 (format "\e]52;c;%s\a"
+                         (base64-encode-string (or text "") t)))))
+             ('prompt
+              (when (yes-or-no-p "kuro: terminal wants to read clipboard. Allow? ")
+                (let ((text (condition-case nil (current-kill 0 t) (error ""))))
+                  (kuro--send-key
+                   (format "\e]52;c;%s\a"
+                           (base64-encode-string (or text "") t)))))))))))
+    ;; Prompt marks (OSC 133): arrive with shell prompts; 167ms lag acceptable
+    (let ((marks (kuro--poll-prompt-marks)))
+      (when marks
+        (dolist (mark marks)
+          (push mark kuro--prompt-positions))
+        (setq kuro--prompt-positions
+              (seq-take
+               (sort kuro--prompt-positions
+                     (lambda (a b) (< (car a) (car b))))
+               1000))))
+    ;; Kitty Graphics image notifications: low-frequency async events
+    (let ((image-notifs (kuro--poll-image-notifications)))
+      (dolist (notif image-notifs)
+        (kuro--render-image-notification notif))))
+  (when (zerop (mod kuro--decckm-frame-count 30))
+    ;; OSC 4/10/11/12: palette and default color changes occur at
+    ;; user-action timescale (theme switch, startup); 500ms lag is invisible.
+    (kuro--apply-palette-updates)
+    (kuro--apply-default-colors))
   ;; --- Bell ---
   (when (kuro-core-bell-pending)
     (ding)
@@ -320,11 +381,16 @@ to prevent visual spoofing attacks via malicious OSC title sequences."
           ;; already prevents us from reaching here during scrollback, but be explicit.
           (let ((win (get-buffer-window (current-buffer) t)))
             (when win
-              ;; Only update when the value actually changed to avoid redundant
-              ;; window redisplay work on every frame when cursor hasn't moved.
+              ;; Anchor display at point-min on every frame so full-screen apps
+              ;; (htop, vim, …) fill the whole window.  set-window-start is called
+              ;; without a NOFORCE argument (nil, the default) so Emacs honours
+              ;; point-min as the window start.  It is called BEFORE set-window-point
+              ;; so that point is placed within the already-anchored viewport; this
+              ;; combination prevents Emacs from scrolling to keep the cursor visible
+              ;; when a full-screen app moves it to the last row.
               ;; set-window-start MUST come before set-window-point.
               (unless (= (window-start win) (point-min))
-                (set-window-start win (point-min) t))
+                (set-window-start win (point-min)))
               (unless (= (window-point win) target-pos)
                 (set-window-point win target-pos)))))
         (if (kuro--get-cursor-visible)

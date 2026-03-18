@@ -295,6 +295,29 @@ When cache exceeds 4096 entries, flush it to prevent unbounded growth."
     (or (gethash key kuro--face-cache)
         (puthash key (kuro--make-face attrs) kuro--face-cache))))
 
+(defun kuro--get-cached-face-raw (fg-enc bg-enc flags ul-enc)
+  "Get or create a cached face using raw FFI-encoded integer values.
+Uses a vector key of raw integers, which avoids cons-cell list allocation
+on cache hits and skips color decoding entirely when cached.
+FG-ENC, BG-ENC, UL-ENC are u32 FFI color values; FLAGS is a u64 bitmask.
+On cache miss, decodes all values and delegates to `kuro--make-face'."
+  (when (> (hash-table-count kuro--face-cache) 4096)
+    (clrhash kuro--face-cache))
+  (let ((key (vector fg-enc bg-enc flags (or ul-enc 0))))
+    (or (gethash key kuro--face-cache)
+        (let* ((fg (kuro--decode-ffi-color fg-enc))
+               (bg (kuro--decode-ffi-color bg-enc))
+               (ul-color (when (and ul-enc
+                                    (/= ul-enc 0)
+                                    (/= ul-enc #xFF000000))
+                           (kuro--rgb-to-emacs (logand ul-enc #xFFFFFF))))
+               (attrs (list :foreground fg
+                            :background bg
+                            :flags flags
+                            :underline-color ul-color))
+               (face (kuro--make-face attrs)))
+          (puthash key face kuro--face-cache)))))
+
 (defun kuro--clear-face-cache ()
   "Clear the face cache to free memory."
   (clrhash kuro--face-cache))

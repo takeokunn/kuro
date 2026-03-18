@@ -141,6 +141,31 @@ Set this if the binary is installed in a non-standard location."
 
 ;;; Core Settings
 
+(defcustom kuro-keymap-exceptions
+  '("C-c" "C-x" "C-u" "C-g" "C-h" "C-l" "M-x" "M-o" "C-y" "M-y")
+  "Keys passed to Emacs instead of the PTY in `kuro-mode'.
+Each element is a key description string accepted by `kbd', e.g. \"M-x\"
+or \"C-g\".  Keys in this list are not bound in the Kuro input keymap and
+therefore fall through to the standard Emacs global keymap.
+
+The default list mirrors `vterm-keymap-exceptions' from emacs-libvterm:
+  C-c  prefix key for Kuro commands (C-c C-c = SIGINT, C-c C-t = copy-mode)
+  C-x  Emacs prefix (C-x C-f, C-x b, etc.)
+  C-u  Emacs universal-argument
+  C-g  Emacs keyboard-quit / abort
+  C-h  Emacs help prefix
+  C-l  recenter-top-bottom (use C-l in shell via `kuro-send-next-key')
+  M-x  execute-extended-command
+  M-o  other-window / face prefix
+  C-y  yank (with bracketed-paste support via `kuro--yank')
+  M-y  yank-pop
+
+Changes do NOT take effect automatically.  After modifying this variable
+you must call `(kuro--build-keymap)' to rebuild the keymap; the next Kuro
+buffer you open will then use the updated binding set."
+  :type '(repeat string)
+  :group 'kuro)
+
 (defcustom kuro-shell (or (getenv "SHELL") "/bin/bash")
   "Shell program to run in the Kuro terminal.
 Must be an executable accessible via PATH.

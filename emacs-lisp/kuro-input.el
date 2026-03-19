@@ -29,7 +29,7 @@
 
 ;;; Printable Characters
 
-(defun kuro--send-char (char)
+(defsubst kuro--send-char (char)
   "Send printable character as UTF-8 to PTY."
   (kuro--send-key (string char)))
 

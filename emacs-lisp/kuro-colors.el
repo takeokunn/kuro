@@ -25,6 +25,8 @@
 
 ;;; Code:
 
+(declare-function kuro--clear-face-cache "kuro-faces" ())
+
 ;;; Customization Group
 
 (defgroup kuro-colors nil

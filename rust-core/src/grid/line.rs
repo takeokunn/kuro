@@ -16,6 +16,7 @@ pub struct Line {
 
 impl Line {
     /// Create a new line with the specified number of columns
+    #[inline(always)]
     pub fn new(cols: usize) -> Self {
         Self {
             cells: vec![Cell::default(); cols],
@@ -25,6 +26,7 @@ impl Line {
 
     /// Create a new line with all cells carrying the given BCE background color.
     /// When `bg` is `Color::Default` this is identical to `Line::new(cols)`.
+    #[inline]
     pub fn new_with_bg(cols: usize, bg: Color) -> Self {
         if bg == Color::Default {
             return Self::new(cols);
@@ -38,11 +40,13 @@ impl Line {
     }
 
     /// Get cell at column index
+    #[inline(always)]
     pub fn get_cell(&self, col: usize) -> Option<&Cell> {
         self.cells.get(col)
     }
 
     /// Get mutable reference to cell at column index
+    #[inline(always)]
     pub fn get_cell_mut(&mut self, col: usize) -> Option<&mut Cell> {
         self.cells.get_mut(col)
     }
@@ -96,11 +100,13 @@ impl Line {
     }
 
     /// Mark line as dirty
+    #[inline(always)]
     pub fn mark_dirty(&mut self) {
         self.is_dirty = true;
     }
 
     /// Mark line as clean (not dirty)
+    #[inline(always)]
     pub fn mark_clean(&mut self) {
         self.is_dirty = false;
     }

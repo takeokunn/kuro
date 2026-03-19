@@ -9,6 +9,7 @@ use crate::TerminalCore;
 use unicode_width::UnicodeWidthChar;
 
 impl vte::Perform for TerminalCore {
+    #[inline]
     fn print(&mut self, c: char) {
         // Combining characters (Unicode width 0) are attached to the previous cell.
         if UnicodeWidthChar::width(c) == Some(0) {
@@ -34,6 +35,7 @@ impl vte::Perform for TerminalCore {
             .print(c, self.current_attrs, self.dec_modes.auto_wrap);
     }
 
+    #[inline]
     fn execute(&mut self, byte: u8) {
         match byte {
             0x07 => self.meta.bell_pending = true,

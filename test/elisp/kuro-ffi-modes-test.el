@@ -20,6 +20,7 @@
 ;;                              sync-output)
 ;;   Group 3: Mouse queries   (mouse-mode, mouse-sgr, mouse-pixel)
 ;;   Group 4: Keyboard query  (keyboard-flags, focus-events)
+;;   Group 5: kuro--initialized guard path (all wrappers return nil when uninitialized)
 
 ;;; Code:
 
@@ -201,6 +202,67 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   "kuro--get-focus-events returns nil when stub returns nil."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-focus-events nil
     (should (null (kuro--get-focus-events)))))
+
+;;; Group 5: kuro--initialized guard path
+;;
+;; When `kuro--initialized' is nil, the `kuro--call' macro's `when' form
+;; short-circuits and returns nil — regardless of the declared fallback value.
+;; These tests verify that every kuro-ffi-modes wrapper returns nil in that case.
+
+(ert-deftest kuro-ffi-modes--get-cursor-visible-nil-when-not-initialized ()
+  "kuro--get-cursor-visible returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-cursor-visible)))))
+
+(ert-deftest kuro-ffi-modes--get-cursor-shape-nil-when-not-initialized ()
+  "kuro--get-cursor-shape returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-cursor-shape)))))
+
+(ert-deftest kuro-ffi-modes--get-app-cursor-keys-nil-when-not-initialized ()
+  "kuro--get-app-cursor-keys returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-app-cursor-keys)))))
+
+(ert-deftest kuro-ffi-modes--get-app-keypad-nil-when-not-initialized ()
+  "kuro--get-app-keypad returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-app-keypad)))))
+
+(ert-deftest kuro-ffi-modes--get-bracketed-paste-nil-when-not-initialized ()
+  "kuro--get-bracketed-paste returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-bracketed-paste)))))
+
+(ert-deftest kuro-ffi-modes--get-mouse-mode-nil-when-not-initialized ()
+  "kuro--get-mouse-mode returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-mouse-mode)))))
+
+(ert-deftest kuro-ffi-modes--get-mouse-sgr-nil-when-not-initialized ()
+  "kuro--get-mouse-sgr returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-mouse-sgr)))))
+
+(ert-deftest kuro-ffi-modes--get-mouse-pixel-nil-when-not-initialized ()
+  "kuro--get-mouse-pixel returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-mouse-pixel)))))
+
+(ert-deftest kuro-ffi-modes--get-focus-events-nil-when-not-initialized ()
+  "kuro--get-focus-events returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-focus-events)))))
+
+(ert-deftest kuro-ffi-modes--get-sync-output-nil-when-not-initialized ()
+  "kuro--get-sync-output returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-sync-output)))))
+
+(ert-deftest kuro-ffi-modes--get-keyboard-flags-nil-when-not-initialized ()
+  "kuro--get-keyboard-flags returns nil when kuro--initialized is nil."
+  (let ((kuro--initialized nil))
+    (should (null (kuro--get-keyboard-flags)))))
 
 (provide 'kuro-ffi-modes-test)
 ;;; kuro-ffi-modes-test.el ends here

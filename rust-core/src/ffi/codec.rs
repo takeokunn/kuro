@@ -50,6 +50,7 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 /// - `Color::Named(c)` → `0x80000000 | index`
 /// - `Color::Indexed(i)` → `0x40000000 | i`
 /// - `Color::Rgb(r, g, b)` → `(r << 16) | (g << 8) | b` (can be 0 = true black)
+#[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_color(color: &Color) -> u32 {
     match color {
@@ -84,6 +85,7 @@ pub fn encode_color(color: &Color) -> u32 {
 ///
 /// Each boolean SGR attribute maps to a dedicated bit position.
 /// The underline style is encoded in bits 9-11 as a 3-bit integer.
+#[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
     let mut flags = 0u64;

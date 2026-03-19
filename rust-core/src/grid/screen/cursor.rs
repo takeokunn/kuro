@@ -4,6 +4,7 @@ use super::*;
 
 impl Screen {
     /// Get reference to the active screen's cursor
+    #[inline(always)]
     pub fn cursor(&self) -> &Cursor {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_ref() {
@@ -14,6 +15,7 @@ impl Screen {
     }
 
     /// Get mutable reference to the active screen's cursor
+    #[inline(always)]
     pub fn cursor_mut(&mut self) -> &mut Cursor {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
@@ -24,6 +26,7 @@ impl Screen {
     }
 
     /// Move cursor to absolute position
+    #[inline]
     pub fn move_cursor(&mut self, row: usize, col: usize) {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
@@ -37,6 +40,7 @@ impl Screen {
     }
 
     /// Move cursor relative
+    #[inline]
     pub fn move_cursor_by(&mut self, row_offset: i32, col_offset: i32) {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
@@ -52,6 +56,7 @@ impl Screen {
     }
 
     /// Carriage return (CR)
+    #[inline(always)]
     pub fn carriage_return(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             screen.cursor.col = 0;
@@ -59,6 +64,7 @@ impl Screen {
     }
 
     /// Backspace (BS)
+    #[inline(always)]
     pub fn backspace(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             if screen.cursor.col > 0 {
@@ -68,6 +74,7 @@ impl Screen {
     }
 
     /// Horizontal tab (HT)
+    #[inline(always)]
     pub fn tab(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             let tab_stop = (screen.cursor.col / 8 + 1) * 8;
@@ -76,6 +83,7 @@ impl Screen {
     }
 
     /// Line feed (LF): advances cursor down one row, scrolling up if at the bottom of the scroll region.
+    #[inline]
     pub fn line_feed(&mut self, bg: Color) {
         if let Some(screen) = self.active_screen_mut() {
             let new_row = screen.cursor.row + 1;

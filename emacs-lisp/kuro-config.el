@@ -199,6 +199,8 @@ and Linux without adding perceptible latency to keystroke echo."
   :type 'float
   :group 'kuro
   :set (lambda (sym val)
+         (unless (numberp val)
+           (user-error "kuro-input-echo-delay must be a number"))
          (when (< val 0)
            (user-error "kuro-input-echo-delay must be non-negative"))
          (set-default sym val)))

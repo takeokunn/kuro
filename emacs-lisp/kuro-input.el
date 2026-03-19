@@ -133,6 +133,9 @@ Always schedules an immediate render so cursor movement feels instant."
 ;; when kuro-input-keys.el is loaded.
 (require 'kuro-input-keys)
 
+(defconst kuro--scroll-to-bottom-sentinel 999999
+  "Sentinel value for `kuro-scroll-to-bottom': scrolls past any real content.")
+
 ;;;###autoload
 (defun kuro-scroll-up ()
   "Scroll back into terminal history by one screenful."
@@ -171,9 +174,6 @@ Always schedules an immediate render so cursor movement feels instant."
   (kuro--send-key (concat (string ?\e) (string (logand char 31))))
   (kuro--schedule-immediate-render))
 
-
-(defconst kuro--scroll-to-bottom-sentinel 999999
-  "Sentinel value for `kuro-scroll-to-bottom': scrolls past any real content.")
 
 (defconst kuro--kitty-modifier-offset 1
   "Offset added to the modifier bitmask in the Kitty keyboard protocol.

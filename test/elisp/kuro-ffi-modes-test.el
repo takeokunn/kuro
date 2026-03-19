@@ -30,10 +30,6 @@
 ;; Each stub is only installed if the symbol is not already fboundp
 ;; (so the real module wins when tests are run in a live Emacs with kuro loaded).
 
-(unless (fboundp 'kuro--call)
-  (defmacro kuro--call (default form)
-    `(condition-case nil ,form (error ,default))))
-
 (unless (fboundp 'kuro-core-get-cursor-visible)
   (defalias 'kuro-core-get-cursor-visible  (lambda () nil)))
 (unless (fboundp 'kuro-core-get-cursor-shape)
@@ -57,15 +53,18 @@
 (unless (fboundp 'kuro-core-get-mouse-pixel)
   (defalias 'kuro-core-get-mouse-pixel     (lambda () nil)))
 
+(require 'kuro-ffi)
 (require 'kuro-ffi-modes)
 
 ;;; Helper macro
 
 (defmacro kuro-ffi-modes-test--with-stub (fn-name return-val &rest body)
-  "Run BODY with FN-NAME temporarily returning RETURN-VAL."
+  "Run BODY with FN-NAME temporarily returning RETURN-VAL.
+Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (declare (indent 2))
-  `(cl-letf (((symbol-function ,fn-name) (lambda () ,return-val)))
-     ,@body))
+  `(let ((kuro--initialized t))
+     (cl-letf (((symbol-function ,fn-name) (lambda () ,return-val)))
+       ,@body)))
 
 ;;; Group 1: Cursor queries
 
@@ -75,10 +74,9 @@
     (should (eq t (kuro--get-cursor-visible)))))
 
 (ert-deftest kuro-ffi-modes--get-cursor-visible-default-when-stub-returns-nil ()
-  "kuro--get-cursor-visible returns t (safe default) when stub returns nil."
+  "kuro--get-cursor-visible returns nil when FFI returns nil (fallback only fires on error)."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-visible nil
-    ;; The wrapper default is t so the cursor is shown rather than hidden.
-    (should (eq t (kuro--get-cursor-visible)))))
+    (should (null (kuro--get-cursor-visible)))))
 
 (ert-deftest kuro-ffi-modes--get-cursor-shape-returns-integer ()
   "kuro--get-cursor-shape returns an integer (e.g. 2) when the stub does so."
@@ -86,9 +84,9 @@
     (should (eq 2 (kuro--get-cursor-shape)))))
 
 (ert-deftest kuro-ffi-modes--get-cursor-shape-default-zero-when-nil ()
-  "kuro--get-cursor-shape returns 0 (blinking block) when stub returns nil."
+  "kuro--get-cursor-shape returns nil when FFI returns nil (fallback only fires on error)."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-shape nil
-    (should (eq 0 (kuro--get-cursor-shape)))))
+    (should (null (kuro--get-cursor-shape)))))
 
 (ert-deftest kuro-ffi-modes--get-cursor-shape-all-valid-values ()
   "kuro--get-cursor-shape passes through all DECSCUSR values 0-6 unchanged."
@@ -146,9 +144,9 @@
     (should (eq 1000 (kuro--get-mouse-mode)))))
 
 (ert-deftest kuro-ffi-modes--get-mouse-mode-default-zero-when-nil ()
-  "kuro--get-mouse-mode returns 0 (disabled) when stub returns nil."
+  "kuro--get-mouse-mode returns nil when FFI returns nil (fallback only fires on error)."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-mode nil
-    (should (eq 0 (kuro--get-mouse-mode)))))
+    (should (null (kuro--get-mouse-mode)))))
 
 (ert-deftest kuro-ffi-modes--get-mouse-mode-values-1002-1003 ()
   "kuro--get-mouse-mode passes through button-event (1002) and any-event (1003)."
@@ -185,9 +183,9 @@
     (should (eq 7 (kuro--get-keyboard-flags)))))
 
 (ert-deftest kuro-ffi-modes--get-keyboard-flags-default-zero-when-nil ()
-  "kuro--get-keyboard-flags returns 0 when stub returns nil."
+  "kuro--get-keyboard-flags returns nil when FFI returns nil (fallback only fires on error)."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-keyboard-flags nil
-    (should (eq 0 (kuro--get-keyboard-flags)))))
+    (should (null (kuro--get-keyboard-flags)))))
 
 (ert-deftest kuro-ffi-modes--get-keyboard-flags-all-bits ()
   "kuro--get-keyboard-flags passes through all 5 defined flag bits."

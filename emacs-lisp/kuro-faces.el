@@ -92,7 +92,7 @@ This function is a no-op in non-graphical (terminal) Emacs frames."
 
 ;;; Face caching
 
-(defsubst kuro--make-face (attrs)
+(defun kuro--make-face (attrs)
   "Create an Emacs face spec from attribute plist ATTRS."
   (let ((props (kuro--attrs-to-face-props attrs)))
     (list props)))

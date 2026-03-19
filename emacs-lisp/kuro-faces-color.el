@@ -67,12 +67,12 @@ The formula is: value = index_offset * kuro--color-gray-step + kuro--color-gray-
 
 ;;; FFI color tag bit constants
 
-(defconst kuro--color-tag-truecolor #x80000000
-  "FFI color tag bit: true-color (24-bit RGB) encoding.")
+(defconst kuro--color-tag-named #x80000000
+  "FFI color tag bit: named color (palette index) encoding.")
 (defconst kuro--color-tag-indexed #x40000000
   "FFI color tag bit: indexed (256-color) encoding.")
 (defconst kuro--color-rgb-mask #xFFFFFF
-  "FFI color mask: low 24 bits are the RGB value.")
+  "FFI color mask: low 24 bits extract the index from a tagged color word.")
 
 ;;; ANSI color conversion
 
@@ -130,7 +130,7 @@ COLOR-ENC is a u32 value:
   (cond
    ((= color-enc kuro--ffi-color-default)
     :default)
-   ((/= 0 (logand color-enc kuro--color-tag-truecolor))
+   ((/= 0 (logand color-enc kuro--color-tag-named))
     (let* ((idx (logand color-enc #xFF))
            (name (when (< idx 16)
                    (aref kuro--ansi-color-names idx))))

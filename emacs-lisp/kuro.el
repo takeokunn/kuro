@@ -21,20 +21,21 @@
 ;;; Code:
 
 (require 'kuro-module)
-(kuro-module-load)
 (require 'kuro-config)
 (require 'kuro-ffi)
 (require 'kuro-faces)
 (require 'kuro-overlays)
+(require 'kuro-navigation)
 (require 'kuro-input)
 (require 'kuro-stream)
+(require 'kuro-render-buffer)
 (require 'kuro-renderer)
+(require 'kuro-lifecycle)
 
-;;; face-remap-remove-relative is provided by the C core (face-remap.el);
-;; declare it to suppress byte-compiler warnings in kuro-kill.
-(declare-function face-remap-remove-relative "face-remap" (cookie))
 ;; kuro-send-next-key is defined in kuro-input.el (loaded before kuro.el uses it).
 (declare-function kuro-send-next-key "kuro-input" ())
+(declare-function kuro--handle-focus-in "kuro-navigation" ())
+(declare-function kuro--handle-focus-out "kuro-navigation" ())
 
 (defvar kuro-mode-map
   (let ((map (make-sparse-keymap)))
@@ -105,6 +106,7 @@ buffers keep their normal terminal keymaps."
     (kuro--render-cycle))
   (message "Kuro copy mode off"))
 
+;;;###autoload
 (defun kuro-copy-mode ()
   "Toggle Kuro copy mode.
 In copy mode the PTY keymap is suspended and standard Emacs cursor
@@ -126,11 +128,47 @@ are enabled.  Press C-c C-t again to return to terminal mode."
   "Last known terminal column count; used to detect window size changes.")
 (put 'kuro--last-cols 'permanent-local t)
 
+(defun kuro--setup-char-width-table ()
+  "Override `char-width-table' to match unicode-width 0.2 / xterm-256color behavior.
+In CJK language environments Emacs sets East-Asian-Ambiguous characters
+\(block elements, geometric shapes, misc symbols, etc.) to display width 2.
+However the Rust unicode-width 0.2 crate — and every standard xterm-256color
+terminal — treats those same codepoints as width 1.  Terminal applications
+such as btop lay out their UI assuming width 1, so a discrepancy causes
+visual corruption \(characters shifted right after each ambiguous glyph).
+
+Braille patterns \(U+2800-U+28FF) are EA-Width Narrow and already 1 in both
+environments, but are pinned explicitly as a safety net against unusual
+font-fallback rendering."
+  (make-local-variable 'char-width-table)
+  (setq char-width-table (copy-sequence char-width-table))
+  ;; Arrows (U+2190-U+21FF) — EA Width A for many (↑↓←→ used as sort/nav indicators)
+  (set-char-table-range char-width-table '(#x2190 . #x21FF) 1)
+  ;; Mathematical Operators (U+2200-U+22FF) — EA Width A for many (×, ÷, ∞, √ etc.)
+  (set-char-table-range char-width-table '(#x2200 . #x22FF) 1)
+  ;; Miscellaneous Technical (U+2300-U+23FF) — EA Width A for some
+  (set-char-table-range char-width-table '(#x2300 . #x23FF) 1)
+  ;; Box Drawing (U+2500-U+257F) — EA Width N, used by ncurses borders
+  (set-char-table-range char-width-table '(#x2500 . #x257F) 1)
+  ;; Block Elements (U+2580-U+259F) — EA Width A; used by btop/htop bar graphs
+  (set-char-table-range char-width-table '(#x2580 . #x259F) 1)
+  ;; Geometric Shapes (U+25A0-U+25FF) — EA Width A for many; used by TUI indicators
+  (set-char-table-range char-width-table '(#x25A0 . #x25FF) 1)
+  ;; Miscellaneous Symbols (U+2600-U+26FF) — EA Width A for many
+  (set-char-table-range char-width-table '(#x2600 . #x26FF) 1)
+  ;; Dingbats (U+2700-U+27BF) — EA Width A for many
+  (set-char-table-range char-width-table '(#x2700 . #x27BF) 1)
+  ;; Braille Patterns (U+2800-U+28FF) — EA Width N; pin to 1 for font-fallback safety
+  (set-char-table-range char-width-table '(#x2800 . #x28FF) 1))
+
 (define-derived-mode kuro-mode fundamental-mode "Kuro"
   "Major mode for Kuro terminal buffers."
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
   (setq-local truncate-lines t)
+  ;; Normalise character display widths to match the Rust unicode-width 0.2 crate.
+  ;; Must run before the first render so col_to_buf mappings stay consistent.
+  (kuro--setup-char-width-table)
   ;; Do NOT enable cursor-intangible-mode: it interferes with set-window-point
   ;; (which we use to track the terminal cursor), causing the visual cursor to
   ;; jump unexpectedly.  vterm and eshell do not use cursor-intangible-mode either.
@@ -160,98 +198,6 @@ are enabled.  Press C-c C-t again to return to terminal mode."
     )
   ;; Resize the PTY whenever the Emacs window size changes.
   (add-hook 'window-size-change-functions #'kuro--window-size-change))
-
-;;;###autoload
-(defun kuro-create (&optional command buffer-name)
-  "Create a new Kuro terminal instance running COMMAND.
-If COMMAND is nil, use `kuro-shell'.
-BUFFER-NAME is the name for the new buffer.
-Switches to the terminal buffer after creation."
-  (interactive
-   (list
-    (read-string "Shell command: " kuro-shell)
-    (generate-new-buffer-name "*kuro*")))
-  (let* ((cmd (or command kuro-shell))
-         (buffer (get-buffer-create (or buffer-name (generate-new-buffer-name "*kuro*")))))
-    ;; Display the buffer FIRST so window-body-height/width reflect the real window.
-    ;; We need exact dimensions before spawning the PTY; otherwise the shell starts
-    ;; with hardcoded 24×80 and full-screen programs (vim, htop, …) that run before
-    ;; the resize SIGWINCH arrives will lay out their UI with the wrong geometry.
-    (unless noninteractive
-      (switch-to-buffer buffer))
-    (let ((rows (if noninteractive 24 (window-body-height)))
-          (cols (if noninteractive 80 (window-body-width))))
-      (with-current-buffer buffer
-        (kuro-mode)
-        ;; Pre-fill with blank lines so kuro--update-line can navigate via
-        ;; forward-line to any row without hitting end-of-buffer.
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (dotimes (_ rows)
-            (insert "\n"))
-          (goto-char (point-min)))
-        ;; Spawn PTY with the correct dimensions from the start — no resize needed.
-        (when (kuro--init cmd rows cols)
-          (setq kuro--cursor-marker (point-marker))
-          (setq kuro--last-rows rows)
-          (setq kuro--last-cols cols)
-          (kuro--set-scrollback-max-lines kuro-scrollback-size)
-          (setq kuro--scroll-offset 0)
-          (kuro--apply-font-to-buffer buffer)
-          (kuro--start-render-loop)
-          ;; Schedule an immediate render so the shell prompt appears at once
-          ;; instead of waiting for the first periodic timer tick (~16ms at 60fps).
-          ;; This is what makes kuro feel as instant as kitty on startup.
-          (run-with-idle-timer 0.05 nil
-                               (lambda (buf)
-                                 (when (buffer-live-p buf)
-                                   (with-current-buffer buf
-                                     (kuro--render-cycle))))
-                               buffer)
-          (message "Kuro: Started terminal with command: %s" cmd))))
-    buffer))
-
-;;;###autoload
-(defun kuro-send-string (string)
-  "Send STRING to the terminal."
-  (interactive "sSend string: ")
-  (kuro--send-key string))
-
-(defun kuro-send-interrupt ()
-  "Send SIGINT (C-c) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-c]))
-
-(defun kuro-send-sigstop ()
-  "Send SIGSTOP (C-z) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-z]))
-
-(defun kuro-send-sigquit ()
-  "Send SIGQUIT (C-\\) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-\\]))
-
-(defun kuro-kill ()
-  "Kill the current Kuro terminal."
-  (interactive)
-  (when (derived-mode-p 'kuro-mode)
-    (kuro--stop-render-loop)
-    ;; Clean up blink overlays
-    (remove-overlays (point-min) (point-max) 'kuro-blink t)
-    (setq kuro--blink-overlays nil)
-    ;; Reset mouse state
-    (setq kuro--mouse-mode 0)
-    (setq kuro--mouse-sgr nil)
-    ;; Reset scroll offset
-    (setq kuro--scroll-offset 0)
-    ;; Clean up font remap
-    (when (and (boundp 'kuro--font-remap-cookie) kuro--font-remap-cookie)
-      (face-remap-remove-relative kuro--font-remap-cookie)
-      (setq kuro--font-remap-cookie nil))
-    (kuro--shutdown)
-    (let ((buffer (current-buffer)))
-      (kill-buffer buffer))))
 
 (provide 'kuro)
 

@@ -6,11 +6,23 @@ This directory contains the Emacs Lisp (ERT) test suite for Kuro, organized by t
 
 ```
 test/
-├── README.md                      # This file
-├── kuro-renderer-unit-test.el    # Unit tests for kuro-renderer.el
-├── kuro-e2e-test.el             # End-to-end tests (requires Rust module)
-├── kuro-config-test.el           # Unit tests for kuro-config.el
-└── run-e2e.sh                   # Shell script to run all E2E tests
+├── README.md                             # This file
+├── elisp/
+│   ├── kuro-e2e-test.el                 # End-to-end tests (requires Rust module)
+│   ├── kuro-renderer-unit-test.el       # Unit tests for kuro-renderer.el
+│   ├── kuro-ffi-test.el                 # FFI layer tests
+│   ├── kuro-faces-test.el               # Face/color tests
+│   ├── kuro-config-test.el              # Unit tests for kuro-config.el
+│   ├── kuro-overlays-test.el            # Overlay tests
+│   ├── kuro-input-test.el               # Input handling tests
+│   └── kuro-performance-test.el         # Performance tests
+├── shell/
+│   ├── run-e2e.sh                       # Shell script to run all E2E tests
+│   ├── vttest-compliance.sh             # VTE compliance check
+│   ├── kuro-comprehensive-test.sh       # Comprehensive test runner
+│   └── bench-validate.sh                # Benchmark validation
+├── manual/                              # Manual test cases
+└── vttest/                              # VT100 test suite (git submodule)
 ```
 
 ## Test Categories
@@ -35,12 +47,12 @@ Tests that only require Emacs Lisp and **do not** need the Rust dynamic module (
 
 ```bash
 # Run renderer unit tests only
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro-renderer-unit-test)" \
   --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
 
 # Run config unit tests only
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro-config-test)" \
   --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
 ```
@@ -74,7 +86,7 @@ Tests that require the Rust module to be built and spawn actual PTY sessions. Th
 make test-e2e
 
 # Or manually:
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro)" \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")"
@@ -87,7 +99,7 @@ emacs --batch -L emacs-lisp -L test \
 **Running:**
 
 ```bash
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro)" \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")"
@@ -134,12 +146,12 @@ You can filter tests by name pattern:
 
 ```bash
 # Run tests matching a pattern
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro-e2e-test)" \
   --eval '(ert-run-tests-batch-and-exit "kuro-e2e-.*color")'
 
 # Run a single test
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro-e2e-test)" \
   --eval '(ert-run-tests-batch-and-exit "^kuro-e2e-echo-command$")'
 ```
@@ -269,7 +281,7 @@ emacs --batch -L emacs-lisp -L test \
 
 ```bash
 # Run with verbose output
-emacs --batch -L emacs-lisp -L test \
+emacs --batch -L emacs-lisp -L test/elisp \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\" t)"
 ```
@@ -281,7 +293,7 @@ For faster iteration during development, run tests directly in Emacs:
 ```elisp
 ;; Load test files
 (add-to-list 'load-path "~/path/to/kuro/emacs-lisp")
-(add-to-list 'load-path "~/path/to/kuro/test")
+(add-to-list 'load-path "~/path/to/kuro/test/elisp")
 
 (require 'kuro-e2e-test)
 
@@ -359,9 +371,13 @@ For faster iteration during development, run tests directly in Emacs:
 
 All tests run in CI via GitHub Actions. The CI runs:
 
-1. `cargo test --workspace` - Rust tests
+1. `cargo fmt --all -- --check` - Rust formatting check
 2. `cargo clippy --workspace -- -D warnings` - Rust linting
-3. `bash test/run-e2e.sh` - Elisp ERT tests
+3. `cargo doc --workspace --no-deps` - Build documentation
+4. `cargo audit` - Security audit
+5. `cargo test --workspace` - Rust tests
+6. `cargo test --workspace --release` - Rust tests (release mode)
+7. `bash test/shell/run-e2e.sh` - Elisp ERT tests
 
 See `.github/workflows/` for CI configuration.
 

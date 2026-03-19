@@ -1,5 +1,7 @@
 //! Integration tests for DEC private modes.
 
+mod common;
+
 use kuro_core::TerminalCore;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -536,3 +538,239 @@ fn test_sync_output_rapid_streaming_no_corruption() {
         "row 1 separator must be unchanged"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// XTVERSION (CSI > q)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn xtversion_csi_greater_q_produces_dcs_response() {
+    let mut t = TerminalCore::new(24, 80);
+    // CSI > q — terminal version identification
+    t.advance(b"\x1b[>q");
+    let responses = common::read_responses(&mut t);
+    assert!(
+        !responses.is_empty(),
+        "XTVERSION must produce at least one response"
+    );
+    let resp = &responses[0];
+    // Response format: DCS > | <name>-<version> ST  (ESC P > | kuro-1.0.0 ESC \)
+    assert!(
+        resp.contains("kuro"),
+        "XTVERSION response must contain 'kuro', got: {:?}",
+        resp
+    );
+    assert!(
+        resp.starts_with("\x1bP") || resp.contains(">|"),
+        "XTVERSION response must be a DCS string, got: {:?}",
+        resp
+    );
+}
+
+#[test]
+fn xtversion_csi_greater_0_q_produces_dcs_response() {
+    // Optional: CSI > 0 q variant (param = 0)
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[>0q");
+    // Should not panic; may or may not produce response (vte may not route "0q" with ">" same way)
+    // The main test is no panic and optional response
+    let _ = common::read_responses(&mut t);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECRQM (CSI ? Ps $ p)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn decrqm_mode_25_cursor_visible_responds_set() {
+    let mut t = TerminalCore::new(24, 80);
+    // Cursor is visible by default (mode 25 = set)
+    // CSI ? 25 $ p
+    t.advance(b"\x1b[?25$p");
+    let responses = common::read_responses(&mut t);
+    assert!(
+        !responses.is_empty(),
+        "DECRQM for mode 25 must produce a response"
+    );
+    let resp = &responses[0];
+    // Response: CSI ? 25 ; 1 $ y  (status=1 means set)
+    assert!(
+        resp.contains("25") && resp.contains('1') && resp.contains("$y"),
+        "DECRQM response for mode 25 (set) must contain '25;1$y', got: {:?}",
+        resp
+    );
+}
+
+#[test]
+fn decrqm_mode_1049_alt_screen_responds_reset() {
+    let mut t = TerminalCore::new(24, 80);
+    // Alternate screen is off by default (mode 1049 = reset)
+    t.advance(b"\x1b[?1049$p");
+    let responses = common::read_responses(&mut t);
+    assert!(
+        !responses.is_empty(),
+        "DECRQM for mode 1049 must produce a response"
+    );
+    let resp = &responses[0];
+    // Response: CSI ? 1049 ; 2 $ y  (status=2 means reset)
+    assert!(
+        resp.contains("1049") && resp.contains('2') && resp.contains("$y"),
+        "DECRQM response for mode 1049 (reset) must contain '1049;2$y', got: {:?}",
+        resp
+    );
+}
+
+#[test]
+fn decrqm_mode_after_enable_responds_set() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1004h"); // enable focus events
+    t.advance(b"\x1b[?1004$p"); // query
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty());
+    let resp = &responses[0];
+    assert!(
+        resp.contains("1004") && resp.contains('1'),
+        "After enabling mode 1004, DECRQM must report status=1, got: {:?}",
+        resp
+    );
+}
+
+#[test]
+fn decrqm_unknown_mode_responds_not_recognized() {
+    let mut t = TerminalCore::new(24, 80);
+    // Mode 9999 — unknown/unsupported
+    t.advance(b"\x1b[?9999$p");
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty());
+    let resp = &responses[0];
+    // Status 0 = not recognized
+    assert!(
+        resp.contains("9999") && resp.contains('0'),
+        "Unknown mode must return status=0, got: {:?}",
+        resp
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mouse Pixel Mode (?1016)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn mouse_pixel_mode_1016_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.dec_modes().mouse_pixel,
+        "Mouse pixel mode should be off by default"
+    );
+    t.advance(b"\x1b[?1016h"); // enable
+    assert!(
+        t.dec_modes().mouse_pixel,
+        "Mouse pixel mode should be on after ?1016h"
+    );
+    t.advance(b"\x1b[?1016l"); // disable
+    assert!(
+        !t.dec_modes().mouse_pixel,
+        "Mouse pixel mode should be off after ?1016l"
+    );
+}
+
+#[test]
+fn mouse_pixel_mode_1016_reported_by_decrqm() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1016h");
+    t.advance(b"\x1b[?1016$p");
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty());
+    let resp = &responses[0];
+    assert!(
+        resp.contains("1016") && resp.contains('1'),
+        "Mouse pixel mode enabled → DECRQM must report status=1, got: {:?}",
+        resp
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DA1 / DA2 — device attributes (pre-existing, regression test)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn da1_produces_response() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[c"); // Primary DA
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty(), "DA1 must produce a response");
+    let resp = &responses[0];
+    assert!(
+        resp.contains("?1"),
+        "DA1 response must contain '?1', got: {:?}",
+        resp
+    );
+}
+
+#[test]
+fn da2_produces_response() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[>c"); // Secondary DA
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty(), "DA2 must produce a response");
+    let resp = &responses[0];
+    assert!(
+        resp.starts_with("\x1b[>"),
+        "DA2 response must start with ESC[>, got: {:?}",
+        resp
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Synchronized Output (?2026) — DECRQM regression test
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn synchronized_output_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(!t.dec_modes().synchronized_output);
+    t.advance(b"\x1b[?2026h");
+    assert!(t.dec_modes().synchronized_output);
+    t.advance(b"\x1b[?2026l");
+    assert!(!t.dec_modes().synchronized_output);
+}
+
+#[test]
+fn decrqm_synchronized_output_reports_state() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?2026h");
+    t.advance(b"\x1b[?2026$p");
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty());
+    let resp = &responses[0];
+    assert!(
+        resp.contains("2026") && resp.contains('1'),
+        "?2026 enabled → DECRQM must report 1, got: {:?}",
+        resp
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kitty keyboard protocol — regression test
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn kitty_keyboard_push_pop_query() {
+    let mut t = TerminalCore::new(24, 80);
+    assert_eq!(t.dec_modes().keyboard_flags, 0);
+    // Push flags=1
+    t.advance(b"\x1b[>1u");
+    assert_eq!(t.dec_modes().keyboard_flags, 1);
+    // Query → response with current flags
+    t.advance(b"\x1b[?u");
+    let responses = common::read_responses(&mut t);
+    assert!(!responses.is_empty(), "Kitty keyboard query must respond");
+    // Pop
+    t.advance(b"\x1b[<u");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        0,
+        "Flags should revert after pop"
+    );
+}
+

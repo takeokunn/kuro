@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod vttest {
     use crate::TerminalCore;
+    use crate::Color;
 
     fn create_terminal() -> TerminalCore {
         TerminalCore::new(24, 80)
@@ -116,7 +117,7 @@ mod vttest {
                                      // After ED 2, cursor may be at home or content cleared
                                      // Just verify no crash and screen is accessible
         let _cell = term.screen.get_cell(0, 0);
-        assert!(true, "ED 2 should clear screen without crash");
+        // No panic occurred - ED 2 cleared screen without crash
     }
 
     #[test]
@@ -152,14 +153,14 @@ mod vttest {
     fn test_sgr_256_color() {
         let mut term = create_terminal();
         feed(&mut term, &csi("38;5;196m"));
-        assert!(true, "256-color should not crash");
+        assert_eq!(term.current_attrs.foreground, Color::Indexed(196), "256-color should set foreground to Indexed(196)");
     }
 
     #[test]
     fn test_sgr_true_color() {
         let mut term = create_terminal();
         feed(&mut term, &csi("38;2;255;128;64m"));
-        assert!(true, "True-color should not crash");
+        assert_eq!(term.current_attrs.foreground, Color::Rgb(255, 128, 64), "true-color should set foreground to Rgb(255, 128, 64)");
     }
 
     // -------------------- Test 4: Line Operations --------------------
@@ -170,7 +171,7 @@ mod vttest {
         feed(&mut term, b"Line1\n");
         feed(&mut term, &csi("1;1H"));
         feed(&mut term, &csi("L"));
-        assert!(true, "IL should not crash");
+        // No panic occurred - IL (insert line) did not crash
     }
 
     #[test]
@@ -179,7 +180,7 @@ mod vttest {
         feed(&mut term, b"Line1\nLine2\nLine3");
         feed(&mut term, &csi("2;1H"));
         feed(&mut term, &csi("M"));
-        assert!(true, "DL should not crash");
+        // No panic occurred - DL (delete line) did not crash
     }
 
     // -------------------- Test 5: Character Operations --------------------
@@ -190,7 +191,7 @@ mod vttest {
         feed(&mut term, b"ABCD");
         feed(&mut term, &csi("1;2H"));
         feed(&mut term, &csi("2@"));
-        assert!(true, "ICH should not crash");
+        // No panic occurred - ICH (insert character) did not crash
     }
 
     #[test]
@@ -199,7 +200,7 @@ mod vttest {
         feed(&mut term, b"ABCD");
         feed(&mut term, &csi("1;2H"));
         feed(&mut term, &csi("2P"));
-        assert!(true, "DCH should not crash");
+        // No panic occurred - DCH (delete character) did not crash
     }
 
     #[test]
@@ -208,7 +209,7 @@ mod vttest {
         feed(&mut term, b"ABCD");
         feed(&mut term, &csi("1;2H"));
         feed(&mut term, &csi("2X"));
-        assert!(true, "ECH should not crash");
+        // No panic occurred - ECH (erase character) did not crash
     }
 
     // -------------------- Test 6: Scroll Region --------------------
@@ -217,7 +218,9 @@ mod vttest {
     fn test_decstbm_set_scroll_region() {
         let mut term = create_terminal();
         feed(&mut term, &csi("5;15r"));
-        assert!(true, "DECSTBM should not crash");
+        // No panic occurred - DECSTBM (set scroll region) did not crash
+        let cursor = term.screen.cursor();
+        assert!(cursor.row < 24 && cursor.col < 80, "cursor should remain in bounds after DECSTBM");
     }
 
     // -------------------- Test 7: Tab Stops --------------------
@@ -235,7 +238,7 @@ mod vttest {
     fn test_tbc_clear_tab_stops() {
         let mut term = create_terminal();
         feed(&mut term, &csi("3g"));
-        assert!(true, "TBC should not crash");
+        // No panic occurred - TBC (tab clear) did not crash
     }
 
     // -------------------- Test 8: Save/Restore Cursor --------------------
@@ -333,14 +336,14 @@ mod vttest {
     fn test_cjk_characters() {
         let mut term = create_terminal();
         feed(&mut term, "日本語".as_bytes());
-        assert!(true, "CJK should not crash");
+        // No panic occurred - CJK character rendering did not crash
     }
 
     #[test]
     fn test_emoji() {
         let mut term = create_terminal();
         feed(&mut term, "🎉🚀".as_bytes());
-        assert!(true, "Emoji should not crash");
+        // No panic occurred - emoji rendering did not crash
     }
 
     // -------------------- Test 13: Repeat --------------------
@@ -350,6 +353,6 @@ mod vttest {
         let mut term = create_terminal();
         feed(&mut term, b"A");
         feed(&mut term, &csi("5b"));
-        assert!(true, "REP should not crash");
+        // No panic occurred - REP (repeat character) did not crash
     }
 }

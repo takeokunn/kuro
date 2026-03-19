@@ -14,22 +14,6 @@ pub enum KuroError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    /// PTY-related errors
-    #[error("PTY error: {0}")]
-    Pty(String),
-
-    /// FFI-related errors
-    #[error("FFI error: {0}")]
-    Ffi(String),
-
-    /// Parser errors
-    #[error("Parser error: {0}")]
-    Parser(String),
-
-    /// Invalid parameter
-    #[error("Invalid parameter: {0}")]
-    InvalidParam(String),
-
     /// Null pointer in FFI
     #[error("Null pointer")]
     NullPointer,
@@ -57,13 +41,13 @@ pub enum KuroError {
 
 impl From<String> for KuroError {
     fn from(s: String) -> Self {
-        KuroError::Ffi(s)
+        crate::ffi::error::ffi_error(&s)
     }
 }
 
 impl From<&str> for KuroError {
     fn from(s: &str) -> Self {
-        KuroError::Ffi(s.to_string())
+        crate::ffi::error::ffi_error(s)
     }
 }
 
@@ -85,16 +69,16 @@ mod tests {
 
     #[test]
     fn test_pty_variant_display() {
-        let err = KuroError::Pty("pty failed".to_string());
+        let err = crate::ffi::error::pty_spawn_error("bash", "pty failed");
         let s = err.to_string();
         assert!(!s.is_empty());
-        assert!(s.contains("PTY error"));
+        assert!(s.contains("PTY"));
         assert!(s.contains("pty failed"));
     }
 
     #[test]
     fn test_ffi_variant_display() {
-        let err = KuroError::Ffi("ffi blew up".to_string());
+        let err = crate::ffi::error::ffi_error("ffi blew up");
         let s = err.to_string();
         assert!(!s.is_empty());
         assert!(s.contains("FFI error"));
@@ -103,19 +87,19 @@ mod tests {
 
     #[test]
     fn test_parser_variant_display() {
-        let err = KuroError::Parser("unexpected byte".to_string());
+        let err = crate::ffi::error::parse_error("unexpected byte");
         let s = err.to_string();
         assert!(!s.is_empty());
-        assert!(s.contains("Parser error"));
+        assert!(s.contains("parse error") || s.contains("VTE parse error"));
         assert!(s.contains("unexpected byte"));
     }
 
     #[test]
     fn test_invalid_param_variant_display() {
-        let err = KuroError::InvalidParam("rows must be > 0".to_string());
+        let err = crate::ffi::error::invalid_parameter_error("rows", "rows must be > 0");
         let s = err.to_string();
         assert!(!s.is_empty());
-        assert!(s.contains("Invalid parameter"));
+        assert!(s.contains("Invalid parameter") || s.contains("parameter"));
         assert!(s.contains("rows must be > 0"));
     }
 
@@ -177,13 +161,13 @@ mod tests {
     #[test]
     fn test_from_string() {
         let err = KuroError::from("some error".to_string());
-        assert!(matches!(err, KuroError::Ffi(_)));
+        assert!(matches!(err, KuroError::Runtime(_)));
     }
 
     #[test]
     fn test_from_str() {
         let err = KuroError::from("some error");
-        assert!(matches!(err, KuroError::Ffi(_)));
+        assert!(matches!(err, KuroError::Runtime(_)));
     }
 
     // --- Debug formatting (non-empty for all variants) ---
@@ -191,10 +175,10 @@ mod tests {
     #[test]
     fn test_debug_format_non_empty() {
         let variants: Vec<Box<dyn std::fmt::Debug>> = vec![
-            Box::new(KuroError::Pty("x".to_string())),
-            Box::new(KuroError::Ffi("x".to_string())),
-            Box::new(KuroError::Parser("x".to_string())),
-            Box::new(KuroError::InvalidParam("x".to_string())),
+            Box::new(crate::ffi::error::pty_spawn_error("bash", "x")),
+            Box::new(crate::ffi::error::ffi_error("x")),
+            Box::new(crate::ffi::error::parse_error("x")),
+            Box::new(crate::ffi::error::invalid_parameter_error("p", "x")),
             Box::new(KuroError::NullPointer),
         ];
         for v in &variants {

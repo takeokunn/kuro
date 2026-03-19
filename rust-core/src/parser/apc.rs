@@ -1,5 +1,6 @@
 //! APC (Application Program Command) pre-scanner for Kitty Graphics Protocol
 
+use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
 use crate::TerminalCore;
 use memchr::memchr;
 
@@ -29,10 +30,6 @@ pub enum ApcScanState {
 /// 2. Slow path: Run the APC state machine only when ESC is detected or we're mid-sequence
 /// 3. Always run the vte parser for all other terminal sequences
 pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
-    /// Maximum bytes accumulated in a single APC payload (4 MiB).
-    /// Bytes beyond this limit are silently dropped; the sequence is still
-    /// dispatched with the truncated payload.
-    const MAX_APC_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
 
     // --- Hybrid APC pre-scanner for Kitty Graphics ---
     // Only run the byte-by-byte scanner if:
@@ -42,51 +39,51 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // This optimization provides 2-4x throughput improvement for plain text
     // (no escape sequences) which is common in typical terminal output.
     let has_esc = memchr(0x1B, bytes).is_some();
-    let in_apc_sequence = core.apc_state != ApcScanState::Idle;
+    let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
 
     if has_esc || in_apc_sequence {
         for &byte in bytes {
-            match (core.apc_state, byte) {
+            match (core.kitty.apc_state, byte) {
                 // Idle: watch for ESC
                 (ApcScanState::Idle, 0x1B) => {
-                    core.apc_state = ApcScanState::AfterEsc;
+                    core.kitty.apc_state = ApcScanState::AfterEsc;
                 }
                 (ApcScanState::Idle, _) => {}
                 // AfterEsc: ESC + '_' starts APC; anything else resets
                 (ApcScanState::AfterEsc, b'_') => {
-                    core.apc_buf.clear();
-                    core.apc_state = ApcScanState::InApc;
+                    core.kitty.apc_buf.clear();
+                    core.kitty.apc_state = ApcScanState::InApc;
                 }
                 (ApcScanState::AfterEsc, _) => {
-                    core.apc_state = ApcScanState::Idle;
+                    core.kitty.apc_state = ApcScanState::Idle;
                 }
                 // InApc: accumulate bytes (with size cap); ESC may be start of ST
                 (ApcScanState::InApc, 0x1B) => {
-                    core.apc_state = ApcScanState::AfterApcEsc;
+                    core.kitty.apc_state = ApcScanState::AfterApcEsc;
                 }
                 (ApcScanState::InApc, b) => {
-                    if core.apc_buf.len() < MAX_APC_PAYLOAD_BYTES {
-                        core.apc_buf.push(b);
+                    if core.kitty.apc_buf.len() < MAX_APC_PAYLOAD_BYTES {
+                        core.kitty.apc_buf.push(b);
                     }
                     // If over limit, keep state but drop byte (truncate silently)
                 }
                 // AfterApcEsc: '\\' completes the APC (ESC \\ = ST); else keep accumulating
                 (ApcScanState::AfterApcEsc, b'\\') => {
                     // APC complete — dispatch if it starts with 'G' (Kitty Graphics)
-                    if core.apc_buf.first() == Some(&b'G') {
-                        let payload = core.apc_buf[1..].to_vec();
+                    if core.kitty.apc_buf.first() == Some(&b'G') {
+                        let payload = core.kitty.apc_buf[1..].to_vec();
                         dispatch_kitty_apc(core, &payload);
                     }
-                    core.apc_buf.clear();
-                    core.apc_state = ApcScanState::Idle;
+                    core.kitty.apc_buf.clear();
+                    core.kitty.apc_state = ApcScanState::Idle;
                 }
                 (ApcScanState::AfterApcEsc, b) => {
                     // False ESC — add ESC + this byte back and stay in InApc
-                    if core.apc_buf.len() + 2 <= MAX_APC_PAYLOAD_BYTES {
-                        core.apc_buf.push(0x1B);
-                        core.apc_buf.push(b);
+                    if core.kitty.apc_buf.len() + 2 <= MAX_APC_PAYLOAD_BYTES {
+                        core.kitty.apc_buf.push(0x1B);
+                        core.kitty.apc_buf.push(b);
                     }
-                    core.apc_state = ApcScanState::InApc;
+                    core.kitty.apc_state = ApcScanState::InApc;
                 }
             }
         }
@@ -98,6 +95,10 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     core.parser = parser;
 }
 
+#[cfg(test)]
+#[path = "tests/apc.rs"]
+mod tests;
+
 /// Dispatch a fully assembled Kitty Graphics APC payload.
 ///
 /// `payload` is everything after the leading 'G' byte (i.e., the key=value header
@@ -106,7 +107,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
     use crate::grid::screen::{ImageData, ImagePlacement};
     use crate::parser::kitty::{process_apc_payload, KittyCommand};
 
-    let cmd = match process_apc_payload(payload, &mut core.kitty_chunk) {
+    let cmd = match process_apc_payload(payload, &mut core.kitty.kitty_chunk) {
         Some(cmd) => cmd,
         None => return, // more chunks incoming, or malformed
     };
@@ -160,7 +161,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
                 display_rows: rows.unwrap_or(1),
             };
             if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-                core.pending_image_notifications.push(notif);
+                core.kitty.pending_image_notifications.push(notif);
             }
         }
 
@@ -179,7 +180,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
                 display_rows: rows.unwrap_or(1),
             };
             if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-                core.pending_image_notifications.push(notif);
+                core.kitty.pending_image_notifications.push(notif);
             }
         }
 
@@ -203,7 +204,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             // Respond with "OK" status using existing pending_responses mechanism
             let id_part = image_id.map(|id| format!(",i={}", id)).unwrap_or_default();
             let response = format!("\x1b_Ga=q{};OK\x1b\\", id_part);
-            core.pending_responses.push(response.into_bytes());
+            core.meta.pending_responses.push(response.into_bytes());
         }
     }
 }

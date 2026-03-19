@@ -2,9 +2,14 @@
 
 use crate::TerminalCore;
 
+const CELL_PIXEL_WIDTH: u32 = 8;
+const CELL_PIXEL_HEIGHT: u32 = 16;
+
 /// DCS state for accumulating sequences.
+#[derive(Default)]
 pub enum DcsState {
     /// No active DCS sequence.
+    #[default]
     Idle,
     /// DCS + q (XTGETTCAP): accumulating hex-encoded capability name.
     Xtgettcap {
@@ -15,11 +20,6 @@ pub enum DcsState {
     Sixel(crate::parser::sixel::SixelDecoder),
 }
 
-impl Default for DcsState {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 /// Called when DCS final byte is received (hook).
 pub fn dcs_hook(
@@ -32,7 +32,7 @@ pub fn dcs_hook(
     match (intermediates, c) {
         (b"+", 'q') => {
             // XTGETTCAP: DCS + q <hex-name> ST
-            core.dcs_state = DcsState::Xtgettcap { buf: Vec::new() };
+            core.meta.dcs_state = DcsState::Xtgettcap { buf: Vec::new() };
         }
         (b"", 'q') => {
             // Sixel: DCS P1;P2;P3 q <data> ST
@@ -41,17 +41,17 @@ pub fn dcs_hook(
                 .nth(1)
                 .and_then(|p| p.first().copied())
                 .unwrap_or(0);
-            core.dcs_state = DcsState::Sixel(crate::parser::sixel::SixelDecoder::new(p2));
+            core.meta.dcs_state = DcsState::Sixel(crate::parser::sixel::SixelDecoder::new(p2));
         }
         _ => {
-            core.dcs_state = DcsState::Idle;
+            core.meta.dcs_state = DcsState::Idle;
         }
     }
 }
 
 /// Called for each data byte of the DCS sequence.
 pub fn dcs_put(core: &mut TerminalCore, byte: u8) {
-    match &mut core.dcs_state {
+    match &mut core.meta.dcs_state {
         DcsState::Xtgettcap { buf } => {
             buf.push(byte);
         }
@@ -64,7 +64,7 @@ pub fn dcs_put(core: &mut TerminalCore, byte: u8) {
 
 /// Called when DCS sequence ends (ST).
 pub fn dcs_unhook(core: &mut TerminalCore) {
-    let state = std::mem::replace(&mut core.dcs_state, DcsState::Idle);
+    let state = std::mem::replace(&mut core.meta.dcs_state, DcsState::Idle);
     match state {
         DcsState::Xtgettcap { buf } => handle_xtgettcap(core, &buf),
         DcsState::Sixel(decoder) => handle_sixel_complete(core, decoder),
@@ -91,7 +91,7 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
 
         let cap_name = match hex_decode(cap_hex) {
             Some(name) => name,
-            Option::None => continue,
+            None => continue,
         };
 
         let response = match cap_name.as_str() {
@@ -123,12 +123,12 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
             }
         };
 
-        core.pending_responses.push(response.into_bytes());
+        core.meta.pending_responses.push(response.into_bytes());
     }
 }
 
 fn hex_decode(hex: &str) -> Option<String> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
 
@@ -148,6 +148,10 @@ fn hex_encode(bytes: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "tests/dcs.rs"]
+mod tests;
 
 /// Finalize a completed sixel sequence and add as image placement.
 fn handle_sixel_complete(core: &mut TerminalCore, decoder: crate::parser::sixel::SixelDecoder) {
@@ -170,8 +174,8 @@ fn handle_sixel_complete(core: &mut TerminalCore, decoder: crate::parser::sixel:
         let cursor = *core.screen.cursor();
 
         // Estimate cell geometry with a conventional 8x16 terminal cell.
-        let cell_w = width.div_ceil(8);
-        let cell_h = height.div_ceil(16);
+        let cell_w = width.div_ceil(CELL_PIXEL_WIDTH);
+        let cell_h = height.div_ceil(CELL_PIXEL_HEIGHT);
 
         let placement = ImagePlacement {
             image_id: actual_id,
@@ -182,7 +186,7 @@ fn handle_sixel_complete(core: &mut TerminalCore, decoder: crate::parser::sixel:
         };
 
         if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-            core.pending_image_notifications.push(notif);
+            core.kitty.pending_image_notifications.push(notif);
         }
 
         // Advance cursor after the rendered image region.

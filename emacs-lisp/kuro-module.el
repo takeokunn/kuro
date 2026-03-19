@@ -15,7 +15,6 @@
 
 (require 'kuro-config)  ;; for kuro-module-binary-path defcustom
 (require 'kuro-ffi)
-(require 'kuro-renderer)
 
 (defun kuro-module--platform-extension ()
   "Return the platform-specific shared library extension."
@@ -70,6 +69,16 @@ If the module is already loaded (kuro-core-init is fbound), does nothing."
             (module-load module-file))
         (message "Kuro: native module not found. Run 'make install' to build it. (searched: %s)"
                  module-file)))))
+
+(defvar kuro--module-loaded nil
+  "Non-nil if the Rust shared library has been loaded.")
+
+(defun kuro--ensure-module-loaded ()
+  "Load the Rust core module if not already loaded.
+Safe to call multiple times; subsequent calls are no-ops."
+  (unless kuro--module-loaded
+    (kuro-module-load)
+    (setq kuro--module-loaded t)))
 
 (provide 'kuro-module)
 

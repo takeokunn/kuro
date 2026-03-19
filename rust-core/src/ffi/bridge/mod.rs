@@ -3,198 +3,22 @@
 //! This module provides the primary FFI implementation using the emacs-module-rs crate,
 //! with the ability to fall back to raw FFI bindings if needed.
 
-use crate::error::KuroError;
-use crate::ffi::abstraction::{
-    emacs_env, emacs_value, init_session, shutdown_session, with_session, with_session_readonly,
-    KuroFFI,
-};
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 use std::panic::catch_unwind;
-use std::sync::Mutex;
 
+use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+
+use crate::error::KuroError;
+
+mod emacs_impl;
 mod events;
 mod images;
 mod lifecycle;
 mod queries;
 mod render;
 
-/// Current FFI implementation type
-///
-/// This enum allows runtime switching between different FFI implementations.
-enum FfiImplementation {
-    EmacsModule,
-    Raw,
-}
+pub use emacs_impl::EmacsModuleFFI;
 
-/// Global FFI implementation selector
-///
-/// This static holds the current FFI implementation. It's initialized
-/// with EmacsModule by default and can be switched to Raw if needed.
-static FFI_IMPLEMENTATION: Mutex<FfiImplementation> = Mutex::new(FfiImplementation::EmacsModule);
-
-/// Initialize the FFI implementation
-///
-/// This function should be called during module initialization to set up
-/// the appropriate FFI implementation.
-fn init_ffi_implementation() {
-    // Default implementation is EmacsModule
-}
-
-/// Switch to raw FFI fallback implementation
-///
-/// This function can be called if the emacs-module-rs implementation
-/// encounters issues that cannot be resolved.
-#[allow(dead_code)]
-pub(crate) fn switch_to_raw_ffi() {
-    if let Ok(mut guard) = FFI_IMPLEMENTATION.lock() {
-        *guard = FfiImplementation::Raw;
-    }
-}
-
-/// Get the current FFI implementation type
-#[allow(dead_code)]
-fn get_ffi_type() -> FfiImplementation {
-    match FFI_IMPLEMENTATION.lock() {
-        Ok(guard) => match &*guard {
-            FfiImplementation::EmacsModule => FfiImplementation::EmacsModule,
-            FfiImplementation::Raw => FfiImplementation::Raw,
-        },
-        Err(_) => FfiImplementation::EmacsModule, // fallback on poisoned mutex
-    }
-}
-
-/// Primary FFI implementation using emacs-module-rs
-///
-/// This is the default implementation that leverages the high-level
-/// bindings provided by emacs-module-rs.
-pub struct EmacsModuleFFI;
-
-impl KuroFFI for EmacsModuleFFI {
-    fn init(_env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        // Convert i64 to u16 safely
-        let rows = rows as u16;
-        let cols = cols as u16;
-
-        // Initialize session
-        match init_session(command, rows, cols) {
-            Ok(_) => {
-                // Return a non-null pointer to indicate success
-                std::ptr::dangling_mut::<emacs_value>()
-            }
-            Err(_) => {
-                // Return null to indicate failure
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn poll_updates(_env: *mut emacs_env, _max_updates: i64) -> *mut emacs_value {
-        let result: std::result::Result<Vec<(usize, String)>, KuroError> =
-            with_session(|session| {
-                session.poll_output()?;
-                Ok(session.get_dirty_lines())
-            });
-
-        match result {
-            Ok(_) => {
-                // Return a non-null pointer to indicate success
-                // (The actual value is ignored in the bridge layer)
-                std::ptr::dangling_mut::<emacs_value>()
-            }
-            Err(_) => {
-                // Return null to indicate failure
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn send_key(_env: *mut emacs_env, data: &[u8]) -> *mut emacs_value {
-        let result = with_session(|session| {
-            session.send_input(data)?;
-            Ok(())
-        });
-
-        match result {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    fn resize(_env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
-        let rows = rows as u16;
-        let cols = cols as u16;
-
-        let result = with_session(|session| {
-            session.resize(rows, cols)?;
-            Ok(())
-        });
-
-        match result {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    fn shutdown(_env: *mut emacs_env) -> *mut emacs_value {
-        match shutdown_session() {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    fn get_cursor(_env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session_readonly(|session| {
-            let (row, col) = session.get_cursor();
-            Ok(format!("{}:{}", row, col))
-        });
-
-        match result {
-            Ok(s) => s.as_ptr() as *mut emacs_value,
-            Err(_) => "0:0".as_ptr() as *mut emacs_value,
-        }
-    }
-
-    fn get_scrollback(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
-        let max_lines = if max_lines <= 0 {
-            usize::MAX
-        } else {
-            max_lines as usize
-        };
-
-        let result = with_session_readonly(|session| Ok(session.get_scrollback(max_lines)));
-
-        match result {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    fn clear_scrollback(_env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session(|session| {
-            session.clear_scrollback();
-            Ok(())
-        });
-
-        match result {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    fn set_scrollback_max_lines(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
-        let result = with_session(|session| {
-            session.set_scrollback_max_lines(max_lines as usize);
-            Ok(())
-        });
-
-        match result {
-            Ok(_) => std::ptr::dangling_mut::<emacs_value>(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-}
-
-/// Lock `TERMINAL_SESSION` and map mutex-poison errors to `KuroError::Ffi`.
+/// Lock `TERMINAL_SESSION` and map mutex-poison errors to `KuroError::State`.
 ///
 /// The macro expands to the locked guard; the caller is responsible for binding
 /// it with `let` or `let mut` as needed:
@@ -206,21 +30,11 @@ macro_rules! lock_session {
     () => {
         crate::ffi::abstraction::TERMINAL_SESSION
             .lock()
-            .map_err(|e| crate::error::KuroError::Ffi(format!("Mutex poisoned: {}", e)))?
+            .map_err(|_e| crate::error::KuroError::State(crate::ffi::error::StateError::NoTerminalSession))?
     };
 }
 
 pub(super) use lock_session;
-
-/// Convert a Rust `bool` to an Emacs Lisp `t` / `nil` symbol.
-#[inline]
-fn bool_to_lisp<'e>(env: &'e Env, v: bool) -> EmacsResult<Value<'e>> {
-    if v {
-        env.intern("t")
-    } else {
-        env.intern("nil")
-    }
-}
 
 /// Catch Rust panics and convert to Emacs errors
 fn catch_panic<'e, R, F>(env: &'e Env, f: F) -> EmacsResult<Value<'e>>
@@ -233,14 +47,7 @@ where
     match result {
         Ok(Ok(value)) => value.into_lisp(env),
         Ok(Err(e)) => {
-            let msg = match e {
-                KuroError::Pty(msg) => format!("PTY error: {}", msg),
-                KuroError::Ffi(msg) => format!("FFI error: {}", msg),
-                KuroError::Parser(msg) => format!("Parser error: {}", msg),
-                KuroError::InvalidParam(msg) => format!("Invalid parameter: {}", msg),
-                KuroError::Io(msg) => format!("IO error: {}", msg),
-                _ => format!("Error: {}", e),
-            };
+            let msg = format!("Kuro error: {}", e);
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -260,9 +67,118 @@ where
     }
 }
 
+/// Helper for FFI functions that read a single value from the active session.
+///
+/// Calls `f(session)` when a session is active; returns `default` otherwise.
+/// Wraps in `catch_panic` automatically.
+///
+/// # Constraints
+/// Both `T` and `F` must be [`std::panic::UnwindSafe`].  For closures that
+/// capture only `&` references or no data at all, this is satisfied
+/// automatically.  Use [`std::panic::AssertUnwindSafe`] if the closure
+/// captures `&mut` data (rare for read-only queries).
+pub(crate) fn query_session<'e, T, F>(
+    env: &'e Env,
+    default: T,
+    f: F,
+) -> EmacsResult<Value<'e>>
+where
+    T: IntoLisp<'e> + std::panic::UnwindSafe + 'static,
+    F: FnOnce(&crate::ffi::abstraction::TerminalSession) -> Result<T, KuroError>
+        + std::panic::UnwindSafe,
+{
+    catch_panic(env, || {
+        let global = lock_session!();
+        if let Some(ref session) = *global {
+            f(session)
+        } else {
+            Ok(default)
+        }
+    })
+}
+
+/// Helper for FFI functions that mutate the active session.
+///
+/// Calls `f(session)` when a session is active; returns `default` otherwise.
+/// Wraps in `catch_panic` automatically.
+///
+/// # Constraints
+/// Both `T` and `F` must be [`std::panic::UnwindSafe`].  For closures that
+/// capture only owned values or no data at all, this is satisfied
+/// automatically.  Use [`std::panic::AssertUnwindSafe`] if the closure
+/// captures references to non-`UnwindSafe` data.
+pub(crate) fn query_session_mut<'e, T, F>(
+    env: &'e Env,
+    default: T,
+    f: F,
+) -> EmacsResult<Value<'e>>
+where
+    T: IntoLisp<'e> + std::panic::UnwindSafe + 'static,
+    F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Result<T, KuroError>
+        + std::panic::UnwindSafe,
+{
+    catch_panic(env, || {
+        let mut global = lock_session!();
+        if let Some(ref mut session) = *global {
+            f(session)
+        } else {
+            Ok(default)
+        }
+    })
+}
+
+/// Helper for FFI functions returning `Option<T>`.
+///
+/// Unlike [`query_session_mut`], the closure returns `Result<Option<T>>`.
+/// `Some(v)` is converted to the corresponding Lisp value; `None` becomes `false`.
+/// When no session is active, also returns `false` — callers cannot distinguish
+/// "no session" from "session returned None".
+///
+/// `AssertUnwindSafe` is applied unconditionally because the closure captures
+/// `&mut TerminalSession`, which is not `UnwindSafe`. The session mutex is
+/// dropped before any unwind path executes.
+///
+/// # Constraints
+/// - Only valid when `None` maps to the Emacs `nil`/`false` value.
+/// - Closure errors are logged via `env.message` but do NOT signal an Emacs
+///   `error` condition (unlike [`catch_panic`]).
+///
+/// # See Also
+/// - [`query_session`] — for closures returning `Result<T>` with `&TerminalSession`
+/// - [`query_session_mut`] — for closures returning `Result<T>` with `&mut TerminalSession`
+#[inline]
+pub(crate) fn query_session_opt<'e, T, F>(
+    env: &'e Env,
+    f: F,
+) -> EmacsResult<Value<'e>>
+where
+    T: IntoLisp<'e>,
+    F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Result<Option<T>, KuroError> + std::panic::UnwindSafe,
+{
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut global = lock_session!();
+        if let Some(ref mut session) = *global {
+            f(session)
+        } else {
+            Ok(None)
+        }
+    }));
+    match result {
+        Ok(Ok(Some(v))) => v.into_lisp(env),
+        Ok(Ok(None)) => false.into_lisp(env),
+        Ok(Err(e)) => {
+            let _ = env.message(format!("kuro: {}", e));
+            false.into_lisp(env)
+        }
+        Err(_) => {
+            let _ = env.message("kuro: panic in query_session_opt");
+            false.into_lisp(env)
+        }
+    }
+}
+
 /// Emacs plugin initialization (called from lib.rs via #[emacs::module])
 pub fn module_init(env: &Env) -> EmacsResult<()> {
-    init_ffi_implementation();
     env.message("Kuro terminal emulator module loaded")?;
     Ok(())
 }
@@ -275,39 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_emacs_module_ffi_trait_impl() {
-        // Verify EmacsModuleFFI implements KuroFFI
-        // Note: KuroFFI is not dyn compatible
-        let _ = &EmacsModuleFFI;
-    }
-
-    #[test]
-    fn test_ffi_initialization() {
-        // Test that FFI implementation is initialized
-        init_ffi_implementation();
-
-        // Get the implementation type
-        let ffi_type = get_ffi_type();
-        match ffi_type {
-            FfiImplementation::EmacsModule => {}
-            FfiImplementation::Raw => {}
-        }
-    }
-
-    #[test]
-    fn test_switch_to_raw_ffi() {
-        // Initialize with EmacsModule
-        init_ffi_implementation();
-
-        // Switch to Raw
-        switch_to_raw_ffi();
-
-        // Verify the switch
-        let ffi_type = get_ffi_type();
-        assert!(matches!(ffi_type, FfiImplementation::Raw));
-
-        // Reset to EmacsModule for other tests
-        let mut impl_guard = FFI_IMPLEMENTATION.lock().unwrap();
-        *impl_guard = FfiImplementation::EmacsModule;
+    fn test_emacs_module_ffi_is_zero_sized() {
+        assert_eq!(std::mem::size_of::<EmacsModuleFFI>(), 0);
     }
 }

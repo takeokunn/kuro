@@ -43,3 +43,7 @@ harness = false
 [[bench]]
 name = "ffi_latency"
 harness = false
+
+[[bench]]
+name = "render_pipeline"
+harness = false

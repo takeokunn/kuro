@@ -156,6 +156,24 @@ impl DecModes {
     }
 }
 
+/// Handle DECRQM — DEC private mode query (CSI ? Ps $ p → CSI ? Ps ; status $ y)
+///
+/// For each queried mode, returns status: 1 = set, 2 = reset, 0 = not recognised.
+#[inline]
+pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
+    for param_group in params {
+        for &mode in param_group {
+            let status: u8 = match term.dec_modes.get_mode(mode) {
+                Some(true) => 1,  // set
+                Some(false) => 2, // reset
+                None => 0,        // not recognized
+            };
+            let response = format!("\x1b[?{};{}$y", mode, status);
+            term.meta.pending_responses.push(response.into_bytes());
+        }
+    }
+}
+
 /// Handle DEC private mode sequences (CSI ? Pm h/l)
 ///
 /// - CSI ? Pm h: Set DEC private mode(s)
@@ -213,356 +231,60 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    #[test]
-    fn test_dec_modes_default() {
-        let modes = DecModes::new();
-        assert!(!modes.app_cursor_keys);
-        assert!(modes.auto_wrap);
-        assert!(modes.cursor_visible);
-        assert!(!modes.alternate_screen);
-        assert!(!modes.bracketed_paste);
+/// Handle Kitty keyboard mode push (CSI > Ps u).
+///
+/// Pushes the current keyboard flags onto the stack (capped at 64 entries)
+/// and sets the new flags from `params`.
+///
+/// # See Also
+/// - [`handle_kitty_kb_pop`] — restore the previous flags from the stack
+/// - [`handle_kitty_kb_query`] — query the current flags without modifying state
+#[inline]
+pub fn handle_kitty_kb_push(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let flags = params
+        .iter()
+        .next()
+        .and_then(|p| p.first().copied())
+        .unwrap_or(0);
+    if term.dec_modes.keyboard_flags_stack.len() < 64 {
+        term.dec_modes
+            .keyboard_flags_stack
+            .push(term.dec_modes.keyboard_flags);
     }
+    term.dec_modes.keyboard_flags = flags as u32;
+}
 
-    #[test]
-    fn test_set_decckm() {
-        let mut modes = DecModes::new();
-        assert!(!modes.app_cursor_keys);
-
-        modes.set_mode(1);
-        assert!(modes.app_cursor_keys);
-    }
-
-    #[test]
-    fn test_reset_decckm() {
-        let mut modes = DecModes::new();
-        modes.app_cursor_keys = true;
-        modes.reset_mode(1);
-        assert!(!modes.app_cursor_keys);
-    }
-
-    #[test]
-    fn test_set_decawm() {
-        let mut modes = DecModes::new();
-        modes.auto_wrap = false;
-
-        modes.set_mode(7);
-        assert!(modes.auto_wrap);
-    }
-
-    #[test]
-    fn test_reset_decawm() {
-        let mut modes = DecModes::new();
-        modes.set_mode(7);
-        assert!(modes.auto_wrap);
-
-        modes.reset_mode(7);
-        assert!(!modes.auto_wrap);
-    }
-
-    #[test]
-    fn test_set_dectcem() {
-        let mut modes = DecModes::new();
-        modes.cursor_visible = false;
-
-        modes.set_mode(25);
-        assert!(modes.cursor_visible);
-    }
-
-    #[test]
-    fn test_reset_dectcem() {
-        let mut modes = DecModes::new();
-        modes.reset_mode(25);
-        assert!(!modes.cursor_visible);
-    }
-
-    #[test]
-    fn test_set_alternate_screen() {
-        let mut modes = DecModes::new();
-        assert!(!modes.alternate_screen);
-
-        modes.set_mode(1049);
-        assert!(modes.alternate_screen);
-    }
-
-    #[test]
-    fn test_reset_alternate_screen() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1049);
-        assert!(modes.alternate_screen);
-
-        modes.reset_mode(1049);
-        assert!(!modes.alternate_screen);
-    }
-
-    #[test]
-    fn test_set_bracketed_paste() {
-        let mut modes = DecModes::new();
-        assert!(!modes.bracketed_paste);
-
-        modes.set_mode(2004);
-        assert!(modes.bracketed_paste);
-    }
-
-    #[test]
-    fn test_reset_bracketed_paste() {
-        let mut modes = DecModes::new();
-        modes.set_mode(2004);
-        assert!(modes.bracketed_paste);
-
-        modes.reset_mode(2004);
-        assert!(!modes.bracketed_paste);
-    }
-
-    #[test]
-    fn test_get_mode() {
-        let mut modes = DecModes::new();
-
-        modes.set_mode(1);
-        modes.set_mode(7);
-
-        assert_eq!(modes.get_mode(1), Some(true));
-        assert_eq!(modes.get_mode(7), Some(true));
-        assert_eq!(modes.get_mode(25), Some(true)); // default
-        assert_eq!(modes.get_mode(1049), Some(false));
-        assert_eq!(modes.get_mode(9999), None);
-    }
-
-    #[test]
-    fn test_app_keypad_default_is_false() {
-        let modes = DecModes::new();
-        assert!(!modes.app_keypad);
-    }
-
-    #[test]
-    fn test_app_keypad_set_and_clear() {
-        let mut modes = DecModes::new();
-        modes.app_keypad = true;
-        assert!(modes.app_keypad);
-        modes.app_keypad = false;
-        assert!(!modes.app_keypad);
-    }
-
-    #[test]
-    fn test_unknown_mode_no_panic() {
-        let mut modes = DecModes::new();
-        modes.set_mode(9999); // Unknown mode, should not panic
-        modes.reset_mode(9999); // Should also not panic
-    }
-
-    #[test]
-    fn test_mouse_mode_default_is_zero() {
-        let modes = DecModes::new();
-        assert_eq!(modes.mouse_mode, 0);
-        assert!(!modes.mouse_sgr);
-    }
-
-    #[test]
-    fn test_set_mouse_mode_1000() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1000);
-        assert_eq!(modes.mouse_mode, 1000);
-    }
-
-    #[test]
-    fn test_set_mouse_mode_1002() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1002);
-        assert_eq!(modes.mouse_mode, 1002);
-    }
-
-    #[test]
-    fn test_set_mouse_mode_1003() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1003);
-        assert_eq!(modes.mouse_mode, 1003);
-    }
-
-    #[test]
-    fn test_reset_mouse_mode_sets_zero() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1002);
-        modes.reset_mode(1002);
-        assert_eq!(modes.mouse_mode, 0);
-    }
-
-    #[test]
-    fn test_reset_any_mouse_mode_clears_all() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1003);
-        // Resetting mode 1000 still clears mouse_mode
-        modes.reset_mode(1000);
-        assert_eq!(modes.mouse_mode, 0);
-    }
-
-    #[test]
-    fn test_set_mouse_mode_replaces_previous() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1000);
-        modes.set_mode(1002); // switch to a different mode
-        assert_eq!(modes.mouse_mode, 1002);
-    }
-
-    #[test]
-    fn test_set_mouse_sgr() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1006);
-        assert!(modes.mouse_sgr);
-    }
-
-    #[test]
-    fn test_reset_mouse_sgr() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1006);
-        modes.reset_mode(1006);
-        assert!(!modes.mouse_sgr);
-    }
-
-    #[test]
-    fn test_get_mode_mouse_1000_active() {
-        let mut modes = DecModes::new();
-        modes.set_mode(1000);
-        assert_eq!(modes.get_mode(1000), Some(true));
-        assert_eq!(modes.get_mode(1002), Some(false));
-        assert_eq!(modes.get_mode(1003), Some(false));
-    }
-
-    #[test]
-    fn test_get_mode_mouse_sgr() {
-        let mut modes = DecModes::new();
-        assert_eq!(modes.get_mode(1006), Some(false));
-        modes.set_mode(1006);
-        assert_eq!(modes.get_mode(1006), Some(true));
-    }
-
-    #[test]
-    fn test_decom_mode_set_reset() {
-        let mut modes = DecModes::new();
-        assert!(!modes.origin_mode, "origin_mode should default to false");
-
-        modes.set_mode(6);
-        assert!(
-            modes.origin_mode,
-            "origin_mode should be set after set_mode(6)"
-        );
-
-        modes.reset_mode(6);
-        assert!(
-            !modes.origin_mode,
-            "origin_mode should be cleared after reset_mode(6)"
-        );
-    }
-
-    #[test]
-    fn test_focus_events_mode_set_reset() {
-        let mut modes = DecModes::new();
-        assert!(!modes.focus_events, "focus_events should default to false");
-
-        modes.set_mode(1004);
-        assert!(
-            modes.focus_events,
-            "focus_events should be set after set_mode(1004)"
-        );
-
-        modes.reset_mode(1004);
-        assert!(
-            !modes.focus_events,
-            "focus_events should be cleared after reset_mode(1004)"
-        );
-    }
-
-    #[test]
-    fn test_sync_output_mode_set_reset() {
-        let mut modes = DecModes::new();
-        assert!(
-            !modes.synchronized_output,
-            "synchronized_output should default to false"
-        );
-
-        modes.set_mode(2026);
-        assert!(
-            modes.synchronized_output,
-            "synchronized_output should be set after set_mode(2026)"
-        );
-
-        modes.reset_mode(2026);
-        assert!(
-            !modes.synchronized_output,
-            "synchronized_output should be cleared after reset_mode(2026)"
-        );
-    }
-
-    #[test]
-    fn test_get_mode_new_modes() {
-        let mut modes = DecModes::new();
-        assert_eq!(modes.get_mode(6), Some(false));
-        assert_eq!(modes.get_mode(1004), Some(false));
-        assert_eq!(modes.get_mode(2026), Some(false));
-
-        modes.set_mode(6);
-        modes.set_mode(1004);
-        modes.set_mode(2026);
-
-        assert_eq!(modes.get_mode(6), Some(true));
-        assert_eq!(modes.get_mode(1004), Some(true));
-        assert_eq!(modes.get_mode(2026), Some(true));
-    }
-
-    #[test]
-    fn test_alt_screen_saves_and_restores_sgr_attrs() {
-        use crate::types::{Color, NamedColor};
-
-        let mut term = crate::TerminalCore::new(5, 10);
-
-        // Set bold and foreground color
-        term.current_attrs.bold = true;
-        term.current_attrs.foreground = Color::Named(NamedColor::Red);
-
-        // Enter alternate screen (CSI ? 1049 h)
-        term.advance(b"\x1b[?1049h");
-
-        // Verify saved_primary_attrs is Some
-        assert!(
-            term.saved_primary_attrs.is_some(),
-            "saved_primary_attrs should be Some after entering alt screen"
-        );
-
-        // Change attrs while in alternate screen
-        term.current_attrs.bold = false;
-        term.current_attrs.foreground = Color::Named(NamedColor::Green);
-
-        // Exit alternate screen (CSI ? 1049 l)
-        term.advance(b"\x1b[?1049l");
-
-        // Original attrs should be restored
-        assert!(
-            term.current_attrs.bold,
-            "bold should be restored to true after exiting alt screen"
-        );
-        assert_eq!(
-            term.current_attrs.foreground,
-            Color::Named(NamedColor::Red),
-            "foreground should be restored to Red after exiting alt screen"
-        );
-
-        // saved_primary_attrs should be consumed (None after take())
-        assert!(
-            term.saved_primary_attrs.is_none(),
-            "saved_primary_attrs should be None after exiting alt screen (consumed by take())"
-        );
-    }
-
-    proptest! {
-        #[test]
-        fn prop_dec_modes_set_reset_no_panic(mode in 0u16..=65535u16) {
-            let mut modes = DecModes::new();
-            modes.set_mode(mode);   // must not panic
-            modes.reset_mode(mode); // must not panic
-            let _ = modes.get_mode(mode);
-        }
+/// Handle Kitty keyboard mode pop (CSI < u).
+///
+/// Pops the top entry from the keyboard flags stack and restores it
+/// as the current `keyboard_flags`.  No-op when the stack is empty.
+///
+/// # See Also
+/// - [`handle_kitty_kb_push`] — save the current flags and set new ones
+/// - [`handle_kitty_kb_query`] — query the current flags without modifying state
+#[inline]
+pub fn handle_kitty_kb_pop(term: &mut crate::TerminalCore) {
+    if let Some(prev) = term.dec_modes.keyboard_flags_stack.pop() {
+        term.dec_modes.keyboard_flags = prev;
+    } else {
+        term.dec_modes.keyboard_flags = 0;
     }
 }
+
+/// Handle CSI ? u — Query Kitty keyboard flags.
+///
+/// Responds with `ESC [ ? <flags> u` where `<flags>` is the current
+/// keyboard protocol enhancement bitmask.
+///
+/// # See Also
+/// - [`handle_kitty_kb_push`] — save the current flags and set new ones
+/// - [`handle_kitty_kb_pop`] — restore the previous flags from the stack
+#[inline]
+pub fn handle_kitty_kb_query(term: &mut crate::TerminalCore) {
+    let response = format!("\x1b[?{}u", term.dec_modes.keyboard_flags);
+    term.meta.pending_responses.push(response.into_bytes());
+}
+
+#[cfg(test)]
+#[path = "tests/dec_private.rs"]
+mod tests;

@@ -1,16 +1,20 @@
 //! Render polling: dirty lines with face/color data, scrollback, scroll viewport, bell
 
-use super::{catch_panic, lock_session};
-use crate::error::KuroError;
-use crate::ffi::abstraction::with_session;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::result::Result;
+
 use emacs::defun;
 use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+
+use crate::error::KuroError;
+use crate::ffi::abstraction::with_session;
+use super::{catch_panic, lock_session, query_session_mut};
 
 /// Poll for terminal updates and return dirty lines
 #[defun]
 fn kuro_core_poll_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result: std::result::Result<Vec<(usize, String)>, KuroError> =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result: Result<Vec<(usize, String)>, KuroError> =
+        catch_unwind(AssertUnwindSafe(|| {
             let mut global = lock_session!();
 
             if let Some(ref mut session) = *global {
@@ -20,7 +24,7 @@ fn kuro_core_poll_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
                 Ok(Vec::new())
             }
         }))
-        .unwrap_or_else(|_| Err(KuroError::Ffi("panic in poll_updates".to_string())));
+        .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error("panic in poll_updates")));
 
     match result {
         Ok(dirty_lines) => {
@@ -34,12 +38,7 @@ fn kuro_core_poll_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
             Ok(list)
         }
         Err(e) => {
-            let msg = match e {
-                KuroError::Pty(msg) => format!("PTY error: {}", msg),
-                KuroError::Ffi(msg) => format!("FFI error: {}", msg),
-                KuroError::Parser(msg) => format!("Parser error: {}", msg),
-                _ => format!("Error: {}", e),
-            };
+            let msg = format!("Kuro error: {}", e);
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -49,17 +48,9 @@ fn kuro_core_poll_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 
 /// Poll for terminal updates and return dirty lines with face information
 #[defun]
-#[allow(clippy::type_complexity)]
 fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result: std::result::Result<
-        Vec<(
-            usize,
-            String,
-            Vec<(usize, usize, u32, u32, u64)>,
-            Vec<usize>,
-        )>,
-        KuroError,
-    > = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result: Result<Vec<crate::ffi::codec::EncodedLine>, KuroError> =
+        catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
 
         if let Some(ref mut session) = *global {
@@ -70,8 +61,8 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
         }
     }))
     .unwrap_or_else(|_| {
-        Err(KuroError::Ffi(
-            "panic in poll_updates_with_faces".to_string(),
+        Err(crate::ffi::error::ffi_error(
+            "panic in poll_updates_with_faces",
         ))
     });
 
@@ -102,12 +93,22 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
                     face_list = env.cons(range_list, face_list)?;
                 }
 
-                // Build col_to_buf as Emacs vector for cursor placement
+                // Build col_to_buf as Emacs vector for cursor placement.
+                // When col_to_buf is empty (ASCII fast path from encode_line),
+                // return an empty Emacs vector instead of nil so the Elisp
+                // (puthash row #() kuro--col-to-buf-map) overwrites any stale
+                // CJK mapping for this row, letting the identity fallback apply.
                 let col_to_buf_len = col_to_buf.len();
-                let col_to_buf_vec = env.make_vector(col_to_buf_len, false.into_lisp(env)?)?;
-                for (i, &offset) in col_to_buf.iter().enumerate() {
-                    col_to_buf_vec.set(i, (offset as i64).into_lisp(env)?)?;
-                }
+                let col_to_buf_vec = if col_to_buf_len == 0 {
+                    // Single make_vector(0) call instead of N+1 calls for ASCII lines.
+                    env.make_vector(0, false.into_lisp(env)?)?
+                } else {
+                    let v = env.make_vector(col_to_buf_len, false.into_lisp(env)?)?;
+                    for (i, &offset) in col_to_buf.iter().enumerate() {
+                        v.set(i, (offset as i64).into_lisp(env)?)?;
+                    }
+                    v
+                };
 
                 let line_pair = env.cons(line_no_val, text_val)?;
                 // line_tuple = ((line_no . text) face_ranges... col_to_buf_vec)
@@ -119,12 +120,7 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
             Ok(list)
         }
         Err(e) => {
-            let msg = match e {
-                KuroError::Pty(msg) => format!("PTY error: {}", msg),
-                KuroError::Ffi(msg) => format!("FFI error: {}", msg),
-                KuroError::Parser(msg) => format!("Parser error: {}", msg),
-                _ => format!("Error: {}", e),
-            };
+            let msg = format!("Kuro error: {}", e);
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -135,45 +131,34 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env) -> EmacsResult<Value<'e>>
 /// Get scrollback buffer lines
 #[defun]
 fn kuro_core_get_scrollback<'e>(env: &'e Env, max_lines: usize) -> EmacsResult<Value<'e>> {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let scrollback_lines = catch_unwind(AssertUnwindSafe(|| {
         let global = lock_session!();
         if let Some(ref session) = *global {
             Ok::<Vec<String>, KuroError>(session.get_scrollback(max_lines))
         } else {
             Ok(Vec::new())
         }
-    }));
-    match result {
-        Ok(Ok(scrollback_lines)) => {
-            let mut list = false.into_lisp(env)?;
-            for line in scrollback_lines.into_iter().rev() {
-                let line_val = line.into_lisp(env)?;
-                list = env.cons(line_val, list)?;
-            }
-            Ok(list)
-        }
-        Ok(Err(e)) => {
-            let _ = env.message(format!("kuro: error in get_scrollback: {}", e));
-            false.into_lisp(env)
-        }
-        Err(_) => {
-            let _ = env.message("kuro: panic in get_scrollback");
-            false.into_lisp(env)
-        }
+    }))
+    .unwrap_or_else(|_| {
+        let _ = env.message("kuro: panic in get_scrollback");
+        Ok(Vec::new())
+    })
+    .unwrap_or_default();
+
+    let mut list = false.into_lisp(env)?;
+    for line in scrollback_lines.into_iter().rev() {
+        let line_val = line.into_lisp(env)?;
+        list = env.cons(line_val, list)?;
     }
+    Ok(list)
 }
 
 /// Clear scrollback buffer
 #[defun]
 fn kuro_core_clear_scrollback<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    catch_panic(env, || {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
-            session.clear_scrollback();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    query_session_mut(env, false, |session| {
+        session.clear_scrollback();
+        Ok(true)
     })
 }
 
@@ -199,31 +184,16 @@ fn kuro_core_scroll_down<'e>(env: &'e Env, n: usize) -> EmacsResult<Value<'e>> {
     })
 }
 
-/// Check whether a BEL character has been received and not yet cleared
+/// Check and clear the pending bell flag atomically.
+///
+/// Returns `t` if a BEL character has been received since the last call,
+/// then unconditionally resets the flag.  Subsequent calls return `nil`
+/// until another BEL is received.  Merges the former two-call
+/// `kuro-core-bell-pending` + `kuro-core-clear-bell` pattern into a single
+/// lock acquisition.
 #[defun]
-fn kuro_core_bell_pending<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    catch_panic(env, || {
-        let global = lock_session!();
-        if let Some(ref session) = *global {
-            Ok(session.core.bell_pending)
-        } else {
-            Ok(false)
-        }
-    })
-}
-
-/// Clear the pending bell flag
-#[defun]
-fn kuro_core_clear_bell<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    catch_panic(env, || {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
-            session.core.bell_pending = false;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    })
+fn kuro_core_take_bell_pending<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    query_session_mut(env, false, |session| Ok(session.take_bell_pending()))
 }
 
 /// Set scrollback buffer max lines
@@ -232,14 +202,9 @@ fn kuro_core_set_scrollback_max_lines<'e>(
     env: &'e Env,
     max_lines: usize,
 ) -> EmacsResult<Value<'e>> {
-    catch_panic(env, || {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
-            session.set_scrollback_max_lines(max_lines);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    query_session_mut(env, false, |session| {
+        session.set_scrollback_max_lines(max_lines);
+        Ok(true)
     })
 }
 
@@ -260,4 +225,38 @@ fn kuro_core_get_scrollback_count<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 #[defun]
 fn kuro_core_get_scroll_offset<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
     catch_panic(env, || with_session(|session| Ok(session.scroll_offset())))
+}
+
+/// Atomically consume pending full-screen scroll event counts and reset them.
+///
+/// Returns a cons cell `(UP . DOWN)` where UP and DOWN are the number of
+/// full-screen scroll-up and scroll-down steps accumulated since the last
+/// call.  Returns `nil` when both counts are zero (no-op frame).
+///
+/// Must be called BEFORE `kuro-core-poll-updates-with-faces` each frame so
+/// that Emacs can perform buffer-level line deletion/insertion first,
+/// preventing double-rendering of the newly revealed bottom row.
+#[defun]
+fn kuro_core_consume_scroll_events<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let (up, down) = catch_unwind(AssertUnwindSafe(|| {
+        let mut global = lock_session!();
+        if let Some(ref mut session) = *global {
+            Ok::<(u32, u32), KuroError>(session.consume_scroll_events())
+        } else {
+            Ok((0, 0))
+        }
+    }))
+    .unwrap_or_else(|_| {
+        let _ = env.message("kuro: panic in consume_scroll_events");
+        Ok((0, 0))
+    })
+    .unwrap_or((0, 0));
+
+    if up > 0 || down > 0 {
+        let up_val = (up as i64).into_lisp(env)?;
+        let down_val = (down as i64).into_lisp(env)?;
+        env.cons(up_val, down_val)
+    } else {
+        false.into_lisp(env)
+    }
 }

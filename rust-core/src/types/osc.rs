@@ -19,20 +19,19 @@ pub enum PromptMark {
 #[derive(Debug, Clone)]
 pub struct PromptMarkEvent {
     /// The mark type
-    pub mark: PromptMark,
+    pub(crate) mark: PromptMark,
     /// Row position when mark was received
-    pub row: usize,
+    pub(crate) row: usize,
     /// Column position when mark was received
-    pub col: usize,
+    pub(crate) col: usize,
 }
 
 /// Active hyperlink state for OSC 8
 #[derive(Debug, Clone, Default)]
 pub struct HyperlinkState {
     /// The URI of the hyperlink, or None if no hyperlink is active
+    /// NOTE: kept pub for integration test access (tests/ crate)
     pub uri: Option<String>,
-    /// Optional id parameter from the hyperlink params
-    pub id: Option<String>,
 }
 
 /// Clipboard action for OSC 52
@@ -54,21 +53,21 @@ pub struct OscData {
     /// Active hyperlink state from OSC 8
     pub hyperlink: HyperlinkState,
     /// Pending clipboard actions from OSC 52
-    pub clipboard_actions: Vec<ClipboardAction>,
+    pub(crate) clipboard_actions: Vec<ClipboardAction>,
     /// Pending prompt mark events from OSC 133
     pub prompt_marks: Vec<PromptMarkEvent>,
     /// Whether the color palette needs to be reset (OSC 104)
-    pub palette_dirty: bool,
+    pub(crate) palette_dirty: bool,
     /// Default foreground color from OSC 10
     pub default_fg: Option<Color>,
     /// Default background color from OSC 11
     pub default_bg: Option<Color>,
     /// Cursor color from OSC 12
-    pub cursor_color: Option<Color>,
+    pub cursor_color: Option<Color>, // NOTE: kept pub for integration test access (tests/ crate)
     /// 256-color palette overrides from OSC 4 (index → [R,G,B] or None=unset)
     pub palette: Vec<Option<[u8; 3]>>,
     /// Pending default-color-change notifications for FFI (fg, bg, cursor)
-    pub default_colors_dirty: bool,
+    pub(crate) default_colors_dirty: bool,
 }
 
 impl Default for OscData {

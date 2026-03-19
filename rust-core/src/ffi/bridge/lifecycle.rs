@@ -1,7 +1,6 @@
 //! Session lifecycle: init / send_key / resize / shutdown
 
-use super::{catch_panic, init_ffi_implementation, lock_session, EmacsModuleFFI};
-use crate::error::KuroError;
+use super::{catch_panic, lock_session, EmacsModuleFFI};
 use crate::ffi::abstraction::{with_session, KuroFFI};
 use emacs::defun;
 use emacs::{Env, Result as EmacsResult, Value};
@@ -20,14 +19,12 @@ fn kuro_core_init<'e>(
     rows: u16,
     cols: u16,
 ) -> EmacsResult<Value<'e>> {
-    init_ffi_implementation();
-
     catch_panic(env, || {
         // Use the emacs-module-rs implementation for the low-level call
         let result = EmacsModuleFFI::init(std::ptr::null_mut(), &command, rows as i64, cols as i64);
 
         if result.is_null() {
-            Err(KuroError::Ffi("Failed to initialize terminal".to_string()))
+            Err(crate::ffi::error::ffi_error("Failed to initialize terminal"))
         } else {
             Ok(true)
         }

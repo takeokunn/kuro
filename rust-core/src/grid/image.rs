@@ -7,12 +7,15 @@ use crate::parser::kitty::ImageFormat;
 use std::collections::{HashMap, VecDeque};
 
 /// Stored image data, always decoded to Rgb or Rgba (never stored as PNG)
-#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct ImageData {
+    /// Raw pixel bytes in the specified format
     pub pixels: Vec<u8>,
+    /// Pixel format: Rgb (3 bytes/pixel) or Rgba (4 bytes/pixel)
     pub format: ImageFormat,
+    /// Image width in pixels
     pub pixel_width: u32,
+    /// Image height in pixels
     pub pixel_height: u32,
 }
 
@@ -48,25 +51,33 @@ impl ImageData {
     }
 }
 
-/// A placed image on the terminal grid
-#[allow(missing_docs)]
+/// A placed image instance on the terminal grid
 #[derive(Debug, Clone)]
 pub struct ImagePlacement {
+    /// ID of the stored image being placed
     pub image_id: u32,
+    /// Terminal row where the image is placed (0-indexed)
     pub row: usize,
+    /// Terminal column where the image is placed (0-indexed)
     pub col: usize,
+    /// Width of the placement in terminal columns
     pub display_cols: u32,
+    /// Height of the placement in terminal rows
     pub display_rows: u32,
 }
 
-/// Notification emitted to Elisp when an image is placed
-#[allow(missing_docs)]
+/// Notification emitted to Elisp when an image is placed on the terminal
 #[derive(Debug, Clone)]
 pub struct ImageNotification {
+    /// ID of the image that was placed
     pub image_id: u32,
+    /// Terminal row of the placement (0-indexed)
     pub row: usize,
+    /// Terminal column of the placement (0-indexed)
     pub col: usize,
+    /// Width of the placement in terminal columns
     pub cell_width: u32,
+    /// Height of the placement in terminal rows
     pub cell_height: u32,
 }
 
@@ -89,10 +100,10 @@ impl Default for GraphicsStore {
     }
 }
 
-#[allow(missing_docs)]
 impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
+    /// Create a new empty graphics store with the default 256 MB capacity cap
     pub fn new() -> Self {
         Self {
             images: HashMap::new(),
@@ -181,6 +192,14 @@ impl GraphicsStore {
                 }
             })
             .collect();
+    }
+
+    /// Shift all placement rows down by `n` lines (called on terminal scroll_down).
+    /// Placements are clamped to `max_row - 1` rather than discarded.
+    pub fn scroll_down(&mut self, n: usize, max_row: usize) {
+        for p in &mut self.placements {
+            p.row = (p.row + n).min(max_row.saturating_sub(1));
+        }
     }
 
     /// Delete an image and all its placements by ID

@@ -448,7 +448,7 @@ fn vt_wide_char() {
 fn vt_combining_char() {
     let mut t = TerminalCore::new(24, 80);
     t.advance("e\u{0301}".as_bytes());
-    assert_eq!(t.get_cell(0, 0).unwrap().grapheme.as_str(), "e\u{0301}");
+    assert_eq!(t.get_cell(0, 0).unwrap().grapheme(), "e\u{0301}");
 }
 
 #[test]

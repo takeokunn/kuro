@@ -23,6 +23,20 @@ impl Line {
         }
     }
 
+    /// Create a new line with all cells carrying the given BCE background color.
+    /// When `bg` is `Color::Default` this is identical to `Line::new(cols)`.
+    pub fn new_with_bg(cols: usize, bg: Color) -> Self {
+        if bg == Color::Default {
+            return Self::new(cols);
+        }
+        let mut cell = Cell::default();
+        cell.attrs.background = bg;
+        Self {
+            cells: vec![cell; cols],
+            is_dirty: false,
+        }
+    }
+
     /// Get cell at column index
     pub fn get_cell(&self, col: usize) -> Option<&Cell> {
         self.cells.get(col)

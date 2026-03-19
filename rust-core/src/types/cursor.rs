@@ -24,13 +24,13 @@ pub enum CursorShape {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Cursor {
     /// Column position (0-indexed)
-    pub col: usize,
+    pub(crate) col: usize,
     /// Row position (0-indexed)
-    pub row: usize,
+    pub(crate) row: usize,
     /// Cursor shape
-    pub shape: CursorShape,
+    pub(crate) shape: CursorShape,
     /// Cursor is visible
-    pub visible: bool,
+    pub(crate) visible: bool,
 }
 
 impl Cursor {
@@ -69,6 +69,52 @@ impl Cursor {
     }
 }
 
+/// Convert a [`CursorShape`] to its DECSCUSR parameter integer for FFI transfer.
+///
+/// The canonical encoding is:
+/// - `BlinkingBlock` → 0 (DECSCUSR 0/1; 1 is an alias accepted by `TryFrom`)
+/// - `SteadyBlock` → 2
+/// - `BlinkingUnderline` → 3, `SteadyUnderline` → 4
+/// - `BlinkingBar` → 5, `SteadyBar` → 6
+///
+/// Used by `kuro_core_get_cursor_shape` to send the current shape to Emacs Lisp.
+impl From<CursorShape> for i64 {
+    #[inline(always)]
+    fn from(shape: CursorShape) -> i64 {
+        match shape {
+            CursorShape::BlinkingBlock => 0,
+            CursorShape::SteadyBlock => 2,
+            CursorShape::BlinkingUnderline => 3,
+            CursorShape::SteadyUnderline => 4,
+            CursorShape::BlinkingBar => 5,
+            CursorShape::SteadyBar => 6,
+        }
+    }
+}
+
+/// Convert a DECSCUSR parameter integer to a [`CursorShape`].
+///
+/// DECSCUSR values 0 and 1 are both aliases for blinking block; 0 is the canonical
+/// round-trip value (`i64::from(BlinkingBlock) == 0`).  Values outside 0–6 return
+/// `Err(())` and callers should fall back to `CursorShape::BlinkingBlock`.
+///
+/// Used by `handle_decscusr` in the CSI parser.
+impl TryFrom<i64> for CursorShape {
+    type Error = ();
+    #[inline(always)]
+    fn try_from(v: i64) -> Result<Self, ()> {
+        match v {
+            0 | 1 => Ok(CursorShape::BlinkingBlock),
+            2 => Ok(CursorShape::SteadyBlock),
+            3 => Ok(CursorShape::BlinkingUnderline),
+            4 => Ok(CursorShape::SteadyUnderline),
+            5 => Ok(CursorShape::BlinkingBar),
+            6 => Ok(CursorShape::SteadyBar),
+            _ => Err(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +146,30 @@ mod tests {
         cursor.move_by(-20, -20);
         assert_eq!(cursor.col, 0);
         assert_eq!(cursor.row, 0);
+    }
+
+    #[test]
+    fn cursor_shape_roundtrip() {
+        // Values 0,2,3,4,5,6 must round-trip through From/TryFrom.
+        // (1 is an alias for BlinkingBlock and maps back to 0.)
+        for v in [0i64, 2, 3, 4, 5, 6] {
+            let shape = CursorShape::try_from(v).unwrap();
+            assert_eq!(i64::from(shape), v);
+        }
+    }
+
+    #[test]
+    fn cursor_shape_param1_alias() {
+        // DECSCUSR param 1 is an alias for BlinkingBlock (same as 0).
+        let shape = CursorShape::try_from(1i64).unwrap();
+        assert_eq!(shape, CursorShape::BlinkingBlock);
+        assert_eq!(i64::from(shape), 0);
+    }
+
+    #[test]
+    fn cursor_shape_unknown_returns_err() {
+        assert!(CursorShape::try_from(99i64).is_err());
+        assert!(CursorShape::try_from(-1i64).is_err());
+        assert!(CursorShape::try_from(7i64).is_err());
     }
 }

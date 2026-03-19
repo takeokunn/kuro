@@ -1,4 +1,4 @@
-.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate
+.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate test-elisp
 
 # Variables
 CARGO = cargo
@@ -34,27 +34,36 @@ test:
 
 # Run E2E tests (requires built module)
 test-e2e: build
-	bash test/run-e2e.sh
+	bash test/shell/run-e2e.sh
 
 # Run safe unit tests only (no PTY, no tmux — safe inside tmux/opencode sessions)
 test-safe:
 	$(CARGO) test --workspace
 	emacs -Q --batch \
-	  -L emacs-lisp -L test \
+	  -L emacs-lisp -L test/elisp \
 	  --eval "(require 'kuro-config)" \
 	  --eval "(require 'kuro-config-test)" \
 	  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
 
 # VTE compliance check (Rust-only, no PTY required)
 vttest-compliance:
-	bash test/vttest-compliance.sh
+	bash test/shell/vttest-compliance.sh
 
 # Benchmark validation (checks >100MB/s parse rate)
 bench-validate:
-	bash test/bench-validate.sh
+	bash test/shell/bench-validate.sh
+
+# Run Elisp ERT tests (no Rust module required)
+test-elisp:
+	$(EMACS) -Q --batch \
+		-L emacs-lisp \
+		-L test/elisp \
+		--eval "(setq load-prefer-newer t)" \
+		--eval "(mapc (function load) (directory-files (expand-file-name \"test/elisp\") t \"\\.el\\'\"))" \
+		--eval "(ert-run-tests-batch-and-exit)"
 
 # Run all tests
-test-all: test test-e2e
+test-all: test test-e2e test-elisp
 
 # Run Clippy
 lint:

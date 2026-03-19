@@ -9,25 +9,35 @@
 
 ;; This file provides overlay management for the Kuro terminal emulator.
 ;; It handles blink text overlays, Kitty Graphics image overlays,
-;; OSC 8 hyperlink overlays, OSC 133 prompt navigation, and focus events.
+;; and FFI face application with SGR attribute support.
 ;;
 ;; # Responsibilities
 ;;
 ;; - Blink overlay creation and visibility toggling (SGR 5/6)
 ;; - Kitty Graphics Protocol image overlay rendering
-;; - OSC 8 hyperlink overlay creation and key bindings
-;; - OSC 133 prompt mark navigation (previous/next prompt)
-;; - Focus event reporting to PTY (mode 1004)
+;; - FFI face application: color, blink, and invisible (SGR 8) attributes
 ;;
 ;; # Dependencies
 ;;
-;; Depends on `kuro-ffi' for `kuro--get-image' and `kuro--send-key'.
-;; Depends on `kuro-faces' for `kuro--apply-face-range' (FFI face application).
+;; Depends on `kuro-ffi-osc' for `kuro--get-image'.
+;; Depends on `kuro-faces' for `kuro--get-cached-face-raw'.
+;; Depends on `kuro-navigation' for hyperlink, prompt, and focus overlay support.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'kuro-ffi)
 (require 'kuro-faces)
+(require 'kuro-faces-attrs)
+(require 'kuro-navigation)
+
+(declare-function kuro--get-image "kuro-ffi-osc" (image-id))
+
+(defconst kuro--blink-slow-frames 30
+  "Frame interval for slow text blink cycle (SGR 5). At 30 fps this gives ~0.5 Hz toggle rate.")
+
+(defconst kuro--blink-fast-frames 10
+  "Frame interval for fast text blink cycle (SGR 6). At 30 fps this gives ~1.5 Hz toggle rate.")
 
 ;;; Buffer-local state
 
@@ -51,17 +61,6 @@ Each overlay has a `kuro-image' property and a `display' image spec.")
 (defvar-local kuro--blink-visible-fast t
   "Non-nil when fast-blink text is currently in the visible phase.")
 (put 'kuro--blink-visible-fast 'permanent-local t)
-
-(defvar-local kuro--hyperlink-overlays nil
-  "List of active hyperlink overlays in the current kuro buffer.")
-(put 'kuro--hyperlink-overlays 'permanent-local t)
-
-(defvar-local kuro--prompt-positions nil
-  "List of (ROW . MARK-TYPE) for OSC 133 prompt marks.
-MARK-TYPE is a symbol such as `prompt-start', `prompt-end',
-`command-start', or `command-end'.  Updated each render cycle
-by polling `kuro--poll-prompt-marks'.")
-(put 'kuro--prompt-positions 'permanent-local t)
 
 ;;; Blink overlays
 
@@ -100,13 +99,13 @@ Slow blink (SGR 5): ~0.5 Hz — toggle every 30 frames at 30 fps (1 s per phase)
 Fast blink (SGR 6): ~1.5 Hz — toggle every 10 frames at 30 fps (~0.33 s per phase).
 Called once per render cycle from `kuro--render-cycle'."
   (setq kuro--blink-frame-count (1+ kuro--blink-frame-count))
-  (when (zerop (mod kuro--blink-frame-count 30))
+  (when (zerop (mod kuro--blink-frame-count kuro--blink-slow-frames))
     (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
     (dolist (ov kuro--blink-overlays)
       (when (and (overlay-buffer ov)
                  (eq (overlay-get ov 'kuro-blink-type) 'slow))
         (overlay-put ov 'invisible (not kuro--blink-visible-slow)))))
-  (when (zerop (mod kuro--blink-frame-count 10))
+  (when (zerop (mod kuro--blink-frame-count kuro--blink-fast-frames))
     (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))
     (dolist (ov kuro--blink-overlays)
       (when (and (overlay-buffer ov)
@@ -172,132 +171,35 @@ Creates an overlay with a `display' image property at the correct grid position.
         (error
          (message "kuro: image render error for id %d: %s" image-id err))))))
 
-;;; Hyperlink overlays (OSC 8)
-
-(defun kuro--clear-all-hyperlink-overlays ()
-  "Remove all hyperlink overlays from the current buffer."
-  (dolist (ov kuro--hyperlink-overlays)
-    (when (overlay-buffer ov)
-      (delete-overlay ov)))
-  (setq kuro--hyperlink-overlays nil))
-
-(defun kuro--make-hyperlink-keymap (uri)
-  "Return a sparse keymap that opens URI on RET or mouse-1."
-  (let ((map (make-sparse-keymap)))
-    (define-key map [return]
-      (lambda () (interactive) (browse-url uri)))
-    (define-key map [mouse-1]
-      (lambda (_event) (interactive "e") (browse-url uri)))
-    map))
-
-(defun kuro--apply-hyperlink-overlay (start end uri)
-  "Create a hyperlink overlay from START to END pointing to URI."
-  (let ((ov (make-overlay start end)))
-    (overlay-put ov 'kuro-hyperlink t)
-    (overlay-put ov 'help-echo (format "URI: %s\nRET or mouse-1 to open" uri))
-    (overlay-put ov 'mouse-face 'highlight)
-    (overlay-put ov 'keymap (kuro--make-hyperlink-keymap uri))
-    (push ov kuro--hyperlink-overlays)))
-
-;;; Prompt navigation (OSC 133)
-
-(defun kuro-previous-prompt ()
-  "Jump to the previous shell prompt (OSC 133 mark)."
-  (interactive)
-  (let* ((cur-line (1- (line-number-at-pos)))
-         (candidates
-          (seq-filter (lambda (entry)
-                        (and (< (car entry) cur-line)
-                             (eq (cdr entry) 'prompt-start)))
-                      kuro--prompt-positions))
-         (target (car (last candidates))))
-    (if target
-        (progn
-          (goto-char (point-min))
-          (forward-line (car target)))
-      (message "kuro: no previous prompt"))))
-
-(defun kuro-next-prompt ()
-  "Jump to the next shell prompt (OSC 133 mark)."
-  (interactive)
-  (let* ((cur-line (1- (line-number-at-pos)))
-         (candidates
-          (seq-filter (lambda (entry)
-                        (and (> (car entry) cur-line)
-                             (eq (cdr entry) 'prompt-start)))
-                      kuro--prompt-positions))
-         (target (car candidates)))
-    (if target
-        (progn
-          (goto-char (point-min))
-          (forward-line (car target)))
-      (message "kuro: no next prompt"))))
-
-;;; Focus event handlers
-
-(defun kuro--handle-focus-in ()
-  "Handle Emacs focus-in event for terminal focus reporting (mode 1004)."
-  (when (and (derived-mode-p 'kuro-mode)
-             kuro--initialized
-             (kuro--get-focus-events))
-    (kuro--send-key "\e[I")))
-
-(defun kuro--handle-focus-out ()
-  "Handle Emacs focus-out event for terminal focus reporting (mode 1004)."
-  (when (and (derived-mode-p 'kuro-mode)
-             kuro--initialized
-             (kuro--get-focus-events))
-    (kuro--send-key "\e[O")))
-
 ;;; FFI face application with blink and hidden support
 
-(defun kuro--apply-faces-from-ffi (line-num face-ranges)
-  "Apply SGR faces from FFI data to LINE-NUM.
-LINE-NUM is the 0-indexed line number.
-FACE-RANGES is a list of (START-COL END-COL FG BG FLAGS) or
-\(START-COL END-COL FG BG FLAGS UL-COLOR) tuples.
-The optional 6th element UL-COLOR is an encoded underline color (u32, same
-encoding as FG/BG) or 0/#xFF000000 for default (no underline color)."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line line-num)
-    (let ((inhibit-read-only t)
-          (inhibit-modification-hooks t)
-          (line-start (point))
-          (line-end (line-end-position)))
-      (dolist (range face-ranges)
-        (let* ((start-col (car range))
-               (end-col (cadr range))
-               (fg-enc (caddr range))
-               (bg-enc (cadddr range))
-               (rest (cddddr range))
-               (flags (or (car rest) 0))
-               (ul-color-enc (cadr rest)))
-          ;; Fast path: skip face application when this range is completely
-          ;; default-styled (no color, no attributes).  In a typical shell
-          ;; session the majority of cells are unstyled; skipping them
-          ;; reduces add-text-properties calls by 60-80% on plain output.
-          (unless (and (= fg-enc #xFF000000)
-                       (= bg-enc #xFF000000)
-                       (= flags 0)
-                       (or (null ul-color-enc)
-                           (= ul-color-enc 0)
-                           (= ul-color-enc #xFF000000)))
-            (let* ((start-pos (min (+ line-start start-col) line-end))
-                   (end-pos (min (+ line-start end-col) line-end)))
-              (when (> end-pos start-pos)
-                ;; Use raw-integer cache: avoids color decoding and cons-cell key
-                ;; allocation on cache hits (majority of calls for repeated colors).
-                (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags
-                                                       (or ul-color-enc 0))))
-                  (add-text-properties start-pos end-pos `(face ,face)))
-                (cond
-                 ((/= 0 (logand flags #x20))
-                  (kuro--apply-blink-overlay start-pos end-pos 'fast))
-                 ((/= 0 (logand flags #x10))
-                  (kuro--apply-blink-overlay start-pos end-pos 'slow)))
-                (when (/= 0 (logand flags #x80))
-                  (add-text-properties start-pos end-pos '(invisible t)))))))))))
+(defsubst kuro--unpack-ffi-face-range (range)
+  "Unpack FFI face RANGE 5-tuple into (start end fg bg flags).
+RANGE is a proper list of the form (start-buf end-buf fg bg flags)
+as returned by `kuro-core-poll-updates-with-faces'."
+  (list (car range) (cadr range) (caddr range) (cadddr range) (car (cddddr range))))
+
+(defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags)
+  "Apply FFI face data to the buffer region from START-POS to END-POS.
+FG-ENC and BG-ENC are encoded foreground/background colors (u32).
+FLAGS is the SGR attribute bitmask.  Applies the face, blink overlays
+(SGR 5/6), and invisible property (SGR 8) as appropriate.
+
+Fast-path: returns immediately when FG-ENC, BG-ENC, and FLAGS are all at
+their default/zero values (no color, no attributes).  Callers do not need
+to repeat this guard."
+  (unless (and (= fg-enc kuro--ffi-color-default)
+               (= bg-enc kuro--ffi-color-default)
+               (= flags 0))
+    (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags 0)))
+      (add-text-properties start-pos end-pos `(face ,face)))
+    (cond
+     ((/= 0 (logand flags kuro--sgr-flag-blink-fast))
+      (kuro--apply-blink-overlay start-pos end-pos 'fast))
+     ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
+      (kuro--apply-blink-overlay start-pos end-pos 'slow)))
+    (when (/= 0 (logand flags kuro--sgr-flag-hidden))
+      (add-text-properties start-pos end-pos '(invisible t)))))
 
 (provide 'kuro-overlays)
 

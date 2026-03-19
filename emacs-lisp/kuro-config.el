@@ -15,6 +15,8 @@
 
 ;;; Code:
 
+(require 'kuro-colors)
+
 ;;; Customization Groups
 
 (defgroup kuro nil
@@ -26,11 +28,6 @@
   "Display settings for Kuro terminal emulator."
   :group 'kuro
   :prefix "kuro-")
-
-(defgroup kuro-colors nil
-  "ANSI color palette for Kuro terminal emulator."
-  :group 'kuro
-  :prefix "kuro-color-")
 
 ;;; Internal buffer iterator
 
@@ -44,40 +41,6 @@
                      (derived-mode-p 'kuro-mode)))
           (push buf result)))
       (nreverse result))))
-
-;;; Internal Color Table
-;; Defined before the :set handlers so that kuro--set-color can safely
-;; call kuro--rebuild-named-colors even if custom-set-variables fires
-;; a :set handler before the file has fully loaded.
-
-(defvar kuro--named-colors nil
-  "Internal alist mapping ANSI color names to hex color strings.
-Rebuilt automatically from `kuro-color-*' defcustom values by
-`kuro--rebuild-named-colors'.  Do not set this variable directly.")
-
-(defun kuro--rebuild-named-colors ()
-  "Rebuild `kuro--named-colors' from `kuro-color-*' defcustom values.
-Called at file load and by each color `defcustom' `:set' handler.
-Skips rebuild silently if any color variable is not yet bound (e.g.
-during `defcustom' initialization before all 16 colors are defined)."
-  (when (boundp 'kuro-color-bright-white)
-    (setq kuro--named-colors
-          (list (cons "black"          kuro-color-black)
-                (cons "red"            kuro-color-red)
-                (cons "green"          kuro-color-green)
-                (cons "yellow"         kuro-color-yellow)
-                (cons "blue"           kuro-color-blue)
-                (cons "magenta"        kuro-color-magenta)
-                (cons "cyan"           kuro-color-cyan)
-                (cons "white"          kuro-color-white)
-                (cons "bright-black"   kuro-color-bright-black)
-                (cons "bright-red"     kuro-color-bright-red)
-                (cons "bright-green"   kuro-color-bright-green)
-                (cons "bright-yellow"  kuro-color-bright-yellow)
-                (cons "bright-blue"    kuro-color-bright-blue)
-                (cons "bright-magenta" kuro-color-bright-magenta)
-                (cons "bright-cyan"    kuro-color-bright-cyan)
-                (cons "bright-white"   kuro-color-bright-white)))))
 
 ;;; :set handler functions
 
@@ -115,16 +78,6 @@ during `defcustom' initialization before all 16 colors are defined)."
   (when (fboundp 'kuro--apply-font-to-buffer)
     (dolist (buf (kuro--kuro-buffers))
       (kuro--apply-font-to-buffer buf))))
-
-(defun kuro--set-color (symbol value)
-  "Set SYMBOL to VALUE, rebuild color table, and clear face cache."
-  (unless (and (stringp value)
-               (string-match-p "^#[0-9a-fA-F]\\{6\\}$" value))
-    (user-error "kuro: color must be a 6-digit hex string like #rrggbb, got: %s" value))
-  (set-default symbol value)
-  (kuro--rebuild-named-colors)
-  (when (fboundp 'kuro--clear-face-cache)
-    (kuro--clear-face-cache)))
 
 ;;; Module Binary Path
 
@@ -211,6 +164,45 @@ immediate render after each keypress, so input echo is not limited by this rate.
   :group 'kuro-display
   :set #'kuro--set-frame-rate)
 
+(defcustom kuro-streaming-latency-mode t
+  "When non-nil, enable low-latency mode for AI agent streaming output.
+In this mode, a zero-delay idle timer fires an immediate render cycle
+whenever the PTY has pending data, giving token-by-token responsiveness
+without waiting for the next 60fps frame tick."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-typewriter-effect nil
+  "When non-nil, display new terminal output character-by-character.
+This creates a smooth \"typing\" animation for AI agent output.
+Set `kuro-typewriter-chars-per-second' to control the display speed."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-typewriter-chars-per-second 120
+  "Number of characters to display per second in typewriter mode.
+Higher values look faster; lower values are more dramatic.
+Only effective when `kuro-typewriter-effect' is non-nil."
+  :type 'natnum
+  :group 'kuro)
+
+(defcustom kuro-input-echo-delay 0.01
+  "Seconds to wait after a keypress before polling for the PTY echo response.
+The PTY reader thread needs a short window to receive the shell's echo and
+deposit it in the crossbeam channel before the Emacs side polls.  A 0 s
+delay is too aggressive on most systems: the idle timer fires before the
+reader thread wakes from its blocking read call, resulting in an empty poll
+and no cursor movement until the next 60 fps periodic tick (~16 ms later).
+
+10 ms (0.01 s) comfortably covers the PTY kernel round-trip on both macOS
+and Linux without adding perceptible latency to keystroke echo."
+  :type 'float
+  :group 'kuro
+  :set (lambda (sym val)
+         (when (< val 0)
+           (user-error "kuro-input-echo-delay must be non-negative"))
+         (set-default sym val)))
+
 (defcustom kuro-font-family nil
   "Font family for Kuro terminal buffers.
 nil means inherit from the default face.
@@ -229,104 +221,6 @@ The value is converted to Emacs face :height units (* 10 value)."
                  (natnum :tag "Size in points (e.g. 14)"))
   :group 'kuro-display
   :set #'kuro--set-font)
-
-;;; ANSI Color Palette
-
-(defcustom kuro-color-black "#000000"
-  "Color for ANSI black (palette index 0).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-red "#c23621"
-  "Color for ANSI red (palette index 1).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-green "#25bc24"
-  "Color for ANSI green (palette index 2).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-yellow "#adad27"
-  "Color for ANSI yellow (palette index 3).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-blue "#492ee1"
-  "Color for ANSI blue (palette index 4).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-magenta "#d338d3"
-  "Color for ANSI magenta (palette index 5).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-cyan "#33bbc8"
-  "Color for ANSI cyan (palette index 6).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-white "#cbcccd"
-  "Color for ANSI white (palette index 7).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-black "#808080"
-  "Color for ANSI bright black / dark gray (palette index 8).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-red "#ff0000"
-  "Color for ANSI bright red (palette index 9).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-green "#00ff00"
-  "Color for ANSI bright green (palette index 10).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-yellow "#ffff00"
-  "Color for ANSI bright yellow (palette index 11).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-blue "#0000ff"
-  "Color for ANSI bright blue (palette index 12).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-magenta "#ff00ff"
-  "Color for ANSI bright magenta (palette index 13).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-cyan "#00ffff"
-  "Color for ANSI bright cyan (palette index 14).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
-
-(defcustom kuro-color-bright-white "#ffffff"
-  "Color for ANSI bright white (palette index 15).  Value must be a 6-digit hex string, e.g. #rrggbb."
-  :type 'color
-  :group 'kuro-colors
-  :set #'kuro--set-color)
 
 ;;; Validation
 
@@ -390,6 +284,18 @@ Displays results in the echo area."
 
 ;; Initialize the color table from current defcustom values at load time.
 (kuro--rebuild-named-colors)
+
+;;; Terminal dimension defaults
+
+(defconst kuro--default-rows 24
+  "Default terminal height in rows used when window dimensions are unavailable.
+Used in `kuro--init' when the ROWS argument is nil (e.g., noninteractive mode).
+See also `kuro--default-cols'.")
+
+(defconst kuro--default-cols 80
+  "Default terminal width in columns used when window dimensions are unavailable.
+Used in `kuro--init' when the COLS argument is nil (e.g., noninteractive mode).
+See also `kuro--default-rows'.")
 
 (provide 'kuro-config)
 

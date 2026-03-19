@@ -10,15 +10,6 @@ use std::sync::OnceLock;
 /// Minimum supported Emacs version
 pub const MIN_EMACS_VERSION: (u32, u32) = (29, 1);
 
-/// Required Emacs module functions that must be available
-#[allow(dead_code)]
-const REQUIRED_FUNCTIONS: &[&str] = &[
-    "emacs-module-init",
-    "module-load",
-    "make-user-ptr",
-    "set-user-ptr-data",
-    "get-user-ptr-data",
-];
 
 /// Global initialization state
 static INIT_STATE: OnceLock<InitializationState> = OnceLock::new();
@@ -91,16 +82,15 @@ fn validate_emacs_version(version: (u32, u32)) -> Result<()> {
 
 /// Verify that required Emacs functions are available
 ///
-/// This is a placeholder implementation. In the actual module,
-/// this would check the Emacs environment for function availability.
+/// Function availability cannot be checked here: `env.intern()` requires an
+/// `emacs_env` pointer that is only valid during a module function call, not at
+/// module-load time.  The dynamic linker ensures the emacs-module ABI symbols
+/// (`make-user-ptr`, etc.) are present before `emacs_module_init` runs, so a
+/// separate check would be redundant.
 ///
 /// # Returns
-/// * `Ok(())` if all required functions are available
-/// * `Err(InitError::MissingFunction)` if a function is missing
+/// * `Ok(())` always
 fn verify_required_functions() -> Result<()> {
-    // In the actual implementation, this would query the Emacs environment
-    // For now, we assume all functions are available if initialization is called
-    // This is because we can't query Emacs from Rust without the environment pointer
     Ok(())
 }
 

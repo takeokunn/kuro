@@ -6,6 +6,7 @@
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 
 /// Post-decode image format (stored in GraphicsStore)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,8 +182,6 @@ pub fn process_apc_payload(
 
     if params.more {
         // m=1: accumulate this chunk and wait for more
-        /// Maximum total bytes accumulated across all chunks (4 MiB).
-        const MAX_CHUNK_DATA_BYTES: usize = 4 * 1024 * 1024;
         match chunk_state.as_mut() {
             None => {
                 // First chunk: initialize state with these params
@@ -333,99 +332,5 @@ fn decode_png(data: &[u8]) -> Result<(Vec<u8>, ImageFormat), &'static str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    #[test]
-    fn test_parse_params_basic() {
-        let params = KittyParams::parse(b"a=t,f=100,i=1,m=0");
-        assert_eq!(params.action, Some('t'));
-        assert_eq!(params.format, Some(100));
-        assert_eq!(params.image_id, Some(1));
-        assert!(!params.more);
-    }
-
-    #[test]
-    fn test_parse_params_more() {
-        let params = KittyParams::parse(b"a=t,m=1,i=5");
-        assert!(params.more);
-        assert_eq!(params.image_id, Some(5));
-    }
-
-    #[test]
-    fn test_parse_params_empty() {
-        let params = KittyParams::parse(b"");
-        assert!(params.action.is_none());
-        assert!(!params.more);
-    }
-
-    #[test]
-    fn test_process_single_chunk_query() {
-        let mut chunk_state = None;
-        let payload = b"a=q,i=1";
-        let result = process_apc_payload(payload, &mut chunk_state);
-        assert!(matches!(
-            result,
-            Some(KittyCommand::Query { image_id: Some(1) })
-        ));
-    }
-
-    #[test]
-    fn test_process_chunk_accumulation() {
-        let mut chunk_state = None;
-
-        // First chunk: m=1, carries params including 1x1 pixel dimensions
-        let result = process_apc_payload(b"a=t,f=32,i=2,s=1,v=1,m=1;", &mut chunk_state);
-        assert!(result.is_none(), "m=1 chunk should return None");
-        assert!(chunk_state.is_some(), "chunk_state should be set");
-
-        // Final chunk: m=0 with 4 bytes of RGBA data for 1x1 image (AAAAAA== = 4 zero bytes)
-        let result = process_apc_payload(b"m=0;AAAAAA==", &mut chunk_state);
-        assert!(chunk_state.is_none(), "chunk_state should be cleared");
-        assert!(matches!(
-            result,
-            Some(KittyCommand::Transmit {
-                image_id: Some(2),
-                format: ImageFormat::Rgba,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn test_malformed_base64_returns_none() {
-        let mut chunk_state = None;
-        let result = process_apc_payload(b"a=t,f=32;not!valid!base64!!!", &mut chunk_state);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_unsupported_transmission_returns_none() {
-        let mut chunk_state = None;
-        // t=f means file transfer, which we don't support
-        let result = process_apc_payload(b"a=t,t=f,i=1;", &mut chunk_state);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_delete_command() {
-        let mut chunk_state = None;
-        let result = process_apc_payload(b"a=d,d=a", &mut chunk_state);
-        assert!(matches!(
-            result,
-            Some(KittyCommand::Delete {
-                delete_sub: 'a',
-                ..
-            })
-        ));
-    }
-
-    proptest! {
-        #[test]
-        fn prop_kitty_params_parse_no_panic(data in any::<Vec<u8>>()) {
-            // must not panic on arbitrary input
-            let _ = KittyParams::parse(&data);
-        }
-    }
-}
+#[path = "tests/kitty.rs"]
+mod tests;

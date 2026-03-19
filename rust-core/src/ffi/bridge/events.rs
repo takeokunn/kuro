@@ -1,9 +1,12 @@
 //! OSC event polling: CWD, clipboard, prompt marks
 
-use super::lock_session;
-use crate::error::KuroError;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
 use emacs::defun;
 use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+
+use crate::error::KuroError;
+use super::{lock_session, query_session_opt};
 
 /// Get the current working directory from OSC 7 and atomically clear the dirty flag.
 ///
@@ -11,31 +14,34 @@ use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 /// or nil if no CWD update is pending.
 #[defun]
 fn kuro_core_get_cwd<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    query_session_opt(env, |s| Ok(s.take_cwd_if_dirty()))
+}
+
+/// Drain a Vec from the active session under a lock, handling panics and missing sessions.
+///
+/// Both `poll_clipboard_actions` and `poll_prompt_marks` follow the same pattern:
+/// acquire the global session lock, drain a Vec, and return it for Emacs list building.
+/// This helper encapsulates the lock + catch_unwind + drain boilerplate so each caller
+/// only needs to supply the per-session drain closure and the panic message label.
+#[inline]
+fn drain_session_vec<T, F>(env: &Env, label: &str, take: F) -> Vec<T>
+where
+    F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Vec<T>
+        + std::panic::UnwindSafe,
+{
+    catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
         if let Some(ref mut session) = *global {
-            if session.core.osc_data.cwd_dirty {
-                session.core.osc_data.cwd_dirty = false;
-                Ok::<Option<String>, KuroError>(session.core.osc_data.cwd.clone())
-            } else {
-                Ok(None)
-            }
+            Ok::<Vec<_>, KuroError>(take(session))
         } else {
-            Ok(None)
+            Ok(Vec::new())
         }
-    }));
-    match result {
-        Ok(Ok(Some(cwd))) => cwd.into_lisp(env),
-        Ok(Ok(None)) => false.into_lisp(env),
-        Ok(Err(e)) => {
-            let _ = env.message(format!("kuro: error in get_cwd: {}", e));
-            false.into_lisp(env)
-        }
-        Err(_) => {
-            let _ = env.message("kuro: panic in get_cwd");
-            false.into_lisp(env)
-        }
-    }
+    }))
+    .unwrap_or_else(|_| {
+        let _ = env.message(&format!("kuro: panic in {label}"));
+        Ok(Vec::new())
+    })
+    .unwrap_or_default()
 }
 
 /// Poll for pending clipboard actions from OSC 52 and clear them.
@@ -45,16 +51,7 @@ fn kuro_core_get_cwd<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 ///   - ("query" . nil) for a query action
 #[defun]
 fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let actions = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
-            Ok::<Vec<_>, KuroError>(std::mem::take(&mut session.core.osc_data.clipboard_actions))
-        } else {
-            Ok(Vec::new())
-        }
-    }))
-    .unwrap_or_else(|_| Ok(Vec::new()))
-    .unwrap_or_default();
+    let actions = drain_session_vec(env, "poll_clipboard_actions", |s| s.take_clipboard_actions());
 
     let mut list = false.into_lisp(env)?;
     for action in actions.into_iter().rev() {
@@ -82,16 +79,7 @@ fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> 
 /// where MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end"
 #[defun]
 fn kuro_core_poll_prompt_marks<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let marks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
-            Ok::<Vec<_>, KuroError>(std::mem::take(&mut session.core.osc_data.prompt_marks))
-        } else {
-            Ok(Vec::new())
-        }
-    }))
-    .unwrap_or_else(|_| Ok(Vec::new()))
-    .unwrap_or_default();
+    let marks = drain_session_vec(env, "poll_prompt_marks", |s| s.take_prompt_marks());
 
     let mut list = false.into_lisp(env)?;
     for event in marks.into_iter().rev() {
@@ -122,16 +110,7 @@ fn kuro_core_poll_prompt_marks<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// for low-latency streaming output (AI agents, etc.).
 #[defun]
 fn kuro_core_has_pending_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_session!();
-        Ok::<bool, KuroError>(
-            global.as_ref().map(|s| s.has_pending_output()).unwrap_or(false)
-        )
-    }));
-    match result {
-        Ok(Ok(has_data)) => has_data.into_lisp(env),
-        _ => false.into_lisp(env),
-    }
+    super::query_session(env, false, |s| Ok(s.has_pending_output()))
 }
 
 /// Get palette overrides from OSC 4 as a list of (index r g b) entries.
@@ -140,10 +119,13 @@ fn kuro_core_has_pending_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// Only returns non-default (overridden) entries.
 #[defun]
 fn kuro_core_get_palette_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let updates = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let updates = catch_unwind(AssertUnwindSafe(|| {
         let global = lock_session!();
         Ok::<Vec<(u8, u8, u8, u8)>, KuroError>(
-            global.as_ref().map(|s| s.get_palette_updates()).unwrap_or_default()
+            global
+                .as_ref()
+                .map(|s| s.get_palette_updates())
+                .unwrap_or_default(),
         )
     }))
     .unwrap_or_else(|_| Ok(Vec::new()))
@@ -173,7 +155,7 @@ fn kuro_core_get_palette_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// Also clears the dirty flag atomically.
 #[defun]
 fn kuro_core_get_default_colors<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result = catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
         if let Some(ref mut session) = *global {
             let dirty = session.take_default_colors_dirty();
@@ -187,7 +169,7 @@ fn kuro_core_get_default_colors<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
             Ok(None)
         }
     }))
-    .unwrap_or_else(|_| Ok(None))
+    .unwrap_or(Ok(None))
     .unwrap_or(None);
 
     match result {

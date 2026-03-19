@@ -54,12 +54,12 @@ macro_rules! lock_test {
     (mut $guard:ident) => {
         TEST_TERMINAL
             .lock()
-            .map_err(|e| KuroError::Ffi(format!("TEST_TERMINAL mutex poisoned: {}", e)))?
+            .map_err(|_e| KuroError::State(crate::ffi::error::StateError::NoTerminalSession))?
     };
     ($guard:ident) => {
         TEST_TERMINAL
             .lock()
-            .map_err(|e| KuroError::Ffi(format!("TEST_TERMINAL mutex poisoned: {}", e)))?
+            .map_err(|_e| KuroError::State(crate::ffi::error::StateError::NoTerminalSession))?
     };
 }
 

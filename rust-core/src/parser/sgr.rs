@@ -3,6 +3,63 @@
 use crate::types::cell::UnderlineStyle;
 use crate::types::{Color, NamedColor};
 
+/// Maximum number of SGR parameter groups in a single CSI sequence.
+///
+/// vte::Params caps at `MAX_PARAMS = 32` groups, so a fixed-size stack array
+/// of this length is sufficient to collect all groups without allocation.
+const SGR_MAX_PARAMS: usize = 32;
+
+/// Sub-parameter index for the color mode selector in a colon-form SGR extended color sequence.
+///
+/// In `CSI 38 : mode : ... m`, the sub-parameters are `[38, mode, ...]`.
+/// Index 0 is the base param (`38` for foreground, `48` for background, `58` for underline).
+/// Index 1 is the mode: `2` = RGB, `5` = 256-color indexed.
+const COLOR_MODE_IDX: usize = 1;
+/// Sub-parameter index for the palette index in 256-color indexed mode (`mode = 5`).
+///
+/// In `CSI 38 : 5 : n m`, `n` is the 256-color palette entry (0-255).
+const COLOR_INDEX_IDX: usize = 2;
+/// Sub-parameter index for the red RGB component.
+const RGB_RED_IDX: usize = 2;
+/// Sub-parameter index for the green RGB component.
+const RGB_GREEN_IDX: usize = 3;
+/// Sub-parameter index for the blue RGB component.
+const RGB_BLUE_IDX: usize = 4;
+
+/// Map a named-color parameter offset (0–7) to a `Color::Named` variant.
+/// `offset = param - base` where base is 30 or 40.
+#[inline]
+fn named_color_from_offset(offset: u16) -> Color {
+    match offset {
+        0 => Color::Named(NamedColor::Black),
+        1 => Color::Named(NamedColor::Red),
+        2 => Color::Named(NamedColor::Green),
+        3 => Color::Named(NamedColor::Yellow),
+        4 => Color::Named(NamedColor::Blue),
+        5 => Color::Named(NamedColor::Magenta),
+        6 => Color::Named(NamedColor::Cyan),
+        7 => Color::Named(NamedColor::White),
+        _ => Color::Default,
+    }
+}
+
+/// Map a bright named-color parameter offset (0–7) to a `Color::Named` bright variant.
+/// `offset = param - base` where base is 90 (foreground) or 100 (background).
+#[inline]
+fn bright_named_color_from_offset(offset: u16) -> Color {
+    match offset {
+        0 => Color::Named(NamedColor::BrightBlack),
+        1 => Color::Named(NamedColor::BrightRed),
+        2 => Color::Named(NamedColor::BrightGreen),
+        3 => Color::Named(NamedColor::BrightYellow),
+        4 => Color::Named(NamedColor::BrightBlue),
+        5 => Color::Named(NamedColor::BrightMagenta),
+        6 => Color::Named(NamedColor::BrightCyan),
+        7 => Color::Named(NamedColor::BrightWhite),
+        _ => Color::Default,
+    }
+}
+
 /// Handle SGR (Select Graphic Rendition) — CSI 'm' sequences only.
 ///
 /// All other CSI sequences (cursor movement, erase, scroll) are handled
@@ -13,7 +70,7 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
     //   Semicolon form: \e[38;5;196m  → groups [[38], [5], [196]] (3 separate groups)
     //   Colon form:     \e[38:5:196m  → groups [[38, 5, 196]] (1 group, 3 sub-params)
     // vte::Params caps at MAX_PARAMS = 32 groups, so a fixed array is sufficient.
-    let mut group_buf: [&[u16]; 32] = [&[]; 32];
+    let mut group_buf: [&[u16]; SGR_MAX_PARAMS] = [&[]; SGR_MAX_PARAMS];
     let mut group_count = 0;
     for group in params.iter() {
         group_buf[group_count] = group;
@@ -80,36 +137,14 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 
             // Foreground colors
             30..=37 => {
-                let color = match param {
-                    30 => NamedColor::Black,
-                    31 => NamedColor::Red,
-                    32 => NamedColor::Green,
-                    33 => NamedColor::Yellow,
-                    34 => NamedColor::Blue,
-                    35 => NamedColor::Magenta,
-                    36 => NamedColor::Cyan,
-                    37 => NamedColor::White,
-                    _ => NamedColor::White,
-                };
-                term.current_attrs.foreground = Color::Named(color);
+                term.current_attrs.foreground = named_color_from_offset(param - 30);
             }
             38 => parse_extended_color(term, groups, &mut i, group, true),
             39 => term.current_attrs.foreground = Color::Default,
 
             // Background colors
             40..=47 => {
-                let color = match param {
-                    40 => NamedColor::Black,
-                    41 => NamedColor::Red,
-                    42 => NamedColor::Green,
-                    43 => NamedColor::Yellow,
-                    44 => NamedColor::Blue,
-                    45 => NamedColor::Magenta,
-                    46 => NamedColor::Cyan,
-                    47 => NamedColor::White,
-                    _ => NamedColor::Black,
-                };
-                term.current_attrs.background = Color::Named(color);
+                term.current_attrs.background = named_color_from_offset(param - 40);
             }
             48 => parse_extended_color(term, groups, &mut i, group, false),
             49 => term.current_attrs.background = Color::Default,
@@ -120,34 +155,12 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 
             // Bright foreground (90-97)
             90..=97 => {
-                let color = match param {
-                    90 => NamedColor::BrightBlack,
-                    91 => NamedColor::BrightRed,
-                    92 => NamedColor::BrightGreen,
-                    93 => NamedColor::BrightYellow,
-                    94 => NamedColor::BrightBlue,
-                    95 => NamedColor::BrightMagenta,
-                    96 => NamedColor::BrightCyan,
-                    97 => NamedColor::BrightWhite,
-                    _ => NamedColor::BrightWhite,
-                };
-                term.current_attrs.foreground = Color::Named(color);
+                term.current_attrs.foreground = bright_named_color_from_offset(param - 90);
             }
 
             // Bright background (100-107)
             100..=107 => {
-                let color = match param {
-                    100 => NamedColor::BrightBlack,
-                    101 => NamedColor::BrightRed,
-                    102 => NamedColor::BrightGreen,
-                    103 => NamedColor::BrightYellow,
-                    104 => NamedColor::BrightBlue,
-                    105 => NamedColor::BrightMagenta,
-                    106 => NamedColor::BrightCyan,
-                    107 => NamedColor::BrightWhite,
-                    _ => NamedColor::BrightBlack,
-                };
-                term.current_attrs.background = Color::Named(color);
+                term.current_attrs.background = bright_named_color_from_offset(param - 100);
             }
 
             _ => {}
@@ -155,21 +168,97 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
     }
 }
 
-/// Parse extended color (256-color or truecolor) from SGR parameters.
+/// Extract the next sub-parameter group's first byte, advancing `i`.
+/// Returns `0` if the group is absent or empty — a missing RGB component
+/// defaults to 0 (black channel), producing the least-surprising degraded
+/// color for a truncated truecolor sequence like `\e[38;2;255;128m` (missing blue).
+#[inline(always)]
+fn next_component(groups: &[&[u16]], i: &mut usize) -> u8 {
+    if *i < groups.len() && !groups[*i].is_empty() {
+        let v = groups[*i][0] as u8;
+        *i += 1;
+        v
+    } else {
+        0
+    }
+}
+
+/// Shared color parser for `38`/`48`/`58` SGR sequences.
 ///
 /// Handles two structural forms produced by the VTE parser:
 ///
-/// **Colon form** (`38:5:196`): All sub-params are in `current_group` as `[38, 5, 196]`.
-/// The sub-params after the `38` are read directly from `current_group`.
+/// **Colon form** (`38:5:196`): All sub-params are in `current_group` as
+/// `[38, 5, 196]`.  The mode and color values are read directly from the
+/// sub-parameter slots via the named index constants.
 ///
 /// **Semicolon form** (`38;5;196`): Each value arrives as a separate group:
-/// `[[38], [5], [196]]`. After `38` is consumed, subsequent groups are consumed
-/// by advancing `i` through `groups`.
+/// `[[38], [5], [196]]`.  After `38` is consumed, subsequent groups are
+/// consumed by advancing `i` through `groups`.
 ///
-/// `groups` - all param groups collected from `vte::Params`
-/// `i` - mutable index into `groups`, already pointing past `current_group`
-/// `current_group` - the group slice that contained the `38` or `48` value
-/// `foreground` - true for foreground (38), false for background (48)
+/// Returns `None` if the sequence is malformed.
+#[inline]
+fn parse_color_from_subparams(
+    groups: &[&[u16]],
+    i: &mut usize,
+    current_group: &[u16],
+) -> Option<Color> {
+    if current_group.len() > 1 {
+        // Colon form: sub-params are already in current_group.
+        match current_group.get(COLOR_MODE_IDX).copied() {
+            Some(5) => {
+                // 256-color indexed: XX:5:n
+                let n = current_group.get(COLOR_INDEX_IDX).copied()? as u8;
+                Some(Color::Indexed(n))
+            }
+            Some(2) => {
+                // TrueColor RGB: XX:2:r:g:b
+                let r = current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8;
+                let g = current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8;
+                let b = current_group.get(RGB_BLUE_IDX).copied().unwrap_or(0) as u8;
+                Some(Color::Rgb(r, g, b))
+            }
+            _ => None,
+        }
+    } else {
+        // Semicolon form: consume subsequent groups from `groups` via index `i`.
+        if *i >= groups.len() || groups[*i].is_empty() {
+            return None;
+        }
+        let mode = groups[*i][0];
+        *i += 1;
+
+        match mode {
+            5 => {
+                // mode == 5: indexed color — a missing palette index cannot default to 0
+                // (which would silently render as black), so we return None instead.
+                // Contrast with mode == 2 (RGB) where missing components default to 0
+                // via `next_component` (producing black channel, not black color).
+                // 256-color indexed: XX;5;n
+                if *i < groups.len() && !groups[*i].is_empty() {
+                    let n = groups[*i][0] as u8;
+                    *i += 1;
+                    Some(Color::Indexed(n))
+                } else {
+                    None
+                }
+            }
+            2 => {
+                // TrueColor RGB: XX;2;r;g;b
+                let r = next_component(groups, i);
+                let g = next_component(groups, i);
+                let b = next_component(groups, i);
+                Some(Color::Rgb(r, g, b))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Parse extended color (256-color or truecolor) from SGR 38/48 parameters.
+///
+/// `foreground` — `true` sets `current_attrs.foreground` (SGR 38),
+/// `false` sets `current_attrs.background` (SGR 48).
+#[inline]
 fn parse_extended_color(
     term: &mut crate::TerminalCore,
     groups: &[&[u16]],
@@ -177,463 +266,28 @@ fn parse_extended_color(
     current_group: &[u16],
     foreground: bool,
 ) {
-    let color = if current_group.len() > 1 {
-        // Colon form: 38:5:196 or 38:2:r:g:b
-        // Sub-params are already present in current_group at indices 1, 2, 3, 4
-        match current_group.get(1).copied() {
-            Some(5) => {
-                // 256-color indexed: 38:5:n
-                match current_group.get(2).copied() {
-                    Some(n) => Color::Indexed(n as u8),
-                    None => return,
-                }
-            }
-            Some(2) => {
-                // TrueColor RGB: 38:2:r:g:b
-                let r = current_group.get(2).copied().unwrap_or(0) as u8;
-                let g = current_group.get(3).copied().unwrap_or(0) as u8;
-                let b = current_group.get(4).copied().unwrap_or(0) as u8;
-                Color::Rgb(r, g, b)
-            }
-            _ => return,
-        }
-    } else {
-        // Semicolon form: consume subsequent groups from `groups` via index `i`
-        let mode = if *i < groups.len() && !groups[*i].is_empty() {
-            let m = groups[*i][0];
-            *i += 1;
-            m
+    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
+        if foreground {
+            term.current_attrs.foreground = color;
         } else {
-            return;
-        };
-
-        match mode {
-            5 => {
-                // 256-color indexed: 38;5;n
-                if *i < groups.len() && !groups[*i].is_empty() {
-                    let n = groups[*i][0] as u8;
-                    *i += 1;
-                    Color::Indexed(n)
-                } else {
-                    return;
-                }
-            }
-            2 => {
-                // TrueColor RGB: 38;2;r;g;b
-                let r = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                let g = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                let b = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                Color::Rgb(r, g, b)
-            }
-            _ => return,
+            term.current_attrs.background = color;
         }
-    };
-
-    if foreground {
-        term.current_attrs.foreground = color;
-    } else {
-        term.current_attrs.background = color;
     }
 }
 
 /// Parse underline color from SGR 58 parameters (same structure as extended color).
+#[inline]
 fn parse_underline_color(
     term: &mut crate::TerminalCore,
     groups: &[&[u16]],
     i: &mut usize,
     current_group: &[u16],
 ) {
-    let color = if current_group.len() > 1 {
-        match current_group.get(1).copied() {
-            Some(5) => match current_group.get(2).copied() {
-                Some(n) => Color::Indexed(n as u8),
-                None => return,
-            },
-            Some(2) => {
-                let r = current_group.get(2).copied().unwrap_or(0) as u8;
-                let g = current_group.get(3).copied().unwrap_or(0) as u8;
-                let b = current_group.get(4).copied().unwrap_or(0) as u8;
-                Color::Rgb(r, g, b)
-            }
-            _ => return,
-        }
-    } else {
-        let mode = if *i < groups.len() && !groups[*i].is_empty() {
-            let m = groups[*i][0];
-            *i += 1;
-            m
-        } else {
-            return;
-        };
-        match mode {
-            5 => {
-                if *i < groups.len() && !groups[*i].is_empty() {
-                    let n = groups[*i][0] as u8;
-                    *i += 1;
-                    Color::Indexed(n)
-                } else {
-                    return;
-                }
-            }
-            2 => {
-                let r = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                let g = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                let b = if *i < groups.len() && !groups[*i].is_empty() {
-                    let v = groups[*i][0] as u8;
-                    *i += 1;
-                    v
-                } else {
-                    0
-                };
-                Color::Rgb(r, g, b)
-            }
-            _ => return,
-        }
-    };
-    term.current_attrs.underline_color = color;
+    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
+        term.current_attrs.underline_color = color;
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sgr_reset() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.current_attrs.bold = true;
-        term.current_attrs.italic = true;
-
-        let params = vte::Params::default();
-        handle_sgr(&mut term, &params);
-
-        assert!(!term.current_attrs.bold);
-        assert!(!term.current_attrs.italic);
-    }
-
-    #[test]
-    fn test_sgr_256_color_fg() {
-        // Semicolon form: \e[38;5;196m — three separate param groups
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38;5;196m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Indexed(196)
-        );
-    }
-
-    #[test]
-    fn test_sgr_256_color_bg() {
-        // Semicolon form: \e[48;5;21m — three separate param groups
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[48;5;21m");
-        assert_eq!(
-            term.current_attrs.background,
-            crate::types::Color::Indexed(21)
-        );
-    }
-
-    #[test]
-    fn test_sgr_truecolor_fg() {
-        // Semicolon form: \e[38;2;255;0;0m — five separate param groups
-        // Note: avoid Rgb(0,0,0) as it collides with Color::Default in encode_color
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38;2;255;0;0m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Rgb(255, 0, 0)
-        );
-    }
-
-    #[test]
-    fn test_sgr_truecolor_bg() {
-        // Semicolon form: \e[48;2;0;128;255m — five separate param groups
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[48;2;0;128;255m");
-        assert_eq!(
-            term.current_attrs.background,
-            crate::types::Color::Rgb(0, 128, 255)
-        );
-    }
-
-    #[test]
-    fn test_sgr_compound_256_with_attrs() {
-        // Compound sequence: bold + 256-color FG + underline in one CSI
-        // \e[1;38;5;196;4m — groups: [1], [38], [5], [196], [4]
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[1;38;5;196;4m");
-        assert!(term.current_attrs.bold, "bold should be set");
-        assert!(term.current_attrs.underline(), "underline should be set");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Indexed(196)
-        );
-    }
-
-    #[test]
-    fn test_sgr_named_colors_regression() {
-        // Regression: named color params (30-37, 40-47) must still work after refactor
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[31m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Named(crate::types::NamedColor::Red)
-        );
-
-        term.advance(b"\x1b[42m");
-        assert_eq!(
-            term.current_attrs.background,
-            crate::types::Color::Named(crate::types::NamedColor::Green)
-        );
-
-        // Also verify bright variants (90-97, 100-107) after refactor
-        term.advance(b"\x1b[91m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Named(crate::types::NamedColor::BrightRed)
-        );
-
-        term.advance(b"\x1b[101m");
-        assert_eq!(
-            term.current_attrs.background,
-            crate::types::Color::Named(crate::types::NamedColor::BrightRed)
-        );
-    }
-
-    #[test]
-    fn test_sgr_256_color_colon_form() {
-        // Colon form: \e[38:5:196m — all sub-params in one group [38, 5, 196]
-        // This exercises the current_group.len() > 1 branch in parse_extended_color
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38:5:196m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Indexed(196)
-        );
-    }
-
-    #[test]
-    fn test_sgr_truecolor_colon_form() {
-        // Colon form: \e[38:2:255:0:128m — all sub-params in one group
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38:2:255:0:128m");
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Rgb(255, 0, 128)
-        );
-    }
-
-    #[test]
-    fn test_sgr_256color_missing_index_unchanged() {
-        // \x1b[38;5m — 256-color with no index value
-        // The foreground should remain unchanged (Color::Default) because
-        // parse_extended_color returns early when the index group is absent
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38;5m");
-        // Should not panic, foreground stays Default
-        assert!(
-            matches!(term.current_attrs.foreground, crate::types::Color::Default),
-            "Foreground should remain Default when 256-color index is missing"
-        );
-    }
-
-    #[test]
-    fn test_sgr_truecolor_partial_rgb_defaults_to_zero() {
-        // \x1b[38;2;255m — truecolor with only R component, G and B missing
-        // Missing components default to 0 (see parse_extended_color unwrap_or(0))
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38;2;255m");
-        // Should not panic; R=255, G=0, B=0 (missing = 0)
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Rgb(255, 0, 0),
-            "Partial truecolor should fill missing components with 0"
-        );
-    }
-
-    #[test]
-    fn test_sgr_truecolor_overflow_truncates_to_u8() {
-        // \x1b[38;2;300;300;300m — values exceed u8 range
-        // Values are truncated by `as u8` cast (300u16 as u8 == 44)
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[38;2;300;300;300m");
-        // Should not panic; values are silently truncated via as u8
-        assert!(
-            matches!(
-                term.current_attrs.foreground,
-                crate::types::Color::Rgb(_, _, _)
-            ),
-            "Overflow truecolor should still produce an Rgb color (truncated)"
-        );
-        assert_eq!(
-            term.current_attrs.foreground,
-            crate::types::Color::Rgb(44, 44, 44),
-            "300u16 as u8 == 44; each component should truncate to 44"
-        );
-    }
-
-    #[test]
-    fn test_sgr_decstbm_inverted_margins_no_panic() {
-        // \x1b[10;5r — DECSTBM with top=10 > bottom=5 (inverted)
-        // Should not panic; scroll operations with inverted region are no-ops
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[10;5r");
-        // Attempt scrolls — should not panic
-        term.advance(b"\x1b[S"); // Scroll up
-        term.advance(b"\x1b[T"); // Scroll down
-    }
-
-    #[test]
-    fn test_sgr_empty_sequence_resets_all() {
-        // \x1b[m — empty SGR sequence resets all attributes
-        let mut term = crate::TerminalCore::new(24, 80);
-        // First set some attributes
-        term.advance(b"\x1b[1;3;4m"); // bold, italic, underline
-        assert!(term.current_attrs.bold, "bold should be set before reset");
-        assert!(
-            term.current_attrs.italic,
-            "italic should be set before reset"
-        );
-        assert!(
-            term.current_attrs.underline(),
-            "underline should be set before reset"
-        );
-        // Now reset with empty sequence
-        term.advance(b"\x1b[m");
-        // All attributes should be reset
-        assert!(!term.current_attrs.bold, "bold should be reset");
-        assert!(!term.current_attrs.italic, "italic should be reset");
-        assert!(!term.current_attrs.underline(), "underline should be reset");
-    }
-
-    #[test]
-    fn test_sgr_unknown_code_no_panic() {
-        // Test that unknown/unsupported SGR codes don't cause panics
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[999m"); // Unknown code
-        term.advance(b"\x1b[38;9m"); // Invalid extended color mode
-                                     // Should complete without panic
-    }
-
-    #[test]
-    fn test_sgr_bold_turn_off_code_22() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[1m"); // bold on
-        assert!(term.current_attrs.bold);
-        term.advance(b"\x1b[22m"); // turn off bold+dim
-        assert!(!term.current_attrs.bold, "Bold should be off after CSI 22m");
-    }
-
-    #[test]
-    fn test_sgr_italic_turn_off_code_23() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[3m"); // italic on
-        assert!(term.current_attrs.italic);
-        term.advance(b"\x1b[23m"); // turn off italic
-        assert!(
-            !term.current_attrs.italic,
-            "Italic should be off after CSI 23m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_underline_turn_off_code_24() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[4m"); // underline on
-        assert!(term.current_attrs.underline());
-        term.advance(b"\x1b[24m"); // turn off underline
-        assert!(
-            !term.current_attrs.underline(),
-            "Underline should be off after CSI 24m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_inverse_turn_off_code_27() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[7m"); // inverse on
-        assert!(term.current_attrs.inverse);
-        term.advance(b"\x1b[27m"); // turn off inverse
-        assert!(
-            !term.current_attrs.inverse,
-            "Inverse should be off after CSI 27m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_blink_turn_off_code_25_clears_slow() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[5m"); // blink_slow on
-        assert!(term.current_attrs.blink_slow);
-        term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
-        assert!(
-            !term.current_attrs.blink_slow,
-            "blink_slow should be off after CSI 25m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_blink_turn_off_code_25_clears_fast() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[6m"); // blink_fast on
-        assert!(term.current_attrs.blink_fast);
-        term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
-        assert!(
-            !term.current_attrs.blink_fast,
-            "blink_fast should be off after CSI 25m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_hidden_turn_off_code_28() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[8m"); // hidden on
-        assert!(term.current_attrs.hidden);
-        term.advance(b"\x1b[28m"); // turn off hidden
-        assert!(
-            !term.current_attrs.hidden,
-            "Hidden should be off after CSI 28m"
-        );
-    }
-
-    #[test]
-    fn test_sgr_strikethrough_turn_off_code_29() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[9m"); // strikethrough on
-        assert!(term.current_attrs.strikethrough);
-        term.advance(b"\x1b[29m"); // turn off strikethrough
-        assert!(
-            !term.current_attrs.strikethrough,
-            "Strikethrough should be off after CSI 29m"
-        );
-    }
-}
+#[path = "tests/sgr.rs"]
+mod tests;

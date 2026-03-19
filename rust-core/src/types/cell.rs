@@ -84,11 +84,13 @@ impl Default for SgrAttributes {
 
 impl SgrAttributes {
     /// Reset all attributes to default
+    #[inline(always)]
     pub fn reset(&mut self) {
         *self = Self::default();
     }
 
     /// Returns true if any underline style is active
+    #[inline(always)]
     pub fn underline(&self) -> bool {
         self.underline_style != UnderlineStyle::None
     }
@@ -98,19 +100,20 @@ impl SgrAttributes {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cell {
     /// Grapheme cluster at this position (may include combining characters)
-    pub grapheme: CompactString,
+    pub(crate) grapheme: CompactString,
     /// SGR attributes
-    pub attrs: SgrAttributes,
+    pub(crate) attrs: SgrAttributes,
     /// Cell width (for Unicode/CJK support)
-    pub width: CellWidth,
+    pub(crate) width: CellWidth,
     /// Hyperlink ID (if any)
-    pub hyperlink_id: Option<String>,
+    pub(crate) hyperlink_id: Option<String>,
     /// Image ID for Kitty Graphics Protocol (if any)
-    pub image_id: Option<u32>,
+    pub(crate) image_id: Option<u32>,
 }
 
 impl Cell {
     /// Create a new cell with the given character
+    #[inline(always)]
     pub fn new(c: char) -> Self {
         Self {
             grapheme: CompactString::new(c.to_string()),
@@ -122,6 +125,7 @@ impl Cell {
     }
 
     /// Create a new cell with character and attributes
+    #[inline(always)]
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
         Self {
             grapheme: CompactString::new(c.to_string()),
@@ -133,19 +137,41 @@ impl Cell {
     }
 
     /// Set hyperlink ID
+    #[inline(always)]
     pub fn with_hyperlink(mut self, id: String) -> Self {
         self.hyperlink_id = Some(id);
         self
     }
 
-    /// Append a combining character to this cell's grapheme cluster
+    /// Append a combining character to this cell's grapheme cluster.
+    ///
+    /// Combining characters are zero-width Unicode scalars (U+0300–U+036F,
+    /// U+1AB0–U+1AFF, etc.) that attach visually to the preceding base glyph.
+    /// We cap the grapheme at 8 Unicode scalars (1 base + 7 combining) to
+    /// prevent memory exhaustion from adversarial or broken terminal output
+    /// that emits a stream of zero-width characters into the same cell.
+    /// Real grapheme clusters virtually never exceed 4 scalars; 8 is generous.
+    #[inline]
     pub fn push_combining(&mut self, c: char) {
-        self.grapheme.push(c);
+        // self.grapheme.chars().count() would be O(n) but graphemes are tiny;
+        // compare byte length against a generous bound instead for O(1) check.
+        // Cap at 32 bytes total: 1 base + up to 7 combining scalars × ≤4 bytes each.
+        // Check that the new char fits before pushing to avoid exceeding the cap.
+        if self.grapheme.len() + c.len_utf8() <= 32 {
+            self.grapheme.push(c);
+        }
     }
 
     /// Get the first (base) character of the grapheme cluster (backward compat)
+    #[inline(always)]
     pub fn char(&self) -> char {
         self.grapheme.chars().next().unwrap_or(' ')
+    }
+
+    /// Get the full grapheme cluster string (may include combining characters)
+    #[inline]
+    pub fn grapheme(&self) -> &str {
+        self.grapheme.as_str()
     }
 }
 
@@ -186,14 +212,16 @@ mod tests {
     fn test_cell_new() {
         let cell = Cell::new('A');
         assert_eq!(cell.grapheme.as_str(), "A");
-        assert_eq!(cell.attrs.bold, false);
+        assert!(!cell.attrs.bold);
     }
 
     #[test]
     fn test_cell_with_attrs() {
-        let mut attrs = SgrAttributes::default();
-        attrs.bold = true;
-        attrs.foreground = Color::Rgb(255, 0, 0);
+        let attrs = SgrAttributes {
+            bold: true,
+            foreground: Color::Rgb(255, 0, 0),
+            ..Default::default()
+        };
 
         let cell = Cell::with_attrs('B', attrs);
         assert_eq!(cell.grapheme.as_str(), "B");
@@ -203,9 +231,7 @@ mod tests {
 
     #[test]
     fn test_sgr_reset() {
-        let mut attrs = SgrAttributes::default();
-        attrs.bold = true;
-        attrs.italic = true;
+        let mut attrs = SgrAttributes { bold: true, italic: true, ..Default::default() };
 
         attrs.reset();
         assert!(!attrs.bold);
@@ -228,8 +254,7 @@ mod tests {
         let cell2 = Cell::new('A');
         assert_eq!(cell1, cell2);
 
-        let mut attrs = SgrAttributes::default();
-        attrs.bold = true;
+        let attrs = SgrAttributes { bold: true, ..Default::default() };
         let cell3 = Cell::with_attrs('A', attrs);
         assert_ne!(cell1, cell3);
     }

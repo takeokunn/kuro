@@ -1,6 +1,6 @@
 //! POSIX PTY implementation using nix crate for safe fork/pty operations
 
-use crate::{error::KuroError, pty::reader::PtyReader, Result};
+use crate::{ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn_error}, pty::reader::PtyReader, Result};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::wait::waitpid;
 use nix::unistd::{fork, ForkResult, Pid};
@@ -37,19 +37,22 @@ impl Pty {
     /// Resolves the command to an absolute path and checks the basename.
     fn validate_shell(command: &str) -> Result<PathBuf> {
         let path = which::which(command)
-            .map_err(|e| KuroError::InvalidParam(format!("Shell not found: {}", e)))?;
+            .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {}", e)))?;
 
         let basename = path
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| KuroError::InvalidParam("Invalid shell name".into()))?;
+            .ok_or_else(|| invalid_parameter_error("command", "Invalid shell name"))?;
 
         if !ALLOWED_SHELLS.contains(&basename) {
-            return Err(KuroError::InvalidParam(format!(
-                "Shell '{}' not allowed. Allowed shells: {}",
-                basename,
-                ALLOWED_SHELLS.join(", ")
-            )));
+            return Err(invalid_parameter_error(
+                "command",
+                &format!(
+                    "Shell '{}' not allowed. Allowed shells: {}",
+                    basename,
+                    ALLOWED_SHELLS.join(", ")
+                ),
+            ));
         }
 
         Ok(path)
@@ -81,7 +84,7 @@ impl Pty {
             ws_ypixel: 0,
         };
         let OpenptyResult { master, slave } = openpty(Some(&winsize), None)
-            .map_err(|e| KuroError::Pty(format!("Failed to open PTY: {}", e)))?;
+            .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {}", e)))?;
 
         // Create bounded channel for backpressure
         let (sender, receiver) = crossbeam_channel::bounded(CHANNEL_CAPACITY);
@@ -94,14 +97,15 @@ impl Pty {
             // dup3 with O_CLOEXEC is available on macOS via F_DUPFD_CLOEXEC fcntl
             let fd = libc::dup(master.as_raw_fd());
             if fd == -1 {
-                return Err(KuroError::Pty("Failed to duplicate master fd".to_string()));
+                return Err(pty_operation_error("dup", "Failed to duplicate master fd"));
             }
             // Set FD_CLOEXEC so the fd is closed on exec in child processes
             let flags = libc::fcntl(fd, libc::F_GETFD);
             if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
                 libc::close(fd);
-                return Err(KuroError::Pty(
-                    "Failed to set FD_CLOEXEC on reader fd".to_string(),
+                return Err(pty_operation_error(
+                    "fcntl",
+                    "Failed to set FD_CLOEXEC on reader fd",
                 ));
             }
             fd
@@ -133,7 +137,7 @@ impl Pty {
 
                 // Create new session
                 nix::unistd::setsid()
-                    .map_err(|e| KuroError::Pty(format!("Failed to setsid: {}", e)))?;
+                    .map_err(|e| pty_operation_error("setsid", &format!("Failed to setsid: {}", e)))?;
 
                 // Set slave PTY as controlling terminal
                 // TIOCSCTTY is required on all POSIX platforms after setsid()
@@ -141,22 +145,25 @@ impl Pty {
                 // Without this, tcgetpgrp() fails in the shell.
                 unsafe {
                     if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY as _, 0) == -1 {
-                        return Err(KuroError::Pty(format!(
-                            "Failed to set controlling terminal: {}",
-                            std::io::Error::last_os_error()
-                        )));
+                        return Err(pty_operation_error(
+                            "TIOCSCTTY",
+                            &format!(
+                                "Failed to set controlling terminal: {}",
+                                std::io::Error::last_os_error()
+                            ),
+                        ));
                     }
                 }
 
                 // Duplicate slave PTY to stdin, stdout, stderr
                 if unsafe { libc::dup2(slave.as_raw_fd(), 0) } == -1 {
-                    return Err(KuroError::Pty("Failed to dup2 stdin".to_string()));
+                    return Err(pty_operation_error("dup2", "Failed to dup2 stdin"));
                 }
                 if unsafe { libc::dup2(slave.as_raw_fd(), 1) } == -1 {
-                    return Err(KuroError::Pty("Failed to dup2 stdout".to_string()));
+                    return Err(pty_operation_error("dup2", "Failed to dup2 stdout"));
                 }
                 if unsafe { libc::dup2(slave.as_raw_fd(), 2) } == -1 {
-                    return Err(KuroError::Pty("Failed to dup2 stderr".to_string()));
+                    return Err(pty_operation_error("dup2", "Failed to dup2 stderr"));
                 }
 
                 // Close slave PTY (we have duplicates now)
@@ -220,27 +227,27 @@ impl Pty {
                 // Using argv[0] = basename keeps ps/top output readable.
                 let shell_full_cstr =
                     std::ffi::CString::new(shell_path.to_str().ok_or_else(|| {
-                        KuroError::Pty("Shell path is not valid UTF-8".to_string())
+                        pty_spawn_error(command, "Shell path is not valid UTF-8")
                     })?)
-                    .map_err(|e| KuroError::Pty(format!("Invalid shell path: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell path: {}", e)))?;
 
                 let shell_name = shell_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("sh");
                 let shell_name_cstr = std::ffi::CString::new(shell_name)
-                    .map_err(|e| KuroError::Pty(format!("Invalid shell name: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {}", e)))?;
 
                 // argv[0] = basename (e.g. "bash"), argv[1..] = empty (interactive login
                 // flags can be added here if needed, but the default is interactive mode
                 // because stdin is a TTY).
                 nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
-                    .map_err(|e| KuroError::Pty(format!("Failed to exec shell: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {}", e)))?;
 
                 // execvp should not return, but if it does, exit
                 std::process::exit(1);
             }
-            Err(errno) => Err(KuroError::Pty(format!("Failed to fork: {}", errno))),
+            Err(errno) => Err(pty_spawn_error(command, &format!("Failed to fork: {}", errno))),
         }
     }
 
@@ -250,7 +257,7 @@ impl Pty {
 
         self.master
             .write_all(bytes)
-            .map_err(|e| KuroError::Pty(format!("Failed to write to PTY: {}", e)))?;
+            .map_err(|e| pty_operation_error("write", &format!("Failed to write to PTY: {}", e)))?;
 
         Ok(())
     }
@@ -328,163 +335,5 @@ impl Drop for Pty {
 
 #[cfg(test)]
 #[cfg(unix)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validate_allowed_shells() {
-        assert!(Pty::validate_shell("bash").is_ok());
-        assert!(Pty::validate_shell("zsh").is_ok());
-        assert!(Pty::validate_shell("sh").is_ok());
-        assert!(Pty::validate_shell("fish").is_ok());
-    }
-
-    #[test]
-    fn test_validate_rejected_shell() {
-        assert!(Pty::validate_shell(" malicious_command").is_err());
-        assert!(Pty::validate_shell("rm").is_err());
-        assert!(Pty::validate_shell("cat").is_err());
-    }
-
-    #[test]
-    fn test_pty_spawn() {
-        let pty = Pty::spawn("sh", 24, 80);
-        assert!(pty.is_ok());
-
-        let mut pty = pty.unwrap();
-        pty.write(b"echo test\n").unwrap();
-    }
-
-    #[test]
-    fn test_validate_shell_empty_string_rejected() {
-        // An empty string should fail because `which` cannot resolve it
-        let result = Pty::validate_shell("");
-        assert!(result.is_err(), "empty string should be rejected");
-    }
-
-    #[test]
-    fn test_validate_shell_absolute_path_bash() {
-        let bash_path = std::path::Path::new("/bin/bash");
-        if bash_path.exists() {
-            // An absolute path to bash resolves to the "bash" basename which is in the whitelist
-            let result = Pty::validate_shell("/bin/bash");
-            assert!(
-                result.is_ok(),
-                "/bin/bash should be accepted when it exists"
-            );
-        }
-    }
-
-    #[test]
-    fn test_validate_shell_rejects_relative_path_slash_slash() {
-        // Relative paths like "../bash" cannot be resolved by `which` as an absolute path,
-        // so they should be rejected
-        let result = Pty::validate_shell("../bash");
-        assert!(result.is_err(), "relative path ../bash should be rejected");
-    }
-
-    #[test]
-    fn test_validate_shell_rejects_python() {
-        // "python3" is not in the ALLOWED_SHELLS whitelist
-        // If it isn't even installed, which() will fail — either way we expect Err
-        let result = Pty::validate_shell("python3");
-        assert!(
-            result.is_err(),
-            "python3 should be rejected (not in whitelist)"
-        );
-    }
-
-    // --- Regression tests: readline visual mode requires non-zero PTY dimensions ---
-    //
-    // Root cause of the C-b/C-f/C-e bug:
-    //   readline calls TIOCGWINSZ at startup. If it sees 0 columns it falls back to
-    //   dumb/novis mode and echoes control characters as literal ^X instead of moving
-    //   the cursor.  Two fixes prevent this:
-    //     1. Pass winsize to openpty() before fork.
-    //     2. Call TIOCSWINSZ on fd 0 inside the child after dup2.
-    //
-    // These tests verify the structural guarantees that make the fixes correct.
-
-    #[test]
-    fn test_spawn_with_nonzero_dimensions_succeeds() {
-        // Spawning with explicit non-zero rows/cols must succeed.
-        // This exercises the openpty(Some(&winsize), ...) path.
-        let pty = Pty::spawn("sh", 24, 80);
-        assert!(
-            pty.is_ok(),
-            "Pty::spawn with rows=24 cols=80 must succeed: {:?}",
-            pty.err()
-        );
-    }
-
-    #[test]
-    fn test_spawn_rows_cols_passed_through() {
-        // After spawn, the parent can immediately set_winsize to the same value
-        // without error — confirming the master fd is valid and TIOCSWINSZ works.
-        let pty = Pty::spawn("sh", 24, 80);
-        assert!(pty.is_ok());
-        let mut pty = pty.unwrap();
-        // This mirrors what kuro does on resize; it must not error.
-        assert!(
-            pty.set_winsize(24, 80).is_ok(),
-            "set_winsize on a freshly spawned PTY must succeed"
-        );
-    }
-
-    #[test]
-    fn test_validate_shell_returns_absolute_path() {
-        // validate_shell must return an absolute PathBuf so that execv uses
-        // the exact binary we validated, not whatever PATH finds first.
-        // Regression: previously execvp("bash", ...) was used, which could
-        // resolve to a different bash (e.g. Homebrew) than validate_shell chose.
-        let result = Pty::validate_shell("sh");
-        assert!(result.is_ok());
-        let path = result.unwrap();
-        assert!(
-            path.is_absolute(),
-            "validate_shell must return an absolute path, got: {:?}",
-            path
-        );
-    }
-
-    #[test]
-    fn test_validate_shell_bash_returns_absolute_path() {
-        // Same as above, specifically for bash.
-        if which::which("bash").is_ok() {
-            let result = Pty::validate_shell("bash");
-            assert!(result.is_ok());
-            let path = result.unwrap();
-            assert!(
-                path.is_absolute(),
-                "validate_shell('bash') must return an absolute path, got: {:?}",
-                path
-            );
-        }
-    }
-
-    #[test]
-    fn test_pty_tiocgwinsz_via_master_after_spawn() {
-        // After spawn, querying TIOCGWINSZ on the master must return the dimensions
-        // we requested.  This is the parent-side proof that openpty(Some(&winsize))
-        // correctly propagated the size.  If this returns 0×0, readline in the child
-        // will enter dumb mode.
-        use std::os::unix::io::AsRawFd;
-        let pty = Pty::spawn("sh", 42, 120);
-        assert!(pty.is_ok());
-        let pty = pty.unwrap();
-
-        let mut ws = libc::winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        let ret = unsafe { libc::ioctl(pty.as_raw_fd(), libc::TIOCGWINSZ, &mut ws) };
-        assert_eq!(ret, 0, "TIOCGWINSZ ioctl failed");
-        assert_eq!(ws.ws_row, 42, "ws_row must equal requested rows");
-        assert_eq!(
-            ws.ws_col, 120,
-            "ws_col must equal requested cols — 0 here would cause readline dumb mode"
-        );
-    }
-}
+#[path = "tests/posix.rs"]
+mod tests;

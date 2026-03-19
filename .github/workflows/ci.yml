@@ -26,16 +26,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
         with:
           toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -43,7 +43,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache Cargo index
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -51,7 +51,7 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Cache Cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -59,7 +59,7 @@ jobs:
             ${{ runner.os }}-cargo-build-target-
 
       - name: Install Emacs
-        uses: jcs090218/setup-emacs@v3
+        uses: jcs090218/setup-emacs@ffd830bca5865932d99c3d179263d8b0ebdd00c0  # v3
         with:
           version: ${{ matrix.emacs-version }}
 
@@ -68,6 +68,9 @@ jobs:
 
       - name: Run cargo clippy
         run: cargo clippy --workspace -- -D warnings
+
+      - name: Build documentation
+        run: cargo doc --workspace --no-deps
 
       # Security audit - if emacs crate 0.19.0 is flagged by RUSTSEC,
       # document the advisory in .cargo/audit.toml with a rationale comment.
@@ -83,6 +86,15 @@ jobs:
       - name: Run cargo test (release)
         run: cargo test --workspace --release
 
+      - name: Run Elisp ERT tests
+        run: |
+          emacs -Q --batch \
+            -L emacs-lisp \
+            -L test/elisp \
+            --eval "(setq load-prefer-newer t)" \
+            --eval "(mapc #'load (directory-files (expand-file-name \"test/elisp\") t \"\\\\.el\\\\'\"))" \
+            --eval "(ert-run-tests-batch-and-exit)"
+
       - name: Install tmux
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -92,7 +104,7 @@ jobs:
           fi
 
       - name: Run E2E tests
-        run: bash test/run-e2e.sh
+        run: bash test/shell/run-e2e.sh
         if: runner.os != 'Windows'
 
   test-windows:
@@ -104,7 +116,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Install Rust toolchain (WSL)
         run: |
@@ -121,10 +133,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
         with:
           toolchain: stable
 
@@ -135,7 +147,7 @@ jobs:
         run: cargo tarpaulin --workspace --timeout 120 --out Xml
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
         with:
           file: ./cobertura.xml
 
@@ -143,9 +155,9 @@ jobs:
     name: Fuzz (nightly, regression check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # nightly
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
       - name: Run fuzz targets (30s each)
@@ -179,16 +191,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -196,7 +208,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache Cargo index
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -204,7 +216,7 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Cache Cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
@@ -220,14 +232,14 @@ jobs:
           mv ${{ matrix.artifact-name }} ${{ matrix.release-name }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: kuro-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.release-name }}
           retention-days: 90
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844  # v1
         with:
           files: |
             target/${{ matrix.target }}/release/${{ matrix.release-name }}

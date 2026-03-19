@@ -5,7 +5,6 @@
 //! terminal escape sequences.
 
 use crate::parser;
-use crate::types;
 use crate::TerminalCore;
 use unicode_width::UnicodeWidthChar;
 
@@ -37,7 +36,7 @@ impl vte::Perform for TerminalCore {
 
     fn execute(&mut self, byte: u8) {
         match byte {
-            0x07 => self.bell_pending = true,
+            0x07 => self.meta.bell_pending = true,
             0x08 => self.screen.backspace(),
             0x09 => {
                 // HT - Horizontal Tab
@@ -48,7 +47,7 @@ impl vte::Perform for TerminalCore {
                     self.screen.tab();
                 }
             }
-            0x0A..=0x0C => self.screen.line_feed(),
+            0x0A..=0x0C => self.screen.line_feed(self.current_attrs.background),
             0x0D => self.screen.carriage_return(),
             _ => {}
         }
@@ -64,22 +63,11 @@ impl vte::Perform for TerminalCore {
                 }
                 'u' => {
                     // CSI ? u — Query keyboard flags
-                    let response = format!("\x1b[?{}u", self.dec_modes.keyboard_flags);
-                    self.pending_responses.push(response.into_bytes());
+                    parser::dec_private::handle_kitty_kb_query(self);
                 }
                 'p' if intermediates.len() >= 2 && intermediates[1] == b'$' => {
-                    // DECRQM — DEC private mode query: CSI ? Ps $ p → CSI ? Ps ; status $ y
-                    for param_group in params {
-                        for &mode in param_group {
-                            let status: u8 = match self.dec_modes.get_mode(mode) {
-                                Some(true) => 1,  // set
-                                Some(false) => 2, // reset
-                                None => 0,        // not recognized
-                            };
-                            let response = format!("\x1b[?{};{}$y", mode, status);
-                            self.pending_responses.push(response.into_bytes());
-                        }
-                    }
+                    // DECRQM — DEC private mode query
+                    parser::dec_private::handle_decrqm(self, params);
                 }
                 _ => {}
             }
@@ -90,25 +78,17 @@ impl vte::Perform for TerminalCore {
         if !intermediates.is_empty() && intermediates[0] == b'>' {
             match c {
                 'u' => {
-                    let flags = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first().copied())
-                        .unwrap_or(0);
-                    if self.dec_modes.keyboard_flags_stack.len() < 64 {
-                        self.dec_modes
-                            .keyboard_flags_stack
-                            .push(self.dec_modes.keyboard_flags);
-                    }
-                    self.dec_modes.keyboard_flags = flags as u32;
+                    // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
+                    parser::dec_private::handle_kitty_kb_push(self, params);
                 }
                 'c' => {
                     // DA2 (Secondary Device Attributes): ESC[>c or ESC[>0c
-                    self.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
+                    self.meta.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
                 }
                 'q' => {
                     // XTVERSION — terminal version identification: CSI > q → DCS > | name ST
-                    self.pending_responses.push(b"\x1bP>|kuro-1.0.0\x1b\\".to_vec());
+                    self.meta.pending_responses
+                        .push(b"\x1bP>|kuro-1.0.0\x1b\\".to_vec());
                 }
                 _ => {}
             }
@@ -118,11 +98,7 @@ impl vte::Perform for TerminalCore {
         // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
         if !intermediates.is_empty() && intermediates[0] == b'<' {
             if c == 'u' {
-                if let Some(prev) = self.dec_modes.keyboard_flags_stack.pop() {
-                    self.dec_modes.keyboard_flags = prev;
-                } else {
-                    self.dec_modes.keyboard_flags = 0;
-                }
+                parser::dec_private::handle_kitty_kb_pop(self);
             }
             return;
         }
@@ -134,25 +110,12 @@ impl vte::Perform for TerminalCore {
             'c' => {
                 if intermediates.is_empty() {
                     // DA1 (Primary): ESC[c or ESC[0c → respond with VT100 + advanced video
-                    self.pending_responses.push(b"\x1b[?1;2c".to_vec());
+                    self.meta.pending_responses.push(b"\x1b[?1;2c".to_vec());
                 }
             }
             // DECSCUSR - Set Cursor Style (CSI Ps SP q)
             'q' if intermediates == b" " => {
-                let ps = params
-                    .iter()
-                    .next()
-                    .and_then(|p| p.first().copied())
-                    .unwrap_or(0);
-                self.dec_modes.cursor_shape = match ps {
-                    0 | 1 => types::cursor::CursorShape::BlinkingBlock,
-                    2 => types::cursor::CursorShape::SteadyBlock,
-                    3 => types::cursor::CursorShape::BlinkingUnderline,
-                    4 => types::cursor::CursorShape::SteadyUnderline,
-                    5 => types::cursor::CursorShape::BlinkingBar,
-                    6 => types::cursor::CursorShape::SteadyBar,
-                    _ => types::cursor::CursorShape::BlinkingBlock,
-                };
+                parser::csi::handle_decscusr(self, params);
             }
             // DECSTR - Soft Terminal Reset (CSI ! p)
             'p' if intermediates == b"!" => {
@@ -182,6 +145,13 @@ impl vte::Perform for TerminalCore {
             'm' => {
                 parser::sgr::handle_sgr(self, params);
             }
+            // ANSI SCP/RCP — save/restore cursor (same semantics as DECSC ESC 7 / DECRC ESC 8)
+            's' if intermediates.is_empty() => {
+                self.save_cursor();
+            }
+            'u' if intermediates.is_empty() => {
+                self.restore_cursor();
+            }
             // Unknown/unhandled CSI sequences are silently ignored
             _ => {}
         }
@@ -190,6 +160,7 @@ impl vte::Perform for TerminalCore {
     /// Handle OSC (Operating System Command) sequences from the VTE parser.
     ///
     /// Delegates to [`parser::osc::handle_osc`] for the full implementation.
+    #[inline(always)]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         parser::osc::handle_osc(self, params, bell_terminated);
     }
@@ -205,23 +176,16 @@ impl vte::Perform for TerminalCore {
             }
             ([], b'M') => {
                 // RI: Reverse Index — move cursor up one line, scroll down if at top of scroll region
-                let cursor_row = self.screen.cursor().row;
-                let scroll_top = self.screen.get_scroll_region().top;
-                if cursor_row == scroll_top {
-                    self.screen.scroll_down(1);
-                } else if cursor_row > 0 {
-                    self.screen
-                        .move_cursor(cursor_row - 1, self.screen.cursor().col);
-                }
+                parser::scroll::handle_ri(self);
             }
             ([], b'D') => {
                 // IND: Index — move cursor down one line, scroll up if at bottom of scroll region
-                self.screen.line_feed();
+                self.screen.line_feed(self.current_attrs.background);
             }
             ([], b'E') => {
                 // NEL: Next Line — CR + LF
                 self.screen.carriage_return();
-                self.screen.line_feed();
+                self.screen.line_feed(self.current_attrs.background);
             }
             ([], b'=') => {
                 // DECKPAM: application keypad mode
@@ -237,106 +201,22 @@ impl vte::Perform for TerminalCore {
         }
     }
 
+    #[inline(always)]
     fn hook(&mut self, params: &vte::Params, intermediates: &[u8], ignore: bool, c: char) {
         parser::dcs::dcs_hook(self, params, intermediates, ignore, c);
     }
 
+    #[inline(always)]
     fn put(&mut self, byte: u8) {
         parser::dcs::dcs_put(self, byte);
     }
 
+    #[inline(always)]
     fn unhook(&mut self) {
         parser::dcs::dcs_unhook(self);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::TerminalCore;
-
-    #[test]
-    fn test_vte_print() {
-        let mut term = TerminalCore::new(24, 80);
-        term.advance(&b"Hello"[..]);
-
-        assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'H');
-        assert_eq!(term.screen.get_cell(0, 1).unwrap().char(), 'e');
-        assert_eq!(term.screen.get_cell(0, 2).unwrap().char(), 'l');
-        assert_eq!(term.screen.get_cell(0, 3).unwrap().char(), 'l');
-        assert_eq!(term.screen.get_cell(0, 4).unwrap().char(), 'o');
-    }
-
-    #[test]
-    fn test_vte_sgr_bold() {
-        let mut term = TerminalCore::new(24, 80);
-        // Set bold, print text, then verify bold is active (no reset)
-        term.advance(&b"\x1b[1mBold"[..]);
-
-        assert!(term.current_attrs.bold);
-    }
-
-    #[test]
-    fn test_vte_cursor_movement() {
-        let mut term = TerminalCore::new(24, 80);
-        term.advance(&b"ABC\x1b[2D"[..]);
-
-        // Should move back 2 columns
-        assert_eq!(term.screen.cursor.col, 1);
-    }
-
-    /// LF (0x0A) should advance the cursor to the next row.
-    #[test]
-    fn test_execute_lf() {
-        let mut term = TerminalCore::new(24, 80);
-        let row_before = term.screen.cursor.row;
-        term.advance(&b"\n"[..]);
-        assert_eq!(
-            term.screen.cursor.row,
-            row_before + 1,
-            "LF should move cursor down one row"
-        );
-    }
-
-    /// CR (0x0D) should move the cursor to column 0 of the current row.
-    #[test]
-    fn test_execute_cr() {
-        let mut term = TerminalCore::new(24, 80);
-        // Move cursor to a non-zero column first
-        term.advance(&b"Hello"[..]);
-        assert!(
-            term.screen.cursor.col > 0,
-            "cursor should be past col 0 after printing"
-        );
-        term.advance(&b"\r"[..]);
-        assert_eq!(
-            term.screen.cursor.col, 0,
-            "CR should return cursor to column 0"
-        );
-    }
-
-    /// BS (0x08) at column 0 should not underflow — cursor stays at 0.
-    #[test]
-    fn test_execute_bs_at_start() {
-        let mut term = TerminalCore::new(24, 80);
-        // Cursor starts at (0, 0)
-        assert_eq!(term.screen.cursor.col, 0);
-        term.advance(&b"\x08"[..]);
-        assert_eq!(
-            term.screen.cursor.col, 0,
-            "BS at col 0 should keep cursor at 0"
-        );
-    }
-
-    /// HT (0x09) should move cursor right by at least one column to the next tab stop.
-    #[test]
-    fn test_execute_tab() {
-        let mut term = TerminalCore::new(24, 80);
-        // Cursor starts at column 0; default tab stop is at column 8
-        let col_before = term.screen.cursor.col;
-        term.advance(&b"\t"[..]);
-        assert!(
-            term.screen.cursor.col > col_before,
-            "HT should move cursor right by at least 1 column"
-        );
-    }
-}
+#[path = "tests/vte_handler.rs"]
+mod tests;

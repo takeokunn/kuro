@@ -41,11 +41,13 @@ pub struct ScrollRegion {
 
 impl ScrollRegion {
     /// Create a new scroll region
+    #[inline(always)]
     pub fn new(top: usize, bottom: usize) -> Self {
         Self { top, bottom }
     }
 
     /// Create default scroll region (entire screen)
+    #[inline(always)]
     pub fn full_screen(rows: usize) -> Self {
         Self {
             top: 0,
@@ -128,11 +130,13 @@ impl Screen {
     }
 
     /// Get number of rows
+    #[inline(always)]
     pub fn rows(&self) -> u16 {
         self.rows
     }
 
     /// Get number of columns
+    #[inline(always)]
     pub fn cols(&self) -> u16 {
         self.cols
     }
@@ -194,21 +198,25 @@ impl Screen {
     }
 
     /// Get cell at position
+    #[inline(always)]
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&Cell> {
         self.active_lines()?.get(row)?.get_cell(col)
     }
 
     /// Get mutable cell at position
+    #[inline(always)]
     pub fn get_cell_mut(&mut self, row: usize, col: usize) -> Option<&mut Cell> {
         self.active_lines_mut()?.get_mut(row)?.cells.get_mut(col)
     }
 
     /// Get line data at row
+    #[inline(always)]
     pub fn get_line(&self, row: usize) -> Option<&Line> {
         self.active_lines()?.get(row)
     }
 
     /// Get mutable line data at row
+    #[inline(always)]
     pub fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
         self.active_lines_mut()?.get_mut(row)
     }

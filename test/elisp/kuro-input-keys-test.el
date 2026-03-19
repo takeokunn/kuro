@@ -145,6 +145,20 @@
     (kuro--arrow-down)
     (should (equal (car kuro-input-keys-test--sent) "\eOB"))))
 
+(ert-deftest kuro-input-keys--arrow-left-app-mode-sends-ss3-D ()
+  "Arrow left sends SS3 D in application cursor keys mode."
+  (let ((kuro--application-cursor-keys-mode t))
+    (setq kuro-input-keys-test--sent nil)
+    (kuro--arrow-left)
+    (should (equal (car kuro-input-keys-test--sent) "\eOD"))))
+
+(ert-deftest kuro-input-keys--arrow-right-app-mode-sends-ss3-C ()
+  "Arrow right sends SS3 C in application cursor keys mode."
+  (let ((kuro--application-cursor-keys-mode t))
+    (setq kuro-input-keys-test--sent nil)
+    (kuro--arrow-right)
+    (should (equal (car kuro-input-keys-test--sent) "\eOC"))))
+
 ;;; Group 4: Navigation keys
 
 (ert-deftest kuro-input-keys--home-sends-csi-H ()
@@ -160,6 +174,20 @@
     (setq kuro-input-keys-test--sent nil)
     (kuro--END)
     (should (equal (car kuro-input-keys-test--sent) "\e[F"))))
+
+(ert-deftest kuro-input-keys--home-app-mode-sends-csi-1-tilde ()
+  "Home key sends CSI 1~ in application cursor keys mode."
+  (let ((kuro--application-cursor-keys-mode t))
+    (setq kuro-input-keys-test--sent nil)
+    (kuro--HOME)
+    (should (equal (car kuro-input-keys-test--sent) "\e[1~"))))
+
+(ert-deftest kuro-input-keys--end-app-mode-sends-csi-4-tilde ()
+  "End key sends CSI 4~ in application cursor keys mode."
+  (let ((kuro--application-cursor-keys-mode t))
+    (setq kuro-input-keys-test--sent nil)
+    (kuro--END)
+    (should (equal (car kuro-input-keys-test--sent) "\e[4~"))))
 
 (ert-deftest kuro-input-keys--insert-sends-csi-2-tilde ()
   "Insert key sends CSI 2~ sequence."

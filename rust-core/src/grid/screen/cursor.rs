@@ -98,6 +98,7 @@ impl Screen {
     }
 
     /// Print a character at the cursor position
+    #[inline]
     pub fn print(&mut self, c: char, attrs: SgrAttributes, auto_wrap: bool) {
         let screen = match self.active_screen_mut() {
             Some(s) => s,

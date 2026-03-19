@@ -16,7 +16,7 @@ pub struct Line {
 
 impl Line {
     /// Create a new line with the specified number of columns
-    #[inline(always)]
+    #[inline]
     pub fn new(cols: usize) -> Self {
         Self {
             cells: vec![Cell::default(); cols],
@@ -52,6 +52,7 @@ impl Line {
     }
 
     /// Update cell at column index
+    #[inline]
     pub fn update_cell(&mut self, col: usize, c: char, attrs: SgrAttributes) {
         if let Some(cell) = self.cells.get_mut(col) {
             let old_grapheme = cell.grapheme.clone();
@@ -68,6 +69,7 @@ impl Line {
     }
 
     /// Update cell at column index with a Cell struct (includes width)
+    #[inline]
     pub fn update_cell_with(&mut self, col: usize, cell: Cell) {
         if col < self.cells.len() {
             let old_cell = self.cells[col].clone();
@@ -81,6 +83,7 @@ impl Line {
     }
 
     /// Clear all cells in line
+    #[inline]
     pub fn clear(&mut self) {
         for cell in &mut self.cells {
             *cell = Cell::default();
@@ -91,6 +94,7 @@ impl Line {
     /// Clear all cells, setting background to specified color.
     /// Implements Background Color Erase (BCE) per VT220: erased cells
     /// receive the given background color rather than the terminal default.
+    #[inline]
     pub fn clear_with_bg(&mut self, bg: Color) {
         for cell in &mut self.cells {
             *cell = Cell::default();

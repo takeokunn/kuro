@@ -98,16 +98,19 @@ impl Screen {
     }
 
     /// Return true if the viewport scroll position changed and a re-render is needed
+    #[inline(always)]
     pub fn is_scroll_dirty(&self) -> bool {
         self.scroll_dirty
     }
 
     /// Clear the scroll_dirty flag after re-rendering
+    #[inline(always)]
     pub fn clear_scroll_dirty(&mut self) {
         self.scroll_dirty = false;
     }
 
     /// Return the current viewport scroll offset (0 = live view)
+    #[inline(always)]
     pub fn scroll_offset(&self) -> usize {
         self.scroll_offset
     }

@@ -74,8 +74,8 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-visible t
     (should (eq t (kuro--get-cursor-visible)))))
 
-(ert-deftest kuro-ffi-modes--get-cursor-visible-default-when-stub-returns-nil ()
-  "kuro--get-cursor-visible returns nil when FFI returns nil (fallback only fires on error)."
+(ert-deftest kuro-ffi-modes--get-cursor-visible-nil-when-stub-returns-nil ()
+  "kuro--get-cursor-visible returns nil when FFI returns nil."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-visible nil
     (should (null (kuro--get-cursor-visible)))))
 
@@ -84,8 +84,8 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-shape 2
     (should (eq 2 (kuro--get-cursor-shape)))))
 
-(ert-deftest kuro-ffi-modes--get-cursor-shape-default-zero-when-nil ()
-  "kuro--get-cursor-shape returns nil when FFI returns nil (fallback only fires on error)."
+(ert-deftest kuro-ffi-modes--get-cursor-shape-nil-when-stub-returns-nil ()
+  "kuro--get-cursor-shape returns nil when FFI returns nil."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-shape nil
     (should (null (kuro--get-cursor-shape)))))
 
@@ -144,8 +144,8 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-mode 1000
     (should (eq 1000 (kuro--get-mouse-mode)))))
 
-(ert-deftest kuro-ffi-modes--get-mouse-mode-default-zero-when-nil ()
-  "kuro--get-mouse-mode returns nil when FFI returns nil (fallback only fires on error)."
+(ert-deftest kuro-ffi-modes--get-mouse-mode-nil-when-stub-returns-nil ()
+  "kuro--get-mouse-mode returns nil when FFI returns nil."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-mode nil
     (should (null (kuro--get-mouse-mode)))))
 
@@ -183,8 +183,8 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-keyboard-flags 7
     (should (eq 7 (kuro--get-keyboard-flags)))))
 
-(ert-deftest kuro-ffi-modes--get-keyboard-flags-default-zero-when-nil ()
-  "kuro--get-keyboard-flags returns nil when FFI returns nil (fallback only fires on error)."
+(ert-deftest kuro-ffi-modes--get-keyboard-flags-nil-when-stub-returns-nil ()
+  "kuro--get-keyboard-flags returns nil when FFI returns nil."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-keyboard-flags nil
     (should (null (kuro--get-keyboard-flags)))))
 

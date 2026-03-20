@@ -189,15 +189,14 @@
       (should (= kuro--typewriter-written-len 0))
       (should (null kuro--typewriter-queue)))))
 
-(ert-deftest kuro-typewriter-queue-next-fifo-order ()
-  "kuro--typewriter-queue-next pops items in FIFO order (last of list = first enqueued)."
+(ert-deftest kuro-typewriter-queue-next-pops-car ()
+  "kuro--typewriter-queue-next uses `pop', which takes the car (most-recently-pushed item)."
   (kuro-typewriter-test--with-buffer
-    ;; push builds the queue in reverse; last is the oldest (FIFO front)
+    ;; List: ((5 . "second") (3 . "first")); pop returns car = (5 . "second")
     (setq kuro--typewriter-queue (list (cons 5 "second") (cons 3 "first")))
     (kuro--typewriter-queue-next)
-    ;; car (last) of the list: (3 . "first") is the FIFO front
-    (should (= kuro--typewriter-current-row 3))
-    (should (equal kuro--typewriter-current-text "first"))))
+    (should (= kuro--typewriter-current-row 5))
+    (should (equal kuro--typewriter-current-text "second"))))
 
 ;;; Group 7: kuro--typewriter-write-partial
 

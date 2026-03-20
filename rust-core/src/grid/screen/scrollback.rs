@@ -67,6 +67,13 @@ impl Screen {
             if new_offset == 0 {
                 self.full_dirty = true;
                 self.scroll_dirty = false;
+                // Reset pending scroll counters that accumulated while the user
+                // was viewing scrollback.  Without this, stale counts would
+                // burst-apply in `consume_scroll_events` on the first render
+                // frame after returning to the live view, causing the Emacs
+                // buffer to shift by the wrong number of lines.
+                self.pending_scroll_up = 0;
+                self.pending_scroll_down = 0;
             } else {
                 self.scroll_dirty = true;
             }

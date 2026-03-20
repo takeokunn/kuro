@@ -204,13 +204,13 @@ Returns t if found, nil on timeout."
     (should (plist-get attrs :hidden))))
 
 (ert-deftest kuro-unit-face-cache-returns-same-object ()
-  "kuro--get-cached-face returns the identical object for equal attribute keys."
-  (require 'kuro-renderer)
+  "kuro--get-cached-face-raw returns the identical object for equal integer keys."
+  (require 'kuro-faces)
   ;; Clear the cache to ensure a predictable starting state
   (kuro--clear-face-cache)
-  (let* ((attrs '(:foreground (named . "red") :background :default :flags 1))
-         (face1 (kuro--get-cached-face attrs))
-         (face2 (kuro--get-cached-face attrs)))
+  ;; named red = bit31 + index 1 = #x80000001; flags=1 (bold)
+  (let* ((face1 (kuro--get-cached-face-raw #x80000001 0 1 0))
+         (face2 (kuro--get-cached-face-raw #x80000001 0 1 0)))
     (should (eq face1 face2))))
 
 (ert-deftest kuro-unit-rgb-to-emacs ()
@@ -1154,7 +1154,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (let ((sent nil)
         (binding (lookup-key kuro--keymap (vector (list 'control ?a)))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 1)))))
@@ -1165,7 +1165,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (let ((sent nil)
         (binding (lookup-key kuro--keymap (vector (list 'control ?d)))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 4)))))
@@ -1176,7 +1176,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (let ((sent nil)
         (binding (lookup-key kuro--keymap (vector (list 'control ?z)))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 26)))))
@@ -1353,26 +1353,30 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
 ;;; Phase 13 Additional Tests — ESC+letter macOS fallback path
 
 (ert-deftest kuro-unit-phase13-esc-letter-fallback-b ()
-  "ESC b two-key sequence sends ESC then 'b' — macOS Option key fallback path."
+  "ESC b two-key sequence sends ESC+b as a single string via kuro--send-meta."
   (require 'kuro-input)
-  (let ((sent-chars nil)
+  (let ((sent nil)
         (binding (lookup-key kuro--keymap (kbd "ESC b"))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-char)
-               (lambda (c) (push c sent-chars))))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
       (funcall binding)
-      (should (equal (nreverse sent-chars) (list ?\e ?b))))))
+      (should (equal sent (list "\eb"))))))
 
 (ert-deftest kuro-unit-phase13-esc-letter-fallback-z ()
-  "ESC z two-key sequence sends ESC then 'z' — validates last letter in fallback loop."
+  "ESC z two-key sequence sends ESC+z as a single string via kuro--send-meta."
   (require 'kuro-input)
-  (let ((sent-chars nil)
+  (let ((sent nil)
         (binding (lookup-key kuro--keymap (kbd "ESC z"))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-char)
-               (lambda (c) (push c sent-chars))))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
       (funcall binding)
-      (should (equal (nreverse sent-chars) (list ?\e ?z))))))
+      (should (equal sent (list "\ez"))))))
 
 ;;; Indexed color unit tests (kuro--indexed-to-emacs)
 
@@ -1769,23 +1773,31 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
 ;;; Phase 13 Additional Tests — High-value Ctrl bindings
 
 (ert-deftest kuro-unit-phase13-ctrl-l-sends-ff ()
-  "Ctrl+L sends byte 0x0C (Form Feed — clear screen signal for many terminals)."
+  "Ctrl+L sends byte 0x0C when keymap-exceptions is empty (C-l is excepted by default)."
   (require 'kuro-input)
-  (let ((sent nil)
-        (binding (lookup-key kuro--keymap (vector (list 'control ?l)))))
+  ;; C-l is in kuro-keymap-exceptions by default; build a temp map without exceptions.
+  (let* ((kuro-keymap-exceptions nil)
+         (orig kuro--keymap)
+         (test-map (unwind-protect (kuro--build-keymap) (setq kuro--keymap orig)))
+         (binding (lookup-key test-map (kbd "C-l")))
+         (sent nil))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 12)))))
 
 (ert-deftest kuro-unit-phase13-ctrl-u-sends-nak ()
-  "Ctrl+U sends byte 0x15 (NAK — line kill signal in readline/vi mode)."
+  "Ctrl+U sends byte 0x15 when keymap-exceptions is empty (C-u is excepted by default)."
   (require 'kuro-input)
-  (let ((sent nil)
-        (binding (lookup-key kuro--keymap (vector (list 'control ?u)))))
+  ;; C-u is in kuro-keymap-exceptions by default; build a temp map without exceptions.
+  (let* ((kuro-keymap-exceptions nil)
+         (orig kuro--keymap)
+         (test-map (unwind-protect (kuro--build-keymap) (setq kuro--keymap orig)))
+         (binding (lookup-key test-map (kbd "C-u")))
+         (sent nil))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 21)))))
@@ -1796,7 +1808,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (let ((sent nil)
         (binding (lookup-key kuro--keymap (vector (list 'control ?w)))))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-special)
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
                (lambda (b) (setq sent b))))
       (funcall binding)
       (should (equal sent 23)))))
@@ -2746,7 +2758,7 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
 (ert-deftest kuro-e2e-ret-key-function ()
   "kuro--RET (\\r, carriage return) submits a typed command to the shell.
 Exercises the kuro--RET function directly, which sends a CR byte via
-kuro--send-special.  This is distinct from kuro-test--send which calls
+kuro--send-ctrl.  This is distinct from kuro-test--send which calls
 kuro--send-key directly; the test proves the round-trip works end-to-end."
   (require 'kuro-input)
   (kuro-test--with-terminal

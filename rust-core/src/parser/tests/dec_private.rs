@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `dec_private` parsing.
+//!
+//! Module under test: `parser/dec_private.rs`
+//! Tier: T2 — ProptestConfig::with_cases(500)
+
 use super::*;
 use proptest::prelude::*;
 
@@ -340,6 +345,7 @@ fn test_alt_screen_saves_and_restores_sgr_attrs() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
     #[test]
     fn prop_dec_modes_set_reset_no_panic(mode in 0u16..=65535u16) {
         let mut modes = DecModes::new();
@@ -484,4 +490,55 @@ fn test_decrqm_unknown_mode() {
     term.advance(b"\x1b[?9999$p"); // query unknown mode
     let resp = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
     assert_eq!(resp, "\x1b[?9999;0$y", "unknown mode must report status 0");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    #[test]
+    // PANIC SAFETY: Unknown DECSET mode numbers (50000–65000) never panic
+    fn prop_decset_unknown_no_panic(mode in 50000u16..=65000u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // DECSET: CSI ? {mode} h
+        term.advance(format!("\x1b[?{}h", mode).as_bytes());
+        // DECRST: CSI ? {mode} l
+        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        // Terminal must still have a valid cursor position
+        prop_assert!(term.screen.cursor.row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: DECSCUSR (CSI Ps SP q) valid range 0–6 never panics
+    fn prop_decscusr_valid_range(ps in 0u16..=6u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[{} q", ps).as_bytes());
+        // Cursor must still be within bounds
+        prop_assert!(term.screen.cursor.row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: mouse mode DECSET/DECRST for known modes never panics
+    fn prop_mouse_mode_toggle_no_panic(
+        mode in prop_oneof![
+            Just(1000u16),
+            Just(1002u16),
+            Just(1003u16),
+            Just(1006u16),
+            Just(1015u16),
+        ]
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[?{}h", mode).as_bytes());
+        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        prop_assert!(term.screen.cursor.row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: arbitrary DECSET mode 1–9999 never panics
+    fn prop_decset_arbitrary_range_no_panic(mode in 1u16..=9999u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[?{}h", mode).as_bytes());
+        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        prop_assert!(term.screen.cursor.row < 24);
+    }
 }

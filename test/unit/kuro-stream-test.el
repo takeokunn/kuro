@@ -154,15 +154,18 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
 (ert-deftest kuro-stream--stop-resets-idle-timer-to-nil ()
   "kuro--stop-stream-idle-timer sets kuro--stream-idle-timer to nil."
   (kuro-stream-test--with-buffer
-    ;; Create a real one-shot timer so we have something to cancel
-    (setq kuro--stream-idle-timer
-          (run-with-timer 3600 nil #'ignore))
-    (should (timerp kuro--stream-idle-timer))
-    ;; Simulate stop: cancel then nil
-    (when (timerp kuro--stream-idle-timer)
-      (cancel-timer kuro--stream-idle-timer)
-      (setq kuro--stream-idle-timer nil))
-    (should (null kuro--stream-idle-timer))))
+    (let ((fake-timer (run-with-timer 3600 nil #'ignore)))
+      (unwind-protect
+          (progn
+            (setq kuro--stream-idle-timer fake-timer)
+            (should (timerp kuro--stream-idle-timer))
+            ;; Simulate stop: cancel then nil
+            (when (timerp kuro--stream-idle-timer)
+              (cancel-timer kuro--stream-idle-timer)
+              (setq kuro--stream-idle-timer nil))
+            (should (null kuro--stream-idle-timer)))
+        (when (timerp fake-timer)
+          (cancel-timer fake-timer))))))
 
 (ert-deftest kuro-stream--stop-idempotent-when-no-timer ()
   "Stop is safe to call when kuro--stream-idle-timer is already nil."
@@ -376,6 +379,103 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
         (kuro--stream-idle-tick (current-buffer))
         ;; After a successful render tick, last-render-time should be non-zero
         (should (> kuro--stream-last-render-time 0.0))))))
+
+;;; Group 7: kuro--start-stream-idle-timer / kuro--stop-stream-idle-timer
+;;
+;; kuro--start-stream-idle-timer(buf):
+;;   - When kuro-streaming-latency-mode is non-nil: cancels any existing timer,
+;;     creates a new repeating idle timer, and stores it in kuro--stream-idle-timer.
+;;   - When kuro-streaming-latency-mode is nil: is a complete no-op.
+;;
+;; kuro--stop-stream-idle-timer():
+;;   - When kuro--stream-idle-timer is a timer: cancels it, sets it nil, resets
+;;     kuro--stream-last-render-time to 0.0, and resets kuro--stream-min-interval to nil.
+;;   - When kuro--stream-idle-timer is nil: is a complete no-op (safe to call).
+
+(ert-deftest kuro-stream-start-idle-timer-creates-timer ()
+  "kuro--start-stream-idle-timer sets kuro--stream-idle-timer to a timer object."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode t))
+      (kuro--start-stream-idle-timer)
+      (unwind-protect
+          (should (timerp kuro--stream-idle-timer))
+        (kuro--stop-stream-idle-timer)))))
+
+(ert-deftest kuro-stream-stop-idle-timer-cancels-timer ()
+  "kuro--stop-stream-idle-timer cancels the timer and sets kuro--stream-idle-timer to nil."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode t))
+      (kuro--start-stream-idle-timer)
+      (should (timerp kuro--stream-idle-timer))
+      (kuro--stop-stream-idle-timer)
+      (should-not kuro--stream-idle-timer))))
+
+(ert-deftest kuro-stream-stop-idle-timer-idempotent ()
+  "kuro--stop-stream-idle-timer is safe when no timer is running (nil guard)."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (should-not
+     (condition-case err
+         (progn (kuro--stop-stream-idle-timer) nil)
+       (error err)))))
+
+(ert-deftest kuro-stream-start-timer-noop-when-latency-mode-off ()
+  "kuro--start-stream-idle-timer is a no-op when kuro-streaming-latency-mode is nil."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode nil))
+      (kuro--start-stream-idle-timer)
+      (should-not kuro--stream-idle-timer))))
+
+(ert-deftest kuro-stream-stop-resets-last-render-time-via-fn ()
+  "kuro--stop-stream-idle-timer resets kuro--stream-last-render-time to 0.0."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode t))
+      (kuro--start-stream-idle-timer)
+      (setq kuro--stream-last-render-time (float-time))
+      (kuro--stop-stream-idle-timer)
+      (should (= kuro--stream-last-render-time 0.0)))))
+
+(ert-deftest kuro-stream-stop-resets-min-interval-via-fn ()
+  "kuro--stop-stream-idle-timer resets kuro--stream-min-interval to nil."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode t))
+      (kuro--start-stream-idle-timer)
+      (setq kuro--stream-min-interval (/ 1.0 60))
+      (kuro--stop-stream-idle-timer)
+      (should (null kuro--stream-min-interval)))))
+
+(ert-deftest kuro-stream-start-cancels-existing-timer ()
+  "kuro--start-stream-idle-timer cancels and replaces an already-running timer."
+  (with-temp-buffer
+    (setq-local kuro--stream-idle-timer nil
+                kuro--stream-last-render-time 0.0
+                kuro--stream-min-interval nil)
+    (let ((kuro-streaming-latency-mode t))
+      (kuro--start-stream-idle-timer)
+      (let ((first-timer kuro--stream-idle-timer))
+        (should (timerp first-timer))
+        ;; Start again — must cancel the first and create a new one.
+        (kuro--start-stream-idle-timer)
+        (unwind-protect
+            (should (timerp kuro--stream-idle-timer))
+          (kuro--stop-stream-idle-timer))))))
 
 (provide 'kuro-stream-test)
 

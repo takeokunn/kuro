@@ -188,9 +188,13 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     };
     let mut buf_offset = 0usize;
     let mut current_start_buf = 0usize;
-    let mut current_fg = 0u32;
-    let mut current_bg = 0u32;
-    let mut current_flags = 0u64;
+    // Sentinel values that cannot match any valid encoded color/flags.
+    // This ensures the very first cell always triggers a face-range boundary,
+    // correctly starting accumulation with the cell's actual attributes.
+    // Previously 0 (true black) — which collided with Color::Rgb(0,0,0).
+    let mut current_fg = u32::MAX;
+    let mut current_bg = u32::MAX;
+    let mut current_flags = u64::MAX;
 
     for cell in cells.iter() {
         // Any CellWidth::Wide cell is a placeholder for the second column of a wide

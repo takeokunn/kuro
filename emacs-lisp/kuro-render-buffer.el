@@ -30,15 +30,13 @@
 UP and DOWN are the number of full-screen scroll-up and scroll-down steps
 accumulated in the Rust core since the last call.
 
-For each scroll-up step: delete the first buffer line (it has scrolled off
-the top of the terminal viewport) and append a blank line at the end, so
-the buffer line count stays equal to `kuro--last-rows'.
+NOTE: Currently `pending_scroll_up'/`pending_scroll_down' in Rust are never
+incremented — full-screen scrolls use `full_dirty = true' instead.  This
+function exists for a potential future two-path scroll design.
 
-For each scroll-down step: delete the last buffer line and prepend a blank
-line at the start.
-
-Also clears `kuro--col-to-buf-map' for rows that shifted, since the
-col→buf mapping is row-indexed and the shift invalidates all entries."
+For each scroll-up step: delete the first buffer line and append a blank.
+For each scroll-down step: delete the last buffer line and prepend a blank.
+Also clears `kuro--col-to-buf-map' since row-indexed mappings are stale."
   (when (> (+ up down) 0)
     (let ((inhibit-read-only t)
           (inhibit-modification-hooks t))
@@ -46,28 +44,21 @@ col→buf mapping is row-indexed and the shift invalidates all entries."
       (dotimes (_ up)
         (save-excursion
           (goto-char (point-min))
-          ;; Delete the first line (including its newline).
           (delete-region (point) (progn (forward-line 1) (point)))
-          ;; Append a blank line at the end.
+          ;; Append exactly one blank line (newline) at the end.
           (goto-char (point-max))
-          (unless (and (> (point-max) (point-min))
-                       (= (char-before) ?\n))
-            (insert "\n"))
           (insert "\n")))
       ;; Scroll-down: terminal content moves down; bottom lines disappear, blank lines appear at top.
       (dotimes (_ down)
         (save-excursion
-          ;; Delete the last line.
+          ;; Delete the last line including its leading newline separator.
           (goto-char (point-max))
           (when (> (point) (point-min))
             (forward-line -1)
-            (delete-region (line-end-position) (point-max)))
+            (delete-region (point) (point-max)))
           ;; Prepend a blank line at the top.
           (goto-char (point-min))
           (insert "\n"))))
-    ;; The col-to-buf map is indexed by row number; after a scroll all rows
-    ;; have shifted so cached mappings are stale.  Clear the whole table rather
-    ;; than shifting every entry — it will be repopulated from dirty-line data.
     (clrhash kuro--col-to-buf-map)))
 
 ;;; Internal helpers
@@ -159,10 +150,10 @@ delete+insert so face ranges use the new content offsets, not cached old ones."
             (let ((line-end (line-end-position)))
               (when face-ranges
                 (dolist (range face-ranges)
-                  (cl-destructuring-bind (start-col end-col fg-enc bg-enc flags)
+                  (cl-destructuring-bind (start-buf end-buf fg-enc bg-enc flags)
                       (kuro--unpack-ffi-face-range range)
-                    (let* ((start-pos (min (+ line-start start-col) line-end))
-                           (end-pos   (min (+ line-start end-col)   line-end)))
+                    (let* ((start-pos (min (+ line-start start-buf) line-end))
+                           (end-pos   (min (+ line-start end-buf)   line-end)))
                       (when (> end-pos start-pos)
                         (kuro--apply-ffi-face-at start-pos end-pos
                                                  fg-enc bg-enc flags))))))))))))

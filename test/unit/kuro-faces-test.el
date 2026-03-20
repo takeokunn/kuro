@@ -9,6 +9,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'kuro-faces)
+(require 'kuro-overlays)
 
 ;;; Group 1: kuro--color-to-emacs
 
@@ -281,37 +282,34 @@
 ;;; Group 7: Face cache
 
 (ert-deftest kuro-faces-get-cached-face-returns-cons ()
-  "kuro--get-cached-face returns a list for any attrs plist."
+  "kuro--get-cached-face-raw returns a list for default (all-zero) args."
   (kuro--clear-face-cache)
-  (let ((attrs '(:foreground :default :background :default :flags 0)))
-    (let ((face (kuro--get-cached-face attrs)))
-      (should (consp face)))))
+  (let ((face (kuro--get-cached-face-raw 0 0 0 0)))
+    (should (consp face))))
 
 (ert-deftest kuro-faces-get-cached-face-same-key-returns-eq ()
-  "Same attrs plist key returns the identical (eq) cached object."
+  "Same integer key args return the identical (eq) cached object."
   (kuro--clear-face-cache)
-  (let ((attrs '(:foreground (named . "red") :background :default :flags 0)))
-    (let ((face1 (kuro--get-cached-face attrs))
-          (face2 (kuro--get-cached-face attrs)))
-      (should (eq face1 face2)))))
+  ;; named red = bit31 + index 1 = #x80000001
+  (let ((face1 (kuro--get-cached-face-raw #x80000001 0 0 0))
+        (face2 (kuro--get-cached-face-raw #x80000001 0 0 0)))
+    (should (eq face1 face2))))
 
 (ert-deftest kuro-faces-get-cached-face-different-fg-different-object ()
-  "Different :foreground values produce different cached faces."
+  "Different fg-enc values produce different cached faces."
   (kuro--clear-face-cache)
-  (let ((face1 (kuro--get-cached-face '(:foreground (named . "red")
-                                        :background :default :flags 0)))
-        (face2 (kuro--get-cached-face '(:foreground (named . "blue")
-                                        :background :default :flags 0))))
+  ;; red (#x80000001) vs blue (#x80000004)
+  (let ((face1 (kuro--get-cached-face-raw #x80000001 0 0 0))
+        (face2 (kuro--get-cached-face-raw #x80000004 0 0 0)))
     (should-not (eq face1 face2))))
 
 (ert-deftest kuro-faces-clear-face-cache ()
   "kuro--clear-face-cache empties the hash table so next call creates new object."
   (kuro--clear-face-cache)
-  (let ((attrs '(:foreground :default :background :default :flags 0)))
-    (let ((face1 (kuro--get-cached-face attrs)))
-      (kuro--clear-face-cache)
-      (let ((face2 (kuro--get-cached-face attrs)))
-        (should-not (eq face1 face2))))))
+  (let ((face1 (kuro--get-cached-face-raw 0 0 0 0)))
+    (kuro--clear-face-cache)
+    (let ((face2 (kuro--get-cached-face-raw 0 0 0 0)))
+      (should-not (eq face1 face2)))))
 
 ;;; Group 8: kuro--attrs-to-face-props
 
@@ -362,15 +360,16 @@ without an extra font-metric recomputation pass."
                 '(:foreground :default :background :default :flags #x100))))
     (should (plist-get props :strike-through))))
 
-;;; Group 9: kuro--apply-face-range
+;;; Group 9: kuro--apply-ffi-face-at
 
-(ert-deftest kuro-faces-apply-face-range-sets-text-property ()
-  "kuro--apply-face-range sets the `face' text property on the specified range."
+(ert-deftest kuro-faces-apply-ffi-face-at-sets-text-property ()
+  "kuro--apply-ffi-face-at sets the `face' text property on the specified range."
   (with-temp-buffer
     (let ((inhibit-read-only t))
       (insert "Hello World")
       (kuro--clear-face-cache)
-      (kuro--apply-face-range 1 6 '(:foreground :default :background :default :flags 0))
+      ;; all-zero args = default colors, no attributes
+      (kuro--apply-ffi-face-at 1 6 0 0 0)
       (let ((prop (get-text-property 1 'face)))
         (should prop)))))
 

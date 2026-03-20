@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `osc_protocol` parsing.
+//!
+//! Module under test: `parser/osc_protocol.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 
 // ── encode_color_spec ────────────────────────────────────────────────────────
@@ -322,4 +327,45 @@ fn test_roundtrip_black() {
 fn test_roundtrip_white() {
     let encoded = encode_color_spec([255, 255, 255]);
     assert_eq!(parse_color_spec(&encoded), Some([255, 255, 255]));
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: OSC 133 (prompt mark) with any mark type string never panics
+    fn prop_osc133_mark_no_panic(
+        mark in prop_oneof![Just("A"), Just("B"), Just("C"), Just("D"), Just("Z")]
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let seq = format!("\x1b]133;{}\x07", mark);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: OSC 7 (cwd) with arbitrary URI never panics
+    fn prop_osc7_arbitrary_uri_no_panic(
+        path in proptest::collection::vec(b'a'..=b'z', 1..=50)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let path_str = String::from_utf8(path).unwrap_or_default();
+        let seq = format!("\x1b]7;file://localhost/{}\x07", path_str);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: OSC 1337 with arbitrary payload never panics
+    fn prop_osc1337_no_panic(
+        payload in proptest::collection::vec(b'a'..=b'z', 0..=50)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let p = String::from_utf8(payload).unwrap_or_default();
+        let seq = format!("\x1b]1337;{}\x07", p);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }

@@ -1149,3 +1149,42 @@ fn test_default_scrollback_max_exact_eviction() {
         "scrollback_buffer.len() must equal DEFAULT_SCROLLBACK_MAX after one eviction"
     );
 }
+
+#[test]
+fn test_scroll_down_no_pending_in_alternate_screen() {
+    let mut screen = Screen::new(24, 80);
+    // Enter alternate screen
+    screen.switch_to_alternate();
+    // Full-screen scroll-down in alternate should NOT accumulate pending_scroll_down
+    screen.scroll_down(3, Color::Default);
+    let (up, down) = screen.consume_scroll_events();
+    assert_eq!(up, 0, "alternate screen scroll_down must not set pending_scroll_up");
+    assert_eq!(down, 0, "alternate screen scroll_down must not set pending_scroll_down");
+}
+
+#[test]
+fn test_viewport_scroll_down_resets_pending_scroll_counters() {
+    let mut screen = Screen::new(24, 80);
+    // Generate scrollback
+    for _ in 0..30 {
+        screen.scroll_up(1, Color::Default);
+    }
+    // Consume scroll events from the initial scroll_up calls
+    let _ = screen.consume_scroll_events();
+
+    // Enter scrollback view
+    screen.viewport_scroll_up(10);
+
+    // Simulate new scroll events arriving while user is in scrollback
+    screen.scroll_up(5, Color::Default);
+    // pending_scroll_up should be 5 now (but suppressed by scrollback view)
+
+    // Return to live view
+    screen.viewport_scroll_down(10);
+    assert_eq!(screen.scroll_offset(), 0);
+
+    // The pending counters should have been reset to 0 by viewport_scroll_down
+    let (up, down) = screen.consume_scroll_events();
+    assert_eq!(up, 0, "pending_scroll_up must be reset when returning to live view");
+    assert_eq!(down, 0, "pending_scroll_down must be reset when returning to live view");
+}

@@ -17,6 +17,7 @@ impl PtyReader {
         mut master: File,
         sender: crossbeam_channel::Sender<Vec<u8>>,
         shutdown: Arc<AtomicBool>,
+        process_exited: Arc<AtomicBool>,
     ) {
         const BUFFER_SIZE: usize = 8192;
         let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -24,7 +25,8 @@ impl PtyReader {
         while !shutdown.load(Ordering::Relaxed) {
             match master.read(&mut buffer) {
                 Ok(0) => {
-                    // EOF - PTY closed
+                    // EOF - child process exited
+                    process_exited.store(true, Ordering::Relaxed);
                     break;
                 }
                 Ok(n) => {
@@ -36,6 +38,10 @@ impl PtyReader {
                     }
                 }
                 Err(e) => {
+                    // Treat persistent read errors (e.g. EIO on Linux after child
+                    // exit) the same as EOF: mark the process as exited so Emacs
+                    // can close the buffer.
+                    process_exited.store(true, Ordering::Relaxed);
                     eprintln!("[PTY] Read error: {}", e);
                     break;
                 }
@@ -66,8 +72,9 @@ mod tests {
         // Wrap the read end as a File and hand it to read_loop in a background thread
         let read_file = unsafe { File::from_raw_fd(read_fd) };
         let shutdown_clone = Arc::clone(&shutdown);
+        let process_exited = Arc::new(AtomicBool::new(false));
         let handle = std::thread::spawn(move || {
-            PtyReader::read_loop(read_file, tx, shutdown_clone);
+            PtyReader::read_loop(read_file, tx, shutdown_clone, process_exited);
         });
 
         // Write data to the write end then close it so the reader sees EOF
@@ -114,8 +121,9 @@ mod tests {
         let _write_file = unsafe { File::from_raw_fd(write_fd) };
 
         let shutdown_clone = Arc::clone(&shutdown);
+        let process_exited = Arc::new(AtomicBool::new(false));
         let handle = std::thread::spawn(move || {
-            PtyReader::read_loop(read_file, tx, shutdown_clone);
+            PtyReader::read_loop(read_file, tx, shutdown_clone, process_exited);
         });
 
         // The loop checks shutdown before every read, so it should exit promptly.
@@ -157,8 +165,9 @@ mod tests {
         unsafe { libc::close(write_fd) };
 
         let shutdown_clone = Arc::clone(&shutdown);
+        let process_exited = Arc::new(AtomicBool::new(false));
         let handle = std::thread::spawn(move || {
-            PtyReader::read_loop(read_file, tx, shutdown_clone);
+            PtyReader::read_loop(read_file, tx, shutdown_clone, process_exited);
         });
 
         handle.join().expect("reader thread panicked");

@@ -479,9 +479,15 @@ fn test_scrollback_not_dirty_suppresses_live_lines() {
     );
 }
 
-/// consume_scroll_events returns the pending counts then zeros on second call.
+/// Full-screen scroll_up uses full_dirty instead of pending_scroll_up.
+///
+/// After the scroll-accumulation fix, the full-screen fast path sets
+/// `full_dirty = true` and does NOT increment `pending_scroll_up`, so
+/// `consume_scroll_events` returns (0, 0).  The Emacs render cycle uses
+/// `take_dirty_lines` (which returns all rows when full_dirty is set)
+/// instead of the buffer-level shift.
 #[test]
-fn test_consume_scroll_events_returns_counts_then_zeros() {
+fn test_consume_scroll_events_returns_zero_after_full_screen_scroll() {
     let mut session = make_session();
 
     // Advance content that causes a full-screen scroll (write 25 lines on a
@@ -490,60 +496,89 @@ fn test_consume_scroll_events_returns_counts_then_zeros() {
         session.core.advance(b"line\n");
     }
 
-    // First consume: must report at least one scroll-up event.
+    // Full-screen scroll now uses full_dirty, not pending_scroll_up.
     let (up, down) = session.consume_scroll_events();
-    assert!(
-        up > 0,
-        "consume_scroll_events must return up > 0 after scrolling content"
-    );
+    assert_eq!(up, 0, "full-screen scroll should not accumulate pending_scroll_up");
     assert_eq!(down, 0, "no scroll-down events expected");
 
-    // Second consume: counters must have been reset to zero.
-    let (up2, down2) = session.consume_scroll_events();
+    // Verify full_dirty was set instead.
+    let dirty = session.core.screen.take_dirty_lines();
     assert_eq!(
-        up2, 0,
-        "second consume_scroll_events must return up=0 (counters reset)"
-    );
-    assert_eq!(
-        down2, 0,
-        "second consume_scroll_events must return down=0 (counters reset)"
+        dirty.len(),
+        24,
+        "full_dirty should cause take_dirty_lines to return all 24 rows"
     );
 }
 
-/// consume_scroll_events reports scroll-down events and then zeros on second call.
+/// Full-screen scroll_down uses full_dirty instead of pending_scroll_down.
 ///
-/// DECSTBM + RI (reverse index) is the portable way to trigger a full-screen
-/// scroll-down: set the scroll region to cover all rows, move the cursor to
-/// the top row, then send ESC M (RI) which inserts a blank line at the top and
-/// scrolls everything else down.
+/// After the scroll-accumulation fix, reverse index (RI) on a full-screen
+/// scroll region sets `full_dirty = true` and does NOT increment
+/// `pending_scroll_down`.
 #[test]
-fn test_consume_scroll_events_scroll_down() {
+fn test_consume_scroll_events_scroll_down_returns_zero() {
     let mut session = make_session();
 
-    // ESC [ r        — DECSTBM: scroll region = full screen (rows 1..24, i.e. 0..24 internally)
-    // ESC [ 1 ; 1 H  — CUP: move cursor to row 1, col 1 (top-left)
-    // ESC M          — RI: reverse index — scrolls content down when cursor is at top margin
-    //
-    // Repeat the RI sequence 3 times to accumulate pending_scroll_down = 3.
+    // ESC [ r        — DECSTBM: scroll region = full screen
+    // ESC [ 1 ; 1 H  — CUP: move cursor to top-left
+    // ESC M          — RI: reverse index — scrolls content down at top margin
     session.core.advance(b"\x1b[r\x1b[1;1H\x1bM\x1bM\x1bM");
 
-    // First consume: must report exactly 3 scroll-down events, 0 scroll-up.
+    // Full-screen scroll_down now uses full_dirty, not pending_scroll_down.
     let (up, down) = session.consume_scroll_events();
     assert_eq!(up, 0, "no scroll-up events expected after RI-only input");
-    assert!(
-        down > 0,
-        "consume_scroll_events must return down > 0 after reverse-index scrolls; got {}",
-        down
-    );
+    assert_eq!(down, 0, "full-screen scroll should not accumulate pending_scroll_down");
 
-    // Second consume: both counters must be zero (reset after first call).
-    let (up2, down2) = session.consume_scroll_events();
+    // Verify full_dirty was set instead.
+    let dirty = session.core.screen.take_dirty_lines();
     assert_eq!(
-        up2, 0,
-        "second consume_scroll_events must return up=0 (counters reset)"
+        dirty.len(),
+        24,
+        "full_dirty should cause take_dirty_lines to return all 24 rows"
     );
-    assert_eq!(
-        down2, 0,
-        "second consume_scroll_events must return down=0 (counters reset)"
+}
+
+/// is_process_alive() returns true when pty is None (test sessions).
+///
+/// Unit test sessions are constructed with `pty: None` via `make_session()`.
+/// `is_process_alive()` must report `true` in that case so that test-only
+/// sessions never trigger the auto-kill path.
+#[test]
+fn test_is_process_alive_no_pty() {
+    let session = make_session();
+    assert!(
+        session.is_process_alive(),
+        "session with pty: None should report process as alive (safe default)"
     );
+}
+
+/// consume_scroll_events returns (0, 0) during scrollback view.
+///
+/// With the full_dirty approach, consume_scroll_events always returns (0, 0)
+/// for full-screen scrolls.  This test verifies the scrollback path still
+/// returns (0, 0) and that full_dirty is cleared by take_dirty_lines.
+#[test]
+fn test_consume_scroll_events_suppressed_during_scrollback() {
+    let mut session = make_session();
+
+    // Generate scrollback content
+    for _ in 0..25 {
+        session.core.advance(b"line\n");
+    }
+    // Drain dirty state from initial scrolling
+    let _ = session.core.screen.take_dirty_lines();
+
+    // Generate more scroll events
+    for _ in 0..5 {
+        session.core.advance(b"more\n");
+    }
+
+    // Enter scrollback view
+    session.core.screen.viewport_scroll_up(10);
+    assert!(session.core.screen.scroll_offset() > 0);
+
+    // consume_scroll_events must return (0, 0) while in scrollback
+    let (up, down) = session.consume_scroll_events();
+    assert_eq!(up, 0, "scroll events must be suppressed during scrollback view");
+    assert_eq!(down, 0, "scroll events must be suppressed during scrollback view");
 }

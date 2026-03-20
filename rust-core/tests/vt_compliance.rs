@@ -147,6 +147,53 @@ fn vt_decawm_auto_wrap() {
     assert!(t.dec_modes().auto_wrap);
 }
 
+/// DEC pending wrap: writing at the last column must NOT immediately wrap.
+///
+/// Per DEC VT510 manual, DECAWM defers the wrap until the next printable
+/// character.  This is essential for TUI apps (btop, htop) that draw
+/// box-drawing characters at the last column without wanting a scroll.
+#[test]
+fn vt_decawm_pending_wrap() {
+    let mut t = TerminalCore::new(3, 5);
+    // Fill row 0 with 'A'
+    t.advance(b"\x1b[1;1HAAAAA");
+    // Cursor should be at last col with pending wrap, NOT on row 1
+    assert_eq!(t.cursor_col(), 4, "cursor stays at last col (pending wrap)");
+    assert_eq!(t.cursor_row(), 0, "cursor stays on row 0 (no wrap yet)");
+    // Row 0 must have all 5 A's
+    for col in 0..5 {
+        assert_eq!(t.get_cell(0, col).unwrap().char(), 'A');
+    }
+    // CUP clears pending wrap — subsequent print must NOT wrap
+    t.advance(b"\x1b[1;5H"); // move to (0,4) — last col
+    t.advance(b"B");
+    assert_eq!(t.cursor_col(), 4, "after overwriting last col, pending wrap again");
+    assert_eq!(t.cursor_row(), 0, "still on row 0");
+    // Now print another char — this must fire the deferred wrap
+    t.advance(b"C");
+    assert_eq!(t.cursor_row(), 1, "deferred wrap fires on next char");
+    assert_eq!(t.cursor_col(), 1, "cursor at col 1 after wrapping and printing 'C'");
+    // 'C' should be at row 1, col 0
+    assert_eq!(t.get_cell(1, 0).unwrap().char(), 'C');
+}
+
+/// DECAWM off: printing at last column stays clamped, never wraps.
+#[test]
+fn vt_decawm_off_no_wrap() {
+    let mut t = TerminalCore::new(3, 5);
+    t.advance(b"\x1b[?7l"); // disable auto-wrap
+    t.advance(b"\x1b[1;1HABCDE");
+    // With DECAWM off, cursor stays at last column
+    assert_eq!(t.cursor_col(), 4);
+    assert_eq!(t.cursor_row(), 0);
+    // Additional chars overwrite at last column, never wrap
+    t.advance(b"FGH");
+    assert_eq!(t.cursor_col(), 4, "DECAWM off: cursor clamped at last col");
+    assert_eq!(t.cursor_row(), 0, "DECAWM off: never wraps to next row");
+    // Last col should have 'H' (the last overwrite)
+    assert_eq!(t.get_cell(0, 4).unwrap().char(), 'H');
+}
+
 #[test]
 fn vt_bracketed_paste() {
     let mut t = TerminalCore::new(24, 80);

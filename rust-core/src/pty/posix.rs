@@ -6,7 +6,7 @@ use nix::sys::wait::waitpid;
 use nix::unistd::{fork, ForkResult, Pid};
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -28,6 +28,8 @@ pub struct Pty {
     shutdown: Arc<AtomicBool>,
     /// Thread handle for PTY reader
     _reader_thread: thread::JoinHandle<()>,
+    /// Flag set by the reader thread when EOF is detected (child process exited).
+    process_exited: Arc<AtomicBool>,
 }
 
 impl Pty {
@@ -89,6 +91,7 @@ impl Pty {
         // Create bounded channel for backpressure
         let (sender, receiver) = crossbeam_channel::bounded(CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
+        let process_exited = Arc::new(AtomicBool::new(false));
 
         // Clone master fd for reader thread, with O_CLOEXEC so the fd is
         // automatically closed in any fork()ed child processes (prevents
@@ -120,8 +123,9 @@ impl Pty {
             Ok(ForkResult::Parent { child }) => {
                 // Parent process: spawn reader thread and return Pty
                 let shutdown_clone = shutdown.clone();
+                let process_exited_clone = process_exited.clone();
                 let reader_thread = thread::spawn(move || {
-                    PtyReader::read_loop(reader_file, sender, shutdown_clone);
+                    PtyReader::read_loop(reader_file, sender, shutdown_clone, process_exited_clone);
                 });
 
                 Ok(Self {
@@ -130,6 +134,7 @@ impl Pty {
                     receiver,
                     shutdown,
                     _reader_thread: reader_thread,
+                    process_exited,
                 })
             }
             Ok(ForkResult::Child) => {
@@ -183,6 +188,17 @@ impl Pty {
                 // inside an existing session and refuse to attach a new client.
                 std::env::remove_var("TMUX");
                 std::env::remove_var("STY");
+
+                // Remove Emacs-specific variables so that programs inside kuro
+                // do not detect the parent Emacs environment.  Without this,
+                // $INSIDE_EMACS causes emacsclient and other Emacs-aware tools
+                // to try talking to the parent Emacs server through the PTY,
+                // producing garbled output ("*ERROR*: Unknown message").
+                std::env::remove_var("INSIDE_EMACS");
+                std::env::remove_var("EMACS_SOCKET_NAME");
+                // Signal that we are running inside kuro, so programs can
+                // detect the kuro terminal environment if needed.
+                std::env::set_var("KURO_TERMINAL", "1");
 
                 // Set TERM so that readline/ncurses programs (bash, vim, etc.) know
                 // what escape sequences to use.  Without TERM set, bash readline will
@@ -277,6 +293,15 @@ impl Pty {
     /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
     pub fn has_pending_data(&self) -> bool {
         !self.receiver.is_empty()
+    }
+
+    /// Returns true if the child process has not yet exited.
+    ///
+    /// Set to false by the reader thread when it detects EOF (Ok(0)) on the
+    /// master PTY file descriptor, which happens when the child process exits.
+    #[inline(always)]
+    pub fn is_alive(&self) -> bool {
+        !self.process_exited.load(Ordering::Relaxed)
     }
 
     /// Set PTY window size

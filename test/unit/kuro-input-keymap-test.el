@@ -144,9 +144,13 @@ C-c is intentionally absent (reserved as prefix key)."
 ;;; Group 4: kuro--build-keymap result
 
 (defun kuro-keymap-test--built-map ()
-  "Return a freshly built Kuro keymap with no exceptions."
-  (let ((kuro-keymap-exceptions nil))
-    (kuro--build-keymap)))
+  "Return a freshly built Kuro keymap with no exceptions.
+Saves and restores `kuro--keymap' so global state is not corrupted."
+  (let ((kuro-keymap-exceptions nil)
+        (orig kuro--keymap))
+    (unwind-protect
+        (kuro--build-keymap)
+      (setq kuro--keymap orig))))
 
 (ert-deftest kuro-input-keymap-build-returns-keymap ()
   "kuro--build-keymap returns a value satisfying keymapp."
@@ -154,9 +158,13 @@ C-c is intentionally absent (reserved as prefix key)."
 
 (ert-deftest kuro-input-keymap-build-stores-in-variable ()
   "kuro--build-keymap stores the result in kuro--keymap."
-  (let ((kuro-keymap-exceptions nil))
-    (kuro--build-keymap)
-    (should (keymapp kuro--keymap))))
+  (let ((orig kuro--keymap)
+        (kuro-keymap-exceptions nil))
+    (unwind-protect
+        (progn
+          (kuro--build-keymap)
+          (should (keymapp kuro--keymap)))
+      (setq kuro--keymap orig))))
 
 (ert-deftest kuro-input-keymap-build-has-self-insert-remap ()
   "The built keymap remaps self-insert-command."

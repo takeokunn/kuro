@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `osc` parsing.
+//!
+//! Module under test: `parser/osc.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 
 /// OSC 0 sets the window title on the terminal core.
@@ -196,6 +201,46 @@ fn test_osc4_set_palette_entry() {
         core.osc_data.palette_dirty,
         "palette_dirty must be true after OSC 4 set"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: OSC 0 with arbitrary ASCII title never panics
+    fn prop_osc0_title_no_panic(
+        title in proptest::collection::vec(b'!'..=b'~', 0..=100)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let title_str = String::from_utf8(title).unwrap_or_default();
+        let seq = format!("\x1b]0;{}\x07", title_str);
+        term.advance(seq.as_bytes());
+        // Terminal must remain in a valid state
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: OSC 4 with any palette index never panics
+    fn prop_osc4_no_panic(idx in 0u16..=300u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let seq = format!("\x1b]4;{};rgb:ff/00/00\x07", idx);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: OSC 2 (icon name) with arbitrary title never panics
+    fn prop_osc2_no_panic(
+        title in proptest::collection::vec(b'!'..=b'~', 0..=50)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let title_str = String::from_utf8(title).unwrap_or_default();
+        let seq = format!("\x1b]2;{}\x07", title_str);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }
 
 /// OSC 4 with index 256 (out of range) must be silently ignored:

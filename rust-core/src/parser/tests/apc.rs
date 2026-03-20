@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `apc` parsing.
+//!
+//! Module under test: `parser/apc.rs`
+//! Tier: T5 — ProptestConfig::with_cases(64)
+
 use super::*;
 use super::MAX_APC_PAYLOAD_BYTES;
 
@@ -148,4 +153,23 @@ fn test_non_kitty_apc_sequence_is_ignored() {
         core.meta.pending_responses.is_empty(),
         "non-Kitty APC sequence must not queue any pending response"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    // PANIC SAFETY: APC with arbitrary payload never panics (payload is truncated at max)
+    fn prop_apc_arbitrary_payload_no_panic(
+        payload in proptest::collection::vec(0x20u8..=0x7eu8, 0..=200)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let p = String::from_utf8(payload).unwrap_or_default();
+        // ESC _ payload ESC \\ (APC)
+        let seq = format!("\x1b_{}\x1b\\", p);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }

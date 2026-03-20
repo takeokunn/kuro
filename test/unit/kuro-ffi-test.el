@@ -233,6 +233,56 @@ or defaulted incorrectly."
       (kuro--clear-scrollback)
       (should called))))
 
+;;; Group 8: Remaining FFI wrappers (poll-updates-with-faces, resize, is-process-alive)
+
+(ert-deftest kuro-ffi-poll-updates-with-faces-nil-when-not-initialized ()
+  "kuro--poll-updates-with-faces returns nil when not initialized."
+  (let ((kuro--initialized nil))
+    (should-not (kuro--poll-updates-with-faces))))
+
+(ert-deftest kuro-ffi-poll-updates-with-faces-calls-core-when-initialized ()
+  "kuro--poll-updates-with-faces calls kuro-core-poll-updates-with-faces."
+  (let ((kuro--initialized t)
+        (called nil))
+    (cl-letf (((symbol-function 'kuro-core-poll-updates-with-faces)
+               (lambda () (setq called t) '((0 "line" nil nil)))))
+      (let ((result (kuro--poll-updates-with-faces)))
+        (should called)
+        (should (listp result))))))
+
+(ert-deftest kuro-ffi-resize-nil-when-not-initialized ()
+  "kuro--resize returns nil when not initialized."
+  (let ((kuro--initialized nil))
+    (should-not (kuro--resize 24 80))))
+
+(ert-deftest kuro-ffi-resize-calls-core-with-rows-and-cols ()
+  "kuro--resize forwards rows and cols to kuro-core-resize when initialized."
+  (let ((kuro--initialized t)
+        (received-rows nil)
+        (received-cols nil))
+    (cl-letf (((symbol-function 'kuro-core-resize)
+               (lambda (rows cols)
+                 (setq received-rows rows
+                       received-cols cols))))
+      (kuro--resize 30 120)
+      (should (= received-rows 30))
+      (should (= received-cols 120)))))
+
+(ert-deftest kuro-ffi-is-process-alive-nil-when-not-initialized ()
+  "kuro--is-process-alive returns nil when not initialized.
+Note: the fallback in kuro--call t is NOT reached when uninitialized;
+`when' short-circuits and returns nil regardless of the fallback value."
+  (let ((kuro--initialized nil))
+    (should-not (kuro--is-process-alive))))
+
+(ert-deftest kuro-ffi-is-process-alive-returns-core-value-when-initialized ()
+  "kuro--is-process-alive returns the value from kuro-core-is-process-alive."
+  (let ((kuro--initialized t))
+    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda () t)))
+      (should (kuro--is-process-alive)))
+    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda () nil)))
+      (should-not (kuro--is-process-alive)))))
+
 (provide 'kuro-ffi-test)
 
 ;;; kuro-ffi-test.el ends here

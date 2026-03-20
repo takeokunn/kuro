@@ -113,6 +113,17 @@ fn kuro_core_has_pending_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
     super::query_session(env, false, |s| Ok(s.has_pending_output()))
 }
 
+/// Check if the PTY child process is still running.
+///
+/// Returns t if the shell process has not yet exited, nil if it has.
+/// Used by Emacs to automatically kill the terminal buffer when the
+/// process exits (e.g., user types `exit').
+/// Returns nil (process gone) when no session is active.
+#[defun]
+fn kuro_core_is_process_alive<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    super::query_session(env, false, |s| Ok(s.is_process_alive()))
+}
+
 /// Get palette overrides from OSC 4 as a list of (index r g b) entries.
 ///
 /// Returns a list of (INDEX R G B) for each palette entry overridden via OSC 4.

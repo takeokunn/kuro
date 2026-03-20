@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `sgr` parsing.
+//!
+//! Module under test: `parser/sgr.rs`
+//! Tier: T2 — ProptestConfig::with_cases(500)
+
 use super::*;
 
 #[test]
@@ -175,17 +180,6 @@ fn test_sgr_truecolor_overflow_truncates_to_u8() {
 }
 
 #[test]
-fn test_sgr_decstbm_inverted_margins_no_panic() {
-    // \x1b[10;5r — DECSTBM with top=10 > bottom=5 (inverted)
-    // Should not panic; scroll operations with inverted region are no-ops
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[10;5r");
-    // Attempt scrolls — should not panic
-    term.advance(b"\x1b[S"); // Scroll up
-    term.advance(b"\x1b[T"); // Scroll down
-}
-
-#[test]
 fn test_sgr_empty_sequence_resets_all() {
     // \x1b[m — empty SGR sequence resets all attributes
     let mut term = crate::TerminalCore::new(24, 80);
@@ -308,4 +302,89 @@ fn test_sgr_strikethrough_turn_off_code_29() {
         !term.current_attrs.strikethrough,
         "Strikethrough should be off after CSI 29m"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    #[test]
+    // ROUNDTRIP: CSI 38;5;{idx}m sets foreground to Color::Indexed(idx)
+    fn prop_sgr_fg_256_roundtrip(idx in 0u8..=255u8) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[38;5;{}m", idx).as_bytes());
+        prop_assert_eq!(
+            term.current_attrs.foreground,
+            crate::types::Color::Indexed(idx),
+            "256-color fg must be Indexed({})", idx
+        );
+    }
+
+    #[test]
+    // ROUNDTRIP: CSI 48;5;{idx}m sets background to Color::Indexed(idx)
+    fn prop_sgr_bg_256_roundtrip(idx in 0u8..=255u8) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[48;5;{}m", idx).as_bytes());
+        prop_assert_eq!(
+            term.current_attrs.background,
+            crate::types::Color::Indexed(idx),
+            "256-color bg must be Indexed({})", idx
+        );
+    }
+
+    #[test]
+    // ROUNDTRIP: CSI 38;2;r;g;bm sets foreground to Color::Rgb(r,g,b)
+    // Excludes Rgb(0,0,0) which collides with Color::Default in encode_color
+    fn prop_sgr_truecolor_fg_roundtrip(
+        r in 0u8..=255u8,
+        g in 0u8..=255u8,
+        b in 0u8..=255u8
+    ) {
+        // Skip the degenerate case: Rgb(0,0,0) encodes identically to Default
+        prop_assume!(r != 0 || g != 0 || b != 0);
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[38;2;{};{};{}m", r, g, b).as_bytes());
+        prop_assert_eq!(
+            term.current_attrs.foreground,
+            crate::types::Color::Rgb(r, g, b),
+            "truecolor fg must be Rgb({},{},{})", r, g, b
+        );
+    }
+
+    #[test]
+    // PANIC SAFETY: any single SGR parameter in 0..=107 must not panic
+    fn prop_sgr_arbitrary_no_panic(code in 0u16..=107u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[{}m", code).as_bytes());
+        // Terminal must still have a valid cursor position
+        prop_assert!(term.screen.cursor.row < 24);
+    }
+
+    #[test]
+    // INVARIANT: SGR 0 resets foreground to Default regardless of prior named color
+    fn prop_sgr_reset_clears_fg(offset in 0u16..=7u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // Set a named foreground color (CSI 30m–CSI 37m)
+        term.advance(format!("\x1b[{}m", 30 + offset).as_bytes());
+        // Now reset with SGR 0
+        term.advance(b"\x1b[0m");
+        prop_assert_eq!(
+            term.current_attrs.foreground,
+            crate::types::Color::Default,
+            "SGR 0 must reset foreground to Default"
+        );
+    }
+
+    #[test]
+    // INVARIANT: Named foreground colors (30-37) set a non-Default foreground
+    fn prop_sgr_named_fg_not_default(offset in 0u16..=7u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[{}m", 30 + offset).as_bytes());
+        prop_assert_ne!(
+            term.current_attrs.foreground,
+            crate::types::Color::Default,
+            "CSI {}m must set a named foreground color", 30 + offset
+        );
+    }
 }

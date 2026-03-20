@@ -40,7 +40,7 @@ test-e2e: build
 test-safe:
 	$(CARGO) test --workspace
 	emacs -Q --batch \
-	  -L emacs-lisp -L test/elisp \
+	  -L emacs-lisp -L test/unit \
 	  --eval "(require 'kuro-config)" \
 	  --eval "(require 'kuro-config-test)" \
 	  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
@@ -57,9 +57,12 @@ bench-validate:
 test-elisp:
 	$(EMACS) -Q --batch \
 		-L emacs-lisp \
-		-L test/elisp \
+		-L test/unit \
+		-L test/integration \
 		--eval "(setq load-prefer-newer t)" \
-		--eval "(mapc (function load) (directory-files (expand-file-name \"test/elisp\") t \"\\.el\\'\"))" \
+		--eval "(load (expand-file-name \"test/unit/kuro-test.el\"))" \
+		--eval "(mapc (function load) (seq-remove (lambda (f) (string-suffix-p \"/kuro-test.el\" f)) (directory-files (expand-file-name \"test/unit\") t \".el$$\")))" \
+		--eval "(mapc (function load) (directory-files (expand-file-name \"test/integration\") t \".el$$\"))" \
 		--eval "(ert-run-tests-batch-and-exit)"
 
 # Run all tests

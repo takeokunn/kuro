@@ -15,7 +15,16 @@
 ;;; Helpers
 
 (defmacro kuro-overlays-test--with-buffer (&rest body)
-  "Run BODY in a fresh buffer with kuro overlay state initialized."
+  "Run BODY in a temp buffer with overlay state initialized to defaults.
+Sets the following buffer-local variables:
+  `kuro--blink-overlays' nil (no active blink overlays)
+  `kuro--blink-visible-slow' t (slow blink phase starts visible)
+  `kuro--blink-visible-fast' t (fast blink phase starts visible)
+  `kuro--image-overlays' nil (no active image overlays)
+  `kuro--hyperlink-overlays' nil (no active hyperlink overlays)
+  `kuro--prompt-positions' nil (no known prompt positions)
+  `kuro--blink-frame-count' 0 (frame counter reset)
+  `inhibit-read-only' t (allows buffer modification in tests)"
   `(with-temp-buffer
      (let ((inhibit-read-only t)
            (kuro--blink-overlays nil)
@@ -107,23 +116,43 @@
     (kuro--tick-blink-overlays)
     (should (= kuro--blink-frame-count 1))))
 
-(ert-deftest kuro-overlays-tick-blink-slow-toggles-at-30 ()
-  "Slow blink state toggles when frame count reaches multiple of 30."
+(ert-deftest kuro-overlays-tick-blink-slow-toggles-at-interval ()
+  "Slow blink state toggles when frame count reaches multiple of slow-frames.
+At the default 60 fps, `kuro--blink-slow-frames' returns 30."
   (kuro-overlays-test--with-buffer
-    (setq kuro--blink-frame-count 29
-          kuro--blink-visible-slow t)
-    (kuro--tick-blink-overlays)  ; count becomes 30
-    (should (= kuro--blink-frame-count 30))
-    (should-not kuro--blink-visible-slow)))
+    (let ((slow (kuro--blink-slow-frames)))
+      (setq kuro--blink-frame-count (1- slow)
+            kuro--blink-visible-slow t)
+      (kuro--tick-blink-overlays)
+      (should (= kuro--blink-frame-count slow))
+      (should-not kuro--blink-visible-slow))))
 
-(ert-deftest kuro-overlays-tick-blink-fast-toggles-at-10 ()
-  "Fast blink state toggles when frame count reaches multiple of 10."
+(ert-deftest kuro-overlays-tick-blink-fast-toggles-at-interval ()
+  "Fast blink state toggles when frame count reaches multiple of fast-frames.
+At the default 60 fps, `kuro--blink-fast-frames' returns 10."
   (kuro-overlays-test--with-buffer
-    (setq kuro--blink-frame-count 9
-          kuro--blink-visible-fast t)
-    (kuro--tick-blink-overlays)  ; count becomes 10
-    (should (= kuro--blink-frame-count 10))
-    (should-not kuro--blink-visible-fast)))
+    (let ((fast (kuro--blink-fast-frames)))
+      (setq kuro--blink-frame-count (1- fast)
+            kuro--blink-visible-fast t)
+      (kuro--tick-blink-overlays)
+      (should (= kuro--blink-frame-count fast))
+      (should-not kuro--blink-visible-fast))))
+
+(ert-deftest kuro-overlays-tick-blink-adapts-to-frame-rate ()
+  "Blink intervals scale with `kuro-frame-rate' for correct real-time timing."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro-frame-rate 30))
+      ;; At 30 fps: slow = round(30 * 0.5) = 15, fast = round(30 * 0.167) = 5
+      (should (= (kuro--blink-slow-frames) 15))
+      (should (= (kuro--blink-fast-frames) 5)))
+    (let ((kuro-frame-rate 120))
+      ;; At 120 fps: slow = round(120 * 0.5) = 60, fast = round(120 * 0.167) = 20
+      (should (= (kuro--blink-slow-frames) 60))
+      (should (= (kuro--blink-fast-frames) 20)))
+    ;; Edge case: very low frame rate should not produce 0 (division-by-zero guard)
+    (let ((kuro-frame-rate 1))
+      (should (>= (kuro--blink-slow-frames) 1))
+      (should (>= (kuro--blink-fast-frames) 1)))))
 
 (ert-deftest kuro-overlays-tick-blink-no-toggle-at-non-boundary ()
   "Slow/fast blink states do NOT toggle at non-boundary frame counts."
@@ -249,8 +278,8 @@
   "kuro-next-prompt moves point to the next prompt-start row."
   (kuro-overlays-test--with-buffer
     (insert "line0\nline1\nPROMPT\nline3\n")
-    ;; Register row 2 as a prompt-start
-    (setq kuro--prompt-positions (list (cons 2 'prompt-start)))
+    ;; Register row 2 as a prompt-start (proper list: MARK-TYPE ROW COL)
+    (setq kuro--prompt-positions (list (list "prompt-start" 2 0)))
     ;; Start at row 0
     (goto-char (point-min))
     (kuro-next-prompt)
@@ -292,6 +321,57 @@
     ;; flags=0, fg/bg both default — fast-path skips everything
     (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0)
     (should (null kuro--blink-overlays))))
+
+;;; Group 7: kuro--unpack-ffi-face-range and kuro--render-image-notification
+
+(ert-deftest kuro-overlays-unpack-ffi-face-range-returns-five-elements ()
+  "kuro--unpack-ffi-face-range returns a 5-element list from a proper list input."
+  (let* ((range '(10 20 255 0 8))
+         (result (kuro--unpack-ffi-face-range range)))
+    (should (= (length result) 5))))
+
+(ert-deftest kuro-overlays-unpack-ffi-face-range-preserves-values ()
+  "kuro--unpack-ffi-face-range unpacks start, end, fg, bg, flags in correct order."
+  (let* ((range '(10 20 #xFF0000 #x00FF00 #x010))
+         (result (kuro--unpack-ffi-face-range range)))
+    (should (= (nth 0 result) 10))
+    (should (= (nth 1 result) 20))
+    (should (= (nth 2 result) #xFF0000))
+    (should (= (nth 3 result) #x00FF00))
+    (should (= (nth 4 result) #x010))))
+
+(ert-deftest kuro-overlays-unpack-ffi-face-range-zero-values ()
+  "kuro--unpack-ffi-face-range handles all-zero input without error."
+  (let* ((range '(0 0 0 0 0))
+         (result (kuro--unpack-ffi-face-range range)))
+    (should (= (length result) 5))
+    (should (cl-every #'zerop result))))
+
+(ert-deftest kuro-overlays-render-image-notification-no-error-when-image-nil ()
+  "kuro--render-image-notification is a no-op (no error) when kuro--get-image returns nil."
+  ;; Stub kuro--get-image to return nil so the (when (and b64 ...)) guard
+  ;; prevents create-image from being called.  The function must not signal.
+  (kuro-overlays-test--with-buffer
+    (insert "placeholder\n")
+    (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) nil)))
+      (should-not
+       (condition-case err
+           (progn
+             (kuro--render-image-notification '(42 0 0 2 1))
+             nil)
+         (error err))))))
+
+(ert-deftest kuro-overlays-render-image-notification-no-error-when-b64-empty ()
+  "kuro--render-image-notification is a no-op (no error) when image data is empty string."
+  (kuro-overlays-test--with-buffer
+    (insert "placeholder\n")
+    (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) "")))
+      (should-not
+       (condition-case err
+           (progn
+             (kuro--render-image-notification '(42 0 0 2 1))
+             nil)
+         (error err))))))
 
 (provide 'kuro-overlays-test)
 

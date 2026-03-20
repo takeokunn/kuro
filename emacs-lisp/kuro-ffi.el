@@ -32,6 +32,7 @@
 (declare-function kuro-core-resize                  "ext:kuro-core" (rows cols))
 (declare-function kuro-core-shutdown                "ext:kuro-core" ())
 (declare-function kuro-core-get-cursor              "ext:kuro-core" ())
+(declare-function kuro-core-is-process-alive        "ext:kuro-core" ())
 
 (defvar-local kuro--initialized nil
   "Non-nil if Kuro has been initialized.
@@ -125,6 +126,16 @@ grid columns to buffer character offsets.  FACE-RANGES is a list of
   "Resize the terminal to ROWS x COLS.
 Returns t if successful, nil otherwise."
   (kuro--call nil (kuro-core-resize rows cols)))
+
+;;; Process state
+
+(defun kuro--is-process-alive ()
+  "Return non-nil if the PTY child process is still running.
+Returns nil when `kuro--initialized' is nil (no active session).
+Falls back to t (alive assumed) on FFI error to prevent spurious buffer
+kills — unlike other wrappers that return nil on error, this one uses t
+so that a transient Rust failure does not destroy the buffer."
+  (kuro--call t (kuro-core-is-process-alive)))
 
 ;;; Cursor queries
 

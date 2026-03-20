@@ -101,15 +101,17 @@ sanitization removes the ESC so [201~ is treated as literal text."
 
 (ert-deftest kuro-input-paste--yank-plain-sends-text-directly ()
   "kuro--yank sends text directly when bracketed paste mode is off."
-  (with-temp-buffer
-    (kill-new "clipboard text")
-    (let ((kuro--bracketed-paste-mode nil)
-          (sent (kuro-paste-test--capture-sent (kuro--yank))))
-      (should (equal sent '("clipboard text"))))))
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "clipboard text")
+      (let ((kuro--bracketed-paste-mode nil)
+            (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (equal sent '("clipboard text")))))))
 
 (ert-deftest kuro-input-paste--yank-plain-preserves-content ()
   "kuro--yank in plain mode sends content verbatim (no wrapping or sanitization)."
-  (let ((esc (string #x1b)))
+  (let ((kill-ring nil)
+        (esc (string #x1b)))
     (with-temp-buffer
       ;; Even with ESC in content, plain mode sends it as-is.
       (kill-new (concat "raw" esc "content"))
@@ -121,20 +123,22 @@ sanitization removes the ESC so [201~ is treated as literal text."
 
 (ert-deftest kuro-input-paste--yank-bracketed-wraps-with-sequences ()
   "kuro--yank wraps content with ESC[200~ and ESC[201~ in bracketed paste mode."
-  (with-temp-buffer
-    (kill-new "pasted text")
-    (let* ((kuro--bracketed-paste-mode t)
-           (sent (kuro-paste-test--capture-sent (kuro--yank))))
-      (should (= (length sent) 1))
-      (let ((payload (car sent)))
-        (should (string-prefix-p "\e[200~" payload))
-        (should (string-suffix-p "\e[201~" payload))
-        (should (string-match-p "pasted text" payload))))))
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "pasted text")
+      (let* ((kuro--bracketed-paste-mode t)
+             (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (= (length sent) 1))
+        (let ((payload (car sent)))
+          (should (string-prefix-p "\e[200~" payload))
+          (should (string-suffix-p "\e[201~" payload))
+          (should (string-match-p "pasted text" payload)))))))
 
 (ert-deftest kuro-input-paste--yank-bracketed-sanitizes-esc ()
   "kuro--yank strips ESC from clipboard content in bracketed paste mode.
 The wrap sequences ESC[200~/ESC[201~ are intact; the user ESC is gone."
-  (let ((esc (string #x1b)))
+  (let ((kill-ring nil)
+        (esc (string #x1b)))
     (with-temp-buffer
       (kill-new (concat "evil" esc "[201~injection"))
       (let* ((kuro--bracketed-paste-mode t)
@@ -153,36 +157,40 @@ The wrap sequences ESC[200~/ESC[201~ are intact; the user ESC is gone."
 
 (ert-deftest kuro-input-paste--yank-bracketed-empty-kill ()
   "kuro--yank with empty kill-ring entry still wraps correctly."
-  (with-temp-buffer
-    (kill-new "")
-    (let* ((kuro--bracketed-paste-mode t)
-           (sent (kuro-paste-test--capture-sent (kuro--yank))))
-      (should (= (length sent) 1))
-      (should (equal (car sent) "\e[200~\e[201~")))))
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "")
+      (let* ((kuro--bracketed-paste-mode t)
+             (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (= (length sent) 1))
+        (should (equal (car sent) "\e[200~\e[201~"))))))
 
 ;;; Group 4: kuro--yank-pop — bracketed paste mode
 
 (ert-deftest kuro-input-paste--yank-pop-wraps-in-bracketed-mode ()
   "kuro--yank-pop wraps content with bracketed paste sequences when mode is on."
-  (with-temp-buffer
-    (kill-new "pop text")
-    ;; Simulate last-command being a yank so yank-pop doesn't error.
-    (let ((last-command 'kuro--yank)
-          (kuro--bracketed-paste-mode t)
-          (sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
-      (should (= (length sent) 1))
-      (let ((payload (car sent)))
-        (should (string-prefix-p "\e[200~" payload))
-        (should (string-suffix-p "\e[201~" payload))))))
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "pop text")
+      ;; last-command must be bound BEFORE calling kuro--yank-pop.
+      ;; Use nested let so last-command is in scope when the call runs.
+      (let ((last-command 'kuro--yank)
+            (kuro--bracketed-paste-mode t))
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (= (length sent) 1))
+          (let ((payload (car sent)))
+            (should (string-prefix-p "\e[200~" payload))
+            (should (string-suffix-p "\e[201~" payload))))))))
 
 (ert-deftest kuro-input-paste--yank-pop-plain-sends-directly ()
   "kuro--yank-pop sends content directly when bracketed paste mode is off."
-  (with-temp-buffer
-    (kill-new "pop plain")
-    (let ((last-command 'kuro--yank)
-          (kuro--bracketed-paste-mode nil)
-          (sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
-      (should (equal sent '("pop plain"))))))
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "pop plain")
+      (let ((last-command 'kuro--yank)
+            (kuro--bracketed-paste-mode nil))
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (equal sent '("pop plain"))))))))
 
 (ert-deftest kuro-input-paste--yank-pop-errors-when-not-after-yank ()
   "kuro--yank-pop signals user-error when previous command was not a yank."

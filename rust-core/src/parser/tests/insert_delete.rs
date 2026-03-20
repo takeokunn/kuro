@@ -1,10 +1,16 @@
+//! Property-based and example-based tests for `insert_delete` parsing.
+//!
+//! Module under test: `parser/insert_delete.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 
 /// Fill every cell in `row` with character `c`
 fn fill_line(term: &mut crate::TerminalCore, row: usize, c: char) {
+    let cols = term.screen.cols() as usize;
     if let Some(line) = term.screen.get_line_mut(row) {
-        for cell in &mut line.cells {
-            cell.grapheme = compact_str::CompactString::new(c.to_string());
+        for col in 0..cols {
+            line.update_cell_with(col, crate::types::Cell::new(c));
         }
     }
 }
@@ -486,4 +492,61 @@ fn test_ech_dirty_tracking() {
 
     let dirty = term.screen.take_dirty_lines();
     assert!(dirty.contains(&1));
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: IL (CSI n L) never panics; row count preserved
+    fn prop_il_no_panic(n in 0u16..=100u16, row in 0usize..10usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.screen.move_cursor(row, 0);
+        term.advance(format!("\x1b[{}L", n).as_bytes());
+        prop_assert_eq!(term.screen.rows() as usize, 10, "rows must be unchanged after IL");
+    }
+
+    #[test]
+    // PANIC SAFETY: DL (CSI n M) never panics; row count preserved
+    fn prop_dl_no_panic(n in 0u16..=100u16, row in 0usize..10usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.screen.move_cursor(row, 0);
+        term.advance(format!("\x1b[{}M", n).as_bytes());
+        prop_assert_eq!(term.screen.rows() as usize, 10, "rows must be unchanged after DL");
+    }
+
+    #[test]
+    // PANIC SAFETY: ICH (CSI n @) never panics; line width preserved
+    fn prop_ich_no_panic(n in 0u16..=100u16, col in 0usize..20usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.screen.move_cursor(0, col);
+        term.advance(format!("\x1b[{}@", n).as_bytes());
+        prop_assert_eq!(
+            term.screen.get_line(0).unwrap().cells.len(), 20,
+            "line width must be preserved after ICH"
+        );
+    }
+
+    #[test]
+    // PANIC SAFETY: DCH (CSI n P) never panics; line width preserved
+    fn prop_dch_no_panic(n in 0u16..=100u16, col in 0usize..20usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.screen.move_cursor(0, col);
+        term.advance(format!("\x1b[{}P", n).as_bytes());
+        prop_assert_eq!(
+            term.screen.get_line(0).unwrap().cells.len(), 20,
+            "line width must be preserved after DCH"
+        );
+    }
+
+    #[test]
+    // INVARIANT: IL + DL cancel out — row count stays the same
+    fn prop_il_dl_preserves_row_count(n in 1u16..=8u16) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.advance(format!("\x1b[{}L", n).as_bytes());
+        term.advance(format!("\x1b[{}M", n).as_bytes());
+        prop_assert_eq!(term.screen.rows() as usize, 10);
+    }
 }

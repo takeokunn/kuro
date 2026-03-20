@@ -33,11 +33,19 @@
 
 (declare-function kuro--get-image "kuro-ffi-osc" (image-id))
 
-(defconst kuro--blink-slow-frames 30
-  "Frame interval for slow text blink cycle (SGR 5). At 30 fps this gives ~0.5 Hz toggle rate.")
+(defun kuro--blink-slow-frames ()
+  "Compute frame interval for slow text blink cycle (SGR 5).
+Returns the number of render frames between each visibility toggle,
+yielding a ~0.5 Hz toggle rate (1.0 s per phase) at any frame rate.
+Uses `(max 1 ...)' to prevent division by zero in the modulo check."
+  (max 1 (round (* kuro-frame-rate 0.5))))
 
-(defconst kuro--blink-fast-frames 10
-  "Frame interval for fast text blink cycle (SGR 6). At 30 fps this gives ~1.5 Hz toggle rate.")
+(defun kuro--blink-fast-frames ()
+  "Compute frame interval for fast text blink cycle (SGR 6).
+Returns the number of render frames between each visibility toggle,
+yielding a ~1.5 Hz toggle rate (~0.33 s per phase) at any frame rate.
+Uses `(max 1 ...)' to prevent division by zero in the modulo check."
+  (max 1 (round (* kuro-frame-rate 0.167))))
 
 ;;; Buffer-local state
 
@@ -95,17 +103,19 @@ visibility state variable is consulted."
 
 (defun kuro--tick-blink-overlays ()
   "Advance the blink frame counter and toggle overlay visibility at correct intervals.
-Slow blink (SGR 5): ~0.5 Hz — toggle every 30 frames at 30 fps (1 s per phase).
-Fast blink (SGR 6): ~1.5 Hz — toggle every 10 frames at 30 fps (~0.33 s per phase).
+Slow blink (SGR 5): ~0.5 Hz — toggle every `kuro--blink-slow-frames' frames (1 s per phase).
+Fast blink (SGR 6): ~1.5 Hz — toggle every `kuro--blink-fast-frames' frames (~0.33 s per phase).
+Frame intervals are computed dynamically from `kuro-frame-rate' so that
+blink timing is correct at any frame rate (not just 30 fps).
 Called once per render cycle from `kuro--render-cycle'."
   (setq kuro--blink-frame-count (1+ kuro--blink-frame-count))
-  (when (zerop (mod kuro--blink-frame-count kuro--blink-slow-frames))
+  (when (zerop (mod kuro--blink-frame-count (kuro--blink-slow-frames)))
     (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
     (dolist (ov kuro--blink-overlays)
       (when (and (overlay-buffer ov)
                  (eq (overlay-get ov 'kuro-blink-type) 'slow))
         (overlay-put ov 'invisible (not kuro--blink-visible-slow)))))
-  (when (zerop (mod kuro--blink-frame-count kuro--blink-fast-frames))
+  (when (zerop (mod kuro--blink-frame-count (kuro--blink-fast-frames)))
     (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))
     (dolist (ov kuro--blink-overlays)
       (when (and (overlay-buffer ov)
@@ -191,6 +201,9 @@ to repeat this guard."
   (unless (and (= fg-enc kuro--ffi-color-default)
                (= bg-enc kuro--ffi-color-default)
                (= flags 0))
+    ;; Fourth arg = underline-color (always 0: not yet encoded in FFI face ranges).
+    ;; TODO: extend encode_line_faces to emit underline_color as a 6th tuple element
+    ;; when SgrAttributes::underline_color != Color::Default, then decode here.
     (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags 0)))
       (add-text-properties start-pos end-pos `(face ,face)))
     (cond

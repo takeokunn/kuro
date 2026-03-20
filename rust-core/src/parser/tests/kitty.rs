@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `kitty` parsing.
+//!
+//! Module under test: `parser/kitty.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 use proptest::prelude::*;
 
@@ -233,9 +238,34 @@ fn test_kitty_three_chunk_with_intermediate_payload() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
     #[test]
     fn prop_kitty_params_parse_no_panic(data in any::<Vec<u8>>()) {
         // must not panic on arbitrary input
         let _ = KittyParams::parse(&data);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: Kitty keyboard protocol set/query with arbitrary flags never panics
+    fn prop_kitty_kb_flags_no_panic(flags in 0u16..=65535u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // CSI = {flags} u — set kitty keyboard flags
+        term.advance(format!("\x1b[={}u", flags).as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: Kitty push/pop mode never panics
+    fn prop_kitty_push_pop_no_panic(flags in 0u16..=31u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // CSI > {flags} u — push kitty keyboard mode
+        term.advance(format!("\x1b[>{}u", flags).as_bytes());
+        // CSI < u — pop kitty keyboard mode
+        term.advance(b"\x1b[<u");
+        prop_assert!(term.screen.cursor().row < 24);
     }
 }

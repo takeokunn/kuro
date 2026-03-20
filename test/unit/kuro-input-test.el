@@ -181,7 +181,8 @@
 
 (ert-deftest kuro-input-yank-plain-without-bracketed-paste ()
   "kuro--yank sends text directly when bracketed paste mode is off."
-  (let ((kuro--bracketed-paste-mode nil)
+  (let ((kill-ring nil)
+        (kuro--bracketed-paste-mode nil)
         (kuro--initialized t))
     (with-temp-buffer
       (kill-new "clipboard text")
@@ -193,7 +194,8 @@
 
 (ert-deftest kuro-input-yank-wraps-with-bracketed-paste ()
   "kuro--yank wraps with ESC[200~ / ESC[201~ when bracketed paste mode is on."
-  (let ((kuro--bracketed-paste-mode t)
+  (let ((kill-ring nil)
+        (kuro--bracketed-paste-mode t)
         (kuro--initialized t))
     (with-temp-buffer
       (kill-new "pasted text")
@@ -210,7 +212,8 @@
 (ert-deftest kuro-input-yank-strips-esc-in-bracketed-paste ()
   "kuro--yank sanitizes ESC bytes from clipboard content in bracketed paste mode.
 The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ remain."
-  (let ((kuro--bracketed-paste-mode t)
+  (let ((kill-ring nil)
+        (kuro--bracketed-paste-mode t)
         (kuro--initialized t)
         (esc (string #x1b)))
     (with-temp-buffer
@@ -527,6 +530,179 @@ M-x falls through to execute-extended-command."
                (lambda () nil)))
       (kuro--send-meta-backspace)
       (should (equal sent (list (string ?\e ?\x7f)))))))
+
+;;; Group 15: kuro--send-special
+
+(ert-deftest kuro-input-send-special-sends-byte ()
+  "kuro--send-special sends the given byte as a single-char string to the PTY."
+  (let ((sent (kuro-input-test--capture-sent
+               (kuro--send-special ?\C-c))))
+    (should (equal sent (list (string ?\C-c))))))
+
+(ert-deftest kuro-input-send-special-sends-escape ()
+  "kuro--send-special sends ESC (0x1B) correctly."
+  (let ((sent (kuro-input-test--capture-sent
+               (kuro--send-special ?\e))))
+    (should (equal sent (list (string ?\e))))))
+
+(ert-deftest kuro-input-send-special-delegates-to-send-key-regardless-of-init ()
+  "kuro--send-special always delegates to kuro--send-key regardless of kuro--initialized."
+  (let ((sent nil)
+        (kuro--initialized nil))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
+      ;; kuro--send-special does not guard on kuro--initialized itself;
+      ;; the guard is inside kuro--send-key (the real FFI wrapper).
+      ;; We verify the byte is still passed through to kuro--send-key
+      ;; (the guard is in the stub layer, not in kuro--send-special).
+      ;; This test confirms kuro--send-special always calls kuro--send-key.
+      (kuro--send-special ?a)
+      (should (equal sent (list (string ?a)))))))
+
+;;; Group 16: kuro--self-insert
+
+(ert-deftest kuro-input-self-insert-sends-char ()
+  "kuro--self-insert sends last-command-event as a UTF-8 string."
+  (let ((last-command-event ?a))
+    (let ((sent (kuro-input-test--capture-sent
+                 (kuro--self-insert))))
+      (should (equal sent (list "a"))))))
+
+(ert-deftest kuro-input-self-insert-sends-space ()
+  "kuro--self-insert sends SPC correctly."
+  (let ((last-command-event ?\s))
+    (let ((sent (kuro-input-test--capture-sent
+                 (kuro--self-insert))))
+      (should (equal sent (list " "))))))
+
+(ert-deftest kuro-input-self-insert-sends-multibyte-char ()
+  "kuro--self-insert sends a multibyte (non-ASCII) character."
+  (let ((last-command-event ?あ))
+    (let ((sent (kuro-input-test--capture-sent
+                 (kuro--self-insert))))
+      (should (equal sent (list (string ?あ)))))))
+
+(ert-deftest kuro-input-self-insert-noop-for-non-character ()
+  "kuro--self-insert is a no-op when last-command-event is not a character."
+  (let ((last-command-event 'mouse-1))
+    (let ((sent (kuro-input-test--capture-sent
+                 (kuro--self-insert))))
+      (should (null sent)))))
+
+;;; Group 17: kuro--ctrl-alt-modified
+
+(ert-deftest kuro-input-ctrl-alt-modified-sends-esc-ctrl-byte ()
+  "kuro--ctrl-alt-modified sends ESC followed by the ctrl byte (char & 31)."
+  ;; char=?a (97), 97 & 31 = 1 (^A), so sequence is ESC + ^A
+  (let ((sent (kuro-input-test--capture-sent
+               (kuro--ctrl-alt-modified ?a 0))))
+    (should (equal sent (list (concat (string ?\e) (string (logand ?a 31))))))))
+
+(ert-deftest kuro-input-ctrl-alt-modified-sends-esc-ctrl-c ()
+  "kuro--ctrl-alt-modified for 'c' sends ESC + ^C (Ctrl+C = 3)."
+  (let ((sent (kuro-input-test--capture-sent
+               (kuro--ctrl-alt-modified ?c 0))))
+    (should (equal sent (list (string ?\e ?\C-c))))))
+
+(ert-deftest kuro-input-ctrl-alt-modified-ignores-modifier-arg ()
+  "kuro--ctrl-alt-modified ignores the MODIFIER argument (always ESC+ctrl-byte)."
+  (let ((sent-no-mod (kuro-input-test--capture-sent
+                      (kuro--ctrl-alt-modified ?b 0)))
+        (sent-with-mod (kuro-input-test--capture-sent
+                        (kuro--ctrl-alt-modified ?b 7))))
+    (should (equal sent-no-mod sent-with-mod))))
+
+;;; Group 18: kuro-scroll-up / kuro-scroll-down / kuro-scroll-bottom
+
+(defmacro kuro-input-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
+                                              get-offset-fn &rest body)
+  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
+  (declare (indent 3))
+  `(with-temp-buffer
+     (setq-local kuro--initialized t
+                 kuro--scroll-offset 0)
+     (cl-letf (((symbol-function 'kuro--scroll-up)    ,scroll-up-fn)
+               ((symbol-function 'kuro--scroll-down)  ,scroll-down-fn)
+               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
+               ((symbol-function 'kuro--render-cycle) #'ignore))
+       ,@body)))
+
+(ert-deftest kuro-input-scroll-up-calls-ffi ()
+  "kuro-scroll-up calls kuro--scroll-up with window-body-height lines."
+  (let ((up-called-with nil))
+    (kuro-input-test--with-scroll-stubs
+        (lambda (n) (setq up-called-with n))
+        #'ignore
+        (lambda () nil)
+      (cl-letf (((symbol-function 'window-body-height) (lambda () 24)))
+        (kuro-scroll-up))
+      (should (= up-called-with 24)))))
+
+(ert-deftest kuro-input-scroll-up-noop-when-uninitialized ()
+  "kuro-scroll-up does nothing when kuro--initialized is nil."
+  (let ((up-called nil))
+    (with-temp-buffer
+      (setq-local kuro--initialized nil
+                  kuro--scroll-offset 0)
+      (cl-letf (((symbol-function 'kuro--scroll-up)
+                 (lambda (_n) (setq up-called t))))
+        (kuro-scroll-up))
+      (should-not up-called))))
+
+(ert-deftest kuro-input-scroll-down-calls-ffi ()
+  "kuro-scroll-down calls kuro--scroll-down with window-body-height lines."
+  (let ((down-called-with nil))
+    (kuro-input-test--with-scroll-stubs
+        #'ignore
+        (lambda (n) (setq down-called-with n))
+        (lambda () nil)
+      (cl-letf (((symbol-function 'window-body-height) (lambda () 24)))
+        (kuro-scroll-down))
+      (should (= down-called-with 24)))))
+
+(ert-deftest kuro-input-scroll-down-noop-when-uninitialized ()
+  "kuro-scroll-down does nothing when kuro--initialized is nil."
+  (let ((down-called nil))
+    (with-temp-buffer
+      (setq-local kuro--initialized nil
+                  kuro--scroll-offset 5)
+      (cl-letf (((symbol-function 'kuro--scroll-down)
+                 (lambda (_n) (setq down-called t))))
+        (kuro-scroll-down))
+      (should-not down-called))))
+
+(ert-deftest kuro-input-scroll-bottom-calls-ffi-with-sentinel ()
+  "kuro-scroll-bottom calls kuro--scroll-down with the sentinel value."
+  (let ((down-called-with nil))
+    (kuro-input-test--with-scroll-stubs
+        #'ignore
+        (lambda (n) (setq down-called-with n))
+        (lambda () 0)
+      (kuro-scroll-bottom))
+    (should (= down-called-with kuro--scroll-to-bottom-sentinel))))
+
+(ert-deftest kuro-input-scroll-bottom-resets-offset ()
+  "kuro-scroll-bottom resets kuro--scroll-offset to 0 (via kuro--get-scroll-offset)."
+  (kuro-input-test--with-scroll-stubs
+      #'ignore
+      #'ignore
+      (lambda () 0)
+    (setq kuro--scroll-offset 42)
+    (kuro-scroll-bottom)
+    (should (= kuro--scroll-offset 0))))
+
+(ert-deftest kuro-input-scroll-bottom-noop-when-uninitialized ()
+  "kuro-scroll-bottom does nothing when kuro--initialized is nil."
+  (let ((down-called nil))
+    (with-temp-buffer
+      (setq-local kuro--initialized nil
+                  kuro--scroll-offset 10)
+      (cl-letf (((symbol-function 'kuro--scroll-down)
+                 (lambda (_n) (setq down-called t))))
+        (kuro-scroll-bottom))
+      (should-not down-called))))
 
 (provide 'kuro-input-test)
 

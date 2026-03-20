@@ -31,6 +31,14 @@ pub struct Cursor {
     pub(crate) shape: CursorShape,
     /// Cursor is visible
     pub(crate) visible: bool,
+    /// DEC pending wrap flag (DECAWM last-column behavior).
+    ///
+    /// When a character is printed at the last column, the cursor stays at that
+    /// column and this flag is set.  The actual wrap (col=0, line_feed) is
+    /// deferred until the next printable character.  Any explicit cursor
+    /// movement clears this flag without wrapping.
+    #[serde(skip, default)]
+    pub(crate) pending_wrap: bool,
 }
 
 impl Cursor {
@@ -41,6 +49,7 @@ impl Cursor {
             row,
             shape: CursorShape::default(),
             visible: true,
+            pending_wrap: false,
         }
     }
 

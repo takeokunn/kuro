@@ -12,7 +12,15 @@ impl TerminalSession {
     /// BEFORE `get_dirty_lines_with_faces` so that buffer-level line
     /// deletion/insertion can precede per-row text updates, preventing the
     /// bottom row from being rendered twice per scroll step.
+    ///
+    /// Returns `(0, 0)` when the viewport is scrolled into the scrollback
+    /// buffer (`scroll_offset > 0`).  Scroll events that accumulated while
+    /// the user was viewing scrollback are discarded in
+    /// `viewport_scroll_down` when `scroll_offset` returns to 0.
     pub fn consume_scroll_events(&mut self) -> (u32, u32) {
+        if self.core.screen.scroll_offset() > 0 {
+            return (0, 0);
+        }
         self.core.screen.consume_scroll_events()
     }
 

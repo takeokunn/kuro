@@ -37,6 +37,13 @@ impl Screen {
         let was_alternate = self.is_alternate_active;
 
         if let Some(screen) = self.active_screen_mut() {
+            // Keep the active screen's rows/cols in sync with the outer Screen.
+            // Without this, the alternate screen retains stale dimensions after
+            // resize, causing incorrect cursor clamping, wrong blank-line widths
+            // during scroll, and the scroll fast-path check to fail.
+            screen.rows = new_rows;
+            screen.cols = new_cols;
+
             // Resize or add/remove lines
             resize_line_buffer(&mut screen.lines, new_rows as usize, new_cols as usize);
 
@@ -48,9 +55,10 @@ impl Screen {
             // Reset scroll region
             screen.scroll_region = ScrollRegion::full_screen(new_rows as usize);
 
-            // Clamp cursor
+            // Clamp cursor and clear pending wrap
             screen.cursor.row = screen.cursor.row.min(new_rows.saturating_sub(1) as usize);
             screen.cursor.col = screen.cursor.col.min(new_cols.saturating_sub(1) as usize);
+            screen.cursor.pending_wrap = false;
         }
 
         // Keep the inactive screen in sync so switching screens never causes a

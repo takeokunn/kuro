@@ -172,6 +172,12 @@ without waiting for the next 60fps frame tick."
   :type 'boolean
   :group 'kuro)
 
+(defcustom kuro-kill-buffer-on-exit t
+  "When non-nil, automatically kill the buffer when the shell process exits.
+Set to nil to keep the buffer open for reviewing output after exit."
+  :type 'boolean
+  :group 'kuro)
+
 (defcustom kuro-typewriter-effect nil
   "When non-nil, display new terminal output character-by-character.
 This creates a smooth \"typing\" animation for AI agent output.

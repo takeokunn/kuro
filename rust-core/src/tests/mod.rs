@@ -9,6 +9,7 @@ mod osc;
 mod regression;
 mod sgr;
 mod terminal;
+pub(super) mod unit;
 
 /// Create a standard 24×80 TerminalCore for testing.
 pub(crate) fn make_term() -> crate::TerminalCore {

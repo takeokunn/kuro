@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `erase` parsing.
+//!
+//! Module under test: `parser/erase.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 use crate::types::cell::CellWidth;
 use crate::types::{Cell, Color, NamedColor, SgrAttributes};
@@ -654,6 +659,60 @@ fn test_ed_mode2_with_colored_bg_applies_bce() {
                 c
             );
             assert_eq!(line.cells[c].char(), ' ');
+        }
+    }
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: ED (CSI n J) with any parameter never panics
+    fn prop_ed_no_panic(ps in 0u16..=10u16) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.advance(format!("\x1b[{}J", ps).as_bytes());
+        prop_assert_eq!(term.screen.rows() as usize, 10);
+    }
+
+    #[test]
+    // PANIC SAFETY: EL (CSI n K) with any parameter never panics
+    fn prop_el_no_panic(ps in 0u16..=10u16) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.advance(format!("\x1b[{}K", ps).as_bytes());
+        prop_assert_eq!(term.screen.rows() as usize, 10);
+    }
+
+    #[test]
+    // PANIC SAFETY: ECH (CSI n X) with any parameter never panics; line width preserved
+    fn prop_ech_no_panic(n in 0u16..=300u16, col in 0usize..20usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        term.screen.move_cursor(0, col);
+        term.advance(format!("\x1b[{}X", n).as_bytes());
+        prop_assert_eq!(
+            term.screen.get_line(0).unwrap().cells.len(),
+            20,
+            "line width must be preserved after ECH"
+        );
+    }
+
+    #[test]
+    // INVARIANT: ED 2 (erase entire display) leaves all cells blank
+    fn prop_ed2_clears_all_cells(row in 0usize..10usize, col in 0usize..20usize) {
+        let mut term = crate::TerminalCore::new(10, 20);
+        // Write something first
+        term.screen.move_cursor(row, col);
+        term.screen.print('X', crate::types::cell::SgrAttributes::default(), true);
+        // Erase display
+        term.advance(b"\x1b[2J");
+        for r in 0..10usize {
+            for c in 0..20usize {
+                prop_assert_eq!(
+                    term.screen.get_cell(r, c).unwrap().char(), ' ',
+                    "cell ({},{}) must be blank after ED 2", r, c
+                );
+            }
         }
     }
 }

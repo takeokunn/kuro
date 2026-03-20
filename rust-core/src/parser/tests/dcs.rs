@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `dcs` parsing.
+//!
+//! Module under test: `parser/dcs.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 
 /// Build a minimal `vte::Params` with no numeric parameters.
@@ -289,4 +294,35 @@ fn test_sixel_empty_data_no_placement() {
         core.kitty.pending_image_notifications.is_empty(),
         "empty sixel data must produce no image notification"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: DCS XTGETTCAP with arbitrary hex-encoded capability name never panics
+    fn prop_xtgettcap_arbitrary_hex_no_panic(
+        cap in proptest::collection::vec(0u8..=255u8, 0..=30)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // Encode as hex string
+        let hex: String = cap.iter().map(|b| format!("{:02X}", b)).collect();
+        let seq = format!("\x1bP+q{}\x1b\\", hex);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: DCS with arbitrary payload bytes never panics
+    fn prop_dcs_arbitrary_payload_no_panic(
+        payload in proptest::collection::vec(0x20u8..=0x7eu8, 0..=50)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        let p = String::from_utf8(payload).unwrap_or_default();
+        let seq = format!("\x1bP{}\x1b\\", p);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }

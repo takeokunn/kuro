@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `vte_handler` parsing.
+//!
+//! Module under test: `parser/vte_handler.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use crate::TerminalCore;
 
 #[test]
@@ -236,4 +241,29 @@ fn test_print_combining_char_does_not_advance_cursor() {
         term.screen.cursor().col, col_after_base,
         "combining character must not advance the cursor"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // PANIC SAFETY: print() with any printable Unicode character never panics
+    fn prop_print_any_char_no_panic(c in proptest::char::range('\u{0020}', '\u{FFFE}')) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // Send character as UTF-8 bytes
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        term.advance(s.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
+
+    #[test]
+    // PANIC SAFETY: C0 control codes (0x00–0x1F) as execute() never panic
+    fn prop_execute_c0_no_panic(byte in 0x00u8..=0x1Fu8) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(&[byte]);
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }

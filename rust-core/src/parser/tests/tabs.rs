@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `tabs` parsing.
+//!
+//! Module under test: `parser/tabs.rs`
+//! Tier: T3 — ProptestConfig::with_cases(256)
+
 use super::*;
 
 #[test]
@@ -276,4 +281,51 @@ fn test_tab_movement_basic() {
         term.screen.cursor.col, 8,
         "tab from col 0 should jump to default stop at col 8"
     );
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // BOUNDARY: tab advance (HT) never moves cursor past last column
+    fn prop_ht_never_exceeds_cols(n_tabs in 1usize..=20usize) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(0, 0);
+        for _ in 0..n_tabs {
+            term.advance(b"\x09"); // HT
+        }
+        prop_assert!(term.screen.cursor().col < 80, "HT must not move cursor past col 79");
+    }
+
+    #[test]
+    // PANIC SAFETY: CHT (CSI n I) with large n never panics
+    fn prop_cht_no_panic(n in 0u16..=200u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.advance(format!("\x1b[{}I", n).as_bytes());
+        prop_assert!(term.screen.cursor().col < 80);
+    }
+
+    #[test]
+    // PANIC SAFETY: CBT (CSI n Z) with large n never panics
+    fn prop_cbt_no_panic(n in 0u16..=200u16) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        term.screen.move_cursor(0, 79); // start at last column
+        term.advance(format!("\x1b[{}Z", n).as_bytes());
+        prop_assert!(term.screen.cursor().col < 80);
+    }
+
+    #[test]
+    // INVARIANT: After TBC 3 (reset to defaults), HT from col 0 goes to col 8 (default stop)
+    fn prop_tbc3_resets_to_defaults(start_col in 0usize..=7usize) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // Reset tab stops to defaults
+        term.advance(b"\x1b[3g");
+        // Move to a column before the first default stop (col 8)
+        term.screen.move_cursor(0, start_col);
+        // One HT should go to default stop at col 8
+        term.advance(b"\x09");
+        prop_assert_eq!(term.screen.cursor().col, 8, "after TBC 3, HT from before col 8 must go to default stop at col 8");
+    }
 }

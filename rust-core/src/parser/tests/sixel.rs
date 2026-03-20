@@ -1,3 +1,8 @@
+//! Property-based and example-based tests for `sixel` parsing.
+//!
+//! Module under test: `parser/sixel.rs`
+//! Tier: T5 — ProptestConfig::with_cases(64)
+
 use super::*;
 
 #[test]
@@ -49,4 +54,23 @@ fn test_hls_to_rgb_red() {
     assert!(r > 200, "red should be high, got {r}");
     assert!(g < 50, "green should be low, got {g}");
     assert!(b < 50, "blue should be low, got {b}");
+}
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    // PANIC SAFETY: DCS sixel sequence with arbitrary data bytes never panics
+    fn prop_sixel_data_no_panic(
+        data in proptest::collection::vec(0x3fu8..=0x7eu8, 0..=100)
+    ) {
+        let mut term = crate::TerminalCore::new(24, 80);
+        // DCS P1;P2;P3 q <sixel_data> ST
+        let d = String::from_utf8(data).unwrap_or_default();
+        let seq = format!("\x1bPq{}\x1b\\", d);
+        term.advance(seq.as_bytes());
+        prop_assert!(term.screen.cursor().row < 24);
+    }
 }

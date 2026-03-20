@@ -73,6 +73,10 @@
 (defvar kuro--prompt-positions nil
   "Forward reference; defvar-local in kuro-navigation.el.")
 
+;; kuro-kill is defined in kuro-lifecycle.el which requires kuro-renderer.el;
+;; use declare-function to avoid a circular require.
+(declare-function kuro-kill "kuro-lifecycle" ())
+
 ;; Bell function provided by the Rust dynamic module at runtime.
 (declare-function kuro-core-take-bell-pending "ext:kuro-core" ())
 (declare-function kuro--update-line-full        "kuro-render-buffer" (row text face-ranges col-to-buf))
@@ -140,6 +144,15 @@ output and the idle timer would only add spurious render cycles on top of
 the normal 60fps ticker.")
 (put 'kuro--tui-mode-frame-count 'permanent-local t)
 
+(defvar-local kuro--last-render-time 0.0
+  "Float-time of the last completed render cycle.
+Used for frame coalescing: when multiple timer sources (60fps periodic,
+streaming idle, input echo delay) all fire within the same frame period,
+only the first actually renders.  Subsequent fires within half a frame
+period are skipped, preventing redundant partial-screen redraws that
+manifest as flickering on complex TUI apps like Claude Code.")
+(put 'kuro--last-render-time 'permanent-local t)
+
 ;;; Render loop lifecycle
 
 (defun kuro--start-render-loop ()
@@ -195,9 +208,12 @@ resize calls concurrently."
         (setq kuro--last-rows new-rows
               kuro--last-cols new-cols)
         (kuro--resize new-rows new-cols)
-        ;; Adjust buffer line count to match new rows
+        ;; Adjust buffer line count to match new rows.
+        ;; Use line-number-at-pos instead of count-lines: count-lines counts
+        ;; newlines, which overcounts by 1 when the buffer has a trailing \n
+        ;; (the normal state — each row is terminated by \n).
         (let ((inhibit-read-only t)
-              (current-rows (count-lines (point-min) (point-max))))
+              (current-rows (1- (line-number-at-pos (point-max)))))
           (cond
            ((< current-rows new-rows)
             (save-excursion
@@ -295,7 +311,11 @@ cutting lock contention between the Emacs timer thread and the PTY reader."
     ;; Kitty Graphics image notifications: low-frequency async events
     (let ((image-notifs (kuro--poll-image-notifications)))
       (dolist (notif image-notifs)
-        (kuro--render-image-notification notif))))
+        (kuro--render-image-notification notif)))
+    ;; Process exit detection: kill buffer when shell has exited
+    (when (and kuro-kill-buffer-on-exit
+               (not (kuro--is-process-alive)))
+      (kuro-kill)))
   (when (zerop (mod kuro--mode-poll-frame-count kuro--osc-rare-poll-cadence))
     (kuro--poll-osc-events)))
 
@@ -313,10 +333,14 @@ Renames the current buffer and the containing frame to the sanitized title."
 (defun kuro--process-scroll-events ()
   "Consume pending full-screen scroll events and apply them to the buffer.
 Must be called before polling dirty lines so that buffer-level
-delete+insert happens before per-row text rewrites."
-  (let ((scroll-ev (kuro--consume-scroll-events)))
-    (when (and scroll-ev (> kuro--last-rows 0))
-      (kuro--apply-buffer-scroll (car scroll-ev) (cdr scroll-ev)))))
+delete+insert happens before per-row text rewrites.
+No-op when the user is viewing scrollback (`kuro--scroll-offset' > 0)
+because the Rust side also suppresses events in that state, and applying
+scroll shifts to a frozen scrollback view would corrupt the display."
+  (unless (> kuro--scroll-offset 0)
+    (let ((scroll-ev (kuro--consume-scroll-events)))
+      (when (and scroll-ev (> kuro--last-rows 0))
+        (kuro--apply-buffer-scroll (car scroll-ev) (cdr scroll-ev))))))
 
 (defsubst kuro--detect-tui-mode (dirty-lines total-rows threshold)
   "Return t if the dirty-line fraction indicates a full-screen TUI app is active.
@@ -347,22 +371,33 @@ idle timer.  Restarts it when dirty-row fraction drops below the threshold."
         (setq kuro--tui-mode-frame-count 0))))))
 
 (defun kuro--evict-stale-col-to-buf-entries (dirty-rows)
-  "Remove col-to-buf mappings for rows not in DIRTY-ROWS from `kuro--col-to-buf-map'.
-Stale entries accumulate when rows are no longer written (e.g., after terminal
-resize or scroll).  Evicting them prevents the map from growing unboundedly and
-ensures the identity fallback applies to rows with no current CJK content.
+  "Remove stale col-to-buf mappings from `kuro--col-to-buf-map'.
+Evicts entries for:
+  1. Rows >= `kuro--last-rows' (out-of-bounds after resize).
+  2. Dirty rows whose updated col-to-buf is empty (transitioned from CJK
+     to ASCII) — the identity fallback is correct for these rows, so the
+     stale CJK mapping must not linger.
 Guard `kuro--last-rows' > 0 to avoid spurious eviction before the first resize.
-2x hysteresis: tolerate up to twice the current row count before evicting.
+2x hysteresis: only triggers when the map exceeds 2× the current row count.
 Returns nil."
-  (ignore dirty-rows)
   (when (and (> kuro--last-rows 0)
              (> (hash-table-count kuro--col-to-buf-map) (* kuro--col-to-buf-evict-factor kuro--last-rows)))
     (let ((max-row kuro--last-rows)
           stale-keys)
+      ;; Collect out-of-bounds rows.
       (maphash (lambda (k _v)
                  (when (>= k max-row)
                    (push k stale-keys)))
                kuro--col-to-buf-map)
+      ;; Collect dirty rows that now have empty col-to-buf (CJK → ASCII transition).
+      (when dirty-rows
+        (dolist (line-update dirty-rows)
+          (let* ((col-to-buf (cdr line-update))
+                 (row (car (car (car line-update)))))
+            (when (and (integerp row)
+                       (vectorp col-to-buf)
+                       (zerop (length col-to-buf)))
+              (push row stale-keys)))))
       (dolist (k stale-keys)
         (remhash k kuro--col-to-buf-map)))))
 
@@ -384,35 +419,27 @@ Responsibilities:
   5. Detect full-screen TUI apps (≥80% dirty rows for
      `kuro--tui-mode-threshold' consecutive frames) and suppress the
      streaming idle timer while in TUI mode, restoring it when the app exits."
-  ;; --- Window title (OSC 2) ---
-  (kuro--apply-title-update)
-  ;; --- Dirty line updates ---
-  ;; `inhibit-redisplay' batches all buffer writes into a single display
-  ;; flush: without it, Emacs' display engine runs between each
-  ;; delete-region + insert pair (up to 2N interruptions on a full-dirty
-  ;; N-row frame from cmatrix), causing visible flicker and wasted CPU.
-  ;; `condition-case' ensures inhibit-redisplay cannot be held indefinitely
-  ;; if an unexpected error escapes from the inner loop.
-  ;;
-  ;; `kuro--update-line-full' merges the three previous per-row navigation
-  ;; calls (clear-blink-overlays, update-line, apply-faces) into one
-  ;; save-excursion block, reducing O(N²) buffer traversal to O(N).
+  ;; --- Scroll events + dirty line updates + cursor + title ---
+  ;; ALL buffer/frame modifications are wrapped in a single `inhibit-redisplay'
+  ;; block so Emacs performs exactly one display flush per frame.  This includes
+  ;; the title update (OSC 2): `rename-buffer' and `set-frame-parameter' both
+  ;; trigger redisplay, so they must be inside the block to prevent mid-frame
+  ;; flashes.  Previously, scroll events (delete-region + insert) ran outside
+  ;; this block, causing flickering on full-screen TUI apps like btop.
   ;;
   ;; FFI data structure (per line):
   ;;   (((row . text) . face-list) . col-to-buf-vector)
   ;; col-to-buf-vector maps grid column index → buffer char offset.
   ;; Face ranges use buffer offsets (not grid column indices).
-  ;; --- Full-screen scroll events ---
-  ;; Consume pending scroll counts BEFORE polling dirty lines so that
-  ;; buffer-level delete+insert happens before per-row text rewrites.
-  (kuro--process-scroll-events)
-  (let ((updates (kuro--poll-updates-with-faces)))
-    ;; Batch ALL buffer modifications (dirty lines + cursor) into a single
-    ;; inhibit-redisplay block so Emacs performs exactly one display flush
-    ;; per frame instead of two (one after dirty lines, one after cursor).
-    ;; This halves display overhead on every frame that has dirty content
-    ;; (which is every frame for full-screen TUI apps like cmatrix).
+  (let ((updates nil))
     (let ((inhibit-redisplay t))
+      ;; Window title (OSC 2): inside inhibit-redisplay to prevent
+      ;; rename-buffer / set-frame-parameter from triggering a mid-frame flush.
+      (kuro--apply-title-update)
+      ;; Consume pending scroll counts BEFORE polling dirty lines so that
+      ;; buffer-level delete+insert happens before per-row text rewrites.
+      (kuro--process-scroll-events)
+      (setq updates (kuro--poll-updates-with-faces))
       (when updates
         (dolist (line-update updates)
           ;; line-update = (((row . text) . face-list) . col-to-buf-vector)
@@ -429,26 +456,47 @@ Responsibilities:
                 (kuro--update-line-full row text face-ranges col-to-buf)
               (error nil)))))
       (kuro--update-cursor))
-    ;; Evict stale col-to-buf entries outside terminal row range.
+    ;; Outside inhibit-redisplay: lightweight bookkeeping that doesn't
+    ;; modify buffer content and doesn't need display suppression.
     (kuro--evict-stale-col-to-buf-entries updates)
-    ;; --- TUI app detection: suppress streaming idle timer ---
     (kuro--update-tui-streaming-timer updates)))
 
 ;;; Render cycle
 
 (defun kuro--render-cycle ()
-  "Single render cycle: poll updates and update buffer."
-  (kuro--handle-pending-resize)
-  ;; Advance the frame counter before polling so that cadence checks inside
-  ;; `kuro--poll-terminal-modes' see the incremented value.
-  (setq kuro--mode-poll-frame-count (1+ kuro--mode-poll-frame-count))
-  (kuro--poll-terminal-modes)
-  ;; --- Bell ---
-  (when (kuro-core-take-bell-pending)
-    (ding))
-  ;; --- Blink overlays ---
-  (kuro--tick-blink-overlays)
-  (kuro--apply-dirty-updates))
+  "Single render cycle: poll updates and update buffer.
+Frame coalescing: when multiple timer sources fire within the same frame
+period, only the first actually renders.  This prevents the streaming idle
+timer, input echo timer, and periodic 60fps timer from each producing a
+separate partial-screen update within 16ms, which causes visible flickering
+on complex TUI apps like Claude Code."
+  ;; Frame coalescing: skip if we rendered within half a frame period.
+  ;; At 60fps, half-frame = 8.3ms — enough to coalesce the input echo
+  ;; timer (10ms) and streaming idle timer into the next periodic tick.
+  (let ((now (float-time)))
+    (when (>= (- now kuro--last-render-time) (/ 0.5 kuro-frame-rate))
+      (setq kuro--last-render-time now)
+      (kuro--handle-pending-resize)
+      ;; Advance the frame counter before polling so that cadence checks inside
+      ;; `kuro--poll-terminal-modes' see the incremented value.
+      (setq kuro--mode-poll-frame-count (1+ kuro--mode-poll-frame-count))
+      (kuro--poll-terminal-modes)
+      ;; Guard: kuro-kill may have been called from within kuro--poll-terminal-modes
+      ;; (process-exit path).  If the buffer was killed, abort the render cycle so
+      ;; the bell, dirty-update, and blink-overlay operations do not run against
+      ;; whatever buffer Emacs switched to after kill-buffer.
+      (when (buffer-live-p (current-buffer))
+        ;; --- Bell ---
+        (when (kuro-core-take-bell-pending)
+          (ding))
+        ;; --- Dirty updates (buffer modifications + cursor) ---
+        (kuro--apply-dirty-updates)
+        ;; --- Blink overlays ---
+        ;; Tick AFTER dirty updates so that newly created blink overlays from
+        ;; `kuro--update-line-full' and pre-existing overlays on non-dirty rows
+        ;; see the same blink phase.  Previously this ran before dirty updates,
+        ;; causing a one-frame phase mismatch between dirty and non-dirty rows.
+        (kuro--tick-blink-overlays)))))
 
 (provide 'kuro-renderer)
 

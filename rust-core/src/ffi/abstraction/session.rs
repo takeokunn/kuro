@@ -66,20 +66,37 @@ impl TerminalSession {
         Ok(())
     }
 
-    /// Poll for PTY output and update terminal
+    /// Poll for PTY output and update terminal.
+    ///
+    /// Drains the crossbeam channel twice: once for the initial batch, then
+    /// yields the current thread and drains again to catch bytes that the
+    /// reader thread pushed while we were processing the first batch.
+    /// This reduces the chance of rendering a partial screen update when
+    /// a TUI app sends a large escape-sequence burst (e.g. Claude Code
+    /// redrawing all 32 rows on up-arrow).
     pub fn poll_output(&mut self) -> Result<Vec<u8>> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
-            let data = pty.read()?;
-            if !data.is_empty() {
-                self.core.advance(&data);
+            let mut all_data = pty.read()?;
+            if !all_data.is_empty() {
+                self.core.advance(&all_data);
+
+                // Second drain: yield to let the reader thread push any
+                // in-flight data, then drain again.  This coalesces two
+                // chunks that would otherwise require two render cycles.
+                std::thread::yield_now();
+                let more = pty.read()?;
+                if !more.is_empty() {
+                    self.core.advance(&more);
+                    all_data.extend(more);
+                }
 
                 // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
                 for response in self.core.meta.pending_responses.drain(..) {
                     pty.write(&response)?;
                 }
 
-                return Ok(data);
+                return Ok(all_data);
             }
         }
         Ok(Vec::new())
@@ -229,6 +246,24 @@ impl TerminalSession {
     /// Always returns `false` on non-Unix platforms where PTY support is unavailable.
     pub fn has_pending_output(&self) -> bool {
         false
+    }
+
+    /// Returns true if the PTY child process has not yet exited.
+    ///
+    /// On Unix: reads the `process_exited` flag written by the reader thread on EOF.
+    /// Returns `true` when `pty` is `None` (test sessions without a real PTY) so that
+    /// test buffers are never auto-killed.
+    /// On non-Unix: always returns `true` (no PTY process to track).
+    #[cfg(unix)]
+    #[inline(always)]
+    pub fn is_process_alive(&self) -> bool {
+        self.pty.as_ref().map_or(true, |p| p.is_alive())
+    }
+
+    #[cfg(not(unix))]
+    #[inline(always)]
+    pub fn is_process_alive(&self) -> bool {
+        true
     }
 
     /// Get mouse pixel mode state (?1016)

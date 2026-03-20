@@ -68,8 +68,13 @@ fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
     if top < bottom {
         term.screen.set_scroll_region(top, bottom);
 
-        // Move cursor to home position after setting scroll region (DECSTD behavior)
-        term.screen.move_cursor(top, 0);
+        // Move cursor to home position after setting scroll region.
+        // Per DEC VT510: DECOM off → absolute (0,0); DECOM on → scroll region top.
+        if term.dec_modes.origin_mode {
+            term.screen.move_cursor(top, 0);
+        } else {
+            term.screen.move_cursor(0, 0);
+        }
     }
     // If invalid, ignore the sequence (DEC behavior)
 }

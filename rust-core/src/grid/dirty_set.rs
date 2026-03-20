@@ -49,6 +49,57 @@ impl BitVecDirtySet {
             self.bits.resize(row + 1, false);
         }
     }
+
+    /// Shift all dirty bits left by `n` positions (for scroll-up).
+    ///
+    /// Content moved up, so dirty index `i` becomes `i - n`.
+    /// Bits where `i < n` are lost (scrolled off screen).
+    /// The bottom `n` positions become clean (new blank lines).
+    #[inline]
+    pub fn shift_left(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let len = self.bits.len();
+        if n >= len {
+            self.clear_all();
+            return;
+        }
+        self.bits.copy_within(n..len, 0);
+        for i in (len - n)..len {
+            self.bits.set(i, false);
+        }
+        self.count = self.bits.count_ones();
+    }
+
+    /// Shift all dirty bits right by `n` positions (for scroll-down).
+    ///
+    /// Content moved down, so dirty index `i` becomes `i + n`.
+    /// Bits where `i + n >= len` are lost (scrolled off screen).
+    /// The top `n` positions become clean (new blank lines).
+    #[inline]
+    pub fn shift_right(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let len = self.bits.len();
+        if n >= len {
+            self.clear_all();
+            return;
+        }
+        self.bits.copy_within(0..len - n, n);
+        for i in 0..n {
+            self.bits.set(i, false);
+        }
+        self.count = self.bits.count_ones();
+    }
+
+    /// Internal helper: clear all bits and reset count.
+    #[inline]
+    fn clear_all(&mut self) {
+        self.bits.fill(false);
+        self.count = 0;
+    }
 }
 
 impl DirtySet for BitVecDirtySet {
@@ -147,5 +198,115 @@ mod tests {
         ds.insert(1);
         assert_eq!(ds.len(), 2);
         assert!(!ds.is_empty());
+    }
+
+    #[test]
+    fn test_shift_left_basic() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(2);
+        ds.insert(5);
+        ds.shift_left(2);
+        // 2→0, 5→3
+        assert!(ds.contains(0));
+        assert!(ds.contains(3));
+        assert!(!ds.contains(2));
+        assert!(!ds.contains(5));
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_left_drops_top_bits() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(0);
+        ds.insert(1);
+        ds.insert(5);
+        ds.shift_left(2);
+        // 0 and 1 are lost (shifted past index 0), 5→3
+        assert!(ds.contains(3));
+        assert_eq!(ds.len(), 1);
+    }
+
+    #[test]
+    fn test_shift_left_clears_tail() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(6);
+        ds.insert(7);
+        ds.shift_left(1);
+        // 6→5, 7→6, position 7 should be clean
+        assert!(ds.contains(5));
+        assert!(ds.contains(6));
+        assert!(!ds.contains(7));
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_left_exceeds_len() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(3);
+        ds.shift_left(10);
+        assert!(ds.is_empty());
+    }
+
+    #[test]
+    fn test_shift_right_basic() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(2);
+        ds.insert(5);
+        ds.shift_right(2);
+        // 2→4, 5→7
+        assert!(ds.contains(4));
+        assert!(ds.contains(7));
+        assert!(!ds.contains(2));
+        assert!(!ds.contains(5));
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_right_drops_bottom_bits() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(5);
+        ds.insert(6);
+        ds.insert(7);
+        ds.shift_right(2);
+        // 6 and 7 are lost (shifted past end), 5→7
+        assert!(ds.contains(7));
+        assert_eq!(ds.len(), 1);
+    }
+
+    #[test]
+    fn test_shift_right_clears_head() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(0);
+        ds.insert(1);
+        ds.shift_right(2);
+        // 0→2, 1→3, positions 0 and 1 should be clean
+        assert!(ds.contains(2));
+        assert!(ds.contains(3));
+        assert!(!ds.contains(0));
+        assert!(!ds.contains(1));
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_right_exceeds_len() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(3);
+        ds.shift_right(10);
+        assert!(ds.is_empty());
+    }
+
+    #[test]
+    fn test_shift_zero_is_noop() {
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(3);
+        ds.insert(5);
+        ds.shift_left(0);
+        assert!(ds.contains(3));
+        assert!(ds.contains(5));
+        assert_eq!(ds.len(), 2);
+        ds.shift_right(0);
+        assert!(ds.contains(3));
+        assert!(ds.contains(5));
+        assert_eq!(ds.len(), 2);
     }
 }

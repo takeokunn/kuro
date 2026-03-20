@@ -1,7 +1,9 @@
 //! Unit tests for FFI abstraction: session management, encode delegates, sync output.
 
-use super::global::{shutdown_session, with_session};
-use super::session::TerminalSession;
+use super::global::{attach_session, detach_session, list_sessions, shutdown_session, with_session, TERMINAL_SESSIONS};
+use super::session::{SessionState, TerminalSession};
+use crate::error::KuroError;
+use crate::ffi::error::StateError;
 use crate::types::cell::SgrAttributes;
 use crate::types::color::Color;
 
@@ -11,6 +13,8 @@ pub(super) fn make_session() -> TerminalSession {
         core: crate::TerminalCore::new(24, 80),
         #[cfg(unix)]
         pty: None,
+        command: String::new(),
+        state: SessionState::Bound,
     }
 }
 
@@ -50,8 +54,9 @@ fn test_encode_attrs_delegates_to_codec() {
 
 #[test]
 fn test_with_session_no_session() {
-    shutdown_session().ok();
-    let result = with_session(|_s| Ok(()));
+    // Use a session ID that will never be created by real usage.
+    shutdown_session(u64::MAX).ok();
+    let result = with_session(u64::MAX, |_s| Ok(()));
     assert!(
         result.is_err(),
         "with_session should return Err when no session is initialized"
@@ -60,7 +65,8 @@ fn test_with_session_no_session() {
 
 #[test]
 fn test_shutdown_session() {
-    let result = shutdown_session();
+    // Shutting down a non-existent session should succeed (no-op).
+    let result = shutdown_session(u64::MAX);
     assert!(
         result.is_ok(),
         "shutdown_session should succeed even with no active session"
@@ -557,6 +563,161 @@ fn test_is_process_alive_no_pty() {
 /// With the full_dirty approach, consume_scroll_events always returns (0, 0)
 /// for full-screen scrolls.  This test verifies the scrollback path still
 /// returns (0, 0) and that full_dirty is cleared by take_dirty_lines.
+// ---------------------------------------------------------------------------
+// Global session state: detach / attach / list
+// ---------------------------------------------------------------------------
+
+/// Insert a fresh `Bound` session under an arbitrary sentinel key.
+/// The caller must clean up with `shutdown_session(id)` when done.
+fn insert_bound_session(id: u64) {
+    let session = make_session(); // state: SessionState::Bound
+    TERMINAL_SESSIONS.lock().unwrap().insert(id, session);
+}
+
+/// Insert a fresh `Detached` session under an arbitrary sentinel key.
+fn insert_detached_session(id: u64) {
+    let mut session = make_session();
+    session.set_detached();
+    TERMINAL_SESSIONS.lock().unwrap().insert(id, session);
+}
+
+/// detach_session transitions a Bound session to Detached and returns Ok.
+#[test]
+fn test_detach_session_bound_to_detached() {
+    const ID: u64 = u64::MAX - 20;
+    shutdown_session(ID).ok();
+    insert_bound_session(ID);
+
+    let result = detach_session(ID);
+    assert!(result.is_ok(), "detach_session should succeed for a Bound session");
+
+    let is_detached = TERMINAL_SESSIONS
+        .lock()
+        .unwrap()
+        .get(&ID)
+        .map(|s| s.is_detached())
+        .unwrap_or(false);
+    assert!(is_detached, "session must be Detached after detach_session");
+
+    shutdown_session(ID).ok();
+}
+
+/// attach_session transitions a Detached session to Bound and returns Ok.
+#[test]
+fn test_attach_session_detached_to_bound() {
+    const ID: u64 = u64::MAX - 21;
+    shutdown_session(ID).ok();
+    insert_detached_session(ID);
+
+    let result = attach_session(ID);
+    assert!(result.is_ok(), "attach_session should succeed for a Detached session");
+
+    let is_detached = TERMINAL_SESSIONS
+        .lock()
+        .unwrap()
+        .get(&ID)
+        .map(|s| s.is_detached())
+        .unwrap_or(true);
+    assert!(!is_detached, "session must be Bound (not Detached) after attach_session");
+
+    shutdown_session(ID).ok();
+}
+
+/// attach_session on a Bound session returns Err(TerminalSessionExists).
+///
+/// This guard prevents two Emacs buffers from owning the same session
+/// simultaneously with competing render loops.
+#[test]
+fn test_attach_session_already_bound_returns_terminal_session_exists() {
+    const ID: u64 = u64::MAX - 22;
+    shutdown_session(ID).ok();
+    insert_bound_session(ID); // already Bound
+
+    let result = attach_session(ID);
+    assert!(
+        result.is_err(),
+        "attach_session must return Err when the session is already Bound"
+    );
+    assert!(
+        matches!(
+            result.unwrap_err(),
+            KuroError::State(StateError::TerminalSessionExists)
+        ),
+        "error must be TerminalSessionExists"
+    );
+
+    shutdown_session(ID).ok();
+}
+
+/// detach_session on a nonexistent ID returns Err(NoTerminalSession).
+#[test]
+fn test_detach_session_nonexistent_returns_no_session() {
+    const ID: u64 = u64::MAX - 23;
+    shutdown_session(ID).ok(); // ensure absent
+
+    let result = detach_session(ID);
+    assert!(result.is_err(), "detach_session must return Err for nonexistent ID");
+    assert!(
+        matches!(result.unwrap_err(), KuroError::State(StateError::NoTerminalSession)),
+        "error must be NoTerminalSession"
+    );
+}
+
+/// attach_session on a nonexistent ID returns Err(NoTerminalSession).
+#[test]
+fn test_attach_session_nonexistent_returns_no_session() {
+    const ID: u64 = u64::MAX - 24;
+    shutdown_session(ID).ok(); // ensure absent
+
+    let result = attach_session(ID);
+    assert!(result.is_err(), "attach_session must return Err for nonexistent ID");
+    assert!(
+        matches!(result.unwrap_err(), KuroError::State(StateError::NoTerminalSession)),
+        "error must be NoTerminalSession"
+    );
+}
+
+/// list_sessions tuple order: (id, command, is_detached, is_alive) at indices 0..3.
+///
+/// A Detached session must have is_detached=true at index 2 and
+/// is_alive=true at index 3 (pty:None sessions always report alive).
+/// This is the Rust-side mirror of the Elisp nth-index regression test.
+#[test]
+fn test_list_sessions_tuple_order_detached() {
+    const ID: u64 = u64::MAX - 25;
+    shutdown_session(ID).ok();
+    insert_detached_session(ID); // Detached, command = ""
+
+    let sessions = list_sessions();
+    let entry = sessions.iter().find(|(id, ..)| *id == ID);
+    assert!(entry.is_some(), "list_sessions must include the inserted session");
+
+    let (found_id, _command, is_detached, is_alive) = entry.unwrap();
+    assert_eq!(*found_id, ID, "index 0 must be the session ID");
+    assert!(*is_detached, "index 2 must be is_detached=true for a Detached session");
+    assert!(*is_alive, "index 3 must be is_alive=true (pty:None reports alive)");
+
+    shutdown_session(ID).ok();
+}
+
+/// list_sessions: a Bound session has is_detached=false at index 2.
+#[test]
+fn test_list_sessions_bound_session_not_detached() {
+    const ID: u64 = u64::MAX - 26;
+    shutdown_session(ID).ok();
+    insert_bound_session(ID);
+
+    let sessions = list_sessions();
+    let entry = sessions.iter().find(|(id, ..)| *id == ID);
+    assert!(entry.is_some(), "list_sessions must include the inserted session");
+
+    let (_, _, is_detached, is_alive) = entry.unwrap();
+    assert!(!is_detached, "index 2 must be is_detached=false for a Bound session");
+    assert!(*is_alive, "index 3 must be is_alive=true for a Bound session with pty:None");
+
+    shutdown_session(ID).ok();
+}
+
 #[test]
 fn test_consume_scroll_events_suppressed_during_scrollback() {
     let mut session = make_session();

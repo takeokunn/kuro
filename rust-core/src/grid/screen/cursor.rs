@@ -92,15 +92,25 @@ impl Screen {
     /// Internal line-feed that operates on an already-dispatched screen.
     /// `is_primary` is forwarded to `scroll_up_impl` so alternate-screen
     /// scrolls never save to scrollback.
+    ///
+    /// Per VT220: scrolling the scroll region is only triggered when the cursor
+    /// is **within** [top, bottom) **and** at the bottom margin (cursor.row ==
+    /// bottom - 1).  If the cursor is outside the scroll region (above top or
+    /// below bottom), the cursor simply moves down one row, clamped at rows - 1.
     #[inline]
     pub(super) fn line_feed_impl(&mut self, bg: Color, is_primary: bool) {
         self.cursor.pending_wrap = false;
         let new_row = self.cursor.row + 1;
+        let rows = self.rows as usize;
 
-        if new_row >= self.scroll_region.bottom {
+        // Cursor must be inside [top, bottom) to trigger a region scroll.
+        let in_region = self.cursor.row >= self.scroll_region.top
+            && self.cursor.row < self.scroll_region.bottom;
+
+        if in_region && new_row >= self.scroll_region.bottom {
             self.scroll_up_impl(1, bg, is_primary);
         } else {
-            self.cursor.row = new_row;
+            self.cursor.row = new_row.min(rows - 1);
         }
     }
 

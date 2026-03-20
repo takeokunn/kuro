@@ -8,6 +8,19 @@
 use crate::pty::Pty;
 use crate::{Result, TerminalCore};
 
+/// Lifecycle state of a terminal session.
+///
+/// A session starts as `Bound` (attached to an Emacs buffer).  When the user
+/// kills the buffer without terminating the process, it becomes `Detached` and
+/// can later be re-attached via `kuro-attach`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionState {
+    /// Attached to an Emacs buffer and actively rendered.
+    Bound,
+    /// PTY process is alive but no buffer is attached.
+    Detached,
+}
+
 /// Terminal session state (shared by all FFI implementations)
 ///
 /// This struct contains the actual terminal logic, independent of any
@@ -18,6 +31,10 @@ pub struct TerminalSession {
     /// PTY handle (Unix only)
     #[cfg(unix)]
     pub(super) pty: Option<Pty>,
+    /// Shell command used to spawn this session (for `kuro-list-sessions`)
+    pub(super) command: String,
+    /// Current lifecycle state
+    pub(super) state: SessionState,
 }
 
 // TerminalSession Facade
@@ -48,11 +65,17 @@ impl TerminalSession {
             Ok(Self {
                 core,
                 pty: Some(pty),
+                command: command.to_string(),
+                state: SessionState::Bound,
             })
         }
 
         #[cfg(not(unix))]
-        Ok(Self { core })
+        Ok(Self {
+            core,
+            command: command.to_string(),
+            state: SessionState::Bound,
+        })
     }
 
     /// Send input to PTY
@@ -264,6 +287,41 @@ impl TerminalSession {
     #[inline(always)]
     pub fn is_process_alive(&self) -> bool {
         true
+    }
+
+    /// Return the shell command used to spawn this session.
+    #[inline(always)]
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// Return `true` if this session is in the `Detached` state.
+    #[inline(always)]
+    pub fn is_detached(&self) -> bool {
+        self.state == SessionState::Detached
+    }
+
+    /// Mark this session as `Detached` (keeps PTY alive, no buffer attached).
+    #[inline(always)]
+    pub fn set_detached(&mut self) {
+        self.state = SessionState::Detached;
+    }
+
+    /// Mark this session as `Bound` (re-attaching it to a buffer).
+    #[inline(always)]
+    pub fn set_bound(&mut self) {
+        self.state = SessionState::Bound;
+    }
+
+    /// Return the PID of the PTY child process, if available.
+    ///
+    /// Returns `None` on non-Unix platforms or when no PTY is attached.
+    pub fn pid(&self) -> Option<u32> {
+        #[cfg(unix)]
+        if let Some(ref pty) = self.pty {
+            return Some(pty.pid());
+        }
+        None
     }
 
     /// Get mouse pixel mode state (?1016)

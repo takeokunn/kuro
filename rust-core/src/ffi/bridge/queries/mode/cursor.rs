@@ -10,12 +10,12 @@ use super::super::super::{lock_session, query_session};
 
 /// Get cursor position as a (ROW . COL) cons pair
 #[defun]
-fn kuro_core_get_cursor<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_cursor<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
     // Returns a cons pair (row . col) — cannot use query_session<T: IntoLisp> since
     // cons pairs require two separate into_lisp calls and do not fit a single T.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let global = lock_session!();
-        let (row, col) = if let Some(ref session) = *global {
+        let (row, col) = if let Some(session) = global.get(&session_id) {
             session.get_cursor()
         } else {
             (0, 0)
@@ -42,8 +42,8 @@ fn kuro_core_get_cursor<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 
 /// Get cursor visibility (DECTCEM state: t if visible, nil if hidden)
 #[defun]
-fn kuro_core_get_cursor_visible<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    query_session(env, true, |s| Ok(s.get_cursor_visible()))
+fn kuro_core_get_cursor_visible<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    query_session(env, session_id, true, |s| Ok(s.get_cursor_visible()))
 }
 
 /// Get cursor shape as an integer (DECSCUSR value)
@@ -56,6 +56,6 @@ fn kuro_core_get_cursor_visible<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 ///   5 = BlinkingBar
 ///   6 = SteadyBar
 #[defun]
-fn kuro_core_get_cursor_shape<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    query_session(env, 0i64, |s| Ok(i64::from(s.get_cursor_shape())))
+fn kuro_core_get_cursor_shape<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    query_session(env, session_id, 0i64, |s| Ok(i64::from(s.get_cursor_shape())))
 }

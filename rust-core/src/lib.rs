@@ -38,7 +38,7 @@ pub use grid::screen::Screen;
 pub use types::{cell::Cell, cell::UnderlineStyle, color::Color, cursor::CursorShape};
 
 // Re-export FFI abstraction layer
-pub use ffi::{EmacsModuleFFI, KuroFFI, RawFFI, TerminalSession, TERMINAL_SESSION};
+pub use ffi::{EmacsModuleFFI, KuroFFI, RawFFI, SessionState, TerminalSession, TERMINAL_SESSIONS};
 
 /// Result type for Kuro operations
 pub type Result<T> = std::result::Result<T, KuroError>;

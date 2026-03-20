@@ -18,17 +18,19 @@ mod render;
 
 pub use emacs_impl::EmacsModuleFFI;
 
-/// Lock `TERMINAL_SESSION` and map mutex-poison errors to `KuroError::State`.
+/// Lock `TERMINAL_SESSIONS` and map mutex-poison errors to `KuroError::State`.
 ///
-/// The macro expands to the locked guard; the caller is responsible for binding
-/// it with `let` or `let mut` as needed:
+/// The macro expands to the locked guard (a `MutexGuard<HashMap<u64, TerminalSession>>`).
+/// The caller then indexes into it with `global.get(&id)` or `global.get_mut(&id)`.
+///
 /// ```rust,ignore
-/// let global = lock_session!();          // immutable guard
-/// let mut global = lock_session!();      // mutable guard (same macro)
+/// let global = lock_session!();                      // immutable guard
+/// let mut global = lock_session!();                  // mutable guard
+/// if let Some(session) = global.get_mut(&session_id) { ... }
 /// ```
 macro_rules! lock_session {
     () => {
-        crate::ffi::abstraction::TERMINAL_SESSION
+        crate::ffi::abstraction::TERMINAL_SESSIONS
             .lock()
             .map_err(|_e| crate::error::KuroError::State(crate::ffi::error::StateError::NoTerminalSession))?
     };
@@ -67,18 +69,13 @@ where
     }
 }
 
-/// Helper for FFI functions that read a single value from the active session.
+/// Helper for FFI functions that read a single value from a specific session.
 ///
-/// Calls `f(session)` when a session is active; returns `default` otherwise.
+/// Calls `f(session)` when the session exists; returns `default` otherwise.
 /// Wraps in `catch_panic` automatically.
-///
-/// # Constraints
-/// Both `T` and `F` must be [`std::panic::UnwindSafe`].  For closures that
-/// capture only `&` references or no data at all, this is satisfied
-/// automatically.  Use [`std::panic::AssertUnwindSafe`] if the closure
-/// captures `&mut` data (rare for read-only queries).
 pub(crate) fn query_session<'e, T, F>(
     env: &'e Env,
+    session_id: u64,
     default: T,
     f: F,
 ) -> EmacsResult<Value<'e>>
@@ -89,7 +86,7 @@ where
 {
     catch_panic(env, || {
         let global = lock_session!();
-        if let Some(ref session) = *global {
+        if let Some(session) = global.get(&session_id) {
             f(session)
         } else {
             Ok(default)
@@ -97,18 +94,13 @@ where
     })
 }
 
-/// Helper for FFI functions that mutate the active session.
+/// Helper for FFI functions that mutate a specific session.
 ///
-/// Calls `f(session)` when a session is active; returns `default` otherwise.
+/// Calls `f(session)` when the session exists; returns `default` otherwise.
 /// Wraps in `catch_panic` automatically.
-///
-/// # Constraints
-/// Both `T` and `F` must be [`std::panic::UnwindSafe`].  For closures that
-/// capture only owned values or no data at all, this is satisfied
-/// automatically.  Use [`std::panic::AssertUnwindSafe`] if the closure
-/// captures references to non-`UnwindSafe` data.
 pub(crate) fn query_session_mut<'e, T, F>(
     env: &'e Env,
+    session_id: u64,
     default: T,
     f: F,
 ) -> EmacsResult<Value<'e>>
@@ -119,7 +111,7 @@ where
 {
     catch_panic(env, || {
         let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        if let Some(session) = global.get_mut(&session_id) {
             f(session)
         } else {
             Ok(default)
@@ -130,34 +122,25 @@ where
 /// Helper for FFI functions returning `Option<T>`.
 ///
 /// Unlike [`query_session_mut`], the closure returns `Result<Option<T>>`.
-/// `Some(v)` is converted to the corresponding Lisp value; `None` becomes `false`.
-/// When no session is active, also returns `false` — callers cannot distinguish
-/// "no session" from "session returned None".
+/// `Some(v)` maps to the corresponding Lisp value; `None` and "no session"
+/// both become `false`.
 ///
 /// `AssertUnwindSafe` is applied unconditionally because the closure captures
-/// `&mut TerminalSession`, which is not `UnwindSafe`. The session mutex is
-/// dropped before any unwind path executes.
-///
-/// # Constraints
-/// - Only valid when `None` maps to the Emacs `nil`/`false` value.
-/// - Closure errors are logged via `env.message` but do NOT signal an Emacs
-///   `error` condition (unlike [`catch_panic`]).
-///
-/// # See Also
-/// - [`query_session`] — for closures returning `Result<T>` with `&TerminalSession`
-/// - [`query_session_mut`] — for closures returning `Result<T>` with `&mut TerminalSession`
+/// `&mut TerminalSession`.
 #[inline]
 pub(crate) fn query_session_opt<'e, T, F>(
     env: &'e Env,
+    session_id: u64,
     f: F,
 ) -> EmacsResult<Value<'e>>
 where
     T: IntoLisp<'e>,
-    F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Result<Option<T>, KuroError> + std::panic::UnwindSafe,
+    F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Result<Option<T>, KuroError>
+        + std::panic::UnwindSafe,
 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        if let Some(session) = global.get_mut(&session_id) {
             f(session)
         } else {
             Ok(None)

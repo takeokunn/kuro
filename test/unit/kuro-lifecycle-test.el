@@ -20,6 +20,8 @@
 ;;   Group 2: kuro-send-interrupt / kuro-send-sigstop / kuro-send-sigquit
 ;;   Group 3: kuro-kill         (guards on derived-mode-p; calls kuro--shutdown)
 ;;   Group 4: kuro-create guard (must not attempt a real PTY)
+;;   Group 5: kuro-list-sessions (nth-index regression: idx2=detached-p, idx3=alive-p)
+;;   Group 6: kuro-kill detach branch (yes-or-no-p nil → kuro-core-detach, not shutdown)
 
 ;;; Code:
 
@@ -66,7 +68,10 @@
                kuro-core-scroll-down
                kuro-core-consume-scroll-events
                kuro-core-clear-scrollback
-               kuro-core-set-scrollback-max-lines))
+               kuro-core-set-scrollback-max-lines
+               kuro-core-detach
+               kuro-core-attach
+               kuro-core-list-sessions))
   (unless (fboundp sym)
     (fset sym (lambda (&rest _) nil))))
 
@@ -309,6 +314,142 @@ We verify kuro-create does not succeed silently when the stub errors."
              (lambda () (error "module not available"))))
     (should-error (kuro-create "echo hello" "*kuro-test*")
                   :type 'error)))
+
+;;; ── Group 5: kuro-list-sessions ─────────────────────────────────────────────
+;;
+;; kuro-list-sessions calls kuro-core-list-sessions and formats results into a
+;; *kuro-sessions* buffer.  Each entry from Rust is (SESSION-ID COMMAND
+;; DETACHED-P ALIVE-P) — indices 0, 1, 2, 3 respectively.  The critical
+;; regression test covers the historical nth-index bug where alive-p and
+;; detached-p were bound to the wrong indices.
+
+(ert-deftest kuro-lifecycle--list-sessions-no-sessions ()
+  "kuro-list-sessions prints a message when kuro-core-list-sessions returns nil."
+  (let ((messages nil))
+    (cl-letf (((symbol-function 'kuro-core-list-sessions)
+               (lambda () nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) messages))))
+      (kuro-list-sessions)
+      (should (cl-some (lambda (m) (string-match-p "No active" m)) messages)))))
+
+(ert-deftest kuro-lifecycle--list-sessions-nth-index-regression ()
+  "Regression: entry (id cmd nil t) must show 'running' in the table row.
+With swapped nth indices the original bug made (nth 3 entry)=t feed
+detached-p, producing 'detached' for a live session.  This test pins
+the correct mapping: index 2 = is_detached, index 3 = is_alive.
+
+Note: the footer text always contains the word 'detached', so we use a
+row-scoped regex (matching 'ID N ... status') instead of a buffer-wide check."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             ;; id=0, cmd="bash", detached=nil(idx2), alive=t(idx3)
+             (lambda () '((0 "bash" nil t))))
+            ((symbol-function 'display-buffer)
+             (lambda (_buf) nil)))
+    (kuro-list-sessions)
+    (with-current-buffer "*kuro-sessions*"
+      ;; The table row for ID 0 must show "running" in the status column.
+      (should (string-match-p "ID 0.*running" (buffer-string)))
+      ;; The table row must NOT show "detached" as the status for ID 0.
+      ;; (Swapped bug: alive-p=t at index 3 → detached-p=t → wrong "detached".)
+      (should-not (string-match-p "ID 0.*detached" (buffer-string))))))
+
+(ert-deftest kuro-lifecycle--list-sessions-detached-status ()
+  "A session with detached-p=t (index 2) shows status 'detached'."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () '((1 "/bin/bash" t t))))  ; detached=t, alive=t
+            ((symbol-function 'display-buffer)
+             (lambda (_buf) nil)))
+    (kuro-list-sessions)
+    (with-current-buffer "*kuro-sessions*"
+      (should (string-match-p "detached" (buffer-string))))))
+
+(ert-deftest kuro-lifecycle--list-sessions-dead-status ()
+  "A session with detached-p=nil and alive-p=nil (both false) shows 'dead'."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () '((2 "/bin/sh" nil nil))))  ; detached=nil, alive=nil
+            ((symbol-function 'display-buffer)
+             (lambda (_buf) nil)))
+    (kuro-list-sessions)
+    (with-current-buffer "*kuro-sessions*"
+      (should (string-match-p "dead" (buffer-string))))))
+
+(ert-deftest kuro-lifecycle--list-sessions-shows-command ()
+  "kuro-list-sessions includes the shell command string in the output."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () '((3 "/usr/bin/fish" nil t))))
+            ((symbol-function 'display-buffer)
+             (lambda (_buf) nil)))
+    (kuro-list-sessions)
+    (with-current-buffer "*kuro-sessions*"
+      (should (string-match-p "/usr/bin/fish" (buffer-string))))))
+
+;;; ── Group 6: kuro-kill detach branch ────────────────────────────────────────
+;;
+;; When kuro--initialized is t, kuro--is-process-alive returns t, AND the
+;; user answers "no" to the kill prompt (yes-or-no-p returns nil), kuro-kill
+;; must call kuro-core-detach (not kuro--shutdown) and clear the
+;; kuro--initialized / kuro--session-id state.
+
+(ert-deftest kuro-lifecycle--kill-detaches-when-user-says-no ()
+  "kuro-kill calls kuro-core-detach with the session ID when user says no.
+kuro--initialized must be nil and kuro--session-id must be 0 afterward.
+kuro--shutdown must NOT be called."
+  (with-temp-buffer
+    (setq major-mode 'kuro-mode)
+    (setq-local kuro--initialized t)
+    (setq-local kuro--session-id 99)
+    (let ((detach-called-with nil)
+          (shutdown-called nil))
+      (cl-letf (((symbol-function 'kuro--stop-render-loop)
+                 (lambda () nil))
+                ((symbol-function 'kuro--clear-all-image-overlays)
+                 (lambda () nil))
+                ((symbol-function 'kuro--is-process-alive)
+                 (lambda () t))
+                ;; yes-or-no-p returns nil → user chose "no" → detach path
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (_prompt) nil))
+                ((symbol-function 'kuro-core-detach)
+                 (lambda (id) (setq detach-called-with id)))
+                ((symbol-function 'kuro--shutdown)
+                 (lambda () (setq shutdown-called t)))
+                ((symbol-function 'kill-buffer)
+                 (lambda (_buf) nil)))
+        (kuro-kill)
+        (should (equal detach-called-with 99))
+        (should-not shutdown-called)
+        (should-not kuro--initialized)
+        (should (= kuro--session-id 0))))))
+
+(ert-deftest kuro-lifecycle--kill-destroys-when-user-says-yes ()
+  "kuro-kill calls kuro--shutdown (not kuro-core-detach) when user says yes.
+This complements the detach branch test above."
+  (with-temp-buffer
+    (setq major-mode 'kuro-mode)
+    (setq-local kuro--initialized t)
+    (setq-local kuro--session-id 77)
+    (let ((detach-called nil)
+          (shutdown-called nil))
+      (cl-letf (((symbol-function 'kuro--stop-render-loop)
+                 (lambda () nil))
+                ((symbol-function 'kuro--clear-all-image-overlays)
+                 (lambda () nil))
+                ((symbol-function 'kuro--is-process-alive)
+                 (lambda () t))
+                ;; yes-or-no-p returns t → user chose "yes" → destroy path
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (_prompt) t))
+                ((symbol-function 'kuro-core-detach)
+                 (lambda (_id) (setq detach-called t)))
+                ((symbol-function 'kuro--shutdown)
+                 (lambda () (setq shutdown-called t)))
+                ((symbol-function 'kill-buffer)
+                 (lambda (_buf) nil)))
+        (kuro-kill)
+        (should shutdown-called)
+        (should-not detach-called)))))
 
 (provide 'kuro-lifecycle-test)
 

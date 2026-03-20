@@ -50,8 +50,11 @@ pub mod safe_ref;
 pub mod test_terminal;
 
 // Re-export the trait and implementations
-pub use abstraction::{init_session, shutdown_session, with_session, with_session_readonly};
-pub use abstraction::{TerminalSession, TERMINAL_SESSION};
+pub use abstraction::{
+    attach_session, detach_session, init_session, list_sessions, shutdown_session,
+    with_session, with_session_readonly,
+};
+pub use abstraction::{SessionState, TerminalSession, TERMINAL_SESSIONS};
 pub use bridge::EmacsModuleFFI;
 pub use error::{InitError, RuntimeError, StateError};
 pub use fallback::RawFFI;

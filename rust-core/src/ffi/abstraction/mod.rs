@@ -18,6 +18,7 @@ mod tests_integration;
 
 pub use super::kuro_ffi::{emacs_env, emacs_value, KuroFFI};
 pub use global::{
-    init_session, shutdown_session, with_session, with_session_readonly, TERMINAL_SESSION,
+    attach_session, detach_session, init_session, list_sessions, shutdown_session,
+    with_session, with_session_readonly, TERMINAL_SESSIONS,
 };
-pub use session::TerminalSession;
+pub use session::{SessionState, TerminalSession};

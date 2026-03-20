@@ -6,32 +6,32 @@ use emacs::defun;
 use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 
 use crate::error::KuroError;
-use super::{lock_session, query_session_opt};
+use super::{lock_session, query_session, query_session_opt};
 
 /// Get the current working directory from OSC 7 and atomically clear the dirty flag.
 ///
 /// Returns the CWD path string if one has been set since the last call,
 /// or nil if no CWD update is pending.
 #[defun]
-fn kuro_core_get_cwd<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    query_session_opt(env, |s| Ok(s.take_cwd_if_dirty()))
+fn kuro_core_get_cwd<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    query_session_opt(env, session_id, |s| Ok(s.take_cwd_if_dirty()))
 }
 
-/// Drain a Vec from the active session under a lock, handling panics and missing sessions.
+/// Drain a Vec from the specified session under a lock, handling panics and missing sessions.
 ///
 /// Both `poll_clipboard_actions` and `poll_prompt_marks` follow the same pattern:
 /// acquire the global session lock, drain a Vec, and return it for Emacs list building.
 /// This helper encapsulates the lock + catch_unwind + drain boilerplate so each caller
 /// only needs to supply the per-session drain closure and the panic message label.
 #[inline]
-fn drain_session_vec<T, F>(env: &Env, label: &str, take: F) -> Vec<T>
+fn drain_session_vec<T, F>(env: &Env, session_id: u64, label: &str, take: F) -> Vec<T>
 where
     F: FnOnce(&mut crate::ffi::abstraction::TerminalSession) -> Vec<T>
         + std::panic::UnwindSafe,
 {
     catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        if let Some(session) = global.get_mut(&session_id) {
             Ok::<Vec<_>, KuroError>(take(session))
         } else {
             Ok(Vec::new())
@@ -50,8 +50,8 @@ where
 ///   - ("write" . TEXT) for a write action
 ///   - ("query" . nil) for a query action
 #[defun]
-fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let actions = drain_session_vec(env, "poll_clipboard_actions", |s| s.take_clipboard_actions());
+fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    let actions = drain_session_vec(env, session_id, "poll_clipboard_actions", |s| s.take_clipboard_actions());
 
     let mut list = false.into_lisp(env)?;
     for action in actions.into_iter().rev() {
@@ -78,8 +78,8 @@ fn kuro_core_poll_clipboard_actions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> 
 ///   (MARK-TYPE ROW COL)
 /// where MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end"
 #[defun]
-fn kuro_core_poll_prompt_marks<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    let marks = drain_session_vec(env, "poll_prompt_marks", |s| s.take_prompt_marks());
+fn kuro_core_poll_prompt_marks<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    let marks = drain_session_vec(env, session_id, "poll_prompt_marks", |s| s.take_prompt_marks());
 
     let mut list = false.into_lisp(env)?;
     for event in marks.into_iter().rev() {
@@ -109,8 +109,8 @@ fn kuro_core_poll_prompt_marks<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// nil otherwise.  Used by Emacs to trigger immediate render cycles
 /// for low-latency streaming output (AI agents, etc.).
 #[defun]
-fn kuro_core_has_pending_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    super::query_session(env, false, |s| Ok(s.has_pending_output()))
+fn kuro_core_has_pending_output<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    query_session(env, session_id, false, |s| Ok(s.has_pending_output()))
 }
 
 /// Check if the PTY child process is still running.
@@ -120,8 +120,8 @@ fn kuro_core_has_pending_output<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// process exits (e.g., user types `exit').
 /// Returns nil (process gone) when no session is active.
 #[defun]
-fn kuro_core_is_process_alive<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
-    super::query_session(env, false, |s| Ok(s.is_process_alive()))
+fn kuro_core_is_process_alive<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    query_session(env, session_id, false, |s| Ok(s.is_process_alive()))
 }
 
 /// Get palette overrides from OSC 4 as a list of (index r g b) entries.
@@ -129,12 +129,12 @@ fn kuro_core_is_process_alive<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// Returns a list of (INDEX R G B) for each palette entry overridden via OSC 4.
 /// Only returns non-default (overridden) entries.
 #[defun]
-fn kuro_core_get_palette_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_palette_updates<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
     let updates = catch_unwind(AssertUnwindSafe(|| {
         let global = lock_session!();
         Ok::<Vec<(u8, u8, u8, u8)>, KuroError>(
             global
-                .as_ref()
+                .get(&session_id)
                 .map(|s| s.get_palette_updates())
                 .unwrap_or_default(),
         )
@@ -165,10 +165,10 @@ fn kuro_core_get_palette_updates<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
 /// a u32 FFI color encoding (0xFF000000 = default/unset).
 /// Also clears the dirty flag atomically.
 #[defun]
-fn kuro_core_get_default_colors<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_default_colors<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
     let result = catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        if let Some(session) = global.get_mut(&session_id) {
             let dirty = session.take_default_colors_dirty();
             if dirty {
                 let (fg, bg, cur) = session.get_default_colors();

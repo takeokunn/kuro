@@ -11,10 +11,10 @@ use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 /// The Elisp caller should decode: `(base64-decode-string data t)` to get unibyte PNG bytes
 /// suitable for `(create-image bytes 'png t)`.
 #[defun]
-fn kuro_core_get_image<'e>(env: &'e Env, image_id: u32) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_image<'e>(env: &'e Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'e>> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let global = lock_session!();
-        if let Some(ref session) = *global {
+        if let Some(session) = global.get(&session_id) {
             Ok::<String, KuroError>(session.get_image_png_base64(image_id))
         } else {
             Ok(String::new())
@@ -47,10 +47,10 @@ fn kuro_core_get_image<'e>(env: &'e Env, image_id: u32) -> EmacsResult<Value<'e>
 /// This is separate from `kuro-core-poll-updates-with-faces` for backward compatibility.
 /// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
 #[defun]
-fn kuro_core_poll_image_notifications<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+fn kuro_core_poll_image_notifications<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
     let notifications = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        if let Some(session) = global.get_mut(&session_id) {
             Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications())
         } else {
             Ok(Vec::new())

@@ -2,6 +2,10 @@
 //!
 //! `EmacsModuleFFI` is the concrete type that implements `KuroFFI` using the
 //! high-level bindings from the `emacs` crate.
+//!
+//! NOTE: This implementation uses session ID 0 for all operations.  It exists
+//! for legacy compatibility and is no longer the primary entry point; all new
+//! code goes through the `#[defun]` functions in the other bridge modules.
 
 use std::ptr;
 use std::result::Result;
@@ -12,6 +16,9 @@ use crate::ffi::abstraction::{
     KuroFFI,
 };
 
+/// Legacy session ID used by the `KuroFFI` trait implementation.
+const LEGACY_SESSION_ID: u64 = 0;
+
 /// Primary FFI implementation using emacs-module-rs
 ///
 /// This is the default implementation that leverages the high-level
@@ -20,45 +27,30 @@ pub struct EmacsModuleFFI;
 
 impl KuroFFI for EmacsModuleFFI {
     fn init(_env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        // Convert i64 to u16 safely
         let rows = rows as u16;
         let cols = cols as u16;
 
-        // Initialize session
         match init_session(command, rows, cols) {
-            Ok(_) => {
-                // Return a non-null pointer to indicate success
-                ptr::dangling_mut::<emacs_value>()
-            }
-            Err(_) => {
-                // Return null to indicate failure
-                ptr::null_mut()
-            }
+            Ok(_id) => ptr::dangling_mut::<emacs_value>(),
+            Err(_) => ptr::null_mut(),
         }
     }
 
     fn poll_updates(_env: *mut emacs_env, _max_updates: i64) -> *mut emacs_value {
         let result: Result<Vec<(usize, String)>, KuroError> =
-            with_session(|session| {
+            with_session(LEGACY_SESSION_ID, |session| {
                 session.poll_output()?;
                 Ok(session.get_dirty_lines())
             });
 
         match result {
-            Ok(_) => {
-                // Return a non-null pointer to indicate success
-                // (The actual value is ignored in the bridge layer)
-                ptr::dangling_mut::<emacs_value>()
-            }
-            Err(_) => {
-                // Return null to indicate failure
-                ptr::null_mut()
-            }
+            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Err(_) => ptr::null_mut(),
         }
     }
 
     fn send_key(_env: *mut emacs_env, data: &[u8]) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.send_input(data)?;
             Ok(())
         });
@@ -73,7 +65,7 @@ impl KuroFFI for EmacsModuleFFI {
         let rows = rows as u16;
         let cols = cols as u16;
 
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.resize(rows, cols)?;
             Ok(())
         });
@@ -85,14 +77,14 @@ impl KuroFFI for EmacsModuleFFI {
     }
 
     fn shutdown(_env: *mut emacs_env) -> *mut emacs_value {
-        match shutdown_session() {
+        match shutdown_session(LEGACY_SESSION_ID) {
             Ok(_) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }
 
     fn get_cursor(_env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session_readonly(|session| {
+        let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
             let (row, col) = session.get_cursor();
             Ok(format!("{}:{}", row, col))
         });
@@ -110,7 +102,7 @@ impl KuroFFI for EmacsModuleFFI {
             max_lines as usize
         };
 
-        let result = with_session_readonly(|session| Ok(session.get_scrollback(max_lines)));
+        let result = with_session_readonly(LEGACY_SESSION_ID, |session| Ok(session.get_scrollback(max_lines)));
 
         match result {
             Ok(_) => ptr::dangling_mut::<emacs_value>(),
@@ -119,7 +111,7 @@ impl KuroFFI for EmacsModuleFFI {
     }
 
     fn clear_scrollback(_env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.clear_scrollback();
             Ok(())
         });
@@ -131,7 +123,7 @@ impl KuroFFI for EmacsModuleFFI {
     }
 
     fn set_scrollback_max_lines(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.set_scrollback_max_lines(max_lines as usize);
             Ok(())
         });

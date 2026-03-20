@@ -1,11 +1,14 @@
-//! Session lifecycle: init / send_key / resize / shutdown
+//! Session lifecycle: init / send_key / resize / shutdown / detach / attach / list
 
-use super::{catch_panic, lock_session, EmacsModuleFFI};
-use crate::ffi::abstraction::{with_session, KuroFFI};
+use super::{catch_panic, lock_session};
+use crate::ffi::abstraction::{attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session};
 use emacs::defun;
-use emacs::{Env, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 
 /// Initialize Kuro with the given shell command and terminal dimensions.
+///
+/// Returns the session ID (a non-negative integer) on success, or nil on failure.
+/// The first session returns 0; subsequent sessions return incrementing values.
 ///
 /// ROWS and COLS must match the actual Emacs window dimensions so that the PTY
 /// is created with the correct size from the start.  Spawning the shell with the
@@ -20,24 +23,18 @@ fn kuro_core_init<'e>(
     cols: u16,
 ) -> EmacsResult<Value<'e>> {
     catch_panic(env, || {
-        // Use the emacs-module-rs implementation for the low-level call
-        let result = EmacsModuleFFI::init(std::ptr::null_mut(), &command, rows as i64, cols as i64);
-
-        if result.is_null() {
-            Err(crate::ffi::error::ffi_error("Failed to initialize terminal"))
-        } else {
-            Ok(true)
-        }
+        let session_id = init_session(&command, rows, cols)?;
+        Ok(session_id as i64)
     })
 }
 
 /// Send key input to the terminal
 #[defun]
-fn kuro_core_send_key<'e>(env: &'e Env, data: String) -> EmacsResult<Value<'e>> {
+fn kuro_core_send_key<'e>(env: &'e Env, session_id: u64, data: String) -> EmacsResult<Value<'e>> {
     let byte_vec: Vec<u8> = data.into_bytes();
 
     catch_panic(env, || {
-        let result = with_session(|session| {
+        let result = with_session(session_id, |session| {
             session.send_input(&byte_vec)?;
             Ok(())
         });
@@ -51,24 +48,92 @@ fn kuro_core_send_key<'e>(env: &'e Env, data: String) -> EmacsResult<Value<'e>> 
 
 /// Resize the terminal
 #[defun]
-fn kuro_core_resize<'e>(env: &'e Env, rows: u16, cols: u16) -> EmacsResult<Value<'e>> {
+fn kuro_core_resize<'e>(env: &'e Env, session_id: u64, rows: u16, cols: u16) -> EmacsResult<Value<'e>> {
     catch_panic(env, || {
-        let mut global = lock_session!();
-        if let Some(ref mut session) = *global {
+        let result = with_session(session_id, |session| {
             session.resize(rows, cols)?;
-            Ok(true)
-        } else {
-            Ok(false)
+            Ok(())
+        });
+        match result {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
         }
     })
 }
 
-/// Shutdown the terminal session
+/// Shutdown the terminal session and release all resources.
+///
+/// Removes the session from the global map, dropping the PTY and killing
+/// the child process.
 #[defun]
-fn kuro_core_shutdown<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+fn kuro_core_shutdown<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
     catch_panic(env, || {
-        let mut global = lock_session!();
-        *global = None;
+        shutdown_session(session_id)?;
         Ok(true)
     })
+}
+
+/// Detach a session from its buffer, keeping the PTY process alive.
+///
+/// The session remains in the global map with `SessionState::Detached`.
+/// Use `kuro-list-sessions` to enumerate detached sessions and
+/// `kuro-core-attach` to reattach one to a new buffer.
+#[defun]
+fn kuro_core_detach<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || {
+        detach_session(session_id)?;
+        Ok(true)
+    })
+}
+
+/// Reattach a detached session to a new Emacs buffer.
+///
+/// Marks the session as `Bound`.  The caller is responsible for setting up
+/// the new buffer (kuro-mode, render loop, etc.) on the Elisp side.
+#[defun]
+fn kuro_core_attach<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || {
+        attach_session(session_id)?;
+        Ok(true)
+    })
+}
+
+/// Return the PID of the PTY child process for the given session.
+///
+/// Returns the PID as an integer, or 0 if the session does not exist or
+/// has no PTY (non-Unix builds).
+#[defun]
+fn kuro_core_get_pid<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+    catch_panic(env, || {
+        let global = lock_session!();
+        if let Some(session) = global.get(&session_id) {
+            Ok(session.pid().unwrap_or(0) as i64)
+        } else {
+            Ok(0i64)
+        }
+    })
+}
+
+/// List all active terminal sessions.
+///
+/// Returns a proper list where each element is `(SESSION-ID COMMAND DETACHED-P ALIVE-P)`.
+/// SESSION-ID is an integer, COMMAND is a string, DETACHED-P and ALIVE-P are booleans.
+#[defun]
+fn kuro_core_list_sessions<'e>(env: &'e Env) -> EmacsResult<Value<'e>> {
+    let sessions = list_sessions();
+    let mut list = false.into_lisp(env)?;
+    for (id, command, is_detached, is_alive) in sessions.into_iter().rev() {
+        let id_val = (id as i64).into_lisp(env)?;
+        let cmd_val = command.into_lisp(env)?;
+        let detached_val = is_detached.into_lisp(env)?;
+        let alive_val = is_alive.into_lisp(env)?;
+
+        let nil = false.into_lisp(env)?;
+        let entry = env.cons(alive_val, nil)?;
+        let entry = env.cons(detached_val, entry)?;
+        let entry = env.cons(cmd_val, entry)?;
+        let entry = env.cons(id_val, entry)?;
+        list = env.cons(entry, list)?;
+    }
+    Ok(list)
 }

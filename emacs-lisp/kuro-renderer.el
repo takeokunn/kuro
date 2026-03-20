@@ -78,7 +78,7 @@
 (declare-function kuro-kill "kuro-lifecycle" ())
 
 ;; Bell function provided by the Rust dynamic module at runtime.
-(declare-function kuro-core-take-bell-pending "ext:kuro-core" ())
+(declare-function kuro-core-take-bell-pending "ext:kuro-core" (session-id))
 (declare-function kuro--update-line-full        "kuro-render-buffer" (row text face-ranges col-to-buf))
 (declare-function kuro--resize                  "kuro-ffi"           (rows cols))
 (declare-function kuro--apply-palette-updates   "kuro-faces"         ())
@@ -487,7 +487,7 @@ on complex TUI apps like Claude Code."
       ;; whatever buffer Emacs switched to after kill-buffer.
       (when (buffer-live-p (current-buffer))
         ;; --- Bell ---
-        (when (kuro-core-take-bell-pending)
+        (when (kuro--call nil (kuro-core-take-bell-pending kuro--session-id))
           (ding))
         ;; --- Dirty updates (buffer modifications + cursor) ---
         (kuro--apply-dirty-updates)

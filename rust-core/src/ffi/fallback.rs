@@ -13,6 +13,9 @@ use super::abstraction::{
 };
 use crate::error::KuroError;
 
+/// Legacy session ID used by the `RawFFI` trait implementation.
+const LEGACY_SESSION_ID: u64 = 0;
+
 /// Raw C types from Emacs module API
 #[repr(C)]
 pub enum emacs_funcall_exit {
@@ -55,7 +58,7 @@ impl KuroFFI for RawFFI {
 
     fn poll_updates(env: *mut emacs_env, max_updates: i64) -> *mut emacs_value {
         let result: std::result::Result<Vec<(usize, String)>, KuroError> =
-            with_session(|session| {
+            with_session(LEGACY_SESSION_ID, |session| {
                 let mut updates = Vec::new();
                 let mut collected = 0;
 
@@ -96,7 +99,7 @@ impl KuroFFI for RawFFI {
     }
 
     fn send_key(env: *mut emacs_env, data: &[u8]) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.send_input(data)?;
             Ok(())
         });
@@ -111,7 +114,7 @@ impl KuroFFI for RawFFI {
         let rows = rows as u16;
         let cols = cols as u16;
 
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.resize(rows, cols)?;
             Ok(())
         });
@@ -123,14 +126,14 @@ impl KuroFFI for RawFFI {
     }
 
     fn shutdown(env: *mut emacs_env) -> *mut emacs_value {
-        match shutdown_session() {
+        match shutdown_session(LEGACY_SESSION_ID) {
             Ok(_) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
 
     fn get_cursor(env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session_readonly(|session| {
+        let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
             let (row, col) = session.get_cursor();
             Ok(format!("{}:{}", row, col))
         });
@@ -148,7 +151,7 @@ impl KuroFFI for RawFFI {
             max_lines as usize
         };
 
-        let result = with_session_readonly(|session| Ok(session.get_scrollback(max_lines)));
+        let result = with_session_readonly(LEGACY_SESSION_ID, |session| Ok(session.get_scrollback(max_lines)));
 
         match result {
             Ok(lines) => {
@@ -164,7 +167,7 @@ impl KuroFFI for RawFFI {
     }
 
     fn clear_scrollback(env: *mut emacs_env) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.clear_scrollback();
             Ok(())
         });
@@ -176,7 +179,7 @@ impl KuroFFI for RawFFI {
     }
 
     fn set_scrollback_max_lines(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
-        let result = with_session(|session| {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
             session.set_scrollback_max_lines(max_lines as usize);
             Ok(())
         });

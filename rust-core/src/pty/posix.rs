@@ -295,6 +295,12 @@ impl Pty {
         !self.receiver.is_empty()
     }
 
+    /// Return the child process PID.
+    #[inline(always)]
+    pub fn pid(&self) -> u32 {
+        self.child_pid.as_raw() as u32
+    }
+
     /// Returns true if the child process has not yet exited.
     ///
     /// Set to false by the reader thread when it detects EOF (Ok(0)) on the

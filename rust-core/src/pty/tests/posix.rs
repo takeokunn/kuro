@@ -111,8 +111,7 @@ fn test_validate_shell_returns_absolute_path() {
     let path = result.unwrap();
     assert!(
         path.is_absolute(),
-        "validate_shell must return an absolute path, got: {:?}",
-        path
+        "validate_shell must return an absolute path, got: {path:?}"
     );
 }
 
@@ -125,8 +124,7 @@ fn test_validate_shell_bash_returns_absolute_path() {
         let path = result.unwrap();
         assert!(
             path.is_absolute(),
-            "validate_shell('bash') must return an absolute path, got: {:?}",
-            path
+            "validate_shell('bash') must return an absolute path, got: {path:?}"
         );
     }
 }

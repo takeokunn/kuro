@@ -1,6 +1,6 @@
 //! Dirty tracking methods for Screen
 
-use super::*;
+use super::{Screen, DirtySet};
 
 impl Screen {
     /// Attach a combining character to the cell at (row, col).
@@ -57,12 +57,11 @@ impl Screen {
                     alt.full_dirty = false;
                     alt.dirty_set.clear();
                     return (0..alt.rows as usize).collect();
-                } else {
-                    let mut dirty: Vec<usize> = alt.dirty_set.iter().collect();
-                    alt.dirty_set.clear();
-                    dirty.sort_unstable();
-                    return dirty;
                 }
+                let mut dirty: Vec<usize> = alt.dirty_set.iter().collect();
+                alt.dirty_set.clear();
+                dirty.sort_unstable();
+                return dirty;
             }
         }
         // Primary screen (or fallback if is_alternate_active but alternate_screen is None)
@@ -88,7 +87,7 @@ mod tests {
         let mut screen = Screen::new(24, 80);
         screen.mark_dirty_range(3, 7); // marks rows 3,4,5,6 (half-open)
         for row in 3..7 {
-            assert!(screen.dirty_set.contains(row), "row {} should be dirty", row);
+            assert!(screen.dirty_set.contains(row), "row {row} should be dirty");
         }
         // Rows outside the range must not be dirty
         assert!(!screen.dirty_set.contains(2));

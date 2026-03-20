@@ -1039,7 +1039,7 @@ fn test_scrollback_eviction_retains_newest_lines() {
     let surviving: Vec<char> = screen
         .scrollback_buffer
         .iter()
-        .map(|line| line.get_cell(0).map(|c| c.char()).unwrap_or(' '))
+        .map(|line| line.get_cell(0).map_or(' ', crate::types::cell::Cell::char))
         .collect();
 
     assert_eq!(

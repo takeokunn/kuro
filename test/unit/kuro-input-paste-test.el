@@ -5,7 +5,7 @@
 ;;; Commentary:
 
 ;; ERT tests for kuro-input-paste.el.
-;; Covers kuro--sanitize-paste (ESC injection prevention) and
+;; Covers kuro--sanitize-paste (ESC and C1 CSI injection prevention) and
 ;; kuro--yank / kuro--yank-pop (bracketed paste wrapping).
 ;; Pure Elisp tests — no Rust dynamic module required.
 ;; kuro--send-key and kuro--schedule-immediate-render are stubbed via cl-letf.
@@ -96,6 +96,13 @@ sanitization removes the ESC so [201~ is treated as literal text."
   (let* ((esc (string #x1b))
          (payload (concat "evil" esc "[201~injection")))
     (should (equal (kuro--sanitize-paste payload) "evil[201~injection"))))
+
+(ert-deftest kuro-input-paste--sanitize-c1-csi-injection-neutralized ()
+  "kuro--sanitize-paste neutralizes 8-bit C1 CSI injection (\\x9b201~).
+On 8-bit terminals \\x9b is equivalent to ESC[ and would close the paste bracket."
+  (let* ((c1-csi (string #x9b))
+         (payload (concat "evil" c1-csi "201~injection")))
+    (should (equal (kuro--sanitize-paste payload) "evil201~injection"))))
 
 ;;; Group 2: kuro--yank — plain mode (bracketed paste off)
 

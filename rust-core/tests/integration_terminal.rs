@@ -1,4 +1,4 @@
-//! Integration tests for TerminalCore — exercise full advance() pipelines.
+//! Integration tests for `TerminalCore` — exercise full `advance()` pipelines.
 //! These tests run without any Emacs runtime.
 
 use kuro_core::TerminalCore;
@@ -317,8 +317,9 @@ fn test_scrollback_max_lines_respected() {
 /// This is the minimal reproduction of the original bug:
 ///   1. kuro sends 0x20 to the PTY.
 ///   2. The shell echoes 0x20 back.
-///   3. VTE calls screen.print(' ') → cursor_col += 1.
-/// If encode_line trimmed the space away, the Emacs buffer line became empty,
+///   3. VTE calls screen.print(' ') → `cursor_col` += 1.
+///
+/// If `encode_line` trimmed the space away, the Emacs buffer line became empty,
 /// causing kuro--update-cursor to clamp the cursor back to col 0.
 #[test]
 fn test_spc_advances_cursor_rightward() {
@@ -344,6 +345,7 @@ fn test_spc_advances_cursor_rightward() {
 /// Simulates the typical bash readline echo of "echo hello ":
 ///   - 10 chars of "echo hello"
 ///   - 1 trailing space typed by the user
+///
 /// The cursor must land at col 11, not col 10 (the trimmed position).
 #[test]
 fn test_cursor_lands_after_trailing_space() {
@@ -396,7 +398,7 @@ fn test_backspace_after_space_moves_cursor_left() {
 /// (ECHOCTL mode), which indicates readline is in dumb-terminal mode due to
 /// the PTY window size being 0×0 at shell startup.
 ///
-/// At the TerminalCore level these bytes are not printable, so cells stay
+/// At the `TerminalCore` level these bytes are not printable, so cells stay
 /// empty and the cursor stays at col 0.
 #[test]
 fn test_control_chars_do_not_print_visible_glyphs() {

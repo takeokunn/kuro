@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for Screen scrollback and viewport methods.
 //!
 //! Module under test: `grid/screen/scrollback.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use crate::grid::screen::Screen;
 use crate::types::color::Color;
@@ -345,9 +345,9 @@ fn test_get_scrollback_lines_order_most_recent_first() {
     let lines = screen.get_scrollback_lines(3);
     assert_eq!(lines.len(), 3);
     // Most recent line ('3') must come first.
-    assert_eq!(lines[0].get_cell(0).map(|c| c.char()), Some('3'));
-    assert_eq!(lines[1].get_cell(0).map(|c| c.char()), Some('2'));
-    assert_eq!(lines[2].get_cell(0).map(|c| c.char()), Some('1'));
+    assert_eq!(lines[0].get_cell(0).map(crate::types::cell::Cell::char), Some('3'));
+    assert_eq!(lines[1].get_cell(0).map(crate::types::cell::Cell::char), Some('2'));
+    assert_eq!(lines[2].get_cell(0).map(crate::types::cell::Cell::char), Some('1'));
 }
 
 #[test]

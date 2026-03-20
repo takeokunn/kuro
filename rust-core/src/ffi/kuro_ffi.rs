@@ -1,7 +1,7 @@
-//! KuroFFI trait and raw C FFI type declarations
+//! `KuroFFI` trait and raw C FFI type declarations
 //!
 //! This module defines the `KuroFFI` trait (the interface for FFI implementations)
-//! and the raw C struct types used by emacs_module.h.
+//! and the raw C struct types used by `emacs_module.h`.
 
 /// Raw Emacs environment pointer (opaque type from C API)
 #[repr(C)]
@@ -45,7 +45,7 @@ pub trait KuroFFI {
     /// * `max_updates` - Maximum number of updates to return (0 for unlimited)
     ///
     /// # Returns
-    /// A pointer to an Emacs list of (line_no . text) pairs
+    /// A pointer to an Emacs list of (`line_no` . text) pairs
     fn poll_updates(env: *mut emacs_env, max_updates: i64) -> *mut emacs_value;
 
     /// Send key input to the terminal

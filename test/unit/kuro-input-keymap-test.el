@@ -15,6 +15,7 @@
 ;;   - kuro--build-keymap result (keymapp, special/ctrl/meta/nav bindings)
 ;;   - kuro--send-meta-backspace sequence
 ;;   - Modifier+arrow xterm CSI sequences produced by the keymap
+;;   - yank / yank-pop / clipboard-yank remap assertions (Group 6)
 ;;
 ;; Pure Elisp tests — no Rust dynamic module required.
 ;; All FFI dependencies are stubbed before requiring the module.
@@ -249,6 +250,40 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
 (ert-deftest kuro-input-keymap-meta-right-sends-csi-1-3C ()
   "M-right sends ESC[1;3C (xterm Alt+Right)."
   (should (equal (kuro-keymap-test--modifier-arrow-seq M right) "\e[1;3C")))
+
+
+;;; Group 6: Yank remaps
+
+(ert-deftest kuro-input-keymap-build-has-yank-remap ()
+  "The built keymap remaps yank to kuro--yank."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [remap yank]) #'kuro--yank))))
+
+(ert-deftest kuro-input-keymap-build-has-yank-pop-remap ()
+  "The built keymap remaps yank-pop to kuro--yank-pop."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [remap yank-pop]) #'kuro--yank-pop))))
+
+(ert-deftest kuro-input-keymap-build-has-clipboard-yank-remap ()
+  "The built keymap remaps clipboard-yank to kuro--yank (for Cmd+V on macOS)."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [remap clipboard-yank]) #'kuro--yank))))
+
+(ert-deftest kuro-input-keymap-clipboard-yank-remap-sends-kill-ring-text ()
+  "Invoking the [remap clipboard-yank] binding sends kill-ring text via kuro--send-key."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map [remap clipboard-yank]))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
+      (let* ((kill-ring (list "clipboard-text"))
+             (kill-ring-yank-pointer kill-ring)
+             (kuro--bracketed-paste-mode nil))
+        (funcall binding)))
+    (should (equal sent '("clipboard-text")))))
 
 (provide 'kuro-input-keymap-test)
 ;;; kuro-input-keymap-test.el ends here

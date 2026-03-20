@@ -78,10 +78,7 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
     // Example: "544e" = "TN" (terminal name).
     // Response format: DCS 1 + r <hex-name>=<hex-value> ST
     //                  DCS 0 + r <hex-name> ST (unknown)
-    let s = match std::str::from_utf8(buf) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
+    let Ok(s) = std::str::from_utf8(buf) else { return };
 
     for cap_hex in s.split(';') {
         let cap_hex = cap_hex.trim();
@@ -89,37 +86,34 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
             continue;
         }
 
-        let cap_name = match hex_decode(cap_hex) {
-            Some(name) => name,
-            None => continue,
-        };
+        let Some(cap_name) = hex_decode(cap_hex) else { continue };
 
         let response = match cap_name.as_str() {
             "TN" | "name" => {
                 let name_hex = hex_encode(&b"kuro"[..]);
-                format!("\x1bP1+r{}={}\x1b\\", cap_hex, name_hex)
+                format!("\x1bP1+r{cap_hex}={name_hex}\x1b\\")
             }
             "RGB" => {
                 let val_hex = hex_encode(&b"8:8:8"[..]);
-                format!("\x1bP1+r{}={}\x1b\\", cap_hex, val_hex)
+                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
             }
             "Tc" => {
                 // True color flag (empty value = supported)
-                format!("\x1bP1+r{}=\x1b\\", cap_hex)
+                format!("\x1bP1+r{cap_hex}=\x1b\\")
             }
             "Ms" => {
                 // Clipboard set/get format for tmux/screen compatibility
                 let val: &[u8] = &b"\x1b]52;%p1%s;%p2%s\x07"[..];
                 let val_hex = hex_encode(val);
-                format!("\x1bP1+r{}={}\x1b\\", cap_hex, val_hex)
+                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
             }
             "colors" | "Co" => {
                 let val_hex = hex_encode(&b"256"[..]);
-                format!("\x1bP1+r{}={}\x1b\\", cap_hex, val_hex)
+                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
             }
             _ => {
                 // Unknown capability
-                format!("\x1bP0+r{}\x1b\\", cap_hex)
+                format!("\x1bP0+r{cap_hex}\x1b\\")
             }
         };
 

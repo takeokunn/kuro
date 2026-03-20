@@ -12,6 +12,7 @@ repository = "https://github.com/takeokunn/kuro"
 rust-version = "1.84.0"
 
 [workspace.dependencies]
+bitflags = "2"
 bitvec = "1.0"
 vte = "0.15.0"
 emacs = "0.19.0"

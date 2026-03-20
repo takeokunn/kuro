@@ -6,7 +6,7 @@ use memchr::memchr;
 
 /// State machine for raw APC byte-stream pre-scanning.
 ///
-/// vte 0.15.0 routes ESC _ to SosPmApcString which silently discards bytes,
+/// vte 0.15.0 routes ESC _ to `SosPmApcString` which silently discards bytes,
 /// so we scan the raw byte stream ourselves.
 /// The payload buffer is stored separately in `TerminalCore::apc_buf` to avoid
 /// per-byte heap moves through the state machine.
@@ -16,7 +16,7 @@ pub enum ApcScanState {
     Idle,
     /// Saw ESC, waiting to see if next byte is '_' (APC start)
     AfterEsc,
-    /// Inside an APC payload (ESC _ received); accumulating bytes in apc_buf
+    /// Inside an APC payload (ESC _ received); accumulating bytes in `apc_buf`
     InApc,
     /// Inside APC, saw ESC — waiting to see if next byte is '\\' (ST = String Terminator)
     AfterApcEsc,
@@ -107,9 +107,8 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
     use crate::grid::screen::{ImageData, ImagePlacement};
     use crate::parser::kitty::{process_apc_payload, KittyCommand};
 
-    let cmd = match process_apc_payload(payload, &mut core.kitty.kitty_chunk) {
-        Some(cmd) => cmd,
-        None => return, // more chunks incoming, or malformed
+    let Some(cmd) = process_apc_payload(payload, &mut core.kitty.kitty_chunk) else {
+        return; // more chunks incoming, or malformed
     };
 
     match cmd {
@@ -202,8 +201,8 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
 
         KittyCommand::Query { image_id } => {
             // Respond with "OK" status using existing pending_responses mechanism
-            let id_part = image_id.map(|id| format!(",i={}", id)).unwrap_or_default();
-            let response = format!("\x1b_Ga=q{};OK\x1b\\", id_part);
+            let id_part = image_id.map(|id| format!(",i={id}")).unwrap_or_default();
+            let response = format!("\x1b_Ga=q{id_part};OK\x1b\\");
             core.meta.pending_responses.push(response.into_bytes());
         }
     }

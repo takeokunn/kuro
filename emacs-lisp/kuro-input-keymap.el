@@ -227,9 +227,13 @@ like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
   (define-key map [mouse-5]      #'kuro--mouse-scroll-down))
 
 (defun kuro--keymap-setup-yank (map)
-  "Add yank remapping and keymap-exception removal to MAP."
-  (define-key map [remap yank]     #'kuro--yank)
-  (define-key map [remap yank-pop] #'kuro--yank-pop)
+  "Add yank remapping and keymap-exception removal to MAP.
+Remaps `yank' (C-y), `yank-pop' (M-y), and `clipboard-yank' (Cmd+V on macOS)
+all to `kuro--yank' / `kuro--yank-pop' so paste always goes through the PTY
+with optional bracketed-paste wrapping."
+  (define-key map [remap yank]          #'kuro--yank)
+  (define-key map [remap yank-pop]      #'kuro--yank-pop)
+  (define-key map [remap clipboard-yank] #'kuro--yank)
 
   ;; Remove bindings for keys listed in kuro-keymap-exceptions so they fall
   ;; through to the standard Emacs global keymap (e.g. M-x, C-g, C-x).

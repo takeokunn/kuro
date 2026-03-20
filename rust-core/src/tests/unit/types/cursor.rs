@@ -1,4 +1,4 @@
-//! Property-based tests for `crate::types::cursor` (Cursor, CursorShape)
+//! Property-based tests for `crate::types::cursor` (Cursor, `CursorShape`)
 //!
 //! Tests in this file complement the embedded `#[cfg(test)]` tests in
 //! `src/types/cursor.rs` and add property-based coverage for mathematical
@@ -88,7 +88,7 @@ proptest! {
 fn test_cursor_shape_canonical_roundtrip() {
     for v in [0i64, 2, 3, 4, 5, 6] {
         let shape = CursorShape::try_from(v)
-            .unwrap_or_else(|_| panic!("try_from({v}) must succeed for canonical value"));
+            .unwrap_or_else(|()| panic!("try_from({v}) must succeed for canonical value"));
         assert_eq!(
             i64::from(shape),
             v,

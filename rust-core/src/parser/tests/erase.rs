@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `erase` parsing.
 //!
 //! Module under test: `parser/erase.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 use crate::types::cell::CellWidth;
@@ -33,12 +33,11 @@ fn test_ed_default() {
         assert_eq!(
             line.cells[c].char(),
             'X',
-            "Column {} should still be 'X'",
-            c
+            "Column {c} should still be 'X'"
         );
     }
     for c in 5..20 {
-        assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
+        assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
     }
 
     // Check that all lines below are cleared
@@ -48,9 +47,7 @@ fn test_ed_default() {
             assert_eq!(
                 line.cells[c].char(),
                 ' ',
-                "Row {} column {} should be cleared",
-                r,
-                c
+                "Row {r} column {c} should be cleared"
             );
         }
     }
@@ -62,9 +59,7 @@ fn test_ed_default() {
             assert_eq!(
                 line.cells[c].char(),
                 'X',
-                "Row {} column {} should still be 'X'",
-                r,
-                c
+                "Row {r} column {c} should still be 'X'"
             );
         }
     }
@@ -160,9 +155,7 @@ fn test_ed_mode2() {
             assert_eq!(
                 line.cells[c].char(),
                 ' ',
-                "Row {} col {} should be cleared",
-                r,
-                c
+                "Row {r} col {c} should be cleared"
             );
         }
     }
@@ -212,12 +205,11 @@ fn test_el_default() {
         assert_eq!(
             line.cells[c].char(),
             'Y',
-            "Column {} should still be 'Y'",
-            c
+            "Column {c} should still be 'Y'"
         );
     }
     for c in 5..20 {
-        assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
+        assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
     }
 }
 
@@ -282,7 +274,7 @@ fn test_el_mode2() {
 
     let line = term.screen.get_line(row).unwrap();
     for c in 0..10 {
-        assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
+        assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
     }
 }
 
@@ -345,16 +337,12 @@ fn test_ed_with_colored_bg_applies_bce() {
             assert_eq!(
                 line.cells[c].attrs.background,
                 Color::Named(NamedColor::Blue),
-                "Row {} col {} should have Blue background after ED",
-                r,
-                c
+                "Row {r} col {c} should have Blue background after ED"
             );
             assert_eq!(
                 line.cells[c].char(),
                 ' ',
-                "Row {} col {} should be cleared",
-                r,
-                c
+                "Row {r} col {c} should be cleared"
             );
         }
     }
@@ -366,16 +354,12 @@ fn test_ed_with_colored_bg_applies_bce() {
             assert_eq!(
                 line.cells[c].char(),
                 'X',
-                "Row {} col {} should still be 'X'",
-                r,
-                c
+                "Row {r} col {c} should still be 'X'"
             );
             assert_eq!(
                 line.cells[c].attrs.background,
                 Color::Default,
-                "Row {} col {} should retain default background",
-                r,
-                c
+                "Row {r} col {c} should retain default background"
             );
         }
     }
@@ -481,12 +465,11 @@ fn test_el_mode1_splits_wide_char() {
     // Cells 0-5 should all be cleared (0-4 by the erase range, 5 as the Wide partner)
     let line = term.screen.get_line(0).unwrap();
     for c in 0..=5 {
-        assert_eq!(line.cells[c].char(), ' ', "Column {} should be cleared", c);
+        assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
         assert_eq!(
             line.cells[c].width,
             CellWidth::Half,
-            "Column {} should be Half width after clearing",
-            c
+            "Column {c} should be Half width after clearing"
         );
     }
 }
@@ -554,8 +537,7 @@ fn test_el_mode1_with_colored_bg_applies_bce() {
         assert_eq!(
             line.cells[c].attrs.background,
             Color::Named(NamedColor::Red),
-            "EL mode 1: col {} should have Red background",
-            c
+            "EL mode 1: col {c} should have Red background"
         );
         assert_eq!(line.cells[c].char(), ' ');
     }
@@ -586,8 +568,7 @@ fn test_el_mode2_with_colored_bg_applies_bce() {
         assert_eq!(
             line.cells[c].attrs.background,
             Color::Named(NamedColor::Green),
-            "EL mode 2: col {} should have Green background",
-            c
+            "EL mode 2: col {c} should have Green background"
         );
         assert_eq!(line.cells[c].char(), ' ');
     }
@@ -616,9 +597,7 @@ fn test_ed_mode1_with_colored_bg_applies_bce() {
             assert_eq!(
                 line.cells[c].attrs.background,
                 Color::Named(NamedColor::Cyan),
-                "ED mode 1: row {} col {} should have Cyan background",
-                r,
-                c
+                "ED mode 1: row {r} col {c} should have Cyan background"
             );
         }
     }
@@ -628,8 +607,7 @@ fn test_ed_mode1_with_colored_bg_applies_bce() {
         assert_eq!(
             line.cells[c].attrs.background,
             Color::Named(NamedColor::Cyan),
-            "ED mode 1: row 2 col {} should have Cyan background",
-            c
+            "ED mode 1: row 2 col {c} should have Cyan background"
         );
     }
 }
@@ -654,9 +632,7 @@ fn test_ed_mode2_with_colored_bg_applies_bce() {
             assert_eq!(
                 line.cells[c].attrs.background,
                 Color::Named(NamedColor::Magenta),
-                "ED mode 2: row {} col {} should have Magenta background",
-                r,
-                c
+                "ED mode 2: row {r} col {c} should have Magenta background"
             );
             assert_eq!(line.cells[c].char(), ' ');
         }
@@ -672,7 +648,7 @@ proptest! {
     // PANIC SAFETY: ED (CSI n J) with any parameter never panics
     fn prop_ed_no_panic(ps in 0u16..=10u16) {
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{}J", ps).as_bytes());
+        term.advance(format!("\x1b[{ps}J").as_bytes());
         prop_assert_eq!(term.screen.rows() as usize, 10);
     }
 
@@ -680,7 +656,7 @@ proptest! {
     // PANIC SAFETY: EL (CSI n K) with any parameter never panics
     fn prop_el_no_panic(ps in 0u16..=10u16) {
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{}K", ps).as_bytes());
+        term.advance(format!("\x1b[{ps}K").as_bytes());
         prop_assert_eq!(term.screen.rows() as usize, 10);
     }
 
@@ -689,7 +665,7 @@ proptest! {
     fn prop_ech_no_panic(n in 0u16..=300u16, col in 0usize..20usize) {
         let mut term = crate::TerminalCore::new(10, 20);
         term.screen.move_cursor(0, col);
-        term.advance(format!("\x1b[{}X", n).as_bytes());
+        term.advance(format!("\x1b[{n}X").as_bytes());
         prop_assert_eq!(
             term.screen.get_line(0).unwrap().cells.len(),
             20,

@@ -40,7 +40,7 @@ fn test_trait_object_safety() {
 fn test_encode_color_delegates_to_codec() {
     assert_eq!(
         TerminalSession::encode_color(&Color::Default),
-        0xFF000000u32
+        0xFF00_0000_u32
     );
 }
 
@@ -77,7 +77,7 @@ fn test_shutdown_session() {
 // Synchronized Output mode (DEC ?2026) suppression tests
 // ---------------------------------------------------------------------------
 
-/// While ?2026h (synchronized output) is active, get_dirty_lines_with_faces must
+/// While ?2026h (synchronized output) is active, `get_dirty_lines_with_faces` must
 /// return an empty Vec.
 #[test]
 fn test_sync_output_suppresses_dirty_lines() {
@@ -271,7 +271,7 @@ fn test_take_clipboard_actions_drains_queue() {
         crate::types::osc::ClipboardAction::Write(text) => {
             assert_eq!(text, "hello", "Write action should contain decoded text");
         }
-        other => panic!("Expected Write action, got {:?}", other),
+        other @ crate::types::osc::ClipboardAction::Query => panic!("Expected Write action, got {other:?}"),
     }
 
     // Second call: queue was drained, should return empty Vec
@@ -385,8 +385,8 @@ fn test_take_default_colors_dirty_false_initially() {
 // Scrollback viewport: get_dirty_lines_with_faces paths (dirty.rs lines ~30-52)
 // ---------------------------------------------------------------------------
 
-/// When the viewport is scrolled back and scroll_dirty is set,
-/// get_dirty_lines_with_faces must return scrollback content for all rows
+/// When the viewport is scrolled back and `scroll_dirty` is set,
+/// `get_dirty_lines_with_faces` must return scrollback content for all rows
 /// rather than live screen content.
 #[test]
 fn test_scrollback_viewport_dirty_returns_scrollback_content() {
@@ -440,8 +440,8 @@ fn test_scrollback_viewport_dirty_returns_scrollback_content() {
     );
 }
 
-/// When the viewport is scrolled back but scroll_dirty is false (no new
-/// scroll event), get_dirty_lines_with_faces must suppress live dirty lines
+/// When the viewport is scrolled back but `scroll_dirty` is false (no new
+/// scroll event), `get_dirty_lines_with_faces` must suppress live dirty lines
 /// to preserve the scrollback view.
 #[test]
 fn test_scrollback_not_dirty_suppresses_live_lines() {
@@ -485,12 +485,12 @@ fn test_scrollback_not_dirty_suppresses_live_lines() {
     );
 }
 
-/// Full-screen scroll_up uses full_dirty instead of pending_scroll_up.
+/// Full-screen `scroll_up` uses `full_dirty` instead of `pending_scroll_up`.
 ///
 /// After the scroll-accumulation fix, the full-screen fast path sets
 /// `full_dirty = true` and does NOT increment `pending_scroll_up`, so
 /// `consume_scroll_events` returns (0, 0).  The Emacs render cycle uses
-/// `take_dirty_lines` (which returns all rows when full_dirty is set)
+/// `take_dirty_lines` (which returns all rows when `full_dirty` is set)
 /// instead of the buffer-level shift.
 #[test]
 fn test_consume_scroll_events_returns_zero_after_full_screen_scroll() {
@@ -516,7 +516,7 @@ fn test_consume_scroll_events_returns_zero_after_full_screen_scroll() {
     );
 }
 
-/// Full-screen scroll_down uses full_dirty instead of pending_scroll_down.
+/// Full-screen `scroll_down` uses `full_dirty` instead of `pending_scroll_down`.
 ///
 /// After the scroll-accumulation fix, reverse index (RI) on a full-screen
 /// scroll region sets `full_dirty = true` and does NOT increment
@@ -544,7 +544,7 @@ fn test_consume_scroll_events_scroll_down_returns_zero() {
     );
 }
 
-/// is_process_alive() returns true when pty is None (test sessions).
+/// `is_process_alive()` returns true when pty is None (test sessions).
 ///
 /// Unit test sessions are constructed with `pty: None` via `make_session()`.
 /// `is_process_alive()` must report `true` in that case so that test-only
@@ -558,11 +558,11 @@ fn test_is_process_alive_no_pty() {
     );
 }
 
-/// consume_scroll_events returns (0, 0) during scrollback view.
-///
-/// With the full_dirty approach, consume_scroll_events always returns (0, 0)
-/// for full-screen scrolls.  This test verifies the scrollback path still
-/// returns (0, 0) and that full_dirty is cleared by take_dirty_lines.
+// consume_scroll_events returns (0, 0) during scrollback view.
+//
+// With the full_dirty approach, consume_scroll_events always returns (0, 0)
+// for full-screen scrolls.  This test verifies the scrollback path still
+// returns (0, 0) and that full_dirty is cleared by take_dirty_lines.
 // ---------------------------------------------------------------------------
 // Global session state: detach / attach / list
 // ---------------------------------------------------------------------------
@@ -581,7 +581,7 @@ fn insert_detached_session(id: u64) {
     TERMINAL_SESSIONS.lock().unwrap().insert(id, session);
 }
 
-/// detach_session transitions a Bound session to Detached and returns Ok.
+/// `detach_session` transitions a Bound session to Detached and returns Ok.
 #[test]
 fn test_detach_session_bound_to_detached() {
     const ID: u64 = u64::MAX - 20;
@@ -595,14 +595,13 @@ fn test_detach_session_bound_to_detached() {
         .lock()
         .unwrap()
         .get(&ID)
-        .map(|s| s.is_detached())
-        .unwrap_or(false);
+        .is_some_and(super::session::TerminalSession::is_detached);
     assert!(is_detached, "session must be Detached after detach_session");
 
     shutdown_session(ID).ok();
 }
 
-/// attach_session transitions a Detached session to Bound and returns Ok.
+/// `attach_session` transitions a Detached session to Bound and returns Ok.
 #[test]
 fn test_attach_session_detached_to_bound() {
     const ID: u64 = u64::MAX - 21;
@@ -616,14 +615,13 @@ fn test_attach_session_detached_to_bound() {
         .lock()
         .unwrap()
         .get(&ID)
-        .map(|s| s.is_detached())
-        .unwrap_or(true);
+        .is_none_or(super::session::TerminalSession::is_detached);
     assert!(!is_detached, "session must be Bound (not Detached) after attach_session");
 
     shutdown_session(ID).ok();
 }
 
-/// attach_session on a Bound session returns Err(TerminalSessionExists).
+/// `attach_session` on a Bound session returns Err(TerminalSessionExists).
 ///
 /// This guard prevents two Emacs buffers from owning the same session
 /// simultaneously with competing render loops.
@@ -649,7 +647,7 @@ fn test_attach_session_already_bound_returns_terminal_session_exists() {
     shutdown_session(ID).ok();
 }
 
-/// detach_session on a nonexistent ID returns Err(NoTerminalSession).
+/// `detach_session` on a nonexistent ID returns Err(NoTerminalSession).
 #[test]
 fn test_detach_session_nonexistent_returns_no_session() {
     const ID: u64 = u64::MAX - 23;
@@ -663,7 +661,7 @@ fn test_detach_session_nonexistent_returns_no_session() {
     );
 }
 
-/// attach_session on a nonexistent ID returns Err(NoTerminalSession).
+/// `attach_session` on a nonexistent ID returns Err(NoTerminalSession).
 #[test]
 fn test_attach_session_nonexistent_returns_no_session() {
     const ID: u64 = u64::MAX - 24;
@@ -677,10 +675,10 @@ fn test_attach_session_nonexistent_returns_no_session() {
     );
 }
 
-/// list_sessions tuple order: (id, command, is_detached, is_alive) at indices 0..3.
+/// `list_sessions` tuple order: (id, command, `is_detached`, `is_alive`) at indices 0..3.
 ///
-/// A Detached session must have is_detached=true at index 2 and
-/// is_alive=true at index 3 (pty:None sessions always report alive).
+/// A Detached session must have `is_detached=true` at index 2 and
+/// `is_alive=true` at index 3 (pty:None sessions always report alive).
 /// This is the Rust-side mirror of the Elisp nth-index regression test.
 #[test]
 fn test_list_sessions_tuple_order_detached() {
@@ -700,7 +698,7 @@ fn test_list_sessions_tuple_order_detached() {
     shutdown_session(ID).ok();
 }
 
-/// list_sessions: a Bound session has is_detached=false at index 2.
+/// `list_sessions`: a Bound session has `is_detached=false` at index 2.
 #[test]
 fn test_list_sessions_bound_session_not_detached() {
     const ID: u64 = u64::MAX - 26;
@@ -714,6 +712,90 @@ fn test_list_sessions_bound_session_not_detached() {
     let (_, _, is_detached, is_alive) = entry.unwrap();
     assert!(!is_detached, "index 2 must be is_detached=false for a Bound session");
     assert!(*is_alive, "index 3 must be is_alive=true for a Bound session with pty:None");
+
+    shutdown_session(ID).ok();
+}
+
+/// `list_sessions` does not include the sentinel ID when that ID has been cleaned up.
+///
+/// This verifies that `shutdown_session` actually removes the entry so the
+/// test sentinel IDs do not pollute subsequent `list_sessions` calls.
+#[test]
+fn test_list_sessions_cleaned_up_id_absent() {
+    const ID: u64 = u64::MAX - 27;
+    shutdown_session(ID).ok();
+    insert_bound_session(ID);
+    shutdown_session(ID).ok();
+
+    let sessions = list_sessions();
+    assert!(
+        sessions.iter().all(|(id, ..)| *id != ID),
+        "list_sessions must not include a session that was shut down"
+    );
+}
+
+/// `list_sessions` includes the non-empty `command` string in tuple index 1.
+#[test]
+fn test_list_sessions_command_field_included() {
+    const ID: u64 = u64::MAX - 28;
+    shutdown_session(ID).ok();
+    let mut session = make_session();
+    session.command = "fish".to_owned();
+    TERMINAL_SESSIONS.lock().unwrap().insert(ID, session);
+
+    let sessions = list_sessions();
+    let entry = sessions.iter().find(|(id, ..)| *id == ID);
+    assert!(entry.is_some(), "list_sessions must include the inserted session");
+    let (_, command, _, _) = entry.unwrap();
+    assert_eq!(command, "fish", "command field must match the session's command string");
+
+    shutdown_session(ID).ok();
+}
+
+/// `list_sessions` returns entries for both Bound and Detached sessions.
+#[test]
+fn test_list_sessions_mixed_bound_and_detached() {
+    const BOUND_ID: u64 = u64::MAX - 29;
+    const DETACHED_ID: u64 = u64::MAX - 30;
+    shutdown_session(BOUND_ID).ok();
+    shutdown_session(DETACHED_ID).ok();
+    insert_bound_session(BOUND_ID);
+    insert_detached_session(DETACHED_ID);
+
+    let sessions = list_sessions();
+    let bound_entry = sessions.iter().find(|(id, ..)| *id == BOUND_ID);
+    let detached_entry = sessions.iter().find(|(id, ..)| *id == DETACHED_ID);
+
+    assert!(bound_entry.is_some(), "list_sessions must include the Bound session");
+    assert!(detached_entry.is_some(), "list_sessions must include the Detached session");
+
+    let (_, _, is_detached_b, _) = bound_entry.unwrap();
+    let (_, _, is_detached_d, _) = detached_entry.unwrap();
+    assert!(!is_detached_b, "Bound session must have is_detached=false");
+    assert!(*is_detached_d, "Detached session must have is_detached=true");
+
+    shutdown_session(BOUND_ID).ok();
+    shutdown_session(DETACHED_ID).ok();
+}
+
+/// `list_sessions` does NOT reap a detached session whose PTY is None (alive=true).
+///
+/// The retain predicate `is_detached && !is_alive` must NOT fire for sessions
+/// with `pty: None` since `is_process_alive()` returns `true` for those.
+/// This is the regression guard for the opportunistic-reap change in FR-D.
+#[test]
+fn test_list_sessions_live_detached_not_reaped() {
+    const ID: u64 = u64::MAX - 31;
+    shutdown_session(ID).ok();
+    insert_detached_session(ID); // pty: None => is_alive=true
+
+    let sessions = list_sessions();
+    let entry = sessions.iter().find(|(id, ..)| *id == ID);
+    assert!(
+        entry.is_some(),
+        "list_sessions must NOT reap a detached session whose PTY reports alive \
+         (pty:None sessions always report alive and must survive the retain call)"
+    );
 
     shutdown_session(ID).ok();
 }

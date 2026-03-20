@@ -95,7 +95,7 @@ fn test_csi_followed_by_apc_processes_both() {
     assert_eq!(core.kitty.apc_buf.len(), 0, "APC should be fully processed");
 }
 
-/// Test: Multiple APC sequences in single advance() call
+/// Test: Multiple APC sequences in single `advance()` call
 #[test]
 fn test_multiple_apc_in_single_advance() {
     let mut core = super::make_term();
@@ -135,7 +135,7 @@ fn test_mixed_apc_csi_osc_single_buffer() {
     assert!(core.meta.title_dirty, "OSC title should set dirty flag");
 }
 
-/// Test: APC split across 3 advance() calls
+/// Test: APC split across 3 `advance()` calls
 #[test]
 fn test_apc_split_across_three_advance_calls() {
     let mut core = super::make_term();
@@ -332,5 +332,5 @@ fn test_mixed_content_all_sequences_processed() {
     // "Start" should be at position 0
     assert_eq!(core.get_cell(0, 0).unwrap().char(), 'S');
     // Should not have current bold (reset)
-    assert!(!core.current_attrs.bold);
+    assert!(!core.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD));
 }

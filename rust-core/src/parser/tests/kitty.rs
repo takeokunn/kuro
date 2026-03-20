@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `kitty` parsing.
 //!
 //! Module under test: `parser/kitty.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 use proptest::prelude::*;
@@ -233,7 +233,7 @@ fn test_kitty_three_chunk_with_intermediate_payload() {
                 "final payload must be 9 bytes (3 chunks × 3 bytes each)"
             );
         }
-        other => panic!("expected KittyCommand::Transmit, got {:?}", other),
+        other => panic!("expected KittyCommand::Transmit, got {other:?}"),
     }
 }
 
@@ -254,7 +254,7 @@ proptest! {
     fn prop_kitty_kb_flags_no_panic(flags in 0u16..=65535u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         // CSI = {flags} u — set kitty keyboard flags
-        term.advance(format!("\x1b[={}u", flags).as_bytes());
+        term.advance(format!("\x1b[={flags}u").as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
 
@@ -263,7 +263,7 @@ proptest! {
     fn prop_kitty_push_pop_no_panic(flags in 0u16..=31u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         // CSI > {flags} u — push kitty keyboard mode
-        term.advance(format!("\x1b[>{}u", flags).as_bytes());
+        term.advance(format!("\x1b[>{flags}u").as_bytes());
         // CSI < u — pop kitty keyboard mode
         term.advance(b"\x1b[<u");
         prop_assert!(term.screen.cursor().row < 24);

@@ -66,7 +66,7 @@ pub fn initialize(emacs_version: (u32, u32)) -> Result<()> {
 /// # Returns
 /// * `Ok(())` if version is compatible
 /// * `Err(InitError::VersionMismatch)` if version is too old
-fn validate_emacs_version(version: (u32, u32)) -> Result<()> {
+const fn validate_emacs_version(version: (u32, u32)) -> Result<()> {
     let (major, minor) = version;
     let (min_major, min_minor) = MIN_EMACS_VERSION;
 
@@ -90,7 +90,7 @@ fn validate_emacs_version(version: (u32, u32)) -> Result<()> {
 ///
 /// # Returns
 /// * `Ok(())` always
-fn verify_required_functions() -> Result<()> {
+const fn verify_required_functions() -> Result<()> {
     Ok(())
 }
 
@@ -117,7 +117,7 @@ pub fn get_init_state() -> Option<InitializationState> {
 /// This function should only be used in test code to reset the
 /// initialization state between tests.
 #[cfg(test)]
-pub fn reset_init_state() {
+pub const fn reset_init_state() {
     // Note: OnceLock doesn't provide a reset method,
     // so in tests we would need to use a different mechanism.
     // For now, this is a placeholder.
@@ -130,6 +130,7 @@ pub fn reset_init_state() {
 ///
 /// # Returns
 /// A vector of symbol names
+#[must_use] 
 pub fn get_exported_symbols() -> Vec<&'static str> {
     vec![
         "kuro-core-init",
@@ -271,8 +272,7 @@ mod tests {
         for sym in &symbols {
             assert!(
                 seen.insert(*sym),
-                "duplicate symbol found in exported list: {}",
-                sym
+                "duplicate symbol found in exported list: {sym}"
             );
         }
     }

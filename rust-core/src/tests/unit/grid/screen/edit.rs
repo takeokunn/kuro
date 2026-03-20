@@ -1,5 +1,5 @@
 //! Unit tests for `Screen` edit methods (edit.rs):
-//! clear_lines, insert_lines, delete_lines, insert_chars, delete_chars, erase_chars.
+//! `clear_lines`, `insert_lines`, `delete_lines`, `insert_chars`, `delete_chars`, `erase_chars`.
 
 use crate::grid::screen::Screen;
 use crate::types::cell::SgrAttributes;

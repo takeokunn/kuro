@@ -34,7 +34,7 @@ pub struct Cursor {
     /// DEC pending wrap flag (DECAWM last-column behavior).
     ///
     /// When a character is printed at the last column, the cursor stays at that
-    /// column and this flag is set.  The actual wrap (col=0, line_feed) is
+    /// column and this flag is set.  The actual wrap (col=0, `line_feed`) is
     /// deferred until the next printable character.  Any explicit cursor
     /// movement clears this flag without wrapping.
     #[serde(skip, default)]
@@ -43,6 +43,7 @@ pub struct Cursor {
 
 impl Cursor {
     /// Create a new cursor at the specified position
+    #[must_use] 
     pub fn new(col: usize, row: usize) -> Self {
         Self {
             col,
@@ -54,23 +55,23 @@ impl Cursor {
     }
 
     /// Move cursor to absolute position
-    pub fn move_to(&mut self, col: usize, row: usize) {
+    pub const fn move_to(&mut self, col: usize, row: usize) {
         self.col = col;
         self.row = row;
     }
 
     /// Move cursor relative to current position
-    pub fn move_by(&mut self, dx: i32, dy: i32) {
+    pub const fn move_by(&mut self, dx: i32, dy: i32) {
         let new_col = if dx >= 0 {
-            self.col.saturating_add(dx as usize)
+            self.col.saturating_add(dx.unsigned_abs() as usize)
         } else {
-            self.col.saturating_sub((-dx) as usize)
+            self.col.saturating_sub(dx.unsigned_abs() as usize)
         };
 
         let new_row = if dy >= 0 {
-            self.row.saturating_add(dy as usize)
+            self.row.saturating_add(dy.unsigned_abs() as usize)
         } else {
-            self.row.saturating_sub((-dy) as usize)
+            self.row.saturating_sub(dy.unsigned_abs() as usize)
         };
 
         self.col = new_col;
@@ -88,8 +89,8 @@ impl Cursor {
 ///
 /// Used by `kuro_core_get_cursor_shape` to send the current shape to Emacs Lisp.
 impl From<CursorShape> for i64 {
-    #[inline(always)]
-    fn from(shape: CursorShape) -> i64 {
+    #[inline]
+    fn from(shape: CursorShape) -> Self {
         match shape {
             CursorShape::BlinkingBlock => 0,
             CursorShape::SteadyBlock => 2,
@@ -110,15 +111,15 @@ impl From<CursorShape> for i64 {
 /// Used by `handle_decscusr` in the CSI parser.
 impl TryFrom<i64> for CursorShape {
     type Error = ();
-    #[inline(always)]
+    #[inline]
     fn try_from(v: i64) -> Result<Self, ()> {
         match v {
-            0 | 1 => Ok(CursorShape::BlinkingBlock),
-            2 => Ok(CursorShape::SteadyBlock),
-            3 => Ok(CursorShape::BlinkingUnderline),
-            4 => Ok(CursorShape::SteadyUnderline),
-            5 => Ok(CursorShape::BlinkingBar),
-            6 => Ok(CursorShape::SteadyBar),
+            0 | 1 => Ok(Self::BlinkingBlock),
+            2 => Ok(Self::SteadyBlock),
+            3 => Ok(Self::BlinkingUnderline),
+            4 => Ok(Self::SteadyUnderline),
+            5 => Ok(Self::BlinkingBar),
+            6 => Ok(Self::SteadyBar),
             _ => Err(()),
         }
     }

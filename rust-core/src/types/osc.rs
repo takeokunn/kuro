@@ -3,7 +3,7 @@
 use crate::types::color::Color;
 
 /// Prompt mark type for OSC 133 shell integration
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptMark {
     /// A - Prompt start
     PromptStart,

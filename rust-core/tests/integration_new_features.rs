@@ -1,13 +1,13 @@
-//! Integration tests for reset behaviour, OscData initialization, and
+//! Integration tests for reset behaviour, `OscData` initialization, and
 //! miscellaneous FR-T3 regressions that do not belong to a single protocol
 //! topic file.
 //!
 //! Protocol-specific tests have been split into:
-//!   - integration_osc.rs       — OSC 4 / 10 / 11 / 12 / 104 / 133 / 1337
-//!   - integration_dec_modes.rs — XTVERSION, DECRQM, mouse-pixel, DA1/DA2,
-//!                                synchronized-output, Kitty KB
-//!   - integration_dcs.rs       — DCS XTGETTCAP, DCS Sixel
-//!   - integration_sgr.rs       — SGR extended underline (4:X, 21, 58, 59)
+//!   - `integration_osc.rs`       — OSC 4 / 10 / 11 / 12 / 104 / 133 / 1337
+//!   - `integration_dec_modes.rs` — XTVERSION, DECRQM, mouse-pixel, DA1/DA2,
+//!     synchronized-output, Kitty KB
+//!   - `integration_dcs.rs`       — DCS XTGETTCAP, DCS Sixel
+//!   - `integration_sgr.rs`       — SGR extended underline (4:X, 21, 58, 59)
 
 mod common;
 
@@ -26,7 +26,7 @@ fn osc_data_palette_initialized_to_256_nones() {
         "OscData.palette must have 256 entries"
     );
     assert!(
-        t.osc_data().palette.iter().all(|e| e.is_none()),
+        t.osc_data().palette.iter().all(std::option::Option::is_none),
         "All palette entries must be None initially"
     );
 }
@@ -72,7 +72,7 @@ fn decrqm_mode_after_disable_responds_reset() {
 
     // Query — mode 1004 should be reported as set (status 1)
     t.advance(b"\x1b[?1004$p");
-    let responses_after_enable = common::read_responses(&mut t);
+    let responses_after_enable = common::read_responses(&t);
     assert!(
         !responses_after_enable.is_empty(),
         "DECRQM after enabling mode 1004 must produce a response"
@@ -81,8 +81,7 @@ fn decrqm_mode_after_disable_responds_reset() {
     let resp_enabled = responses_after_enable.last().unwrap();
     assert!(
         resp_enabled.contains("1004") && resp_enabled.contains('1') && resp_enabled.contains("$y"),
-        "DECRQM for enabled mode 1004 must contain '1004;1$y', got: {:?}",
-        resp_enabled
+        "DECRQM for enabled mode 1004 must contain '1004;1$y', got: {resp_enabled:?}"
     );
 
     // Record how many responses exist before the disable+query round-trip
@@ -93,7 +92,7 @@ fn decrqm_mode_after_disable_responds_reset() {
 
     // Query again — mode 1004 should now be reported as reset (status 2)
     t.advance(b"\x1b[?1004$p");
-    let responses_after_disable = common::read_responses(&mut t);
+    let responses_after_disable = common::read_responses(&t);
     assert!(
         responses_after_disable.len() > count_before_disable,
         "DECRQM after disabling mode 1004 must produce an additional response"
@@ -102,8 +101,7 @@ fn decrqm_mode_after_disable_responds_reset() {
     let resp_disabled = responses_after_disable.last().unwrap();
     assert!(
         resp_disabled.contains("1004") && resp_disabled.contains('2') && resp_disabled.contains("$y"),
-        "DECRQM for disabled mode 1004 must contain '1004;2$y', got: {:?}",
-        resp_disabled
+        "DECRQM for disabled mode 1004 must contain '1004;2$y', got: {resp_disabled:?}"
     );
 }
 
@@ -186,7 +184,7 @@ fn test_kitty_stack_depth() {
 
     // Query — current flags should be 3
     t.advance(b"\x1b[?u");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "Kitty keyboard query must produce a response"
@@ -194,8 +192,7 @@ fn test_kitty_stack_depth() {
     let resp = &responses[0];
     assert!(
         resp.contains('3'),
-        "Query response must report current flags=3, got: {:?}",
-        resp
+        "Query response must report current flags=3, got: {resp:?}"
     );
 
     // Pop — flags should revert to 2

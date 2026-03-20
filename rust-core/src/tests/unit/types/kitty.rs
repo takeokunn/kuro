@@ -1,13 +1,13 @@
 //! Example-based and structural tests for `types::kitty::KittyState`.
 //!
 //! Module under test: `src/types/kitty.rs`
-//! Tier: T5 — ProptestConfig::with_cases(64)
+//! Tier: T5 — `ProptestConfig::with_cases(64)`
 //!
 //! Field inventory (verified from source):
-//!   apc_state: ApcScanState       (pub(crate))
-//!   apc_buf: Vec<u8>              (pub(crate))
-//!   kitty_chunk: Option<KittyChunkState>  (pub(crate))
-//!   pending_image_notifications: Vec<ImageNotification>  (pub(crate))
+//!   `apc_state`: `ApcScanState`       (pub(crate))
+//!   `apc_buf`: Vec<u8>              (pub(crate))
+//!   `kitty_chunk`: Option<KittyChunkState>  (pub(crate))
+//!   `pending_image_notifications`: Vec<ImageNotification>  (pub(crate))
 
 use crate::parser::apc::ApcScanState;
 use crate::types::kitty::KittyState;

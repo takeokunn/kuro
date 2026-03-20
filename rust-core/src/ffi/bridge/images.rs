@@ -11,14 +11,11 @@ use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 /// The Elisp caller should decode: `(base64-decode-string data t)` to get unibyte PNG bytes
 /// suitable for `(create-image bytes 'png t)`.
 #[defun]
-fn kuro_core_get_image<'e>(env: &'e Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_image(env: &Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'_>> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let global = lock_session!();
-        if let Some(session) = global.get(&session_id) {
-            Ok::<String, KuroError>(session.get_image_png_base64(image_id))
-        } else {
-            Ok(String::new())
-        }
+        global.get(&session_id)
+            .map_or_else(|| Ok(String::new()), |session| Ok::<String, KuroError>(session.get_image_png_base64(image_id)))
     }));
     match result {
         Ok(Ok(b64)) => {
@@ -29,7 +26,7 @@ fn kuro_core_get_image<'e>(env: &'e Env, session_id: u64, image_id: u32) -> Emac
             }
         }
         Ok(Err(e)) => {
-            let _ = env.message(format!("kuro: error in get_image: {}", e));
+            let _ = env.message(format!("kuro: error in get_image: {e}"));
             false.into_lisp(env)
         }
         Err(_) => {
@@ -47,14 +44,12 @@ fn kuro_core_get_image<'e>(env: &'e Env, session_id: u64, image_id: u32) -> Emac
 /// This is separate from `kuro-core-poll-updates-with-faces` for backward compatibility.
 /// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
 #[defun]
-fn kuro_core_poll_image_notifications<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+#[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
+fn kuro_core_poll_image_notifications(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let notifications = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(session) = global.get_mut(&session_id) {
-            Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications())
-        } else {
-            Ok(Vec::new())
-        }
+        global.get_mut(&session_id)
+            .map_or_else(|| Ok(Vec::new()), |session| Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications()))
     }))
     .unwrap_or_else(|_| Ok(Vec::new()))
     .unwrap_or_default();
@@ -62,11 +57,11 @@ fn kuro_core_poll_image_notifications<'e>(env: &'e Env, session_id: u64) -> Emac
     // Build Elisp list: each item is (image-id row col cell-width cell-height)
     let mut list = false.into_lisp(env)?;
     for notif in notifications.into_iter().rev() {
-        let id_val = (notif.image_id as i64).into_lisp(env)?;
+        let id_val = i64::from(notif.image_id).into_lisp(env)?;
         let row_val = (notif.row as i64).into_lisp(env)?;
         let col_val = (notif.col as i64).into_lisp(env)?;
-        let cw_val = (notif.cell_width as i64).into_lisp(env)?;
-        let ch_val = (notif.cell_height as i64).into_lisp(env)?;
+        let cw_val = i64::from(notif.cell_width).into_lisp(env)?;
+        let ch_val = i64::from(notif.cell_height).into_lisp(env)?;
 
         // Build proper list: (image-id row col cell-width cell-height)
         let nil = false.into_lisp(env)?;

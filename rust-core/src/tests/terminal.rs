@@ -1,6 +1,7 @@
 //! Basic terminal creation, resize, input, and cursor tests.
 
 use super::super::*;
+use crate::types::cell::SgrFlags;
 use proptest::prelude::*;
 
 #[test]
@@ -62,20 +63,20 @@ fn test_decsc_decrc_preserves_attrs() {
 
     // Set bold via SGR
     term.advance(b"\x1b[1m"); // CSI 1m -> bold on
-    assert!(term.current_attrs.bold);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
 
     // Save cursor + attrs
     term.advance(b"\x1b7"); // DECSC
 
     // Reset attrs
     term.advance(b"\x1b[0m"); // CSI 0m -> reset
-    assert!(!term.current_attrs.bold);
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
 
     // Restore cursor + attrs
     term.advance(b"\x1b8"); // DECRC
 
     // Bold should be restored
-    assert!(term.current_attrs.bold);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
 }
 
 #[test]
@@ -95,7 +96,7 @@ fn test_ris_full_reset() {
     assert_eq!(term.screen.cursor().col, 0);
 
     // Attributes should be reset to default
-    assert!(!term.current_attrs.bold);
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
 
     // Saved cursor state should be cleared
     assert!(term.saved_cursor.is_none());
@@ -272,7 +273,7 @@ fn test_advance_split_sequence() {
     term.advance(b"\x1b["); // incomplete CSI
     term.advance(b"1m"); // complete: SGR bold
     assert!(
-        term.current_attrs.bold,
+        term.current_attrs.flags.contains(SgrFlags::BOLD),
         "bold should be set after split CSI sequence"
     );
 }
@@ -391,7 +392,7 @@ fn test_decstr_soft_reset() {
     // Cursor keys should be reset
     assert!(!term.dec_modes.app_cursor_keys);
     // SGR should be reset
-    assert!(!term.current_attrs.bold);
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
     // Cursor should be at home
     assert_eq!(term.cursor_row(), 0);
     assert_eq!(term.cursor_col(), 0);
@@ -644,7 +645,7 @@ proptest! {
         ) {
             let mut term = super::make_term();
             // CUP uses 1-indexed row;col
-            let seq = format!("\x1b[{};{}H", row, col);
+            let seq = format!("\x1b[{row};{col}H");
             term.advance(seq.as_bytes());
             prop_assert!(term.screen.cursor().row < 24,
                 "CUP row {} must clamp to <24, got {}", row, term.screen.cursor().row);

@@ -26,17 +26,13 @@ impl SafeEnvRef {
     /// The caller must ensure that:
     /// - The pointer is valid and points to a properly initialized Emacs environment
     /// - The environment remains valid for the lifetime of this reference
-    /// - Only one SafeEnvRef exists for a given environment at a time
+    /// - Only one `SafeEnvRef` exists for a given environment at a time
     ///
-    /// # Arguments
-    /// * `env` - Raw pointer to Emacs environment
-    ///
-    /// # Returns
-    /// * `Ok(SafeEnvRef)` if pointer is valid
-    /// * `Err(KuroError::NullPointer)` if pointer is null
+    /// # Errors
+    /// Returns `Err(KuroError::NullPointer)` if `env` is null.
     pub unsafe fn from_raw(env: *mut emacs_env) -> Result<Self> {
         NonNull::new(env)
-            .map(|env| SafeEnvRef { env })
+            .map(|env| Self { env })
             .ok_or(KuroError::NullPointer)
     }
 
@@ -46,7 +42,8 @@ impl SafeEnvRef {
     ///
     /// # Returns
     /// Raw pointer to the Emacs environment
-    pub fn as_ptr(&self) -> *mut emacs_env {
+    #[must_use] 
+    pub const fn as_ptr(&self) -> *mut emacs_env {
         self.env.as_ptr()
     }
 
@@ -58,8 +55,9 @@ impl SafeEnvRef {
     /// # Returns
     /// * `true` if the pointer is non-null
     /// * `false` if the pointer is null (should never happen)
-    #[allow(useless_ptr_null_checks)]
-    pub fn is_valid(&self) -> bool {
+    #[expect(useless_ptr_null_checks, reason = "runtime guard: Emacs env pointer validity is enforced by the Emacs runtime, not statically provable")]
+    #[must_use] 
+    pub const fn is_valid(&self) -> bool {
         !self.env.as_ptr().is_null()
     }
 
@@ -71,9 +69,10 @@ impl SafeEnvRef {
     /// used correctly.
     ///
     /// # Returns
-    /// A new SafeEnvRef pointing to the same environment
-    pub unsafe fn clone_ref(&self) -> Self {
-        SafeEnvRef { env: self.env }
+    /// A new `SafeEnvRef` pointing to the same environment
+    #[must_use] 
+    pub const unsafe fn clone_ref(&self) -> Self {
+        Self { env: self.env }
     }
 }
 
@@ -97,6 +96,7 @@ pub struct EnvRefRegistry {
 
 impl EnvRefRegistry {
     /// Create a new environment reference registry
+    #[must_use] 
     pub const fn new() -> Self {
         Self {
             ref_count: std::sync::atomic::AtomicUsize::new(0),
@@ -144,7 +144,7 @@ static GLOBAL_REGISTRY: EnvRefRegistry = EnvRefRegistry::new();
 
 /// Register a new environment reference in the global registry
 ///
-/// This function should be called whenever a new SafeEnvRef is created.
+/// This function should be called whenever a new `SafeEnvRef` is created.
 ///
 /// # Returns
 /// The new reference count
@@ -154,7 +154,7 @@ pub fn register_env_ref() -> usize {
 
 /// Unregister an environment reference from the global registry
 ///
-/// This function should be called whenever a SafeEnvRef is dropped.
+/// This function should be called whenever a `SafeEnvRef` is dropped.
 ///
 /// # Returns
 /// The new reference count
@@ -182,10 +182,11 @@ impl EnvRefGuard {
     /// Create a new environment reference guard
     ///
     /// This automatically registers the reference in the global registry.
-    #[allow(clippy::new_without_default)]
+    #[expect(clippy::new_without_default, reason = "EnvRefGuard::new() has a side effect (register_env_ref); a Default impl would be misleading")]
+    #[must_use] 
     pub fn new() -> Self {
         register_env_ref();
-        EnvRefGuard
+        Self
     }
 }
 
@@ -197,7 +198,7 @@ impl Drop for EnvRefGuard {
 
 /// Scoped environment reference
 ///
-/// This combines a SafeEnvRef with automatic lifetime management via EnvRefGuard.
+/// This combines a `SafeEnvRef` with automatic lifetime management via `EnvRefGuard`.
 pub struct ScopedEnvRef {
     /// The safe environment reference
     env: SafeEnvRef,
@@ -212,12 +213,8 @@ impl ScopedEnvRef {
     /// The caller must ensure the pointer is valid and the environment
     /// remains valid for the lifetime of this scoped reference.
     ///
-    /// # Arguments
-    /// * `env` - Raw pointer to Emacs environment
-    ///
-    /// # Returns
-    /// * `Ok(ScopedEnvRef)` if pointer is valid
-    /// * `Err(KuroError::NullPointer)` if pointer is null
+    /// # Errors
+    /// Returns `Err(KuroError::NullPointer)` if `env` is null.
     pub unsafe fn from_raw(env: *mut emacs_env) -> Result<Self> {
         let env_ref = SafeEnvRef::from_raw(env)?;
         Ok(Self {
@@ -229,8 +226,9 @@ impl ScopedEnvRef {
     /// Get the safe environment reference
     ///
     /// # Returns
-    /// Reference to the SafeEnvRef
-    pub fn env(&self) -> &SafeEnvRef {
+    /// Reference to the `SafeEnvRef`
+    #[must_use] 
+    pub const fn env(&self) -> &SafeEnvRef {
         &self.env
     }
 
@@ -238,7 +236,8 @@ impl ScopedEnvRef {
     ///
     /// # Returns
     /// Raw pointer to the Emacs environment
-    pub fn as_ptr(&self) -> *mut emacs_env {
+    #[must_use] 
+    pub const fn as_ptr(&self) -> *mut emacs_env {
         self.env.as_ptr()
     }
 }

@@ -9,9 +9,9 @@ use crate::TerminalCore;
 pub(super) fn encode_color_spec(rgb: [u8; 3]) -> String {
     format!(
         "rgb:{:04x}/{:04x}/{:04x}",
-        (rgb[0] as u16) << 8 | rgb[0] as u16,
-        (rgb[1] as u16) << 8 | rgb[1] as u16,
-        (rgb[2] as u16) << 8 | rgb[2] as u16
+        u16::from(rgb[0]) << 8 | u16::from(rgb[0]),
+        u16::from(rgb[1]) << 8 | u16::from(rgb[1]),
+        u16::from(rgb[2]) << 8 | u16::from(rgb[2])
     )
 }
 
@@ -80,17 +80,17 @@ pub(crate) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
 /// Handle OSC 104 — Reset color palette.
 pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(idx_raw) = params.get(1) {
-        if !idx_raw.is_empty() {
+        if idx_raw.is_empty() {
+            // Reset all palette entries
+            for entry in &mut core.osc_data.palette {
+                *entry = None;
+            }
+        } else {
             let idx_str = std::str::from_utf8(idx_raw).unwrap_or("");
             if let Ok(idx) = idx_str.parse::<usize>() {
                 if idx < 256 {
                     core.osc_data.palette[idx] = None;
                 }
-            }
-        } else {
-            // Reset all palette entries
-            for entry in &mut core.osc_data.palette {
-                *entry = None;
             }
         }
     } else {
@@ -205,33 +205,27 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
 
                         let result = {
                             let decoder = png::Decoder::new(std::io::Cursor::new(&raw));
-                            match decoder.read_info() {
-                                Ok(mut reader) => {
-                                    let mut buf = vec![0u8; reader.output_buffer_size()];
-                                    match reader.next_frame(&mut buf) {
-                                        Ok(info) => {
-                                            buf.truncate(info.buffer_size());
-                                            let fmt = match info.color_type {
-                                                png::ColorType::Rgba => ImageFormat::Rgba,
-                                                _ => ImageFormat::Rgb,
-                                            };
-                                            let w = info.width;
-                                            let h = info.height;
-                                            // Convert to RGBA if RGB
-                                            let pixels = if fmt == ImageFormat::Rgb {
-                                                buf.chunks(3)
-                                                    .flat_map(|p| [p[0], p[1], p[2], 255])
-                                                    .collect()
-                                            } else {
-                                                buf
-                                            };
-                                            Some((pixels, ImageFormat::Rgba, w, h))
-                                        }
-                                        Err(_) => None,
-                                    }
-                                }
-                                Err(_) => None,
-                            }
+                            decoder.read_info().ok().and_then(|mut reader| {
+                                let mut buf = vec![0u8; reader.output_buffer_size()];
+                                reader.next_frame(&mut buf).ok().map(|info| {
+                                    buf.truncate(info.buffer_size());
+                                    let fmt = match info.color_type {
+                                        png::ColorType::Rgba => ImageFormat::Rgba,
+                                        _ => ImageFormat::Rgb,
+                                    };
+                                    let w = info.width;
+                                    let h = info.height;
+                                    // Convert to RGBA if RGB
+                                    let pixels = if fmt == ImageFormat::Rgb {
+                                        buf.chunks(3)
+                                            .flat_map(|p| [p[0], p[1], p[2], 255])
+                                            .collect()
+                                    } else {
+                                        buf
+                                    };
+                                    (pixels, ImageFormat::Rgba, w, h)
+                                })
+                            })
                         };
 
                         if let Some((pixels, format, pw, ph)) = result {

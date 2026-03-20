@@ -1,11 +1,11 @@
 //! SGR (Select Graphic Rendition) parameter parsing
 
-use crate::types::cell::UnderlineStyle;
+use crate::types::cell::{SgrFlags, UnderlineStyle};
 use crate::types::{Color, NamedColor};
 
 /// Maximum number of SGR parameter groups in a single CSI sequence.
 ///
-/// vte::Params caps at `MAX_PARAMS = 32` groups, so a fixed-size stack array
+/// `vte::Params` caps at `MAX_PARAMS = 32` groups, so a fixed-size stack array
 /// of this length is sufficient to collect all groups without allocation.
 const SGR_MAX_PARAMS: usize = 32;
 
@@ -29,7 +29,7 @@ const RGB_BLUE_IDX: usize = 4;
 /// Map a named-color parameter offset (0–7) to a `Color::Named` variant.
 /// `offset = param - base` where base is 30 or 40.
 #[inline]
-fn named_color_from_offset(offset: u16) -> Color {
+const fn named_color_from_offset(offset: u16) -> Color {
     match offset {
         0 => Color::Named(NamedColor::Black),
         1 => Color::Named(NamedColor::Red),
@@ -46,7 +46,7 @@ fn named_color_from_offset(offset: u16) -> Color {
 /// Map a bright named-color parameter offset (0–7) to a `Color::Named` bright variant.
 /// `offset = param - base` where base is 90 (foreground) or 100 (background).
 #[inline]
-fn bright_named_color_from_offset(offset: u16) -> Color {
+const fn bright_named_color_from_offset(offset: u16) -> Color {
     match offset {
         0 => Color::Named(NamedColor::BrightBlack),
         1 => Color::Named(NamedColor::BrightRed),
@@ -72,7 +72,7 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
     // vte::Params caps at MAX_PARAMS = 32 groups, so a fixed array is sufficient.
     let mut group_buf: [&[u16]; SGR_MAX_PARAMS] = [&[]; SGR_MAX_PARAMS];
     let mut group_count = 0;
-    for group in params.iter() {
+    for group in params {
         group_buf[group_count] = group;
         group_count += 1;
     }
@@ -95,16 +95,15 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 
         match param {
             0 => term.current_attrs.reset(),
-            1 => term.current_attrs.bold = true,
-            2 => term.current_attrs.dim = true,
-            3 => term.current_attrs.italic = true,
+            1 => term.current_attrs.flags.insert(SgrFlags::BOLD),
+            2 => term.current_attrs.flags.insert(SgrFlags::DIM),
+            3 => term.current_attrs.flags.insert(SgrFlags::ITALIC),
             4 => {
                 // SGR 4 with no sub-params = straight underline; sub-params handled below
                 if group.len() > 1 {
                     // 4:0 = none, 4:1 = straight, 4:2 = double, 4:3 = curly, 4:4 = dotted, 4:5 = dashed
                     term.current_attrs.underline_style = match group[1] {
                         0 => UnderlineStyle::None,
-                        1 => UnderlineStyle::Straight,
                         2 => UnderlineStyle::Double,
                         3 => UnderlineStyle::Curly,
                         4 => UnderlineStyle::Dotted,
@@ -115,25 +114,25 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
                     term.current_attrs.underline_style = UnderlineStyle::Straight;
                 }
             }
-            5 => term.current_attrs.blink_slow = true,
-            6 => term.current_attrs.blink_fast = true,
-            7 => term.current_attrs.inverse = true,
-            8 => term.current_attrs.hidden = true,
-            9 => term.current_attrs.strikethrough = true,
+            5 => term.current_attrs.flags.insert(SgrFlags::BLINK_SLOW),
+            6 => term.current_attrs.flags.insert(SgrFlags::BLINK_FAST),
+            7 => term.current_attrs.flags.insert(SgrFlags::INVERSE),
+            8 => term.current_attrs.flags.insert(SgrFlags::HIDDEN),
+            9 => term.current_attrs.flags.insert(SgrFlags::STRIKETHROUGH),
             22 => {
-                term.current_attrs.bold = false;
-                term.current_attrs.dim = false;
+                term.current_attrs.flags.remove(SgrFlags::BOLD);
+                term.current_attrs.flags.remove(SgrFlags::DIM);
             }
-            23 => term.current_attrs.italic = false,
+            23 => term.current_attrs.flags.remove(SgrFlags::ITALIC),
             24 => term.current_attrs.underline_style = UnderlineStyle::None,
             25 => {
-                term.current_attrs.blink_slow = false;
-                term.current_attrs.blink_fast = false;
+                term.current_attrs.flags.remove(SgrFlags::BLINK_SLOW);
+                term.current_attrs.flags.remove(SgrFlags::BLINK_FAST);
             }
             21 => term.current_attrs.underline_style = UnderlineStyle::Double, // SGR 21: double underline
-            27 => term.current_attrs.inverse = false,
-            28 => term.current_attrs.hidden = false,
-            29 => term.current_attrs.strikethrough = false,
+            27 => term.current_attrs.flags.remove(SgrFlags::INVERSE),
+            28 => term.current_attrs.flags.remove(SgrFlags::HIDDEN),
+            29 => term.current_attrs.flags.remove(SgrFlags::STRIKETHROUGH),
 
             // Foreground colors
             30..=37 => {
@@ -172,7 +171,9 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Returns `0` if the group is absent or empty — a missing RGB component
 /// defaults to 0 (black channel), producing the least-surprising degraded
 /// color for a truncated truecolor sequence like `\e[38;2;255;128m` (missing blue).
-#[inline(always)]
+/// Values > 255 are truncated to the low 8 bits (xterm-compatible behavior).
+#[inline]
+#[expect(clippy::cast_possible_truncation, reason = "VTE sub-params are u16; RGB values 0-255 fit; out-of-range values truncate to low 8 bits (xterm-compatible)")]
 fn next_component(groups: &[&[u16]], i: &mut usize) -> u8 {
     if *i < groups.len() && !groups[*i].is_empty() {
         let v = groups[*i][0] as u8;
@@ -207,14 +208,18 @@ fn parse_color_from_subparams(
         match current_group.get(COLOR_MODE_IDX).copied() {
             Some(5) => {
                 // 256-color indexed: XX:5:n
+                #[expect(clippy::cast_possible_truncation, reason = "palette index 0-255 from u16 sub-param; values > 255 truncate (xterm-compatible)")]
                 let n = current_group.get(COLOR_INDEX_IDX).copied()? as u8;
                 Some(Color::Indexed(n))
             }
             Some(2) => {
                 // TrueColor RGB: XX:2:r:g:b
-                let r = current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8;
-                let g = current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8;
-                let b = current_group.get(RGB_BLUE_IDX).copied().unwrap_or(0) as u8;
+                #[expect(clippy::cast_possible_truncation, reason = "RGB components 0-255 from u16 sub-params; values > 255 truncate (xterm-compatible)")]
+                let (r, g, b) = (
+                    current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8,
+                    current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8,
+                    current_group.get(RGB_BLUE_IDX).copied().unwrap_or(0) as u8,
+                );
                 Some(Color::Rgb(r, g, b))
             }
             _ => None,
@@ -235,6 +240,7 @@ fn parse_color_from_subparams(
                 // via `next_component` (producing black channel, not black color).
                 // 256-color indexed: XX;5;n
                 if *i < groups.len() && !groups[*i].is_empty() {
+                    #[expect(clippy::cast_possible_truncation, reason = "palette index 0-255; values > 255 truncate (xterm-compatible)")]
                     let n = groups[*i][0] as u8;
                     *i += 1;
                     Some(Color::Indexed(n))

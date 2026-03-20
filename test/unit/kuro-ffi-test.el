@@ -111,7 +111,7 @@ or defaulted incorrectly."
 (ert-deftest kuro-ffi-shutdown-clears-initialized ()
   "kuro--shutdown resets kuro--initialized to nil."
   (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-shutdown) (lambda () t)))
+    (cl-letf (((symbol-function 'kuro-core-shutdown) (lambda (_id) t)))
       (kuro--shutdown)
       (should-not kuro--initialized))))
 
@@ -126,7 +126,7 @@ or defaulted incorrectly."
   "kuro--send-key passes string DATA directly to kuro-core-send-key."
   (let ((kuro--initialized t)
         (received nil))
-    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (s) (setq received s))))
+    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_id s) (setq received s))))
       (kuro--send-key "hello")
       (should (equal received "hello")))))
 
@@ -134,7 +134,7 @@ or defaulted incorrectly."
   "kuro--send-key converts a vector of char codes to a string."
   (let ((kuro--initialized t)
         (received nil))
-    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (s) (setq received s))))
+    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_id s) (setq received s))))
       (kuro--send-key [?a ?b ?c])
       (should (stringp received))
       (should (equal received "abc")))))
@@ -143,16 +143,21 @@ or defaulted incorrectly."
   "kuro--send-key does nothing when not initialized."
   (let ((kuro--initialized nil)
         (called nil))
-    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_s) (setq called t))))
+    (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_id _s) (setq called t))))
       (kuro--send-key "x")
       (should-not called))))
 
-;;; Group 5: Query wrappers (cursor, mode flags)
+;;; Group 5: Cursor position query (kuro--get-cursor)
+;;
+;; kuro--get-cursor is the only query wrapper defined in kuro-ffi.el itself.
+;; kuro--get-cursor-visible / kuro--get-cursor-shape are tested in kuro-ffi-modes-test.el.
+;; kuro--get-scroll-offset is tested in kuro-ffi-osc-test.el.
+;; kuro--get-keyboard-flags is tested in kuro-ffi-modes-test.el.
 
 (ert-deftest kuro-ffi-get-cursor-returns-pair ()
   "kuro--get-cursor returns a (row . col) pair from the stub."
   (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor) (lambda () '(3 . 7))))
+    (cl-letf (((symbol-function 'kuro-core-get-cursor) (lambda (_id) '(3 . 7))))
       (let ((pos (kuro--get-cursor)))
         (should (equal pos '(3 . 7)))))))
 
@@ -161,46 +166,13 @@ or defaulted incorrectly."
   (let ((kuro--initialized nil))
     (should-not (kuro--get-cursor))))
 
-(ert-deftest kuro-ffi-get-cursor-visible-returns-t ()
-  "kuro--get-cursor-visible returns t from stub."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor-visible) (lambda () t)))
-      (should (kuro--get-cursor-visible)))))
-
-(ert-deftest kuro-ffi-get-cursor-visible-nil-when-not-initialized ()
-  "kuro--get-cursor-visible returns nil when not initialized."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--get-cursor-visible))))
-
-(ert-deftest kuro-ffi-get-scroll-offset-returns-integer ()
-  "kuro--get-scroll-offset returns an integer from stub."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-scroll-offset) (lambda () 42)))
-      (should (= (kuro--get-scroll-offset) 42)))))
-
-(ert-deftest kuro-ffi-get-scroll-offset-nil-when-not-initialized ()
-  "kuro--get-scroll-offset returns nil when not initialized."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--get-scroll-offset))))
-
-(ert-deftest kuro-ffi-get-keyboard-flags-returns-integer ()
-  "kuro--get-keyboard-flags returns an integer from stub."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-keyboard-flags) (lambda () 7)))
-      (should (= (kuro--get-keyboard-flags) 7)))))
-
-(ert-deftest kuro-ffi-get-keyboard-flags-nil-when-not-initialized ()
-  "kuro--get-keyboard-flags returns nil when not initialized."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--get-keyboard-flags))))
-
 ;;; Group 6: Poll functions
 
 (ert-deftest kuro-ffi-poll-updates-returns-list ()
   "kuro--poll-updates returns whatever kuro-core-poll-updates returns."
   (let ((kuro--initialized t))
     (cl-letf (((symbol-function 'kuro-core-poll-updates)
-               (lambda () '((0 . "line0") (1 . "line1")))))
+               (lambda (_id) '((0 . "line0") (1 . "line1")))))
       (let ((updates (kuro--poll-updates)))
         (should (= (length updates) 2))))))
 
@@ -213,7 +185,7 @@ or defaulted incorrectly."
   "kuro--poll-clipboard-actions passes through the stub result."
   (let ((kuro--initialized t))
     (cl-letf (((symbol-function 'kuro-core-poll-clipboard-actions)
-               (lambda () '((write . "hello")))))
+               (lambda (_id) '((write . "hello")))))
       (let ((actions (kuro--poll-clipboard-actions)))
         (should (= (length actions) 1))
         (should (eq (car (car actions)) 'write))))))
@@ -229,7 +201,7 @@ or defaulted incorrectly."
   "kuro--clear-scrollback calls kuro-core-clear-scrollback when initialized."
   (let ((kuro--initialized t)
         (called nil))
-    (cl-letf (((symbol-function 'kuro-core-clear-scrollback) (lambda () (setq called t))))
+    (cl-letf (((symbol-function 'kuro-core-clear-scrollback) (lambda (_id) (setq called t))))
       (kuro--clear-scrollback)
       (should called))))
 
@@ -245,7 +217,7 @@ or defaulted incorrectly."
   (let ((kuro--initialized t)
         (called nil))
     (cl-letf (((symbol-function 'kuro-core-poll-updates-with-faces)
-               (lambda () (setq called t) '((0 "line" nil nil)))))
+               (lambda (_id) (setq called t) '((0 "line" nil nil)))))
       (let ((result (kuro--poll-updates-with-faces)))
         (should called)
         (should (listp result))))))
@@ -261,7 +233,7 @@ or defaulted incorrectly."
         (received-rows nil)
         (received-cols nil))
     (cl-letf (((symbol-function 'kuro-core-resize)
-               (lambda (rows cols)
+               (lambda (_id rows cols)
                  (setq received-rows rows
                        received-cols cols))))
       (kuro--resize 30 120)
@@ -278,9 +250,9 @@ Note: the fallback in kuro--call t is NOT reached when uninitialized;
 (ert-deftest kuro-ffi-is-process-alive-returns-core-value-when-initialized ()
   "kuro--is-process-alive returns the value from kuro-core-is-process-alive."
   (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda () t)))
+    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda (_id) t)))
       (should (kuro--is-process-alive)))
-    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda () nil)))
+    (cl-letf (((symbol-function 'kuro-core-is-process-alive) (lambda (_id) nil)))
       (should-not (kuro--is-process-alive)))))
 
 (provide 'kuro-ffi-test)

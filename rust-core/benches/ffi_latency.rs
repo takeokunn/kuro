@@ -24,10 +24,10 @@ fn bench_ffi_latency(c: &mut Criterion) {
         let mut core = TerminalCore::new(24, 80);
 
         b.iter(|| {
-            black_box(core.resize(24, 80));
-            black_box(core.resize(50, 200));
-            black_box(core.resize(100, 400));
-            black_box(core.resize(24, 80)); // Reset
+            core.resize(24, 80);
+            core.resize(50, 200);
+            core.resize(100, 400);
+            core.resize(24, 80); // Reset
         });
     });
 
@@ -47,7 +47,7 @@ fn bench_ffi_latency(c: &mut Criterion) {
         // Fill screen
         for _row in 0..24 {
             for _col in 0..80 {
-                core.advance(&[b'X']);
+                core.advance(b"X");
             }
         }
 
@@ -62,9 +62,9 @@ fn bench_ffi_latency(c: &mut Criterion) {
     group.bench_function("print_cell", |b| {
         let mut core = TerminalCore::new(24, 80);
         b.iter(|| {
-            black_box(core.advance(&[b'X']));
-            black_box(core.advance(&[b'Y']));
-            black_box(core.advance(&[b'Z']));
+            core.advance(b"X");
+            core.advance(b"Y");
+            core.advance(b"Z");
         });
     });
 

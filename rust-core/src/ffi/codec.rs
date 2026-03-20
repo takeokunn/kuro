@@ -25,7 +25,7 @@
 //! - Bit 7 (`0x080`): hidden
 //! - Bit 8 (`0x100`): strikethrough
 
-use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
+use crate::types::cell::{Cell, CellWidth, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::{Color, NamedColor};
 
 /// Encoded line data for FFI transfer: `(row, text, face_ranges, col_to_buf)`.
@@ -54,7 +54,7 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_color(color: &Color) -> u32 {
     match color {
-        Color::Default => 0xFF000000u32,
+        Color::Default => 0xFF00_0000_u32,
         Color::Named(named) => {
             let idx: u32 = match named {
                 NamedColor::Black => 0,
@@ -74,10 +74,10 @@ pub fn encode_color(color: &Color) -> u32 {
                 NamedColor::BrightCyan => 14,
                 NamedColor::BrightWhite => 15,
             };
-            0x80000000u32 | idx
+            0x8000_0000_u32 | idx
         }
-        Color::Indexed(idx) => 0x40000000u32 | (*idx as u32),
-        Color::Rgb(r, g, b) => ((*r as u32) << 16) | ((*g as u32) << 8) | (*b as u32),
+        Color::Indexed(idx) => 0x4000_0000_u32 | u32::from(*idx),
+        Color::Rgb(r, g, b) => (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b),
     }
 }
 
@@ -88,19 +88,12 @@ pub fn encode_color(color: &Color) -> u32 {
 #[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
-    let mut flags = 0u64;
-    if attrs.bold {
-        flags |= 0x1;
-    }
-    if attrs.dim {
-        flags |= 0x2;
-    }
-    if attrs.italic {
-        flags |= 0x4;
-    }
-    if attrs.underline() {
-        flags |= 0x8;
-    }
+    let f = attrs.flags;
+    let mut bits = 0u64;
+    if f.contains(SgrFlags::BOLD)          { bits |= 0x001; }
+    if f.contains(SgrFlags::DIM)           { bits |= 0x002; }
+    if f.contains(SgrFlags::ITALIC)        { bits |= 0x004; }
+    if attrs.underline()                   { bits |= 0x008; }
     let style_bits: u64 = match attrs.underline_style {
         UnderlineStyle::None => 0,
         UnderlineStyle::Straight => 1,
@@ -109,23 +102,13 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
         UnderlineStyle::Dotted => 4,
         UnderlineStyle::Dashed => 5,
     };
-    flags |= style_bits << 9;
-    if attrs.blink_slow {
-        flags |= 0x10;
-    }
-    if attrs.blink_fast {
-        flags |= 0x20;
-    }
-    if attrs.inverse {
-        flags |= 0x40;
-    }
-    if attrs.hidden {
-        flags |= 0x80;
-    }
-    if attrs.strikethrough {
-        flags |= 0x100;
-    }
-    flags
+    bits |= style_bits << 9;
+    if f.contains(SgrFlags::BLINK_SLOW)    { bits |= 0x010; }
+    if f.contains(SgrFlags::BLINK_FAST)    { bits |= 0x020; }
+    if f.contains(SgrFlags::INVERSE)       { bits |= 0x040; }
+    if f.contains(SgrFlags::HIDDEN)        { bits |= 0x080; }
+    if f.contains(SgrFlags::STRIKETHROUGH) { bits |= 0x100; }
+    bits
 }
 
 /// Encode a slice of cells into `(text, face_ranges, col_to_buf)` for FFI transfer.
@@ -196,7 +179,7 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     let mut current_bg = u32::MAX;
     let mut current_flags = u64::MAX;
 
-    for cell in cells.iter() {
+    for cell in cells {
         // Any CellWidth::Wide cell is a placeholder for the second column of a wide
         // (CJK/emoji) character.  Skip it: the base character was already emitted and
         // advances the Emacs buffer by exactly one char position.

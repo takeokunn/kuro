@@ -10,6 +10,7 @@ repository.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+bitflags.workspace = true
 bitvec.workspace = true
 vte.workspace = true
 emacs.workspace = true

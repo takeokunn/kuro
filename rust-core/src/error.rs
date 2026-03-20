@@ -182,7 +182,7 @@ mod tests {
             Box::new(KuroError::NullPointer),
         ];
         for v in &variants {
-            let s = format!("{:?}", v);
+            let s = format!("{v:?}");
             assert!(!s.is_empty(), "Debug format must be non-empty");
         }
     }

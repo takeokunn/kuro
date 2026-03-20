@@ -8,11 +8,12 @@ use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 
 use crate::error::KuroError;
 use crate::ffi::abstraction::with_session;
-use super::{catch_panic, lock_session, query_session_mut};
+use super::{catch_panic, lock_session, query_session, query_session_mut};
 
 /// Poll for terminal updates and return dirty lines
 #[defun]
-fn kuro_core_poll_updates<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+#[expect(clippy::cast_possible_wrap, reason = "line_no is a terminal row index (≤ 65535); usize→i64 never wraps")]
+fn kuro_core_poll_updates(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let result: Result<Vec<(usize, String)>, KuroError> =
         catch_unwind(AssertUnwindSafe(|| {
             let mut global = lock_session!();
@@ -38,7 +39,7 @@ fn kuro_core_poll_updates<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Valu
             Ok(list)
         }
         Err(e) => {
-            let msg = format!("Kuro error: {}", e);
+            let msg = format!("Kuro error: {e}");
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -48,17 +49,17 @@ fn kuro_core_poll_updates<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Valu
 
 /// Poll for terminal updates and return dirty lines with face information
 #[defun]
-fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+#[expect(clippy::cast_possible_wrap, reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64")]
+fn kuro_core_poll_updates_with_faces(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let result: Result<Vec<crate::ffi::codec::EncodedLine>, KuroError> =
         catch_unwind(AssertUnwindSafe(|| {
         let mut global = lock_session!();
 
-        if let Some(session) = global.get_mut(&session_id) {
-            session.poll_output()?;
-            Ok(session.get_dirty_lines_with_faces())
-        } else {
-            Ok(Vec::new())
-        }
+        let Some(session) = global.get_mut(&session_id) else {
+            return Ok(Vec::new());
+        };
+        session.poll_output()?;
+        Ok(session.get_dirty_lines_with_faces())
     }))
     .unwrap_or_else(|_| {
         Err(crate::ffi::error::ffi_error(
@@ -79,8 +80,8 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env, session_id: u64) -> Emacs
                 for (start_buf, end_buf, fg, bg, flags) in face_ranges {
                     let start_val = (start_buf as i64).into_lisp(env)?;
                     let end_val = (end_buf as i64).into_lisp(env)?;
-                    let fg_val = (fg as i64).into_lisp(env)?;
-                    let bg_val = (bg as i64).into_lisp(env)?;
+                    let fg_val = i64::from(fg).into_lisp(env)?;
+                    let bg_val = i64::from(bg).into_lisp(env)?;
                     let flags_val = (flags as i64).into_lisp(env)?;
 
                     // Build flat proper list: (start end fg bg flags)
@@ -120,7 +121,7 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env, session_id: u64) -> Emacs
             Ok(list)
         }
         Err(e) => {
-            let msg = format!("Kuro error: {}", e);
+            let msg = format!("Kuro error: {e}");
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -130,14 +131,10 @@ fn kuro_core_poll_updates_with_faces<'e>(env: &'e Env, session_id: u64) -> Emacs
 
 /// Get scrollback buffer lines
 #[defun]
-fn kuro_core_get_scrollback<'e>(env: &'e Env, session_id: u64, max_lines: usize) -> EmacsResult<Value<'e>> {
-    let scrollback_lines = catch_unwind(AssertUnwindSafe(|| {
+fn kuro_core_get_scrollback(env: &Env, session_id: u64, max_lines: usize) -> EmacsResult<Value<'_>> {
+    let scrollback_lines: Vec<String> = catch_unwind(AssertUnwindSafe(|| -> crate::Result<Vec<String>> {
         let global = lock_session!();
-        if let Some(session) = global.get(&session_id) {
-            Ok::<Vec<String>, KuroError>(session.get_scrollback(max_lines))
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(global.get(&session_id).map(|s| s.get_scrollback(max_lines)).unwrap_or_default())
     }))
     .unwrap_or_else(|_| {
         let _ = env.message("kuro: panic in get_scrollback");
@@ -155,7 +152,7 @@ fn kuro_core_get_scrollback<'e>(env: &'e Env, session_id: u64, max_lines: usize)
 
 /// Clear scrollback buffer
 #[defun]
-fn kuro_core_clear_scrollback<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+fn kuro_core_clear_scrollback(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     query_session_mut(env, session_id, false, |session| {
         session.clear_scrollback();
         Ok(true)
@@ -164,7 +161,7 @@ fn kuro_core_clear_scrollback<'e>(env: &'e Env, session_id: u64) -> EmacsResult<
 
 /// Scroll the viewport up by n lines (toward older scrollback content)
 #[defun]
-fn kuro_core_scroll_up<'e>(env: &'e Env, session_id: u64, n: usize) -> EmacsResult<Value<'e>> {
+fn kuro_core_scroll_up(env: &Env, session_id: u64, n: usize) -> EmacsResult<Value<'_>> {
     catch_panic(env, || {
         with_session(session_id, |session| {
             session.viewport_scroll_up(n);
@@ -175,7 +172,7 @@ fn kuro_core_scroll_up<'e>(env: &'e Env, session_id: u64, n: usize) -> EmacsResu
 
 /// Scroll the viewport down by n lines (toward live content)
 #[defun]
-fn kuro_core_scroll_down<'e>(env: &'e Env, session_id: u64, n: usize) -> EmacsResult<Value<'e>> {
+fn kuro_core_scroll_down(env: &Env, session_id: u64, n: usize) -> EmacsResult<Value<'_>> {
     catch_panic(env, || {
         with_session(session_id, |session| {
             session.viewport_scroll_down(n);
@@ -192,17 +189,17 @@ fn kuro_core_scroll_down<'e>(env: &'e Env, session_id: u64, n: usize) -> EmacsRe
 /// `kuro-core-bell-pending` + `kuro-core-clear-bell` pattern into a single
 /// lock acquisition.
 #[defun]
-fn kuro_core_take_bell_pending<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+fn kuro_core_take_bell_pending(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     query_session_mut(env, session_id, false, |session| Ok(session.take_bell_pending()))
 }
 
 /// Set scrollback buffer max lines
 #[defun]
-fn kuro_core_set_scrollback_max_lines<'e>(
-    env: &'e Env,
+fn kuro_core_set_scrollback_max_lines(
+    env: &Env,
     session_id: u64,
     max_lines: usize,
-) -> EmacsResult<Value<'e>> {
+) -> EmacsResult<Value<'_>> {
     query_session_mut(env, session_id, false, |session| {
         session.set_scrollback_max_lines(max_lines);
         Ok(true)
@@ -211,20 +208,13 @@ fn kuro_core_set_scrollback_max_lines<'e>(
 
 /// Get scrollback buffer line count
 #[defun]
-fn kuro_core_get_scrollback_count<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
-    catch_panic(env, || {
-        let global = lock_session!();
-        if let Some(session) = global.get(&session_id) {
-            Ok(session.get_scrollback_count())
-        } else {
-            Ok(0)
-        }
-    })
+fn kuro_core_get_scrollback_count(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    query_session(env, session_id, 0usize, |session| Ok(session.get_scrollback_count()))
 }
 
 /// Get the current viewport scroll offset (0 = live view, N = scrolled back N lines)
 #[defun]
-fn kuro_core_get_scroll_offset<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_scroll_offset(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     catch_panic(env, || with_session(session_id, |session| Ok(session.scroll_offset())))
 }
 
@@ -238,14 +228,10 @@ fn kuro_core_get_scroll_offset<'e>(env: &'e Env, session_id: u64) -> EmacsResult
 /// that Emacs can perform buffer-level line deletion/insertion first,
 /// preventing double-rendering of the newly revealed bottom row.
 #[defun]
-fn kuro_core_consume_scroll_events<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
-    let (up, down) = catch_unwind(AssertUnwindSafe(|| {
+fn kuro_core_consume_scroll_events(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    let (up, down): (u32, u32) = catch_unwind(AssertUnwindSafe(|| -> crate::Result<(u32, u32)> {
         let mut global = lock_session!();
-        if let Some(session) = global.get_mut(&session_id) {
-            Ok::<(u32, u32), KuroError>(session.consume_scroll_events())
-        } else {
-            Ok((0, 0))
-        }
+        Ok(global.get_mut(&session_id).map_or((0, 0), super::super::abstraction::session::TerminalSession::consume_scroll_events))
     }))
     .unwrap_or_else(|_| {
         let _ = env.message("kuro: panic in consume_scroll_events");
@@ -254,8 +240,8 @@ fn kuro_core_consume_scroll_events<'e>(env: &'e Env, session_id: u64) -> EmacsRe
     .unwrap_or((0, 0));
 
     if up > 0 || down > 0 {
-        let up_val = (up as i64).into_lisp(env)?;
-        let down_val = (down as i64).into_lisp(env)?;
+        let up_val = i64::from(up).into_lisp(env)?;
+        let down_val = i64::from(down).into_lisp(env)?;
         env.cons(up_val, down_val)
     } else {
         false.into_lisp(env)

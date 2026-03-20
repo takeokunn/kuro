@@ -4,6 +4,46 @@ use super::color::Color;
 use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 
+bitflags::bitflags! {
+    /// SGR boolean attribute flags — packed into a single byte per cell.
+    ///
+    /// Using one `u8` bitfield instead of eight `bool` fields reduces
+    /// `SgrAttributes` by 7 bytes per instance.  With a 24×80 terminal
+    /// (1 920 cells), this saves ~13 KiB per screen buffer.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SgrFlags: u8 {
+        /// SGR 1: Bold / increased intensity
+        const BOLD          = 0b0000_0001;
+        /// SGR 2: Faint / decreased intensity
+        const DIM           = 0b0000_0010;
+        /// SGR 3: Italic
+        const ITALIC        = 0b0000_0100;
+        /// SGR 5: Blink (slow)
+        const BLINK_SLOW    = 0b0000_1000;
+        /// SGR 6: Blink (rapid)
+        const BLINK_FAST    = 0b0001_0000;
+        /// SGR 7: Inverse / reverse video
+        const INVERSE       = 0b0010_0000;
+        /// SGR 8: Concealed / hidden
+        const HIDDEN        = 0b0100_0000;
+        /// SGR 9: Crossed-out / strikethrough
+        const STRIKETHROUGH = 0b1000_0000;
+    }
+}
+
+impl Serialize for SgrFlags {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.bits().serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SgrFlags {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let bits = u8::deserialize(d)?;
+        Ok(Self::from_bits_truncate(bits))
+    }
+}
+
 /// Cell width for Unicode/CJK character support
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CellWidth {
@@ -41,26 +81,12 @@ pub struct SgrAttributes {
     pub foreground: Color,
     /// Background color
     pub background: Color,
-    /// Bold text
-    pub bold: bool,
-    /// Dim text
-    pub dim: bool,
-    /// Italic text
-    pub italic: bool,
-    /// Underline style (replaces the old `underline: bool`)
+    /// Boolean style flags (bold, dim, italic, blink, inverse, hidden, strikethrough)
+    pub flags: SgrFlags,
+    /// Underline style (none/straight/double/curly/dotted/dashed)
     pub underline_style: UnderlineStyle,
     /// Underline color (SGR 58/59)
     pub underline_color: Color,
-    /// Blink (slow)
-    pub blink_slow: bool,
-    /// Blink (rapid)
-    pub blink_fast: bool,
-    /// Inverse/reverse video
-    pub inverse: bool,
-    /// Hidden/conceal
-    pub hidden: bool,
-    /// Strikethrough
-    pub strikethrough: bool,
 }
 
 impl Default for SgrAttributes {
@@ -68,29 +94,23 @@ impl Default for SgrAttributes {
         Self {
             foreground: Color::Default,
             background: Color::Default,
-            bold: false,
-            dim: false,
-            italic: false,
+            flags: SgrFlags::empty(),
             underline_style: UnderlineStyle::None,
             underline_color: Color::Default,
-            blink_slow: false,
-            blink_fast: false,
-            inverse: false,
-            hidden: false,
-            strikethrough: false,
         }
     }
 }
 
 impl SgrAttributes {
     /// Reset all attributes to default
-    #[inline(always)]
+    #[inline]
     pub fn reset(&mut self) {
         *self = Self::default();
     }
 
     /// Returns true if any underline style is active
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn underline(&self) -> bool {
         self.underline_style != UnderlineStyle::None
     }
@@ -113,7 +133,8 @@ pub struct Cell {
 
 impl Cell {
     /// Create a new cell with the given character
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn new(c: char) -> Self {
         Self {
             grapheme: CompactString::new(c.to_string()),
@@ -125,7 +146,8 @@ impl Cell {
     }
 
     /// Create a new cell with character and attributes
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
         Self {
             grapheme: CompactString::new(c.to_string()),
@@ -137,7 +159,8 @@ impl Cell {
     }
 
     /// Set hyperlink ID
-    #[inline(always)]
+    #[inline]
+    #[must_use] 
     pub fn with_hyperlink(mut self, id: String) -> Self {
         self.hyperlink_id = Some(id);
         self
@@ -163,13 +186,15 @@ impl Cell {
     }
 
     /// Get the first (base) character of the grapheme cluster (backward compat)
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn char(&self) -> char {
         self.grapheme.chars().next().unwrap_or(' ')
     }
 
     /// Get the full grapheme cluster string (may include combining characters)
     #[inline]
+    #[must_use] 
     pub fn grapheme(&self) -> &str {
         self.grapheme.as_str()
     }
@@ -212,30 +237,30 @@ mod tests {
     fn test_cell_new() {
         let cell = Cell::new('A');
         assert_eq!(cell.grapheme.as_str(), "A");
-        assert!(!cell.attrs.bold);
+        assert!(!cell.attrs.flags.contains(SgrFlags::BOLD));
     }
 
     #[test]
     fn test_cell_with_attrs() {
         let attrs = SgrAttributes {
-            bold: true,
+            flags: SgrFlags::BOLD,
             foreground: Color::Rgb(255, 0, 0),
             ..Default::default()
         };
 
         let cell = Cell::with_attrs('B', attrs);
         assert_eq!(cell.grapheme.as_str(), "B");
-        assert!(cell.attrs.bold);
+        assert!(cell.attrs.flags.contains(SgrFlags::BOLD));
         assert_eq!(cell.attrs.foreground, Color::Rgb(255, 0, 0));
     }
 
     #[test]
     fn test_sgr_reset() {
-        let mut attrs = SgrAttributes { bold: true, italic: true, ..Default::default() };
+        let mut attrs = SgrAttributes { flags: SgrFlags::BOLD | SgrFlags::ITALIC, ..Default::default() };
 
         attrs.reset();
-        assert!(!attrs.bold);
-        assert!(!attrs.italic);
+        assert!(!attrs.flags.contains(SgrFlags::BOLD));
+        assert!(!attrs.flags.contains(SgrFlags::ITALIC));
         assert_eq!(attrs.foreground, Color::Default);
     }
 
@@ -254,7 +279,7 @@ mod tests {
         let cell2 = Cell::new('A');
         assert_eq!(cell1, cell2);
 
-        let attrs = SgrAttributes { bold: true, ..Default::default() };
+        let attrs = SgrAttributes { flags: SgrFlags::BOLD, ..Default::default() };
         let cell3 = Cell::with_attrs('A', attrs);
         assert_ne!(cell1, cell3);
     }
@@ -279,7 +304,7 @@ mod tests {
         // Other fields are preserved after setting a hyperlink
         assert_eq!(relinked.char(), 'A');
         assert_eq!(relinked.width, CellWidth::Half);
-        assert!(!relinked.attrs.bold);
+        assert!(!relinked.attrs.flags.contains(SgrFlags::BOLD));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `csi` parsing.
 //!
 //! Module under test: `parser/csi.rs`
-//! Tier: T2 — ProptestConfig::with_cases(500)
+//! Tier: T2 — `ProptestConfig::with_cases(500)`
 
 use super::*;
 
@@ -657,7 +657,7 @@ proptest! {
     fn prop_cursor_up_no_overflow(n in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         term.screen.move_cursor(0, 0);
-        term.advance(format!("\x1b[{}A", n).as_bytes());
+        term.advance(format!("\x1b[{n}A").as_bytes());
         prop_assert_eq!(term.screen.cursor.row, 0, "cursor up from row 0 must stay at 0");
     }
 
@@ -667,7 +667,7 @@ proptest! {
         let rows: usize = 24;
         let mut term = crate::TerminalCore::new(rows as u16, 80);
         term.screen.move_cursor(rows - 1, 0);
-        term.advance(format!("\x1b[{}B", n).as_bytes());
+        term.advance(format!("\x1b[{n}B").as_bytes());
         prop_assert!(
             term.screen.cursor.row < rows,
             "cursor down from last row must not exceed bounds"
@@ -678,7 +678,7 @@ proptest! {
     // BOUNDARY: cursor right never exceeds last column
     fn prop_cursor_right_in_bounds(n in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[{}C", n).as_bytes());
+        term.advance(format!("\x1b[{n}C").as_bytes());
         prop_assert!(term.screen.cursor.col < 80, "cursor.col must be < 80");
     }
 
@@ -687,7 +687,7 @@ proptest! {
     fn prop_cursor_left_in_bounds(n in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         term.screen.move_cursor(0, 0);
-        term.advance(format!("\x1b[{}D", n).as_bytes());
+        term.advance(format!("\x1b[{n}D").as_bytes());
         prop_assert_eq!(term.screen.cursor.col, 0, "cursor left from col 0 must stay at 0");
     }
 }

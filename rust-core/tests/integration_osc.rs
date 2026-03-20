@@ -39,19 +39,17 @@ fn osc4_query_palette_color_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]4;3;rgb:00/ff/00\x07"); // set index 3 = green
     t.advance(b"\x1b]4;3;?\x07"); // query index 3
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty(), "OSC 4 query must produce a response");
     let resp = &responses[0];
     assert!(
         resp.contains("4;3"),
-        "OSC 4 response must echo back index 3, got: {:?}",
-        resp
+        "OSC 4 response must echo back index 3, got: {resp:?}"
     );
     // Response should contain some green channel info
     assert!(
         resp.contains("rgb:") || resp.contains("ff"),
-        "OSC 4 response should contain the color spec, got: {:?}",
-        resp
+        "OSC 4 response should contain the color spec, got: {resp:?}"
     );
 }
 
@@ -85,7 +83,7 @@ fn osc104_reset_all() {
     t.advance(b"\x1b]4;1;rgb:00/ff/00\x07");
     t.advance(b"\x1b]104\x07"); // reset all
     assert!(
-        t.osc_data().palette.iter().all(|e| e.is_none()),
+        t.osc_data().palette.iter().all(std::option::Option::is_none),
         "OSC 104 with no args must reset all palette entries"
     );
 }
@@ -153,7 +151,7 @@ fn osc10_query_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]10;rgb:aa/bb/cc\x07"); // set first
     t.advance(b"\x1b]10;?\x07"); // then query
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "OSC 10 query must produce a response"
@@ -161,8 +159,7 @@ fn osc10_query_produces_response() {
     let resp = &responses[0];
     assert!(
         resp.contains("10;"),
-        "OSC 10 response must echo back '10;', got: {:?}",
-        resp
+        "OSC 10 response must echo back '10;', got: {resp:?}"
     );
 }
 
@@ -171,13 +168,12 @@ fn osc11_query_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]11;rgb:22/33/44\x07");
     t.advance(b"\x1b]11;?\x07");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("11;"),
-        "OSC 11 response must echo '11;', got: {:?}",
-        resp
+        "OSC 11 response must echo '11;', got: {resp:?}"
     );
 }
 
@@ -186,13 +182,12 @@ fn osc12_query_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]12;rgb:ff/a5/00\x07");
     t.advance(b"\x1b]12;?\x07");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("12;"),
-        "OSC 12 response must echo '12;', got: {:?}",
-        resp
+        "OSC 12 response must echo '12;', got: {resp:?}"
     );
 }
 

@@ -11,6 +11,6 @@ use super::super::query_session_opt;
 /// Returns the new title string if one has been set since the last call,
 /// or nil if no title update is pending.
 #[defun]
-fn kuro_core_get_and_clear_title<'e>(env: &'e Env, session_id: u64) -> EmacsResult<Value<'e>> {
+fn kuro_core_get_and_clear_title(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     query_session_opt(env, session_id, |s| Ok(s.take_title_if_dirty()))
 }

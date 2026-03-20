@@ -1,4 +1,4 @@
-//! Property-based tests for `crate::types::color` (Color, NamedColor)
+//! Property-based tests for `crate::types::color` (Color, `NamedColor`)
 //!
 //! Tests in this file complement the embedded `#[cfg(test)]` tests in
 //! `src/types/color.rs` and add property-based coverage for mathematical
@@ -111,7 +111,7 @@ fn test_named_colors_have_unique_rgb_values() {
         NamedColor::BrightCyan,
         NamedColor::BrightWhite,
     ];
-    let rgb_values: HashSet<(u8, u8, u8)> = all_named.iter().map(|c| c.to_rgb()).collect();
+    let rgb_values: HashSet<(u8, u8, u8)> = all_named.iter().map(crate::types::color::NamedColor::to_rgb).collect();
     assert_eq!(
         rgb_values.len(),
         16,

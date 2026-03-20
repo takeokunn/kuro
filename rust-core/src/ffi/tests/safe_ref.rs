@@ -36,14 +36,14 @@ fn test_env_ref_guard() {
     assert_eq!(env_ref_count(), initial_count);
 }
 
-/// A freshly created EnvRefRegistry starts with a count of 0.
+/// A freshly created `EnvRefRegistry` starts with a count of 0.
 #[test]
 fn test_env_ref_registry_starts_empty() {
     let registry = EnvRefRegistry::new();
     assert_eq!(registry.count(), 0, "fresh registry should have count 0");
 }
 
-/// Calling register() once on a fresh registry increments the count to 1.
+/// Calling `register()` once on a fresh registry increments the count to 1.
 #[test]
 fn test_env_ref_registry_register_increments_count() {
     let registry = EnvRefRegistry::new();
@@ -55,7 +55,7 @@ fn test_env_ref_registry_register_increments_count() {
     );
 }
 
-/// Calling register() then unregister() on a fresh registry leaves the count at 0.
+/// Calling `register()` then `unregister()` on a fresh registry leaves the count at 0.
 #[test]
 fn test_env_ref_registry_unregister_decrements_count() {
     let registry = EnvRefRegistry::new();

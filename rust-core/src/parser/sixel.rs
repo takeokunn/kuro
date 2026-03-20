@@ -50,6 +50,8 @@ enum SixelParseState {
 
 impl SixelDecoder {
     /// Create a decoder using Sixel P2 behavior.
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "VT340 default palette values are 0-100 (positive); (v * 255 / 100) is always ≤ 255")]
     pub fn new(p2: u16) -> Self {
         let mut color_map = HashMap::new();
         // VT340-like default palette (first 16 entries, 0-100 mapped to 0-255).
@@ -151,7 +153,7 @@ impl SixelDecoder {
                 self.num_buf = self
                     .num_buf
                     .saturating_mul(10)
-                    .saturating_add((byte - b'0') as u32);
+                    .saturating_add(u32::from(byte - b'0'));
             }
             b';' => {
                 self.params.push(self.num_buf);
@@ -175,7 +177,7 @@ impl SixelDecoder {
                 self.num_buf = self
                     .num_buf
                     .saturating_mul(10)
-                    .saturating_add((byte - b'0') as u32);
+                    .saturating_add(u32::from(byte - b'0'));
             }
             0x3F..=0x7E => {
                 let count = self.num_buf.max(1);
@@ -197,7 +199,7 @@ impl SixelDecoder {
                 self.num_buf = self
                     .num_buf
                     .saturating_mul(10)
-                    .saturating_add((byte - b'0') as u32);
+                    .saturating_add(u32::from(byte - b'0'));
             }
             b';' => {
                 self.params.push(self.num_buf);
@@ -214,6 +216,8 @@ impl SixelDecoder {
         }
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "register index: DCS params are u32 but Sixel only defines 0-255 registers (VT340); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255")]
+    #[expect(clippy::cast_precision_loss, reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation")]
     fn apply_color_command(&mut self) {
         if self.params.is_empty() {
             return;
@@ -373,6 +377,7 @@ impl SixelDecoder {
     /// Finalize decoding.
     ///
     /// Returns `(pixels_rgba, width, height)` or `None` when nothing was decoded.
+    #[must_use] 
     pub fn finish(mut self) -> Option<(Vec<u8>, u32, u32)> {
         // Flush an unterminated command at sequence end.
         match self.state {
@@ -413,6 +418,7 @@ impl SixelDecoder {
 }
 
 /// HLS to RGB conversion (H: 0-360, L: 0-100, S: 0-100).
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "L/S are clamped to [0,1] and hue_to_rgb returns [0,1]; multiplied by 255 gives [0,255] — always fits in u8")]
 fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     let l = (l / 100.0).clamp(0.0, 1.0);
     let s = (s / 100.0).clamp(0.0, 1.0);
@@ -427,7 +433,7 @@ fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     } else {
         l + s - l * s
     };
-    let p = 2.0 * l - q;
+    let p = 2.0f32.mul_add(l, -q);
     let h = h / 360.0;
 
     let r = hue_to_rgb(p, q, h + 1.0 / 3.0);
@@ -445,13 +451,13 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
         t -= 1.0;
     }
     if t < 1.0 / 6.0 {
-        return p + (q - p) * 6.0 * t;
+        return ((q - p) * 6.0).mul_add(t, p);
     }
     if t < 1.0 / 2.0 {
         return q;
     }
     if t < 2.0 / 3.0 {
-        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+        return ((q - p) * (2.0 / 3.0 - t)).mul_add(6.0, p);
     }
     p
 }

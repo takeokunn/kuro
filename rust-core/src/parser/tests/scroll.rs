@@ -1,7 +1,11 @@
 //! Property-based and example-based tests for `scroll` parsing.
 //!
 //! Module under test: `parser/scroll.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
+
+// Test helpers convert between usize/u16/i64 for grid coordinates; values are
+// bounded by terminal dimensions (≤ 65535 rows/cols) so truncation is safe.
+#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)")]
 
 use super::*;
 
@@ -470,8 +474,7 @@ fn test_su_scroll_up_clamps_at_screen() {
         assert_eq!(
             line.cells[0].char(),
             ' ',
-            "row {} should be blank after over-scroll",
-            r
+            "row {r} should be blank after over-scroll"
         );
     }
 }
@@ -496,7 +499,7 @@ proptest! {
     // PANIC SAFETY: SU (CSI n S) with any parameter never panics
     fn prop_su_no_panic(n in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{}S", n).as_bytes());
+        term.advance(format!("\x1b[{n}S").as_bytes());
         prop_assert!(term.screen.rows() == 10);
     }
 
@@ -504,7 +507,7 @@ proptest! {
     // PANIC SAFETY: SD (CSI n T) with any parameter never panics
     fn prop_sd_no_panic(n in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{}T", n).as_bytes());
+        term.advance(format!("\x1b[{n}T").as_bytes());
         prop_assert!(term.screen.rows() == 10);
     }
 
@@ -526,8 +529,8 @@ proptest! {
         let rows = 10u16;
         let bot = (top + extra).min(rows);
         prop_assume!(top < bot);
-        let mut term = crate::TerminalCore::new(rows as u16, 20);
-        term.advance(format!("\x1b[{};{}r", top, bot).as_bytes());
+        let mut term = crate::TerminalCore::new(rows, 20);
+        term.advance(format!("\x1b[{top};{bot}r").as_bytes());
         // After valid DECSTBM, cursor must be at home
         prop_assert_eq!(term.screen.cursor().row, 0);
         prop_assert_eq!(term.screen.cursor().col, 0);
@@ -541,7 +544,7 @@ proptest! {
     ) {
         prop_assume!(top >= bot);
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{};{}r", top, bot).as_bytes());
+        term.advance(format!("\x1b[{top};{bot}r").as_bytes());
         prop_assert!(term.screen.cursor().row < 10);
         prop_assert!(term.screen.cursor().col < 20);
     }

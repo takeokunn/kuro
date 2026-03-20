@@ -20,7 +20,7 @@ fn bench_grid_update(c: &mut Criterion) {
         group.throughput(Throughput::Elements(cell_count as u64));
 
         let input = (rows, cols);
-        group.bench_with_input(format!("{}x{}", rows, cols), &input, |b, &(rows, cols)| {
+        group.bench_with_input(format!("{rows}x{cols}"), &input, |b, &(rows, cols)| {
             let mut screen = Screen::new(rows as u16, cols as u16);
             let attrs = SgrAttributes::default();
 
@@ -48,7 +48,7 @@ fn bench_screen_erase(c: &mut Criterion) {
 
     for &(rows, cols) in &sizes {
         let input = (rows, cols);
-        group.bench_with_input(format!("{}x{}", rows, cols), &input, |b, &(rows, cols)| {
+        group.bench_with_input(format!("{rows}x{cols}"), &input, |b, &(rows, cols)| {
             b.iter(|| {
                 let mut screen = Screen::new(rows as u16, cols as u16);
 
@@ -62,7 +62,7 @@ fn bench_screen_erase(c: &mut Criterion) {
                 }
 
                 // Erase all lines
-                black_box(screen.clear_lines(0, rows));
+                screen.clear_lines(0, rows);
             });
         });
     }
@@ -85,7 +85,7 @@ fn bench_line_erase(c: &mut Criterion) {
             }
 
             // Erase the line
-            black_box(screen.clear_lines(0, 1));
+            screen.clear_lines(0, 1);
 
             // Reset cursor for next iteration
             screen.move_cursor(0, 0);

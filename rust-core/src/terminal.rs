@@ -1,4 +1,4 @@
-//! TerminalCore — integrates VTE parser, virtual screen, and PTY state.
+//! `TerminalCore` — integrates VTE parser, virtual screen, and PTY state.
 
 use crate::grid::screen::Screen;
 use crate::parser;
@@ -35,19 +35,20 @@ pub struct TerminalCore {
 
 impl TerminalCore {
     /// Create a new terminal core with the specified dimensions
+    #[must_use] 
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {
             screen: Screen::new(rows, cols),
-            current_attrs: Default::default(),
+            current_attrs: types::cell::SgrAttributes::default(),
             parser: vte::Parser::new(),
             dec_modes: DecModes::new(),
             tab_stops: TabStops::new(cols as usize),
             saved_cursor: None,
             saved_attrs: None,
             saved_primary_attrs: None,
-            osc_data: Default::default(),
-            kitty: Default::default(),
-            meta: Default::default(),
+            osc_data: types::osc::OscData::default(),
+            kitty: types::KittyState::default(),
+            meta: types::TerminalMeta::default(),
         }
     }
 
@@ -86,124 +87,147 @@ impl TerminalCore {
     // These should not be used in production code paths.
 
     /// Get the cursor row (0-indexed), using the active screen (primary or alternate)
+    #[must_use] 
     pub fn cursor_row(&self) -> usize {
         self.screen.cursor().row
     }
 
     /// Get the cursor column (0-indexed), using the active screen (primary or alternate)
+    #[must_use] 
     pub fn cursor_col(&self) -> usize {
         self.screen.cursor().col
     }
 
     /// Get the number of rows in the terminal screen
-    pub fn rows(&self) -> u16 {
+    #[must_use] 
+    pub const fn rows(&self) -> u16 {
         self.screen.rows()
     }
 
     /// Get the number of columns in the terminal screen
-    pub fn cols(&self) -> u16 {
+    #[must_use] 
+    pub const fn cols(&self) -> u16 {
         self.screen.cols()
     }
 
     /// Get whether the cursor is visible (DECTCEM state)
-    pub fn cursor_visible(&self) -> bool {
+    #[must_use] 
+    pub const fn cursor_visible(&self) -> bool {
         self.dec_modes.cursor_visible
     }
 
     /// Get whether application cursor keys mode is active (DECCKM)
-    pub fn app_cursor_keys(&self) -> bool {
+    #[must_use] 
+    pub const fn app_cursor_keys(&self) -> bool {
         self.dec_modes.app_cursor_keys
     }
 
     /// Get whether bracketed paste mode is active (mode 2004)
-    pub fn bracketed_paste(&self) -> bool {
+    #[must_use] 
+    pub const fn bracketed_paste(&self) -> bool {
         self.dec_modes.bracketed_paste
     }
 
     /// Get whether the alternate screen buffer is currently active
-    pub fn is_alternate_screen_active(&self) -> bool {
+    #[must_use] 
+    pub const fn is_alternate_screen_active(&self) -> bool {
         self.screen.is_alternate_screen_active()
     }
 
     /// Get whether bold SGR attribute is currently set
-    pub fn current_bold(&self) -> bool {
-        self.current_attrs.bold
+    #[must_use]
+    pub const fn current_bold(&self) -> bool {
+        self.current_attrs.flags.contains(types::cell::SgrFlags::BOLD)
     }
 
     /// Get whether italic SGR attribute is currently set
-    pub fn current_italic(&self) -> bool {
-        self.current_attrs.italic
+    #[must_use]
+    pub const fn current_italic(&self) -> bool {
+        self.current_attrs.flags.contains(types::cell::SgrFlags::ITALIC)
     }
 
     /// Get whether underline SGR attribute is currently set
+    #[must_use] 
     pub fn current_underline(&self) -> bool {
         self.current_attrs.underline()
     }
 
     /// Get a cell from the screen at the given (row, col) position
+    #[must_use] 
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&types::cell::Cell> {
         self.screen.get_cell(row, col)
     }
 
     /// Get the number of lines currently in the scrollback buffer
-    pub fn scrollback_line_count(&self) -> usize {
+    #[must_use] 
+    pub const fn scrollback_line_count(&self) -> usize {
         self.screen.scrollback_line_count
     }
 
     /// Get scrollback lines as cell characters; most recent line first.
     /// Each inner Vec is the characters of one scrolled-off line.
+    #[must_use] 
     pub fn scrollback_chars(&self, max_lines: usize) -> Vec<Vec<char>> {
         self.screen
             .get_scrollback_lines(max_lines)
             .into_iter()
-            .map(|line| line.cells.iter().map(|c| c.char()).collect())
+            .map(|line| line.cells.iter().map(super::types::cell::Cell::char).collect())
             .collect()
     }
 
     /// Get current DEC modes state (read-only reference)
-    pub fn dec_modes(&self) -> &parser::dec_private::DecModes {
+    #[must_use] 
+    pub const fn dec_modes(&self) -> &parser::dec_private::DecModes {
         &self.dec_modes
     }
 
     /// Get current SGR attributes (read-only reference)
-    pub fn current_attrs(&self) -> &types::cell::SgrAttributes {
+    #[must_use] 
+    pub const fn current_attrs(&self) -> &types::cell::SgrAttributes {
         &self.current_attrs
     }
 
     /// Get current OSC data (read-only reference)
-    pub fn osc_data(&self) -> &types::osc::OscData {
+    #[must_use] 
+    pub const fn osc_data(&self) -> &types::osc::OscData {
         &self.osc_data
     }
 
     /// Returns whether the 256-color palette has been updated since the last render (OSC 4).
     #[inline]
-    pub fn palette_dirty(&self) -> bool {
+    #[must_use] 
+    pub const fn palette_dirty(&self) -> bool {
         self.osc_data.palette_dirty
     }
 
     /// Returns whether the default fg/bg/cursor colors have changed since the last render (OSC 10/11/12).
     #[inline]
-    pub fn default_colors_dirty(&self) -> bool {
+    #[must_use] 
+    pub const fn default_colors_dirty(&self) -> bool {
         self.osc_data.default_colors_dirty
     }
 
     /// Get the current window title
+    #[must_use] 
     pub fn title(&self) -> &str {
         &self.meta.title
     }
 
     /// Get whether the title has been updated and not yet read
-    pub fn title_dirty(&self) -> bool {
+    #[must_use] 
+    pub const fn title_dirty(&self) -> bool {
         self.meta.title_dirty
     }
 
     /// Get pending terminal responses (for DA1, DA2, Kitty keyboard, etc.)
+    #[must_use] 
     pub fn pending_responses(&self) -> &[Vec<u8>] {
         &self.meta.pending_responses
     }
 
     /// Get current foreground color
-    pub fn current_foreground(&self) -> &types::Color {
+    #[must_use] 
+    pub const fn current_foreground(&self) -> &types::Color {
         &self.current_attrs.foreground
     }
 
@@ -268,6 +292,6 @@ impl TerminalCore {
         self.meta.dcs_state = parser::dcs::DcsState::Idle;
         self.kitty.pending_image_notifications.clear();
         // Clear OSC data
-        self.osc_data = Default::default();
+        self.osc_data = types::osc::OscData::default();
     }
 }

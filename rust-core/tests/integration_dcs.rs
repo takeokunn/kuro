@@ -13,7 +13,7 @@ fn xtgettcap_tn_responds_with_kuro() {
     let mut t = TerminalCore::new(24, 80);
     // DCS + q 544e ST  ("TN" in hex = 54 4e)
     t.advance(b"\x1bP+q544e\x1b\\");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "XTGETTCAP for TN must produce a response"
@@ -21,15 +21,13 @@ fn xtgettcap_tn_responds_with_kuro() {
     let resp = &responses[0];
     assert!(
         resp.contains("1+r"),
-        "Known capability must use DCS 1+r format, got: {:?}",
-        resp
+        "Known capability must use DCS 1+r format, got: {resp:?}"
     );
     // Response contains hex-encoded "kuro"
     // "kuro" in hex = 6b 75 72 6f
     assert!(
         resp.contains("6b75726f") || resp.to_lowercase().contains("kuro"),
-        "TN response must encode 'kuro', got: {:?}",
-        resp
+        "TN response must encode 'kuro', got: {resp:?}"
     );
 }
 
@@ -38,13 +36,12 @@ fn xtgettcap_rgb_responds_with_truecolor() {
     let mut t = TerminalCore::new(24, 80);
     // DCS + q 524742 ST  ("RGB" in hex = 52 47 42)
     t.advance(b"\x1bP+q524742\x1b\\");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("1+r"),
-        "RGB capability response must be DCS 1+r, got: {:?}",
-        resp
+        "RGB capability response must be DCS 1+r, got: {resp:?}"
     );
 }
 
@@ -53,13 +50,12 @@ fn xtgettcap_unknown_cap_responds_not_found() {
     let mut t = TerminalCore::new(24, 80);
     // DCS + q 786666 ST  ("xff" — not a valid capability)
     t.advance(b"\x1bP+q786666\x1b\\");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("0+r"),
-        "Unknown capability must use DCS 0+r format, got: {:?}",
-        resp
+        "Unknown capability must use DCS 0+r format, got: {resp:?}"
     );
 }
 

@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for Screen cursor movement methods.
 //!
 //! Module under test: `grid/screen/cursor.rs`
-//! Tier: T2 — ProptestConfig::with_cases(500)
+//! Tier: T2 — `ProptestConfig::with_cases(500)`
 
 use crate::grid::screen::Screen;
 use crate::types::color::Color;

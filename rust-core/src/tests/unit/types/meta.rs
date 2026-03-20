@@ -1,14 +1,14 @@
 //! Example-based and structural tests for `types::meta::TerminalMeta`.
 //!
 //! Module under test: `src/types/meta.rs`
-//! Tier: T5 — ProptestConfig::with_cases(64)
+//! Tier: T5 — `ProptestConfig::with_cases(64)`
 //!
 //! Field inventory (verified from source):
 //!   title: String                (pub(crate))
-//!   title_dirty: bool            (pub(crate))
-//!   bell_pending: bool           (pub(crate))
-//!   pending_responses: Vec<Vec<u8>>  (pub(crate))
-//!   dcs_state: DcsState          (pub(crate)) — Default yields DcsState::Idle
+//!   `title_dirty`: bool            (pub(crate))
+//!   `bell_pending`: bool           (pub(crate))
+//!   `pending_responses`: Vec<Vec<u8>>  (pub(crate))
+//!   `dcs_state`: `DcsState`          (pub(crate)) — Default yields `DcsState::Idle`
 
 use crate::types::meta::TerminalMeta;
 use proptest::prelude::*;
@@ -55,16 +55,14 @@ fn test_terminal_meta_default_pending_empty() {
 #[test]
 // MUTATION: Setting bell_pending to true persists
 fn test_terminal_meta_bell_set_persists() {
-    let mut m = TerminalMeta::default();
-    m.bell_pending = true;
+    let m = TerminalMeta { bell_pending: true, ..Default::default() };
     assert!(m.bell_pending, "bell_pending must persist after being set to true");
 }
 
 #[test]
 // MUTATION: Clearing bell_pending back to false persists
 fn test_terminal_meta_bell_clear_persists() {
-    let mut m = TerminalMeta::default();
-    m.bell_pending = true;
+    let mut m = TerminalMeta { bell_pending: true, ..Default::default() };
     m.bell_pending = false;
     assert!(!m.bell_pending, "bell_pending must persist after being cleared");
 }
@@ -72,9 +70,7 @@ fn test_terminal_meta_bell_clear_persists() {
 #[test]
 // MUTATION: Setting title and title_dirty persists
 fn test_terminal_meta_title_set_persists() {
-    let mut m = TerminalMeta::default();
-    m.title = "my terminal".to_string();
-    m.title_dirty = true;
+    let m = TerminalMeta { title: "my terminal".to_string(), title_dirty: true, ..Default::default() };
     assert_eq!(m.title, "my terminal");
     assert!(m.title_dirty);
 }
@@ -82,9 +78,7 @@ fn test_terminal_meta_title_set_persists() {
 #[test]
 // MUTATION: Clearing title_dirty after reading persists
 fn test_terminal_meta_title_dirty_clear() {
-    let mut m = TerminalMeta::default();
-    m.title = "test".to_string();
-    m.title_dirty = true;
+    let mut m = TerminalMeta { title: "test".to_string(), title_dirty: true, ..Default::default() };
     m.title_dirty = false;
     assert!(!m.title_dirty, "title_dirty must persist as false after clear");
 }
@@ -104,8 +98,8 @@ fn test_terminal_meta_drain_responses() {
     let mut m = TerminalMeta::default();
     m.pending_responses.push(b"a".to_vec());
     m.pending_responses.push(b"b".to_vec());
-    let drained: Vec<Vec<u8>> = m.pending_responses.drain(..).collect();
-    assert_eq!(drained.len(), 2);
+    let count = m.pending_responses.drain(..).count();
+    assert_eq!(count, 2);
     assert!(m.pending_responses.is_empty());
 }
 
@@ -125,8 +119,7 @@ proptest! {
     #[test]
     // INVARIANT: Any string assigned to title is preserved exactly
     fn prop_terminal_meta_title_roundtrip(s in "[\\x20-\\x7e]{0,128}") {
-        let mut m = TerminalMeta::default();
-        m.title = s.clone();
+        let m = TerminalMeta { title: s.clone(), ..Default::default() };
         prop_assert_eq!(&m.title, &s);
     }
 

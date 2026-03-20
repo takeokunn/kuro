@@ -8,7 +8,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 
-/// Post-decode image format (stored in GraphicsStore)
+/// Post-decode image format (stored in `GraphicsStore`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
     /// f=24: 3 bytes per pixel (R, G, B)
@@ -18,7 +18,7 @@ pub enum ImageFormat {
 }
 
 /// Parsed parameters from the Kitty Graphics APC header
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct KittyParams {
     /// Action: t=transmit, T=transmit+display, p=place, d=delete, f=frame, q=query
     pub action: Option<char>,
@@ -54,6 +54,7 @@ impl KittyParams {
     /// Parse comma-separated key=value pairs from the APC header bytes.
     ///
     /// Format: `a=t,f=100,i=1,m=0`
+    #[must_use] 
     pub fn parse(header: &[u8]) -> Self {
         let mut params = Self::default();
         for kv in header.split(|&b| b == b',') {
@@ -88,8 +89,8 @@ fn parse_u32(bytes: &[u8]) -> Option<u32> {
     std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
-/// A finalized, decoded Kitty Graphics command ready for dispatch to GraphicsStore
-#[allow(missing_docs)]
+/// A finalized, decoded Kitty Graphics command ready for dispatch to `GraphicsStore`
+#[expect(missing_docs, reason = "KittyCommand variants are self-documenting from the Kitty Graphics Protocol spec; prose docs add no value here")]
 #[derive(Debug)]
 pub enum KittyCommand {
     /// Transmit image data and store (a=t)
@@ -151,10 +152,10 @@ pub fn process_apc_payload(
     chunk_state: &mut Option<KittyChunkState>,
 ) -> Option<KittyCommand> {
     // Split at ';' to separate key=value header from base64 payload
-    let (header, b64_data) = match payload.iter().position(|&b| b == b';') {
-        Some(pos) => (&payload[..pos], &payload[pos + 1..]),
-        None => (payload, &[][..]),
-    };
+    let (header, b64_data) = payload.iter().position(|&b| b == b';').map_or_else(
+        || (payload, &[][..]),
+        |pos| (&payload[..pos], &payload[pos + 1..]),
+    );
 
     let params = KittyParams::parse(header);
 
@@ -167,17 +168,12 @@ pub fn process_apc_payload(
     }
 
     // Base64 decode the payload
-    let decoded = if !b64_data.is_empty() {
-        match BASE64_STANDARD.decode(b64_data) {
-            Ok(d) => d,
-            Err(_) => {
-                // Malformed base64 — discard entire sequence including any chunk state
-                *chunk_state = None;
-                return None;
-            }
-        }
-    } else {
+    let decoded = if b64_data.is_empty() {
         Vec::new()
+    } else if let Ok(d) = BASE64_STANDARD.decode(b64_data) { d } else {
+        // Malformed base64 — discard entire sequence including any chunk state
+        *chunk_state = None;
+        return None;
     };
 
     if params.more {
@@ -322,7 +318,7 @@ fn decode_png(data: &[u8]) -> Result<(Vec<u8>, ImageFormat), &'static str> {
                 .collect();
             (rgba, ImageFormat::Rgba)
         }
-        _ => {
+        png::ColorType::Indexed => {
             // Indexed and other types: unsupported, treat as opaque
             (buf, ImageFormat::Rgba)
         }

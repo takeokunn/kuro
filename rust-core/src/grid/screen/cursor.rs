@@ -1,10 +1,11 @@
 //! Cursor movement and character printing methods for Screen
 
-use super::*;
+use super::{Screen, Cursor, Color, SgrAttributes, UnicodeWidthChar, CellWidth, Cell, DirtySet};
 
 impl Screen {
     /// Get reference to the active screen's cursor
-    #[inline(always)]
+    #[inline]
+    #[must_use] 
     pub fn cursor(&self) -> &Cursor {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_ref() {
@@ -15,7 +16,7 @@ impl Screen {
     }
 
     /// Get mutable reference to the active screen's cursor
-    #[inline(always)]
+    #[inline]
     pub fn cursor_mut(&mut self) -> &mut Cursor {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
@@ -60,7 +61,7 @@ impl Screen {
     }
 
     /// Carriage return (CR) — clears pending wrap
-    #[inline(always)]
+    #[inline]
     pub fn carriage_return(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             screen.cursor.col = 0;
@@ -69,7 +70,7 @@ impl Screen {
     }
 
     /// Backspace (BS) — clears pending wrap
-    #[inline(always)]
+    #[inline]
     pub fn backspace(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             if screen.cursor.col > 0 {
@@ -80,7 +81,7 @@ impl Screen {
     }
 
     /// Horizontal tab (HT) — clears pending wrap
-    #[inline(always)]
+    #[inline]
     pub fn tab(&mut self) {
         if let Some(screen) = self.active_screen_mut() {
             let tab_stop = (screen.cursor.col / 8 + 1) * 8;
@@ -130,7 +131,7 @@ impl Screen {
     /// - When a character fills the last column the cursor stays there and
     ///   `pending_wrap` is set.
     /// - On the *next* printable character the deferred wrap fires (col → 0,
-    ///   line_feed).
+    ///   `line_feed`).
     /// - Any explicit cursor movement clears `pending_wrap` without wrapping.
     #[inline]
     pub fn print(&mut self, c: char, attrs: SgrAttributes, auto_wrap: bool) {
@@ -138,10 +139,7 @@ impl Screen {
         // (called from line_feed_impl) sees the correct value even when
         // operating on the alternate screen.
         let is_primary = !self.is_alternate_active;
-        let screen = match self.active_screen_mut() {
-            Some(s) => s,
-            None => return,
-        };
+        let Some(screen) = self.active_screen_mut() else { return };
 
         // --- Deferred wrap: execute the pending wrap from a previous print ---
         if screen.cursor.pending_wrap {
@@ -189,13 +187,10 @@ impl Screen {
 
             // If cursor reached beyond the last column, set pending wrap
             if screen.cursor.col >= screen.cols as usize {
+                // Clamp to last column; set pending wrap flag only if auto-wrap is on
+                screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                 if auto_wrap {
-                    // DEC pending wrap: stay at last column, defer the wrap
-                    screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                     screen.cursor.pending_wrap = true;
-                } else {
-                    // No autowrap — clamp to last column
-                    screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                 }
             }
         } else {
@@ -230,11 +225,10 @@ impl Screen {
 
                 // If the wide char exactly fills the line, set pending wrap
                 if screen.cursor.col >= screen.cols as usize {
+                    // Clamp to last column; set pending wrap flag only if auto-wrap is on
+                    screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                     if auto_wrap {
-                        screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                         screen.cursor.pending_wrap = true;
-                    } else {
-                        screen.cursor.col = (screen.cols as usize).saturating_sub(1);
                     }
                 }
             }

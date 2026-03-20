@@ -3,7 +3,7 @@
 //!
 //! ## SPC / trailing-space regression
 //!
-//!   encode_line() was trimming trailing spaces from the rendered text before
+//!   `encode_line()` was trimming trailing spaces from the rendered text before
 //!   sending it to Emacs.  kuro--update-cursor computes the buffer position as
 //!   `(min (+ line-start col) line-end)`.  After trimming, line-end was
 //!   smaller than the cursor column when the cursor was inside whitespace,
@@ -11,12 +11,12 @@
 //!
 //!   Symptom: pressing SPC at a bash prompt didn't visually move the cursor.
 //!
-//! DO NOT add trim_end_matches logic back to encode_line or get_dirty_lines
+//! DO NOT add `trim_end_matches` logic back to `encode_line` or `get_dirty_lines`
 //! without also fixing the Emacs-side cursor computation.
 //!
 //! ## Pending wrap regression (btop / TUI rendering)
 //!
-//!   print() was immediately wrapping and scrolling when a character was
+//!   `print()` was immediately wrapping and scrolling when a character was
 //!   written at the last column.  DEC VT terminals defer this wrap: the
 //!   cursor stays at the last column with a "pending wrap" flag, and the
 //!   actual wrap + scroll only fires when the *next* printable character
@@ -71,7 +71,7 @@ fn test_cursor_col_after_text_then_space() {
     );
 }
 
-/// encode_line must preserve trailing spaces so the Emacs buffer line is
+/// `encode_line` must preserve trailing spaces so the Emacs buffer line is
 /// at least as long as the terminal cursor column.
 #[test]
 fn test_encode_line_preserves_trailing_spaces_for_cursor() {
@@ -98,7 +98,7 @@ fn test_encode_line_preserves_trailing_spaces_for_cursor() {
 /// A line consisting entirely of spaces must not encode as an empty string.
 ///
 /// When the terminal is freshly initialized, all cells are spaces.  If
-/// encode_line collapsed such a line to "", every cursor-update call would
+/// `encode_line` collapsed such a line to "", every cursor-update call would
 /// clamp to col 0.
 #[test]
 fn test_blank_line_is_not_empty_after_encode() {
@@ -115,16 +115,13 @@ fn test_blank_line_is_not_empty_after_encode() {
 
 /// Feed captured btop output in chunks and report the first divergence.
 /// Reads /tmp/btop-capture.bin and prints row 0 at 10K intervals.
-/// Run with: cargo test btop_render -- --ignored --nocapture
+/// Run with: cargo test `btop_render` -- --ignored --nocapture
 #[test]
-#[ignore]
+#[ignore = "requires /tmp/btop-capture.bin fixture"]
 fn test_btop_render_dump() {
-    let data = match std::fs::read("/tmp/btop-capture.bin") {
-        Ok(d) => d,
-        Err(_) => {
-            eprintln!("SKIP: /tmp/btop-capture.bin not found");
-            return;
-        }
+    let Ok(data) = std::fs::read("/tmp/btop-capture.bin") else {
+        eprintln!("SKIP: /tmp/btop-capture.bin not found");
+        return;
     };
 
     // Feed in 1K chunks between 30K-40K to find exact divergence point
@@ -138,11 +135,11 @@ fn test_btop_render_dump() {
         offset = end;
 
         if let Some(line) = term.screen.get_line(0) {
-            let text: String = line.cells.iter().map(|c| c.char()).collect();
+            let text: String = line.cells.iter().map(super::super::types::cell::Cell::char).collect();
             let trimmed = text.trim_end();
-            let end_idx = trimmed.char_indices().nth(40).map(|(i, _)| i).unwrap_or(trimmed.len());
+            let end_idx = trimmed.char_indices().nth(40).map_or(trimmed.len(), |(i, _)| i);
             let starts_with = &trimmed[..end_idx];
-            eprintln!("@{:6}: |{}|", end, starts_with);
+            eprintln!("@{end:6}: |{starts_with}|");
         }
     }
 
@@ -150,7 +147,7 @@ fn test_btop_render_dump() {
     eprintln!("\n--- Final screen dump (40x120) ---");
     for row in 0..40usize {
         if let Some(line) = term.screen.get_line(row) {
-            let text: String = line.cells.iter().map(|c| c.char()).collect();
+            let text: String = line.cells.iter().map(super::super::types::cell::Cell::char).collect();
             eprintln!("{:02}: |{}|", row, text.trim_end());
         }
     }
@@ -184,7 +181,7 @@ fn test_internal_spaces_preserved() {
 /// Printing at the last column must NOT immediately scroll.
 ///
 /// This is the root cause of the btop rendering bug: btop writes a box-drawing
-/// character at (last_row, last_col), which should NOT cause a scroll.  The
+/// character at (`last_row`, `last_col`), which should NOT cause a scroll.  The
 /// scroll should only happen when the next printable character arrives.
 #[test]
 fn test_pending_wrap_no_immediate_scroll() {

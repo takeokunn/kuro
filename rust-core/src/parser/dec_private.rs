@@ -3,6 +3,7 @@
 use crate::types::cursor::CursorShape;
 
 /// DEC private mode state
+#[expect(clippy::struct_excessive_bools, reason = "DecModes fields map 1:1 to VT DEC private mode numbers; bool semantics are the clearest representation for terminal state flags")]
 #[derive(Debug, Clone)]
 pub struct DecModes {
     /// Application Cursor Keys mode (DECCKM - ?1)
@@ -40,7 +41,7 @@ pub struct DecModes {
 
     /// Application Keypad Mode (DECKPAM / DECKPNM)
     /// Set by ESC = (DECKPAM), cleared by ESC > (DECKPNM).
-    /// Not a CSI ?h/l mode — handled directly in esc_dispatch.
+    /// Not a CSI ?h/l mode — handled directly in `esc_dispatch`.
     pub app_keypad: bool,
 
     /// DECOM (?6) - Origin Mode. When set, cursor addressing is relative to scroll region.
@@ -73,7 +74,8 @@ impl Default for DecModes {
 
 impl DecModes {
     /// Create a new DEC modes structure with default values
-    pub fn new() -> Self {
+    #[must_use] 
+    pub const fn new() -> Self {
         Self {
             app_cursor_keys: false,
             auto_wrap: true,      // Default: auto wrap enabled
@@ -94,7 +96,7 @@ impl DecModes {
     }
 
     /// Set a DEC private mode
-    pub fn set_mode(&mut self, mode: u16) {
+    pub const fn set_mode(&mut self, mode: u16) {
         match mode {
             1 => self.app_cursor_keys = true,
             6 => self.origin_mode = true,
@@ -112,7 +114,7 @@ impl DecModes {
     }
 
     /// Reset a DEC private mode
-    pub fn reset_mode(&mut self, mode: u16) {
+    pub const fn reset_mode(&mut self, mode: u16) {
         match mode {
             1 => self.app_cursor_keys = false,
             6 => self.origin_mode = false,
@@ -130,7 +132,8 @@ impl DecModes {
     }
 
     /// Query a DEC private mode state
-    pub fn get_mode(&self, mode: u16) -> Option<bool> {
+    #[must_use] 
+    pub const fn get_mode(&self, mode: u16) -> Option<bool> {
         match mode {
             1 => Some(self.app_cursor_keys),
             6 => Some(self.origin_mode),
@@ -151,7 +154,8 @@ impl DecModes {
 
     /// Check if tab stops are enabled (tabs always enabled in standard VT)
     /// This is a placeholder for future tab mode support
-    pub fn tab_stops_enabled(&self) -> bool {
+    #[must_use] 
+    pub const fn tab_stops_enabled(&self) -> bool {
         true
     }
 }
@@ -168,7 +172,7 @@ pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
                 Some(false) => 2, // reset
                 None => 0,        // not recognized
             };
-            let response = format!("\x1b[?{};{}$y", mode, status);
+            let response = format!("\x1b[?{mode};{status}$y");
             term.meta.pending_responses.push(response.into_bytes());
         }
     }
@@ -251,7 +255,7 @@ pub fn handle_kitty_kb_push(term: &mut crate::TerminalCore, params: &vte::Params
             .keyboard_flags_stack
             .push(term.dec_modes.keyboard_flags);
     }
-    term.dec_modes.keyboard_flags = flags as u32;
+    term.dec_modes.keyboard_flags = u32::from(flags);
 }
 
 /// Handle Kitty keyboard mode pop (CSI < u).

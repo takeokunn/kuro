@@ -21,7 +21,8 @@ pub struct ImageData {
 
 impl ImageData {
     /// Byte count of raw pixel data
-    pub fn byte_count(&self) -> usize {
+    #[must_use] 
+    pub const fn byte_count(&self) -> usize {
         self.pixels.len()
     }
 
@@ -44,6 +45,7 @@ impl ImageData {
     }
 
     /// Re-encode as base64-encoded PNG string (for Emacs FFI transfer)
+    #[must_use] 
     pub fn to_png_base64(&self) -> String {
         use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
         use base64::Engine as _;
@@ -104,6 +106,7 @@ impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
     /// Create a new empty graphics store with the default 256 MB capacity cap
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             images: HashMap::new(),
@@ -149,15 +152,13 @@ impl GraphicsStore {
     }
 
     /// Return the image as a base64-encoded PNG string.
-    /// Returns an empty string if the image_id is not found (orphan reference).
+    /// Returns an empty string if the `image_id` is not found (orphan reference).
+    #[must_use] 
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
-        match self.images.get(&image_id) {
-            Some(data) => data.to_png_base64(),
-            None => String::new(),
-        }
+        self.images.get(&image_id).map_or_else(String::new, ImageData::to_png_base64)
     }
 
-    /// Add a placement and return an ImageNotification (or None if image_id unknown)
+    /// Add a placement and return an `ImageNotification` (or None if `image_id` unknown)
     pub fn add_placement(&mut self, placement: ImagePlacement) -> Option<ImageNotification> {
         if !self.images.contains_key(&placement.image_id) {
             return None;
@@ -178,7 +179,7 @@ impl GraphicsStore {
         self.placements.clear();
     }
 
-    /// Shift all placement rows up by `n` lines (called on terminal scroll_up).
+    /// Shift all placement rows up by `n` lines (called on terminal `scroll_up`).
     /// Placements that scroll off the top (row < n) are discarded.
     pub fn scroll_up(&mut self, n: usize) {
         self.placements = std::mem::take(&mut self.placements)
@@ -194,7 +195,7 @@ impl GraphicsStore {
             .collect();
     }
 
-    /// Shift all placement rows down by `n` lines (called on terminal scroll_down).
+    /// Shift all placement rows down by `n` lines (called on terminal `scroll_down`).
     /// Placements are clamped to `max_row - 1` rather than discarded.
     pub fn scroll_down(&mut self, n: usize, max_row: usize) {
         for p in &mut self.placements {

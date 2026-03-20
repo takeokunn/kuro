@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for Screen dirty-tracking methods.
 //!
 //! Module under test: `grid/screen/dirty.rs`
-//! Tier: T2 — ProptestConfig::with_cases(500)
+//! Tier: T2 — `ProptestConfig::with_cases(500)`
 //!
 //! NOTE on `take_dirty_lines()`: returns `Vec<usize>` (sorted row indices).
 //! NOTE on `attach_combining`: inserts into `dirty_set` but does NOT set

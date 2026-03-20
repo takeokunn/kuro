@@ -3,7 +3,7 @@
 /// Tab stop manager using bitmap for O(1) tab stop lookups
 ///
 /// Uses a Vec<bool> bitmap where index i represents whether there's a tab stop at column i.
-/// This provides constant-time set/clear operations and linear scan for next_stop, which
+/// This provides constant-time set/clear operations and linear scan for `next_stop`, which
 /// is efficient for typical terminal widths (< 256 columns).
 #[derive(Debug, Clone)]
 pub struct TabStops {
@@ -15,6 +15,7 @@ pub struct TabStops {
 
 impl TabStops {
     /// Create a new tab stop manager with default stops every 8 columns
+    #[must_use] 
     pub fn new(cols: usize) -> Self {
         let mut stops = vec![false; cols];
         // Default tabs every 8 columns
@@ -37,21 +38,18 @@ impl TabStops {
     /// Clear tab stop at the specified column (Ps=0)
     /// Clear all tab stops (Ps=3)
     pub fn clear_stop(&mut self, col: Option<usize>) {
-        match col {
-            Some(c) => {
-                // Clear single tab stop
-                if c < self.cols {
-                    self.stops[c] = false;
-                }
+        if let Some(c) = col {
+            // Clear single tab stop
+            if c < self.cols {
+                self.stops[c] = false;
             }
-            None => {
-                // Clear all tab stops and reset to defaults
-                self.stops.fill(false);
-                let mut c = 8;
-                while c < self.cols {
-                    self.stops[c] = true;
-                    c += 8;
-                }
+        } else {
+            // Clear all tab stops and reset to defaults
+            self.stops.fill(false);
+            let mut c = 8;
+            while c < self.cols {
+                self.stops[c] = true;
+                c += 8;
             }
         }
     }
@@ -61,7 +59,8 @@ impl TabStops {
     /// This performs a linear scan from the specified column, which is O(cols) in worst case
     /// but typically O(cols/8) since tab stops are usually spaced every 8 columns.
     /// For typical terminals (< 256 columns), this is very fast and eliminates the
-    /// O(n log n) sort operation from the previous HashSet implementation.
+    /// O(n log n) sort operation from the previous `HashSet` implementation.
+    #[must_use] 
     pub fn next_stop(&self, from: usize) -> usize {
         // Find the first tab stop >= from
         for i in from..self.cols {
@@ -96,6 +95,7 @@ impl TabStops {
     }
 
     /// Get a copy of all tab stops as a sorted vector
+    #[must_use] 
     pub fn get_stops(&self) -> Vec<usize> {
         self.stops
             .iter()
@@ -123,6 +123,7 @@ impl TabStops {
     /// Get a copy of tab stops for saving
     ///
     /// Returns the full bitmap state for restoration.
+    #[must_use] 
     pub fn save(&self) -> Vec<bool> {
         self.stops.clone()
     }

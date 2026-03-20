@@ -13,6 +13,9 @@ impl PtyReader {
     ///
     /// Uses a reusable buffer to minimize allocations and respects the shutdown signal
     /// for graceful termination.
+    // The Arc and Sender args are moved into the thread body — taking references
+    // would require 'static lifetimes, which defeats the purpose.
+    #[expect(clippy::needless_pass_by_value, reason = "args are moved into the thread body")]
     pub fn read_loop(
         mut master: File,
         sender: crossbeam_channel::Sender<Vec<u8>>,
@@ -42,7 +45,7 @@ impl PtyReader {
                     // exit) the same as EOF: mark the process as exited so Emacs
                     // can close the buffer.
                     process_exited.store(true, Ordering::Relaxed);
-                    eprintln!("[PTY] Read error: {}", e);
+                    eprintln!("[PTY] Read error: {e}");
                     break;
                 }
             }
@@ -79,8 +82,8 @@ mod tests {
 
         // Write data to the write end then close it so the reader sees EOF
         {
-            let mut write_file = unsafe { File::from_raw_fd(write_fd) };
             use std::io::Write;
+            let mut write_file = unsafe { File::from_raw_fd(write_fd) };
             write_file.write_all(b"hello").expect("write failed");
             // write_file is dropped here, closing the write end
         }
@@ -143,7 +146,7 @@ mod tests {
         assert!(rx.try_recv().is_err(), "channel should be empty");
     }
 
-    /// Verify that closing the write end of the pipe causes the read_loop to exit
+    /// Verify that closing the write end of the pipe causes the `read_loop` to exit
     /// (EOF path) and the channel receives no data when nothing was written.
     #[cfg(unix)]
     #[test]

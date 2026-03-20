@@ -27,13 +27,12 @@ pub struct EmacsModuleFFI;
 
 impl KuroFFI for EmacsModuleFFI {
     fn init(_env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
-        match init_session(command, rows, cols) {
-            Ok(_id) => ptr::dangling_mut::<emacs_value>(),
-            Err(_) => ptr::null_mut(),
-        }
+        init_session(command, rows, cols).map_or(ptr::null_mut(), |_id| ptr::dangling_mut::<emacs_value>())
     }
 
     fn poll_updates(_env: *mut emacs_env, _max_updates: i64) -> *mut emacs_value {
@@ -56,13 +55,15 @@ impl KuroFFI for EmacsModuleFFI {
         });
 
         match result {
-            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Ok(()) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }
 
     fn resize(_env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
@@ -71,14 +72,14 @@ impl KuroFFI for EmacsModuleFFI {
         });
 
         match result {
-            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Ok(()) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }
 
     fn shutdown(_env: *mut emacs_env) -> *mut emacs_value {
         match shutdown_session(LEGACY_SESSION_ID) {
-            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Ok(()) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }
@@ -86,13 +87,10 @@ impl KuroFFI for EmacsModuleFFI {
     fn get_cursor(_env: *mut emacs_env) -> *mut emacs_value {
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
             let (row, col) = session.get_cursor();
-            Ok(format!("{}:{}", row, col))
+            Ok(format!("{row}:{col}"))
         });
 
-        match result {
-            Ok(s) => s.as_ptr() as *mut emacs_value,
-            Err(_) => "0:0".as_ptr() as *mut emacs_value,
-        }
+        result.map_or_else(|_| "0:0".as_ptr() as *mut emacs_value, |s| s.as_ptr() as *mut emacs_value)
     }
 
     fn get_scrollback(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
@@ -117,7 +115,7 @@ impl KuroFFI for EmacsModuleFFI {
         });
 
         match result {
-            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Ok(()) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }
@@ -129,7 +127,7 @@ impl KuroFFI for EmacsModuleFFI {
         });
 
         match result {
-            Ok(_) => ptr::dangling_mut::<emacs_value>(),
+            Ok(()) => ptr::dangling_mut::<emacs_value>(),
             Err(_) => ptr::null_mut(),
         }
     }

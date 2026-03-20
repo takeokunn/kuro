@@ -12,19 +12,19 @@
 //! The FFI layer is organized as follows:
 //!
 //! - **init.rs**: Initialization validation and Emacs environment checks
-//! - **error.rs**: FFI-specific error types (InitError, StateError, RuntimeError)
-//! - **safe_ref.rs**: Safe environment reference storage with lifetime management
+//! - **error.rs**: FFI-specific error types (`InitError`, `StateError`, `RuntimeError`)
+//! - **`safe_ref.rs`**: Safe environment reference storage with lifetime management
 //! - **codec.rs**: Color/attribute encoding for compact FFI data transfer
 //! - **abstraction.rs**: Defines the `KuroFFI` trait and shared session logic
 //! - **bridge/**: Primary implementation using emacs-module-rs, split by concern:
-//!   - **bridge/mod.rs**: Infrastructure (lock_session!, bool_to_lisp, catch_panic, EmacsModuleFFI)
-//!   - **bridge/lifecycle.rs**: Session init/send_key/resize/shutdown
+//!   - **bridge/mod.rs**: Infrastructure (`lock_session`!, `bool_to_lisp`, `catch_panic`, `EmacsModuleFFI`)
+//!   - **bridge/lifecycle.rs**: Session `init/send_key/resize/shutdown`
 //!   - **bridge/queries.rs**: Cursor and mode getter functions
 //!   - **bridge/render.rs**: Render polling, scrollback, viewport scroll, bell
 //!   - **bridge/events.rs**: OSC event polling (CWD, clipboard, prompt marks, focus)
 //!   - **bridge/images.rs**: Kitty Graphics Protocol image functions
 //! - **fallback.rs**: Raw FFI bindings as contingency
-//! - **test_terminal.rs**: Test-only #[defun] functions that bypass the PTY
+//! - **`test_terminal.rs`**: Test-only #[defun] functions that bypass the PTY
 //!
 //! # Usage
 //!

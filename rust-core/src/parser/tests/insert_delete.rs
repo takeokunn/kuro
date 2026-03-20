@@ -1,7 +1,11 @@
 //! Property-based and example-based tests for `insert_delete` parsing.
 //!
 //! Module under test: `parser/insert_delete.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
+
+// Test helpers convert between usize/u16/i64 for grid coordinates; values are
+// bounded by terminal dimensions (≤ 65535 rows/cols) so truncation is safe.
+#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)")]
 
 use super::*;
 
@@ -19,8 +23,7 @@ fn fill_line(term: &mut crate::TerminalCore, row: usize, c: char) {
 fn char_at(term: &crate::TerminalCore, row: usize, col: usize) -> char {
     term.screen
         .get_cell(row, col)
-        .map(|c| c.char())
-        .unwrap_or(' ')
+        .map_or(' ', crate::types::cell::Cell::char)
 }
 
 // ── IL (Insert Lines) ──────────────────────────────────────────────────
@@ -327,7 +330,7 @@ fn test_clear_lines_start_equals_end_is_noop() {
 
     // All rows must still have 'X'.
     for r in 0..10 {
-        assert_eq!(char_at(&term, r, 0), 'X', "row {} should be untouched", r);
+        assert_eq!(char_at(&term, r, 0), 'X', "row {r} should be untouched");
     }
 }
 
@@ -342,7 +345,7 @@ fn test_clear_lines_start_greater_than_end_is_noop() {
     term.screen.clear_lines(5, 2); // inverted range
 
     for r in 0..10 {
-        assert_eq!(char_at(&term, r, 0), 'Z', "row {} should be untouched", r);
+        assert_eq!(char_at(&term, r, 0), 'Z', "row {r} should be untouched");
     }
 }
 
@@ -504,7 +507,7 @@ proptest! {
     fn prop_il_no_panic(n in 0u16..=100u16, row in 0usize..10usize) {
         let mut term = crate::TerminalCore::new(10, 20);
         term.screen.move_cursor(row, 0);
-        term.advance(format!("\x1b[{}L", n).as_bytes());
+        term.advance(format!("\x1b[{n}L").as_bytes());
         prop_assert_eq!(term.screen.rows() as usize, 10, "rows must be unchanged after IL");
     }
 
@@ -513,7 +516,7 @@ proptest! {
     fn prop_dl_no_panic(n in 0u16..=100u16, row in 0usize..10usize) {
         let mut term = crate::TerminalCore::new(10, 20);
         term.screen.move_cursor(row, 0);
-        term.advance(format!("\x1b[{}M", n).as_bytes());
+        term.advance(format!("\x1b[{n}M").as_bytes());
         prop_assert_eq!(term.screen.rows() as usize, 10, "rows must be unchanged after DL");
     }
 
@@ -522,7 +525,7 @@ proptest! {
     fn prop_ich_no_panic(n in 0u16..=100u16, col in 0usize..20usize) {
         let mut term = crate::TerminalCore::new(10, 20);
         term.screen.move_cursor(0, col);
-        term.advance(format!("\x1b[{}@", n).as_bytes());
+        term.advance(format!("\x1b[{n}@").as_bytes());
         prop_assert_eq!(
             term.screen.get_line(0).unwrap().cells.len(), 20,
             "line width must be preserved after ICH"
@@ -534,7 +537,7 @@ proptest! {
     fn prop_dch_no_panic(n in 0u16..=100u16, col in 0usize..20usize) {
         let mut term = crate::TerminalCore::new(10, 20);
         term.screen.move_cursor(0, col);
-        term.advance(format!("\x1b[{}P", n).as_bytes());
+        term.advance(format!("\x1b[{n}P").as_bytes());
         prop_assert_eq!(
             term.screen.get_line(0).unwrap().cells.len(), 20,
             "line width must be preserved after DCH"
@@ -545,8 +548,8 @@ proptest! {
     // INVARIANT: IL + DL cancel out — row count stays the same
     fn prop_il_dl_preserves_row_count(n in 1u16..=8u16) {
         let mut term = crate::TerminalCore::new(10, 20);
-        term.advance(format!("\x1b[{}L", n).as_bytes());
-        term.advance(format!("\x1b[{}M", n).as_bytes());
+        term.advance(format!("\x1b[{n}L").as_bytes());
+        term.advance(format!("\x1b[{n}M").as_bytes());
         prop_assert_eq!(term.screen.rows() as usize, 10);
     }
 }

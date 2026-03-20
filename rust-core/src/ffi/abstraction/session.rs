@@ -47,6 +47,9 @@ pub struct TerminalSession {
 // blocked by `pub(super)` on the `core` field.
 impl TerminalSession {
     /// Create a new terminal session
+    ///
+    /// # Errors
+    /// Returns `Err` if the PTY process fails to spawn or the window size cannot be set.
     pub fn new(command: &str, rows: u16, cols: u16) -> Result<Self> {
         let core = TerminalCore::new(rows, cols);
 
@@ -79,6 +82,9 @@ impl TerminalSession {
     }
 
     /// Send input to PTY
+    ///
+    /// # Errors
+    /// Returns `Err` if writing to the PTY file descriptor fails.
     pub fn send_input(&mut self, bytes: &[u8]) -> Result<()> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
@@ -97,6 +103,9 @@ impl TerminalSession {
     /// This reduces the chance of rendering a partial screen update when
     /// a TUI app sends a large escape-sequence burst (e.g. Claude Code
     /// redrawing all 32 rows on up-arrow).
+    ///
+    /// # Errors
+    /// Returns `Err` if reading from or writing to the PTY file descriptor fails.
     pub fn poll_output(&mut self) -> Result<Vec<u8>> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
@@ -134,7 +143,7 @@ impl TerminalSession {
             let text_opt: Option<String> = self.core.screen.get_line(row).map(|line| {
                 // Wide placeholder cells (CellWidth::Wide) are included as ' ' chars,
                 // maintaining the grid_col == buffer_char_offset invariant (Phase 11).
-                let s: String = line.cells.iter().map(|c| c.char()).collect();
+                let s: String = line.cells.iter().map(crate::types::cell::Cell::char).collect();
                 // NOTE: trailing spaces are intentionally NOT trimmed.
                 // Trimming would cause the Emacs-side cursor clamp
                 // `(min (+ line-start col) line-end)` to place the cursor at
@@ -154,6 +163,7 @@ impl TerminalSession {
     ///
     /// Delegates to [`crate::ffi::codec::encode_color`].
     #[inline]
+    #[must_use] 
     pub fn encode_color(color: &crate::types::Color) -> u32 {
         crate::ffi::codec::encode_color(color)
     }
@@ -162,11 +172,12 @@ impl TerminalSession {
     ///
     /// Delegates to [`crate::ffi::codec::encode_attrs`].
     #[inline]
+    #[must_use] 
     pub fn encode_attrs(attrs: &crate::types::cell::SgrAttributes) -> u64 {
         crate::ffi::codec::encode_attrs(attrs)
     }
 
-    /// Encode a single line's cells into (row, text, face_ranges, col_to_buf).
+    /// Encode a single line's cells into (row, text, `face_ranges`, `col_to_buf`).
     ///
     /// This is a pure function (no `self` dependency) so it can be called
     /// while holding a shared borrow of the screen — eliminating the need to
@@ -176,12 +187,16 @@ impl TerminalSession {
     /// - `text` has wide placeholder cells removed (CJK renders correctly in Emacs)
     /// - `face_ranges` use buffer offsets (not grid column indices)
     /// - `col_to_buf[col]` maps grid column to buffer character offset
+    #[must_use] 
     pub fn encode_line_faces(row: usize, cells: &[crate::types::cell::Cell]) -> crate::ffi::codec::EncodedLine {
         let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(cells);
         (row, text, face_ranges, col_to_buf)
     }
 
     /// Resize terminal
+    ///
+    /// # Errors
+    /// Returns `Err` if the PTY window-size ioctl fails.
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         self.core.resize(rows, cols);
         #[cfg(unix)]
@@ -192,20 +207,23 @@ impl TerminalSession {
     }
 
     /// Get cursor position
+    #[must_use] 
     pub fn get_cursor(&self) -> (usize, usize) {
         let c = self.core.screen.cursor();
         (c.row, c.col)
     }
 
     /// Get cursor visibility (DECTCEM state)
-    pub fn get_cursor_visible(&self) -> bool {
+    #[must_use] 
+    pub const fn get_cursor_visible(&self) -> bool {
         self.core.dec_modes.cursor_visible
     }
 
     /// Get scrollback lines
+    #[must_use] 
     pub fn get_scrollback(&self, max_lines: usize) -> Vec<String> {
         let lines = self.core.screen.get_scrollback_lines(max_lines);
-        lines.iter().map(|line| line.to_string()).collect()
+        lines.iter().map(std::string::ToString::to_string).collect()
     }
 
     /// Clear scrollback buffer
@@ -220,6 +238,7 @@ impl TerminalSession {
 
     /// Return a base64-encoded PNG string for the given image ID.
     /// Returns an empty string if the image is not found (orphan reference).
+    #[must_use] 
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
         self.core.screen.get_image_png_base64(image_id)
     }
@@ -232,7 +251,8 @@ impl TerminalSession {
     }
 
     /// Get scrollback line count
-    pub fn get_scrollback_count(&self) -> usize {
+    #[must_use] 
+    pub const fn get_scrollback_count(&self) -> usize {
         self.core.screen.scrollback_line_count
     }
 
@@ -242,12 +262,13 @@ impl TerminalSession {
     }
 
     /// Scroll the viewport down by n lines (toward live content)
-    pub fn viewport_scroll_down(&mut self, n: usize) {
+    pub const fn viewport_scroll_down(&mut self, n: usize) {
         self.core.screen.viewport_scroll_down(n);
     }
 
     /// Return the current viewport scroll offset (0 = live view)
-    pub fn scroll_offset(&self) -> usize {
+    #[must_use] 
+    pub const fn scroll_offset(&self) -> usize {
         self.core.screen.scroll_offset()
     }
 
@@ -255,12 +276,9 @@ impl TerminalSession {
     ///
     /// Used by Elisp to trigger immediate rendering when streaming output arrives.
     #[cfg(unix)]
+    #[must_use] 
     pub fn has_pending_output(&self) -> bool {
-        if let Some(ref pty) = self.pty {
-            pty.has_pending_data()
-        } else {
-            false
-        }
+        self.pty.as_ref().is_some_and(crate::pty::posix::Pty::has_pending_data)
     }
 
     #[cfg(not(unix))]
@@ -278,9 +296,10 @@ impl TerminalSession {
     /// test buffers are never auto-killed.
     /// On non-Unix: always returns `true` (no PTY process to track).
     #[cfg(unix)]
-    #[inline(always)]
+    #[inline]
+    #[must_use] 
     pub fn is_process_alive(&self) -> bool {
-        self.pty.as_ref().map_or(true, |p| p.is_alive())
+        self.pty.as_ref().is_none_or(crate::pty::posix::Pty::is_alive)
     }
 
     #[cfg(not(unix))]
@@ -290,33 +309,36 @@ impl TerminalSession {
     }
 
     /// Return the shell command used to spawn this session.
-    #[inline(always)]
+    #[inline]
+    #[must_use] 
     pub fn command(&self) -> &str {
         &self.command
     }
 
     /// Return `true` if this session is in the `Detached` state.
-    #[inline(always)]
+    #[inline]
+    #[must_use] 
     pub fn is_detached(&self) -> bool {
         self.state == SessionState::Detached
     }
 
     /// Mark this session as `Detached` (keeps PTY alive, no buffer attached).
-    #[inline(always)]
-    pub fn set_detached(&mut self) {
+    #[inline]
+    pub const fn set_detached(&mut self) {
         self.state = SessionState::Detached;
     }
 
     /// Mark this session as `Bound` (re-attaching it to a buffer).
-    #[inline(always)]
-    pub fn set_bound(&mut self) {
+    #[inline]
+    pub const fn set_bound(&mut self) {
         self.state = SessionState::Bound;
     }
 
     /// Return the PID of the PTY child process, if available.
     ///
     /// Returns `None` on non-Unix platforms or when no PTY is attached.
-    pub fn pid(&self) -> Option<u32> {
+    #[must_use] 
+    pub const fn pid(&self) -> Option<u32> {
         #[cfg(unix)]
         if let Some(ref pty) = self.pty {
             return Some(pty.pid());
@@ -325,13 +347,15 @@ impl TerminalSession {
     }
 
     /// Get mouse pixel mode state (?1016)
-    pub fn get_mouse_pixel(&self) -> bool {
+    #[must_use] 
+    pub const fn get_mouse_pixel(&self) -> bool {
         self.core.dec_modes.mouse_pixel
     }
 
     /// Get current 256-color palette overrides (non-None entries only).
     ///
     /// Returns a Vec of (index, R, G, B) for each overridden palette entry.
+    #[must_use] 
     pub fn get_palette_updates(&self) -> Vec<(u8, u8, u8, u8)> {
         self.core
             .osc_data
@@ -343,13 +367,11 @@ impl TerminalSession {
     }
 
     /// Get default foreground/background/cursor colors (None = unset = use Emacs default).
-    /// Returns (fg_encoded, bg_encoded, cursor_encoded) as u32 FFI color values.
+    /// Returns (`fg_encoded`, `bg_encoded`, `cursor_encoded`) as u32 FFI color values.
+    #[must_use] 
     pub fn get_default_colors(&self) -> (u32, u32, u32) {
         let encode = |color: &Option<crate::types::Color>| -> u32 {
-            match color {
-                Some(c) => Self::encode_color(c),
-                None => 0xFF000000u32, // Color::Default sentinel
-            }
+            color.as_ref().map_or(0xFF00_0000_u32, Self::encode_color)
         };
         (
             encode(&self.core.osc_data.default_fg),
@@ -363,7 +385,7 @@ impl TerminalSession {
     /// Returns `true` if the flag was set (i.e., the default colors changed since
     /// the last call), then resets the flag to `false` regardless of its value.
     /// Subsequent calls return `false` until the flag is set again by the parser.
-    pub fn take_default_colors_dirty(&mut self) -> bool {
+    pub const fn take_default_colors_dirty(&mut self) -> bool {
         let dirty = self.core.osc_data.default_colors_dirty;
         self.core.osc_data.default_colors_dirty = false;
         dirty
@@ -374,7 +396,7 @@ impl TerminalSession {
     /// Returns `true` if a BEL character has been received since the last call,
     /// then unconditionally resets the flag to `false`.
     /// Subsequent calls return `false` until another BEL is received.
-    pub fn take_bell_pending(&mut self) -> bool {
+    pub const fn take_bell_pending(&mut self) -> bool {
         let was_pending = self.core.meta.bell_pending;
         self.core.meta.bell_pending = false;
         was_pending
@@ -412,47 +434,56 @@ impl TerminalSession {
     }
 
     /// Get the current mouse tracking mode.
-    pub fn get_mouse_mode(&self) -> u16 {
+    #[must_use] 
+    pub const fn get_mouse_mode(&self) -> u16 {
         self.core.dec_modes.mouse_mode
     }
 
     /// Get whether SGR mouse coordinate encoding is active.
-    pub fn get_mouse_sgr(&self) -> bool {
+    #[must_use] 
+    pub const fn get_mouse_sgr(&self) -> bool {
         self.core.dec_modes.mouse_sgr
     }
 
     /// Get whether application cursor keys mode (DECCKM) is active.
-    pub fn get_app_cursor_keys(&self) -> bool {
+    #[must_use] 
+    pub const fn get_app_cursor_keys(&self) -> bool {
         self.core.dec_modes.app_cursor_keys
     }
 
     /// Get whether application keypad mode is active.
-    pub fn get_app_keypad(&self) -> bool {
+    #[must_use] 
+    pub const fn get_app_keypad(&self) -> bool {
         self.core.dec_modes.app_keypad
     }
 
     /// Get the kitty keyboard protocol flags bitmask.
-    pub fn get_keyboard_flags(&self) -> u32 {
+    #[must_use] 
+    pub const fn get_keyboard_flags(&self) -> u32 {
         self.core.dec_modes.keyboard_flags
     }
 
     /// Get the current cursor shape.
-    pub fn get_cursor_shape(&self) -> crate::types::cursor::CursorShape {
+    #[must_use] 
+    pub const fn get_cursor_shape(&self) -> crate::types::cursor::CursorShape {
         self.core.dec_modes.cursor_shape
     }
 
     /// Get whether bracketed paste mode is active.
-    pub fn get_bracketed_paste(&self) -> bool {
+    #[must_use] 
+    pub const fn get_bracketed_paste(&self) -> bool {
         self.core.dec_modes.bracketed_paste
     }
 
     /// Get whether focus event reporting is active.
-    pub fn get_focus_events(&self) -> bool {
+    #[must_use] 
+    pub const fn get_focus_events(&self) -> bool {
         self.core.dec_modes.focus_events
     }
 
     /// Get whether synchronized output mode (DEC ?2026) is active.
-    pub fn get_synchronized_output(&self) -> bool {
+    #[must_use] 
+    pub const fn get_synchronized_output(&self) -> bool {
         self.core.dec_modes.synchronized_output
     }
 }

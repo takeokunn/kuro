@@ -1,6 +1,6 @@
 //! Scroll region and scroll event methods for Screen
 
-use super::*;
+use super::{Screen, Line, Color, ScrollRegion};
 
 /// Push `line` onto the scrollback buffer of `screen`, evicting the oldest
 /// entry when the buffer is at capacity.
@@ -170,6 +170,7 @@ impl Screen {
     }
 
     /// Get scroll region
+    #[must_use] 
     pub fn get_scroll_region(&self) -> &ScrollRegion {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_ref() {
@@ -186,10 +187,7 @@ impl Screen {
     /// buffer-level scroll operations (delete first line + append blank) can
     /// be performed first, avoiding double-render of the bottom row.
     pub fn consume_scroll_events(&mut self) -> (u32, u32) {
-        let screen = match self.active_screen_mut() {
-            Some(s) => s,
-            None => return (0, 0),
-        };
+        let Some(screen) = self.active_screen_mut() else { return (0, 0) };
         let up = screen.pending_scroll_up;
         let down = screen.pending_scroll_down;
         screen.pending_scroll_up = 0;

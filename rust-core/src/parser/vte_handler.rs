@@ -1,4 +1,4 @@
-//! VTE Perform trait implementation for TerminalCore
+//! VTE Perform trait implementation for `TerminalCore`
 //!
 //! This module implements the `vte::Perform` trait, which is the callback
 //! interface for the VTE parser. Each method handles a different class of
@@ -162,7 +162,7 @@ impl vte::Perform for TerminalCore {
     /// Handle OSC (Operating System Command) sequences from the VTE parser.
     ///
     /// Delegates to [`parser::osc::handle_osc`] for the full implementation.
-    #[inline(always)]
+    #[inline]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         parser::osc::handle_osc(self, params, bell_terminated);
     }
@@ -203,17 +203,17 @@ impl vte::Perform for TerminalCore {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn hook(&mut self, params: &vte::Params, intermediates: &[u8], ignore: bool, c: char) {
         parser::dcs::dcs_hook(self, params, intermediates, ignore, c);
     }
 
-    #[inline(always)]
+    #[inline]
     fn put(&mut self, byte: u8) {
         parser::dcs::dcs_put(self, byte);
     }
 
-    #[inline(always)]
+    #[inline]
     fn unhook(&mut self) {
         parser::dcs::dcs_unhook(self);
     }

@@ -68,12 +68,12 @@ fn bench_parser_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_throughput");
 
     // Test with different input sizes: 1MB, 5MB, 10MB
-    for size_mb in [1, 5, 10].iter() {
+    for size_mb in &[1, 5, 10] {
         let output = generate_vte_output(*size_mb);
 
         group.throughput(Throughput::Bytes(output.len() as u64));
 
-        group.bench_with_input(format!("{}MB", size_mb), size_mb, |b, &_size_mb| {
+        group.bench_with_input(format!("{size_mb}MB"), size_mb, |b, &_size_mb| {
             let mut term = TerminalCore::new(24, 80);
 
             b.iter(|| {
@@ -92,12 +92,12 @@ fn bench_plain_text_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("plain_text_throughput");
 
     // Test with different input sizes: 1MB, 5MB, 10MB
-    for size_mb in [1, 5, 10].iter() {
+    for size_mb in &[1, 5, 10] {
         let output = generate_plain_text(*size_mb);
 
         group.throughput(Throughput::Bytes(output.len() as u64));
 
-        group.bench_with_input(format!("{}MB", size_mb), size_mb, |b, &_size_mb| {
+        group.bench_with_input(format!("{size_mb}MB"), size_mb, |b, &_size_mb| {
             let mut term = TerminalCore::new(24, 80);
 
             b.iter(|| {

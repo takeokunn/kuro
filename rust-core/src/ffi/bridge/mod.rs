@@ -49,19 +49,19 @@ where
     match result {
         Ok(Ok(value)) => value.into_lisp(env),
         Ok(Err(e)) => {
-            let msg = format!("Kuro error: {}", e);
+            let msg = format!("Kuro error: {e}");
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
         }
         Err(panic_payload) => {
-            let msg = match panic_payload.downcast::<String>() {
-                Ok(msg) => format!("Panic: {}", msg),
-                Err(panic_payload) => match panic_payload.downcast::<&'static str>() {
-                    Ok(msg) => format!("Panic: {}", msg),
-                    Err(_) => "Panic: Unknown panic payload".to_string(),
-                },
-            };
+            let msg = panic_payload.downcast::<String>().map_or_else(
+                |p| p.downcast::<&'static str>().map_or_else(
+                    |_| "Panic: Unknown panic payload".to_string(),
+                    |msg| format!("Panic: {msg}"),
+                ),
+                |msg| format!("Panic: {msg}"),
+            );
             let _ = env.message(&msg);
             let _ = env.call("error", (msg,));
             false.into_lisp(env)
@@ -86,11 +86,7 @@ where
 {
     catch_panic(env, || {
         let global = lock_session!();
-        if let Some(session) = global.get(&session_id) {
-            f(session)
-        } else {
-            Ok(default)
-        }
+        global.get(&session_id).map_or(Ok(default), f)
     })
 }
 
@@ -111,11 +107,7 @@ where
 {
     catch_panic(env, || {
         let mut global = lock_session!();
-        if let Some(session) = global.get_mut(&session_id) {
-            f(session)
-        } else {
-            Ok(default)
-        }
+        global.get_mut(&session_id).map_or(Ok(default), f)
     })
 }
 
@@ -140,17 +132,13 @@ where
 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        if let Some(session) = global.get_mut(&session_id) {
-            f(session)
-        } else {
-            Ok(None)
-        }
+        global.get_mut(&session_id).map_or(Ok(None), f)
     }));
     match result {
         Ok(Ok(Some(v))) => v.into_lisp(env),
         Ok(Ok(None)) => false.into_lisp(env),
         Ok(Err(e)) => {
-            let _ = env.message(format!("kuro: {}", e));
+            let _ = env.message(format!("kuro: {e}"));
             false.into_lisp(env)
         }
         Err(_) => {
@@ -160,7 +148,10 @@ where
     }
 }
 
-/// Emacs plugin initialization (called from lib.rs via #[emacs::module])
+/// Emacs plugin initialization (called from lib.rs via #[`emacs::module`])
+///
+/// # Errors
+/// Returns `Err` if the Emacs environment rejects the module message.
 pub fn module_init(env: &Env) -> EmacsResult<()> {
     env.message("Kuro terminal emulator module loaded")?;
     Ok(())

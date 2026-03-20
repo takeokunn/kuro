@@ -39,7 +39,7 @@ impl Pty {
     /// Resolves the command to an absolute path and checks the basename.
     fn validate_shell(command: &str) -> Result<PathBuf> {
         let path = which::which(command)
-            .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {}", e)))?;
+            .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {e}")))?;
 
         let basename = path
             .file_name()
@@ -69,9 +69,12 @@ impl Pty {
     /// terminal mode — causing control characters to be echoed as `^X` instead of
     /// being handled as cursor-movement commands.
     ///
-    /// This creates a proper PTY master/slave pair using openpty(),
+    /// This creates a proper PTY master/slave pair using `openpty()`,
     /// forks a child process, and executes the shell with the slave
     /// PTY as stdin/stdout/stderr.
+    ///
+    /// # Errors
+    /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
     pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
@@ -86,7 +89,7 @@ impl Pty {
             ws_ypixel: 0,
         };
         let OpenptyResult { master, slave } = openpty(Some(&winsize), None)
-            .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {}", e)))?;
+            .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {e}")))?;
 
         // Create bounded channel for backpressure
         let (sender, receiver) = crossbeam_channel::bounded(CHANNEL_CAPACITY);
@@ -142,14 +145,14 @@ impl Pty {
 
                 // Create new session
                 nix::unistd::setsid()
-                    .map_err(|e| pty_operation_error("setsid", &format!("Failed to setsid: {}", e)))?;
+                    .map_err(|e| pty_operation_error("setsid", &format!("Failed to setsid: {e}")))?;
 
                 // Set slave PTY as controlling terminal
                 // TIOCSCTTY is required on all POSIX platforms after setsid()
                 // to establish the slave PTY as the controlling terminal.
                 // Without this, tcgetpgrp() fails in the shell.
                 unsafe {
-                    if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY as _, 0) == -1 {
+                    if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY.into(), 0) == -1 {
                         return Err(pty_operation_error(
                             "TIOCSCTTY",
                             &format!(
@@ -245,40 +248,46 @@ impl Pty {
                     std::ffi::CString::new(shell_path.to_str().ok_or_else(|| {
                         pty_spawn_error(command, "Shell path is not valid UTF-8")
                     })?)
-                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell path: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell path: {e}")))?;
 
                 let shell_name = shell_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("sh");
                 let shell_name_cstr = std::ffi::CString::new(shell_name)
-                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {e}")))?;
 
                 // argv[0] = basename (e.g. "bash"), argv[1..] = empty (interactive login
                 // flags can be added here if needed, but the default is interactive mode
                 // because stdin is a TTY).
                 nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
-                    .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {}", e)))?;
+                    .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {e}")))?;
 
                 // execvp should not return, but if it does, exit
                 std::process::exit(1);
             }
-            Err(errno) => Err(pty_spawn_error(command, &format!("Failed to fork: {}", errno))),
+            Err(errno) => Err(pty_spawn_error(command, &format!("Failed to fork: {errno}"))),
         }
     }
 
     /// Write bytes to the PTY
+    ///
+    /// # Errors
+    /// Returns `Err` if the underlying `write_all` to the master file descriptor fails.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
         use std::io::Write;
 
         self.master
             .write_all(bytes)
-            .map_err(|e| pty_operation_error("write", &format!("Failed to write to PTY: {}", e)))?;
+            .map_err(|e| pty_operation_error("write", &format!("Failed to write to PTY: {e}")))?;
 
         Ok(())
     }
 
     /// Read bytes from the PTY (non-blocking, drains all available data)
+    ///
+    /// # Errors
+    /// Never returns an error in the current implementation (channel `try_recv` is infallible after data arrives).
     pub fn read(&mut self) -> Result<Vec<u8>> {
         let mut all_data = Vec::new();
 
@@ -291,13 +300,15 @@ impl Pty {
     }
 
     /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
+    #[must_use] 
     pub fn has_pending_data(&self) -> bool {
         !self.receiver.is_empty()
     }
 
     /// Return the child process PID.
-    #[inline(always)]
-    pub fn pid(&self) -> u32 {
+    #[inline]
+    #[must_use]
+    pub const fn pid(&self) -> u32 {
         self.child_pid.as_raw() as u32
     }
 
@@ -305,12 +316,16 @@ impl Pty {
     ///
     /// Set to false by the reader thread when it detects EOF (Ok(0)) on the
     /// master PTY file descriptor, which happens when the child process exits.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn is_alive(&self) -> bool {
         !self.process_exited.load(Ordering::Relaxed)
     }
 
     /// Set PTY window size
+    ///
+    /// # Errors
+    /// Returns `Err` if the `TIOCSWINSZ` ioctl fails.
     pub fn set_winsize(&mut self, rows: u16, cols: u16) -> Result<()> {
         let winsize = Winsize {
             ws_row: rows,
@@ -347,14 +362,14 @@ impl Drop for Pty {
 
         // Send SIGHUP to the child process so it exits gracefully
         if let Err(e) = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP) {
-            eprintln!("[PTY] Drop: failed to send SIGHUP: {}", e);
+            eprintln!("[PTY] Drop: failed to send SIGHUP: {e}");
         }
 
         // Wait for the child to exit (prevents zombie processes)
         match waitpid(self.child_pid, None) {
             Ok(_) => {}
             Err(e) => {
-                eprintln!("[PTY] Drop: waitpid failed: {}", e);
+                eprintln!("[PTY] Drop: waitpid failed: {e}");
             }
         }
         // The master File is dropped next (by the compiler-generated cleanup),

@@ -35,6 +35,7 @@ pub struct BitVecDirtySet {
 
 impl BitVecDirtySet {
     /// Create an empty set pre-allocated for `capacity` rows.
+    #[must_use] 
     pub fn new(capacity: usize) -> Self {
         Self {
             bits: bitvec![0; capacity],
@@ -115,7 +116,7 @@ impl DirtySet for BitVecDirtySet {
 
     #[inline]
     fn contains(&self, row: usize) -> bool {
-        self.bits.get(row).map(|b| *b).unwrap_or(false)
+        self.bits.get(row).is_some_and(|b| *b)
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = usize> + '_> {

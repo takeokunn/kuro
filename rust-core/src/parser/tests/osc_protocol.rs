@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `osc_protocol` parsing.
 //!
 //! Module under test: `parser/osc_protocol.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 
@@ -133,7 +133,7 @@ fn test_handle_osc_52_write_clipboard() {
     assert_eq!(core.osc_data().clipboard_actions.len(), 1);
     match &core.osc_data().clipboard_actions[0] {
         ClipboardAction::Write(s) => assert_eq!(s, "hello"),
-        other => panic!("expected Write, got {:?}", other),
+        other @ ClipboardAction::Query => panic!("expected Write, got {other:?}"),
     }
 }
 
@@ -184,7 +184,7 @@ fn test_handle_osc_104_reset_all_when_empty_arg() {
     // Empty byte slice for index arg → reset all
     let params: &[&[u8]] = &[b"104", b""];
     super::handle_osc_104(&mut core, params);
-    assert!(core.osc_data().palette.iter().all(|e| e.is_none()));
+    assert!(core.osc_data().palette.iter().all(std::option::Option::is_none));
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -196,7 +196,7 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     // No index param at all
     let params: &[&[u8]] = &[b"104"];
     super::handle_osc_104(&mut core, params);
-    assert!(core.osc_data().palette.iter().all(|e| e.is_none()));
+    assert!(core.osc_data().palette.iter().all(std::option::Option::is_none));
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -340,7 +340,7 @@ proptest! {
         mark in prop_oneof![Just("A"), Just("B"), Just("C"), Just("D"), Just("Z")]
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
-        let seq = format!("\x1b]133;{}\x07", mark);
+        let seq = format!("\x1b]133;{mark}\x07");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
@@ -352,7 +352,7 @@ proptest! {
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
         let path_str = String::from_utf8(path).unwrap_or_default();
-        let seq = format!("\x1b]7;file://localhost/{}\x07", path_str);
+        let seq = format!("\x1b]7;file://localhost/{path_str}\x07");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
@@ -364,7 +364,7 @@ proptest! {
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
         let p = String::from_utf8(payload).unwrap_or_default();
-        let seq = format!("\x1b]1337;{}\x07", p);
+        let seq = format!("\x1b]1337;{p}\x07");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }

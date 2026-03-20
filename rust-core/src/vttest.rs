@@ -4,7 +4,7 @@
 //! Based on the classic vttest test suite.
 
 #[cfg(test)]
-mod vttest {
+mod tests {
     use crate::TerminalCore;
     use crate::Color;
 
@@ -19,7 +19,7 @@ mod vttest {
 
     /// CSI helper: creates CSI sequence bytes
     fn csi(params: &str) -> Vec<u8> {
-        format!("\x1b[{}", params).into_bytes()
+        format!("\x1b[{params}").into_bytes()
     }
 
     // -------------------- Test 1: Cursor Movement --------------------
@@ -137,16 +137,16 @@ mod vttest {
     fn test_sgr_bold() {
         let mut term = create_terminal();
         feed(&mut term, &csi("1m"));
-        assert!(term.current_attrs.bold, "SGR 1 should set bold");
+        assert!(term.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD), "SGR 1 should set bold");
         feed(&mut term, &csi("0m"));
-        assert!(!term.current_attrs.bold, "SGR 0 should reset");
+        assert!(!term.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD), "SGR 0 should reset");
     }
 
     #[test]
     fn test_sgr_italic() {
         let mut term = create_terminal();
         feed(&mut term, &csi("3m"));
-        assert!(term.current_attrs.italic, "SGR 3 should set italic");
+        assert!(term.current_attrs.flags.contains(crate::types::cell::SgrFlags::ITALIC), "SGR 3 should set italic");
     }
 
     #[test]

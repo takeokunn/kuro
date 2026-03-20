@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `dcs` parsing.
 //!
 //! Module under test: `parser/dcs.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 
@@ -37,8 +37,7 @@ fn test_xtgettcap_known_capability_response() {
         .expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
-        "known capability response must start with ESC P 1 + r, got: {:?}",
-        resp
+        "known capability response must start with ESC P 1 + r, got: {resp:?}"
     );
     assert!(
         resp.contains("544e"),
@@ -64,8 +63,7 @@ fn test_xtgettcap_unknown_capability_response() {
         .expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP0+r"),
-        "unknown capability response must start with ESC P 0 + r, got: {:?}",
-        resp
+        "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
     );
 }
 
@@ -107,13 +105,11 @@ fn test_xtgettcap_multiple_capabilities() {
 
     assert!(
         resp0.starts_with("\x1bP1+r"),
-        "TN capability response must start with ESC P 1 + r, got: {:?}",
-        resp0
+        "TN capability response must start with ESC P 1 + r, got: {resp0:?}"
     );
     assert!(
         resp1.starts_with("\x1bP1+r"),
-        "RGB capability response must start with ESC P 1 + r, got: {:?}",
-        resp1
+        "RGB capability response must start with ESC P 1 + r, got: {resp1:?}"
     );
 }
 
@@ -146,8 +142,7 @@ fn test_xtgettcap_truecolor_flag_response() {
         .expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
-        "Tc capability response must start with ESC P 1 + r, got: {:?}",
-        resp
+        "Tc capability response must start with ESC P 1 + r, got: {resp:?}"
     );
     assert!(resp.contains("5463"), "response must echo back the hex-encoded name");
 }
@@ -166,8 +161,7 @@ fn test_xtgettcap_colors_capability_response() {
         .expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
-        "colors capability response must start with ESC P 1 + r, got: {:?}",
-        resp
+        "colors capability response must start with ESC P 1 + r, got: {resp:?}"
     );
 }
 
@@ -188,9 +182,9 @@ fn test_xtgettcap_mixed_known_unknown_capabilities() {
     let r0 = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
     let r1 = std::str::from_utf8(&core.meta.pending_responses[1]).unwrap();
     let r2 = std::str::from_utf8(&core.meta.pending_responses[2]).unwrap();
-    assert!(r0.starts_with("\x1bP1+r"), "TN must succeed, got: {:?}", r0);
-    assert!(r1.starts_with("\x1bP0+r"), "ZZZZ must fail, got: {:?}", r1);
-    assert!(r2.starts_with("\x1bP1+r"), "RGB must succeed, got: {:?}", r2);
+    assert!(r0.starts_with("\x1bP1+r"), "TN must succeed, got: {r0:?}");
+    assert!(r1.starts_with("\x1bP0+r"), "ZZZZ must fail, got: {r1:?}");
+    assert!(r2.starts_with("\x1bP1+r"), "RGB must succeed, got: {r2:?}");
 }
 
 /// XTGETTCAP with multiple unknown capabilities must produce one failure
@@ -211,8 +205,7 @@ fn test_xtgettcap_multiple_unknown_capabilities() {
         let resp = std::str::from_utf8(resp_bytes).expect("response must be valid UTF-8");
         assert!(
             resp.starts_with("\x1bP0+r"),
-            "unknown capability response must start with ESC P 0 + r, got: {:?}",
-            resp
+            "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
         );
     }
 }
@@ -282,7 +275,7 @@ fn test_sixel_advances_cursor_after_render() {
 }
 
 /// A Sixel DCS sequence with empty data (no pixel commands) must not add any
-/// image notification (decoder.finish() returns None for an empty sequence).
+/// image notification (`decoder.finish()` returns None for an empty sequence).
 #[test]
 fn test_sixel_empty_data_no_placement() {
     let mut core = crate::TerminalCore::new(24, 80);
@@ -306,10 +299,12 @@ proptest! {
     fn prop_xtgettcap_arbitrary_hex_no_panic(
         cap in proptest::collection::vec(0u8..=255u8, 0..=30)
     ) {
+        use std::fmt::Write as _;
         let mut term = crate::TerminalCore::new(24, 80);
         // Encode as hex string
-        let hex: String = cap.iter().map(|b| format!("{:02X}", b)).collect();
-        let seq = format!("\x1bP+q{}\x1b\\", hex);
+        let mut hex = String::with_capacity(cap.len() * 2);
+        for b in &cap { let _ = write!(hex, "{b:02X}"); }
+        let seq = format!("\x1bP+q{hex}\x1b\\");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
@@ -321,7 +316,7 @@ proptest! {
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
         let p = String::from_utf8(payload).unwrap_or_default();
-        let seq = format!("\x1bP{}\x1b\\", p);
+        let seq = format!("\x1bP{p}\x1b\\");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }

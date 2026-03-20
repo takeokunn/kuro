@@ -1,8 +1,9 @@
 //! VT100/VT220 compliance test suite
 //!
 //! Tests terminal emulator compliance with VT100/VT220 standards.
-//! These tests exercise the full advance() pipeline without any Emacs runtime.
+//! These tests exercise the full `advance()` pipeline without any Emacs runtime.
 
+use kuro_core::types::cell::SgrFlags;
 use kuro_core::TerminalCore;
 
 // === VT100 Basic Cursor Movement ===
@@ -73,18 +74,18 @@ fn vt_ed_erases_display() {
 fn vt_sgr_bold() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1m");
-    assert!(t.current_attrs().bold);
+    assert!(t.current_attrs().flags.contains(SgrFlags::BOLD));
 }
 
 #[test]
 fn vt_sgr_reset() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1;3;4m");
-    assert!(t.current_attrs().bold);
-    assert!(t.current_attrs().italic);
+    assert!(t.current_attrs().flags.contains(SgrFlags::BOLD));
+    assert!(t.current_attrs().flags.contains(SgrFlags::ITALIC));
     t.advance(b"\x1b[0m");
-    assert!(!t.current_attrs().bold);
-    assert!(!t.current_attrs().italic);
+    assert!(!t.current_attrs().flags.contains(SgrFlags::BOLD));
+    assert!(!t.current_attrs().flags.contains(SgrFlags::ITALIC));
 }
 
 #[test]
@@ -318,7 +319,7 @@ fn vt_decstr_soft_reset() {
     t.advance(b"\x1b[?1h\x1b[1m\x1b[10;20H");
     t.advance(b"\x1b[!p");
     assert!(!t.dec_modes().app_cursor_keys);
-    assert!(!t.current_attrs().bold);
+    assert!(!t.current_attrs().flags.contains(SgrFlags::BOLD));
     assert_eq!(t.cursor_row(), 0);
     assert!(t.dec_modes().auto_wrap);
 }
@@ -429,7 +430,7 @@ fn vt_synchronized_output_state_transitions() {
     // The content written during sync should be visible via get_cell
     let cell0 = t.get_cell(0, 0);
     assert_eq!(
-        cell0.map(|c| c.char()),
+        cell0.map(kuro_core::Cell::char),
         Some('H'),
         "first cell should be 'H' (content written during sync preserved in grid)"
     );
@@ -511,7 +512,7 @@ fn vt_full_reset() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1m\x1b[?1h");
     t.advance(b"\x1bc"); // RIS - full reset
-    assert!(!t.current_attrs().bold);
+    assert!(!t.current_attrs().flags.contains(SgrFlags::BOLD));
     assert!(!t.dec_modes().app_cursor_keys);
 }
 
@@ -631,12 +632,12 @@ fn vt_sgr_invisible() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[8m");
     assert!(
-        t.current_attrs().hidden,
+        t.current_attrs().flags.contains(SgrFlags::HIDDEN),
         "SGR 8 should set hidden attribute"
     );
     t.advance(b"\x1b[28m");
     assert!(
-        !t.current_attrs().hidden,
+        !t.current_attrs().flags.contains(SgrFlags::HIDDEN),
         "SGR 28 should clear hidden attribute"
     );
 }
@@ -647,12 +648,12 @@ fn vt_sgr_strikethrough() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[9m");
     assert!(
-        t.current_attrs().strikethrough,
+        t.current_attrs().flags.contains(SgrFlags::STRIKETHROUGH),
         "SGR 9 should set strikethrough"
     );
     t.advance(b"\x1b[29m");
     assert!(
-        !t.current_attrs().strikethrough,
+        !t.current_attrs().flags.contains(SgrFlags::STRIKETHROUGH),
         "SGR 29 should clear strikethrough"
     );
 }

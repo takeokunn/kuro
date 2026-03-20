@@ -40,7 +40,7 @@ pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: ch
 /// - Pt: Bottom margin (default: bottom of screen, which becomes rows internally)
 ///
 /// Note: The top margin is inclusive, bottom margin is exclusive (following the
-/// existing ScrollRegion convention in Screen).
+/// existing `ScrollRegion` convention in Screen).
 fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
     let rows = term.screen.rows() as usize;
 

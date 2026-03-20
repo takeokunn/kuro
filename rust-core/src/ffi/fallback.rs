@@ -1,7 +1,7 @@
 //! Raw FFI bindings as fallback for when emacs-module-rs fails
 //!
 //! This module provides direct C API bindings to the Emacs module interface.
-//! It serves as a contingency implementation of the KuroFFI trait that can
+//! It serves as a contingency implementation of the `KuroFFI` trait that can
 //! be used if the emacs-module-rs crate encounters issues.
 //!
 //! This implementation manually handles the C-level interaction with Emacs,
@@ -45,8 +45,10 @@ pub struct RawFFI;
 
 impl KuroFFI for RawFFI {
     fn init(env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        // Convert i64 to u16 safely
+        // Convert i64 to u16 — KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
         // Initialize session
@@ -82,20 +84,17 @@ impl KuroFFI for RawFFI {
                 Ok(updates)
             });
 
-        match result {
-            Ok(dirty_lines) => {
-                // Convert to Emacs list of (line_no . text) pairs
-                let mut list = Self::make_nil(env);
-                for (line_no, text) in dirty_lines.into_iter().rev() {
-                    let line_no_val = Self::make_integer(env, line_no as i64);
-                    let text_val = Self::make_string(env, &text);
-                    let pair = Self::cons(env, line_no_val, text_val);
-                    list = Self::cons(env, pair, list);
-                }
-                list
+        result.map_or_else(|_| Self::make_nil(env), |dirty_lines| {
+            // Convert to Emacs list of (line_no . text) pairs
+            let mut list = Self::make_nil(env);
+            for (line_no, text) in dirty_lines.into_iter().rev() {
+                let line_no_val = Self::make_integer(env, line_no as i64);
+                let text_val = Self::make_string(env, &text);
+                let pair = Self::cons(env, line_no_val, text_val);
+                list = Self::cons(env, pair, list);
             }
-            Err(_) => Self::make_nil(env),
-        }
+            list
+        })
     }
 
     fn send_key(env: *mut emacs_env, data: &[u8]) -> *mut emacs_value {
@@ -105,13 +104,15 @@ impl KuroFFI for RawFFI {
         });
 
         match result {
-            Ok(_) => Self::make_bool(env, true),
+            Ok(()) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
 
     fn resize(env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
+        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
@@ -120,14 +121,14 @@ impl KuroFFI for RawFFI {
         });
 
         match result {
-            Ok(_) => Self::make_bool(env, true),
+            Ok(()) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
 
     fn shutdown(env: *mut emacs_env) -> *mut emacs_value {
         match shutdown_session(LEGACY_SESSION_ID) {
-            Ok(_) => Self::make_bool(env, true),
+            Ok(()) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
@@ -135,13 +136,10 @@ impl KuroFFI for RawFFI {
     fn get_cursor(env: *mut emacs_env) -> *mut emacs_value {
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
             let (row, col) = session.get_cursor();
-            Ok(format!("{}:{}", row, col))
+            Ok(format!("{row}:{col}"))
         });
 
-        match result {
-            Ok(s) => Self::make_string(env, &s),
-            Err(_) => Self::make_string(env, "0:0"),
-        }
+        result.map_or_else(|_| Self::make_string(env, "0:0"), |s| Self::make_string(env, &s))
     }
 
     fn get_scrollback(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
@@ -153,17 +151,14 @@ impl KuroFFI for RawFFI {
 
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| Ok(session.get_scrollback(max_lines)));
 
-        match result {
-            Ok(lines) => {
-                let mut list = Self::make_nil(env);
-                for line in lines.into_iter().rev() {
-                    let line_val = Self::make_string(env, &line);
-                    list = Self::cons(env, line_val, list);
-                }
-                list
+        result.map_or_else(|_| Self::make_nil(env), |lines| {
+            let mut list = Self::make_nil(env);
+            for line in lines.into_iter().rev() {
+                let line_val = Self::make_string(env, &line);
+                list = Self::cons(env, line_val, list);
             }
-            Err(_) => Self::make_nil(env),
-        }
+            list
+        })
     }
 
     fn clear_scrollback(env: *mut emacs_env) -> *mut emacs_value {
@@ -173,7 +168,7 @@ impl KuroFFI for RawFFI {
         });
 
         match result {
-            Ok(_) => Self::make_bool(env, true),
+            Ok(()) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
@@ -185,7 +180,7 @@ impl KuroFFI for RawFFI {
         });
 
         match result {
-            Ok(_) => Self::make_bool(env, true),
+            Ok(()) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
@@ -193,14 +188,14 @@ impl KuroFFI for RawFFI {
 
 impl RawFFI {
     /// Create a nil value
-    fn make_nil(_env: *mut emacs_env) -> *mut emacs_value {
+    const fn make_nil(_env: *mut emacs_env) -> *mut emacs_value {
         // In a real implementation, this would call emacs_make_nil or equivalent
         // For now, return a null pointer which will be interpreted as nil
         std::ptr::null_mut()
     }
 
     /// Create a boolean value (t or nil)
-    fn make_bool(_env: *mut emacs_env, value: bool) -> *mut emacs_value {
+    const fn make_bool(_env: *mut emacs_env, value: bool) -> *mut emacs_value {
         // In a real implementation, this would create t or nil
         // For now, use null as nil, and a non-null pointer for t
         if value {
@@ -213,14 +208,14 @@ impl RawFFI {
     }
 
     /// Create an integer value
-    fn make_integer(_env: *mut emacs_env, value: i64) -> *mut emacs_value {
+    const fn make_integer(_env: *mut emacs_env, value: i64) -> *mut emacs_value {
         // In a real implementation, this would call env.make_integer(value)
         // For now, return a pointer with the value encoded (placeholder)
         (value as usize + 0x1000) as *mut emacs_value
     }
 
     /// Create a string value
-    fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
+    const fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
         // In a real implementation, this would call env.make_string(s)
         // For now, return a pointer to the string (placeholder)
         s.as_ptr() as *mut emacs_value
@@ -326,7 +321,6 @@ impl RawFFI {
 ///     pub fn cdr(env: *mut emacs_env, cons_cell: *mut emacs_value) -> *mut emacs_value;
 /// }
 /// ```
-
 #[cfg(test)]
 mod tests {
     use super::*;

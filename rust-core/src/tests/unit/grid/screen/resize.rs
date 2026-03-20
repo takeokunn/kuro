@@ -27,7 +27,7 @@ fn resize_larger_grows_line_count() {
     s.resize(10, 20);
     assert_eq!(s.rows() as usize, 10);
     // Active screen must have 10 lines
-    assert_eq!(s.get_line(9).is_some(), true);
+    assert!(s.get_line(9).is_some());
 }
 
 #[test]

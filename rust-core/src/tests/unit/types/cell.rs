@@ -1,10 +1,10 @@
-//! Property-based tests for `crate::types::cell` (Cell, SgrAttributes, CellWidth, UnderlineStyle)
+//! Property-based tests for `crate::types::cell` (Cell, `SgrAttributes`, `CellWidth`, `UnderlineStyle`)
 //!
 //! Tests in this file complement the embedded `#[cfg(test)]` tests in
 //! `src/types/cell.rs` and add property-based coverage for mathematical
 //! invariants and boundary conditions.
 
-use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
+use crate::types::cell::{Cell, CellWidth, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::Color;
 use proptest::prelude::*;
 
@@ -26,21 +26,20 @@ prop_compose! {
         hidden      in proptest::bool::ANY,
         strikethrough in proptest::bool::ANY,
     ) -> SgrAttributes {
-        SgrAttributes {
-            bold,
-            dim,
-            italic,
-            blink_slow,
-            blink_fast,
-            inverse,
-            hidden,
-            strikethrough,
-            ..Default::default()
-        }
+        let mut flags = SgrFlags::empty();
+        flags.set(SgrFlags::BOLD, bold);
+        flags.set(SgrFlags::DIM, dim);
+        flags.set(SgrFlags::ITALIC, italic);
+        flags.set(SgrFlags::BLINK_SLOW, blink_slow);
+        flags.set(SgrFlags::BLINK_FAST, blink_fast);
+        flags.set(SgrFlags::INVERSE, inverse);
+        flags.set(SgrFlags::HIDDEN, hidden);
+        flags.set(SgrFlags::STRIKETHROUGH, strikethrough);
+        SgrAttributes { flags, ..Default::default() }
     }
 }
 
-/// Strategy that picks one of the six UnderlineStyle variants.
+/// Strategy that picks one of the six `UnderlineStyle` variants.
 fn arb_underline_style() -> impl Strategy<Value = UnderlineStyle> {
     prop_oneof![
         Just(UnderlineStyle::None),
@@ -177,14 +176,7 @@ fn underline_style_all_variants_correct_bool() {
 // both color fields equal to Color::Default.
 fn sgr_default_all_false() {
     let attrs = SgrAttributes::default();
-    assert!(!attrs.bold);
-    assert!(!attrs.dim);
-    assert!(!attrs.italic);
-    assert!(!attrs.blink_slow);
-    assert!(!attrs.blink_fast);
-    assert!(!attrs.inverse);
-    assert!(!attrs.hidden);
-    assert!(!attrs.strikethrough);
+    assert_eq!(attrs.flags, SgrFlags::empty(), "all boolean flags must be clear in default attrs");
     assert!(!attrs.underline());
     assert_eq!(attrs.underline_style, UnderlineStyle::None);
     assert_eq!(attrs.foreground, Color::Default);

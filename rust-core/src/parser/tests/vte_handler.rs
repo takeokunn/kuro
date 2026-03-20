@@ -1,8 +1,9 @@
 //! Property-based and example-based tests for `vte_handler` parsing.
 //!
 //! Module under test: `parser/vte_handler.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
+use crate::types::cell::SgrFlags;
 use crate::TerminalCore;
 
 #[test]
@@ -23,7 +24,7 @@ fn test_vte_sgr_bold() {
     // Set bold, print text, then verify bold is active (no reset)
     term.advance(&b"\x1b[1mBold"[..]);
 
-    assert!(term.current_attrs.bold);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
 }
 
 #[test]
@@ -225,7 +226,7 @@ fn test_hook_put_unhook_xtgettcap_tn_queues_response() {
     );
 }
 
-/// print() with a combining character (zero-width) must NOT advance the cursor.
+/// `print()` with a combining character (zero-width) must NOT advance the cursor.
 #[test]
 fn test_print_combining_char_does_not_advance_cursor() {
     let mut term = TerminalCore::new(24, 80);

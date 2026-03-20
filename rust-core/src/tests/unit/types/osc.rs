@@ -1,4 +1,4 @@
-//! Unit tests for `crate::types::osc` (OscData, HyperlinkState, PromptMark, ClipboardAction).
+//! Unit tests for `crate::types::osc` (`OscData`, `HyperlinkState`, `PromptMark`, `ClipboardAction`).
 
 use crate::types::osc::{ClipboardAction, HyperlinkState, OscData, PromptMark, PromptMarkEvent};
 use crate::types::color::Color;
@@ -53,7 +53,7 @@ fn osc_data_palette_has_256_entries() {
 fn osc_data_palette_all_none_on_default() {
     let d = OscData::default();
     assert!(
-        d.palette.iter().all(|e| e.is_none()),
+        d.palette.iter().all(std::option::Option::is_none),
         "every palette entry must be None on construction"
     );
 }
@@ -83,15 +83,13 @@ fn hyperlink_state_default_uri_none() {
 
 #[test]
 fn hyperlink_state_set_uri() {
-    let mut h = HyperlinkState::default();
-    h.uri = Some("https://example.com".to_string());
+    let h = HyperlinkState { uri: Some("https://example.com".to_string()) };
     assert_eq!(h.uri.as_deref(), Some("https://example.com"));
 }
 
 #[test]
 fn hyperlink_state_clear_uri() {
-    let mut h = HyperlinkState::default();
-    h.uri = Some("https://example.com".to_string());
+    let mut h = HyperlinkState { uri: Some("https://example.com".to_string()) };
     h.uri = None;
     assert!(h.uri.is_none());
 }
@@ -157,22 +155,19 @@ fn clipboard_action_query_variant() {
 
 #[test]
 fn osc_data_set_default_fg() {
-    let mut d = OscData::default();
-    d.default_fg = Some(Color::Indexed(1));
+    let d = OscData { default_fg: Some(Color::Indexed(1)), ..Default::default() };
     assert!(matches!(d.default_fg, Some(Color::Indexed(1))));
 }
 
 #[test]
 fn osc_data_set_default_bg() {
-    let mut d = OscData::default();
-    d.default_bg = Some(Color::Rgb(255, 128, 0));
+    let d = OscData { default_bg: Some(Color::Rgb(255, 128, 0)), ..Default::default() };
     assert!(matches!(d.default_bg, Some(Color::Rgb(255, 128, 0))));
 }
 
 #[test]
 fn osc_data_set_cursor_color() {
-    let mut d = OscData::default();
-    d.cursor_color = Some(Color::Default);
+    let d = OscData { cursor_color: Some(Color::Default), ..Default::default() };
     assert!(matches!(d.cursor_color, Some(Color::Default)));
 }
 
@@ -203,8 +198,7 @@ proptest! {
     // INVARIANT: HyperlinkState uri survives clone
     fn prop_hyperlink_clone_preserves_uri(len in 0usize..128usize) {
         let uri: String = "x".repeat(len);
-        let mut h = HyperlinkState::default();
-        h.uri = if len == 0 { None } else { Some(uri.clone()) };
+        let h = HyperlinkState { uri: if len == 0 { None } else { Some(uri) } };
         let cloned = h.clone();
         prop_assert_eq!(cloned.uri, h.uri);
     }

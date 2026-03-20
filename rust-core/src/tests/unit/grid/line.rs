@@ -155,7 +155,7 @@ fn new_with_bg_default_equals_new() {
     assert_eq!(plain.cells.len(), with_default_bg.cells.len());
     assert_eq!(plain.is_dirty, with_default_bg.is_dirty);
     for (i, (a, b)) in plain.cells.iter().zip(with_default_bg.cells.iter()).enumerate() {
-        assert_eq!(a, b, "cell mismatch at col {}", i);
+        assert_eq!(a, b, "cell mismatch at col {i}");
     }
 }
 

@@ -1,21 +1,22 @@
 //! Property-based and example-based tests for `sgr` parsing.
 //!
 //! Module under test: `parser/sgr.rs`
-//! Tier: T2 — ProptestConfig::with_cases(500)
+//! Tier: T2 — `ProptestConfig::with_cases(500)`
 
 use super::*;
+use crate::types::cell::SgrFlags;
 
 #[test]
 fn test_sgr_reset() {
     let mut term = crate::TerminalCore::new(24, 80);
-    term.current_attrs.bold = true;
-    term.current_attrs.italic = true;
+    term.current_attrs.flags.insert(SgrFlags::BOLD);
+    term.current_attrs.flags.insert(SgrFlags::ITALIC);
 
     let params = vte::Params::default();
     handle_sgr(&mut term, &params);
 
-    assert!(!term.current_attrs.bold);
-    assert!(!term.current_attrs.italic);
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
+    assert!(!term.current_attrs.flags.contains(SgrFlags::ITALIC));
 }
 
 #[test]
@@ -69,7 +70,7 @@ fn test_sgr_compound_256_with_attrs() {
     // \e[1;38;5;196;4m — groups: [1], [38], [5], [196], [4]
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;38;5;196;4m");
-    assert!(term.current_attrs.bold, "bold should be set");
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be set");
     assert!(term.current_attrs.underline(), "underline should be set");
     assert_eq!(
         term.current_attrs.foreground,
@@ -185,9 +186,9 @@ fn test_sgr_empty_sequence_resets_all() {
     let mut term = crate::TerminalCore::new(24, 80);
     // First set some attributes
     term.advance(b"\x1b[1;3;4m"); // bold, italic, underline
-    assert!(term.current_attrs.bold, "bold should be set before reset");
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be set before reset");
     assert!(
-        term.current_attrs.italic,
+        term.current_attrs.flags.contains(SgrFlags::ITALIC),
         "italic should be set before reset"
     );
     assert!(
@@ -197,8 +198,8 @@ fn test_sgr_empty_sequence_resets_all() {
     // Now reset with empty sequence
     term.advance(b"\x1b[m");
     // All attributes should be reset
-    assert!(!term.current_attrs.bold, "bold should be reset");
-    assert!(!term.current_attrs.italic, "italic should be reset");
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be reset");
+    assert!(!term.current_attrs.flags.contains(SgrFlags::ITALIC), "italic should be reset");
     assert!(!term.current_attrs.underline(), "underline should be reset");
 }
 
@@ -215,19 +216,19 @@ fn test_sgr_unknown_code_no_panic() {
 fn test_sgr_bold_turn_off_code_22() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1m"); // bold on
-    assert!(term.current_attrs.bold);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b[22m"); // turn off bold+dim
-    assert!(!term.current_attrs.bold, "Bold should be off after CSI 22m");
+    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD), "Bold should be off after CSI 22m");
 }
 
 #[test]
 fn test_sgr_italic_turn_off_code_23() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[3m"); // italic on
-    assert!(term.current_attrs.italic);
+    assert!(term.current_attrs.flags.contains(SgrFlags::ITALIC));
     term.advance(b"\x1b[23m"); // turn off italic
     assert!(
-        !term.current_attrs.italic,
+        !term.current_attrs.flags.contains(SgrFlags::ITALIC),
         "Italic should be off after CSI 23m"
     );
 }
@@ -248,10 +249,10 @@ fn test_sgr_underline_turn_off_code_24() {
 fn test_sgr_inverse_turn_off_code_27() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[7m"); // inverse on
-    assert!(term.current_attrs.inverse);
+    assert!(term.current_attrs.flags.contains(SgrFlags::INVERSE));
     term.advance(b"\x1b[27m"); // turn off inverse
     assert!(
-        !term.current_attrs.inverse,
+        !term.current_attrs.flags.contains(SgrFlags::INVERSE),
         "Inverse should be off after CSI 27m"
     );
 }
@@ -260,10 +261,10 @@ fn test_sgr_inverse_turn_off_code_27() {
 fn test_sgr_blink_turn_off_code_25_clears_slow() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[5m"); // blink_slow on
-    assert!(term.current_attrs.blink_slow);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BLINK_SLOW));
     term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
     assert!(
-        !term.current_attrs.blink_slow,
+        !term.current_attrs.flags.contains(SgrFlags::BLINK_SLOW),
         "blink_slow should be off after CSI 25m"
     );
 }
@@ -272,10 +273,10 @@ fn test_sgr_blink_turn_off_code_25_clears_slow() {
 fn test_sgr_blink_turn_off_code_25_clears_fast() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[6m"); // blink_fast on
-    assert!(term.current_attrs.blink_fast);
+    assert!(term.current_attrs.flags.contains(SgrFlags::BLINK_FAST));
     term.advance(b"\x1b[25m"); // turn off blink (both slow and fast)
     assert!(
-        !term.current_attrs.blink_fast,
+        !term.current_attrs.flags.contains(SgrFlags::BLINK_FAST),
         "blink_fast should be off after CSI 25m"
     );
 }
@@ -284,10 +285,10 @@ fn test_sgr_blink_turn_off_code_25_clears_fast() {
 fn test_sgr_hidden_turn_off_code_28() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[8m"); // hidden on
-    assert!(term.current_attrs.hidden);
+    assert!(term.current_attrs.flags.contains(SgrFlags::HIDDEN));
     term.advance(b"\x1b[28m"); // turn off hidden
     assert!(
-        !term.current_attrs.hidden,
+        !term.current_attrs.flags.contains(SgrFlags::HIDDEN),
         "Hidden should be off after CSI 28m"
     );
 }
@@ -296,10 +297,10 @@ fn test_sgr_hidden_turn_off_code_28() {
 fn test_sgr_strikethrough_turn_off_code_29() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[9m"); // strikethrough on
-    assert!(term.current_attrs.strikethrough);
+    assert!(term.current_attrs.flags.contains(SgrFlags::STRIKETHROUGH));
     term.advance(b"\x1b[29m"); // turn off strikethrough
     assert!(
-        !term.current_attrs.strikethrough,
+        !term.current_attrs.flags.contains(SgrFlags::STRIKETHROUGH),
         "Strikethrough should be off after CSI 29m"
     );
 }
@@ -313,7 +314,7 @@ proptest! {
     // ROUNDTRIP: CSI 38;5;{idx}m sets foreground to Color::Indexed(idx)
     fn prop_sgr_fg_256_roundtrip(idx in 0u8..=255u8) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[38;5;{}m", idx).as_bytes());
+        term.advance(format!("\x1b[38;5;{idx}m").as_bytes());
         prop_assert_eq!(
             term.current_attrs.foreground,
             crate::types::Color::Indexed(idx),
@@ -325,7 +326,7 @@ proptest! {
     // ROUNDTRIP: CSI 48;5;{idx}m sets background to Color::Indexed(idx)
     fn prop_sgr_bg_256_roundtrip(idx in 0u8..=255u8) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[48;5;{}m", idx).as_bytes());
+        term.advance(format!("\x1b[48;5;{idx}m").as_bytes());
         prop_assert_eq!(
             term.current_attrs.background,
             crate::types::Color::Indexed(idx),
@@ -344,7 +345,7 @@ proptest! {
         // Skip the degenerate case: Rgb(0,0,0) encodes identically to Default
         prop_assume!(r != 0 || g != 0 || b != 0);
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[38;2;{};{};{}m", r, g, b).as_bytes());
+        term.advance(format!("\x1b[38;2;{r};{g};{b}m").as_bytes());
         prop_assert_eq!(
             term.current_attrs.foreground,
             crate::types::Color::Rgb(r, g, b),
@@ -356,7 +357,7 @@ proptest! {
     // PANIC SAFETY: any single SGR parameter in 0..=107 must not panic
     fn prop_sgr_arbitrary_no_panic(code in 0u16..=107u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[{}m", code).as_bytes());
+        term.advance(format!("\x1b[{code}m").as_bytes());
         // Terminal must still have a valid cursor position
         prop_assert!(term.screen.cursor.row < 24);
     }

@@ -41,14 +41,16 @@ pub struct ScrollRegion {
 
 impl ScrollRegion {
     /// Create a new scroll region
-    #[inline(always)]
-    pub fn new(top: usize, bottom: usize) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn new(top: usize, bottom: usize) -> Self {
         Self { top, bottom }
     }
 
     /// Create default scroll region (entire screen)
-    #[inline(always)]
-    pub fn full_screen(rows: usize) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn full_screen(rows: usize) -> Self {
         Self {
             top: 0,
             bottom: rows,
@@ -59,13 +61,13 @@ impl ScrollRegion {
 /// Virtual screen representing the terminal display
 #[derive(Debug)]
 pub struct Screen {
-    /// Lines in the screen (VecDeque enables O(1) full-screen scroll via rotate)
+    /// Lines in the screen (`VecDeque` enables O(1) full-screen scroll via rotate)
     pub(super) lines: VecDeque<Line>,
     /// Cursor state
     pub(crate) cursor: Cursor,
     /// Set of dirty line indices (bit-vector backed for O(1) insert)
     pub(super) dirty_set: BitVecDirtySet,
-    /// When true, all lines are dirty (overrides dirty_set for efficiency)
+    /// When true, all lines are dirty (overrides `dirty_set` for efficiency)
     pub(super) full_dirty: bool,
     /// Scroll region
     pub(super) scroll_region: ScrollRegion,
@@ -74,7 +76,7 @@ pub struct Screen {
     /// Number of columns
     pub(super) cols: u16,
     /// Alternate screen buffer (for DEC mode 1049)
-    pub(super) alternate_screen: Option<Box<Screen>>,
+    pub(super) alternate_screen: Option<Box<Self>>,
     /// Whether alternate screen is currently active
     pub(super) is_alternate_active: bool,
     /// Saved primary cursor position when switching to alternate
@@ -93,16 +95,17 @@ pub struct Screen {
     pub(super) scroll_dirty: bool,
     /// Image placement store for Kitty Graphics Protocol
     pub(crate) graphics: GraphicsStore,
-    /// Accumulated full-screen scroll-up count since last consume_scroll_events call.
+    /// Accumulated full-screen scroll-up count since last `consume_scroll_events` call.
     /// Used by the Emacs render cycle to perform buffer-level delete+insert instead
     /// of rewriting every dirty row, eliminating O(N) line renders per scroll step.
     pub(crate) pending_scroll_up: u32,
-    /// Accumulated full-screen scroll-down count since last consume_scroll_events call.
+    /// Accumulated full-screen scroll-down count since last `consume_scroll_events` call.
     pub(crate) pending_scroll_down: u32,
 }
 
 impl Screen {
     /// Create a new screen with the specified dimensions
+    #[must_use] 
     pub fn new(rows: u16, cols: u16) -> Self {
         let lines: VecDeque<Line> = (0..rows).map(|_| Line::new(cols as usize)).collect();
 
@@ -130,21 +133,23 @@ impl Screen {
     }
 
     /// Get number of rows
-    #[inline(always)]
-    pub fn rows(&self) -> u16 {
+    #[inline]
+    #[must_use] 
+    pub const fn rows(&self) -> u16 {
         self.rows
     }
 
     /// Get number of columns
-    #[inline(always)]
-    pub fn cols(&self) -> u16 {
+    #[inline]
+    #[must_use] 
+    pub const fn cols(&self) -> u16 {
         self.cols
     }
 
     /// Return a reference to the line buffer of the currently active screen.
     ///
     /// When the alternate screen is active the alternate buffer's `lines`
-    /// VecDeque is returned; otherwise the primary buffer's `lines` is
+    /// `VecDeque` is returned; otherwise the primary buffer's `lines` is
     /// returned.  Returns `None` only when `is_alternate_active` is true but
     /// `alternate_screen` is `None` (invariant violation).
     #[inline]
@@ -171,7 +176,7 @@ impl Screen {
     /// Return a mutable reference to the line buffer of the currently active screen.
     ///
     /// When the alternate screen is active the alternate buffer's `lines`
-    /// VecDeque is returned; otherwise the primary buffer's `lines` is
+    /// `VecDeque` is returned; otherwise the primary buffer's `lines` is
     /// returned.  Returns `None` only when `is_alternate_active` is true but
     /// `alternate_screen` is `None` (invariant violation).
     ///
@@ -198,25 +203,27 @@ impl Screen {
     }
 
     /// Get cell at position
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&Cell> {
         self.active_lines()?.get(row)?.get_cell(col)
     }
 
     /// Get mutable cell at position
-    #[inline(always)]
+    #[inline]
     pub fn get_cell_mut(&mut self, row: usize, col: usize) -> Option<&mut Cell> {
         self.active_lines_mut()?.get_mut(row)?.cells.get_mut(col)
     }
 
     /// Get line data at row
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn get_line(&self, row: usize) -> Option<&Line> {
         self.active_lines()?.get(row)
     }
 
     /// Get mutable line data at row
-    #[inline(always)]
+    #[inline]
     pub fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
         self.active_lines_mut()?.get_mut(row)
     }
@@ -229,7 +236,7 @@ impl Screen {
                 self.alternate_screen.is_some(),
                 "Screen invariant violated: is_alternate_active=true but alternate_screen=None"
             );
-            self.alternate_screen.as_mut().map(|b| b.as_mut())
+            self.alternate_screen.as_mut().map(std::convert::AsMut::as_mut)
         } else {
             Some(self)
         }
@@ -243,7 +250,7 @@ impl Screen {
                 self.alternate_screen.is_some(),
                 "Screen invariant violated: is_alternate_active=true but alternate_screen=None"
             );
-            self.alternate_screen.as_ref().map(|b| b.as_ref())
+            self.alternate_screen.as_ref().map(std::convert::AsRef::as_ref)
         } else {
             Some(self)
         }

@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `dec_private` parsing.
 //!
 //! Module under test: `parser/dec_private.rs`
-//! Tier: T2 — ProptestConfig::with_cases(500)
+//! Tier: T2 — `ProptestConfig::with_cases(500)`
 
 use super::*;
 use proptest::prelude::*;
@@ -303,11 +303,12 @@ fn test_get_mode_new_modes() {
 #[test]
 fn test_alt_screen_saves_and_restores_sgr_attrs() {
     use crate::types::{Color, NamedColor};
+    use crate::types::cell::SgrFlags;
 
     let mut term = crate::TerminalCore::new(5, 10);
 
     // Set bold and foreground color
-    term.current_attrs.bold = true;
+    term.current_attrs.flags.insert(SgrFlags::BOLD);
     term.current_attrs.foreground = Color::Named(NamedColor::Red);
 
     // Enter alternate screen (CSI ? 1049 h)
@@ -320,7 +321,7 @@ fn test_alt_screen_saves_and_restores_sgr_attrs() {
     );
 
     // Change attrs while in alternate screen
-    term.current_attrs.bold = false;
+    term.current_attrs.flags.remove(SgrFlags::BOLD);
     term.current_attrs.foreground = Color::Named(NamedColor::Green);
 
     // Exit alternate screen (CSI ? 1049 l)
@@ -328,7 +329,7 @@ fn test_alt_screen_saves_and_restores_sgr_attrs() {
 
     // Original attrs should be restored
     assert!(
-        term.current_attrs.bold,
+        term.current_attrs.flags.contains(SgrFlags::BOLD),
         "bold should be restored to true after exiting alt screen"
     );
     assert_eq!(
@@ -405,7 +406,7 @@ fn test_kitty_kb_push_max_stack_depth() {
 
     for i in 0u8..65 {
         // Vary the flags so each push is distinct (not required, but realistic)
-        let seq = format!("\x1b[>{}u", i);
+        let seq = format!("\x1b[>{i}u");
         term.advance(seq.as_bytes());
     }
 
@@ -500,9 +501,9 @@ proptest! {
     fn prop_decset_unknown_no_panic(mode in 50000u16..=65000u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         // DECSET: CSI ? {mode} h
-        term.advance(format!("\x1b[?{}h", mode).as_bytes());
+        term.advance(format!("\x1b[?{mode}h").as_bytes());
         // DECRST: CSI ? {mode} l
-        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        term.advance(format!("\x1b[?{mode}l").as_bytes());
         // Terminal must still have a valid cursor position
         prop_assert!(term.screen.cursor.row < 24);
     }
@@ -511,7 +512,7 @@ proptest! {
     // PANIC SAFETY: DECSCUSR (CSI Ps SP q) valid range 0–6 never panics
     fn prop_decscusr_valid_range(ps in 0u16..=6u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[{} q", ps).as_bytes());
+        term.advance(format!("\x1b[{ps} q").as_bytes());
         // Cursor must still be within bounds
         prop_assert!(term.screen.cursor.row < 24);
     }
@@ -528,8 +529,8 @@ proptest! {
         ]
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[?{}h", mode).as_bytes());
-        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        term.advance(format!("\x1b[?{mode}h").as_bytes());
+        term.advance(format!("\x1b[?{mode}l").as_bytes());
         prop_assert!(term.screen.cursor.row < 24);
     }
 
@@ -537,8 +538,8 @@ proptest! {
     // PANIC SAFETY: arbitrary DECSET mode 1–9999 never panics
     fn prop_decset_arbitrary_range_no_panic(mode in 1u16..=9999u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[?{}h", mode).as_bytes());
-        term.advance(format!("\x1b[?{}l", mode).as_bytes());
+        term.advance(format!("\x1b[?{mode}h").as_bytes());
+        term.advance(format!("\x1b[?{mode}l").as_bytes());
         prop_assert!(term.screen.cursor.row < 24);
     }
 }

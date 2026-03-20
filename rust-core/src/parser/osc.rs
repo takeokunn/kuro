@@ -68,8 +68,7 @@ fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
             // Skip hostname part (up to next /)
             let path = after_scheme
                 .find('/')
-                .map(|i| &after_scheme[i..])
-                .unwrap_or(after_scheme);
+                .map_or(after_scheme, |i| &after_scheme[i..]);
             if path.len() <= OSC7_MAX_PATH_BYTES {
                 core.osc_data.cwd = Some(path.to_string());
                 core.osc_data.cwd_dirty = true;

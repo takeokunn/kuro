@@ -1,5 +1,5 @@
 //! Unit tests for `Screen` alternate screen methods (alternate.rs):
-//! switch_to_alternate, switch_to_primary, is_alternate_screen_active.
+//! `switch_to_alternate`, `switch_to_primary`, `is_alternate_screen_active`.
 
 use crate::grid::screen::Screen;
 use crate::types::cell::SgrAttributes;

@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `tabs` parsing.
 //!
 //! Module under test: `parser/tabs.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 
@@ -303,7 +303,7 @@ proptest! {
     // PANIC SAFETY: CHT (CSI n I) with large n never panics
     fn prop_cht_no_panic(n in 0u16..=200u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[{}I", n).as_bytes());
+        term.advance(format!("\x1b[{n}I").as_bytes());
         prop_assert!(term.screen.cursor().col < 80);
     }
 
@@ -312,7 +312,7 @@ proptest! {
     fn prop_cbt_no_panic(n in 0u16..=200u16) {
         let mut term = crate::TerminalCore::new(24, 80);
         term.screen.move_cursor(0, 79); // start at last column
-        term.advance(format!("\x1b[{}Z", n).as_bytes());
+        term.advance(format!("\x1b[{n}Z").as_bytes());
         prop_assert!(term.screen.cursor().col < 80);
     }
 

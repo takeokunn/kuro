@@ -1,5 +1,5 @@
 use super::*;
-use crate::types::cell::{Cell, SgrAttributes};
+use crate::types::cell::{Cell, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::{Color, NamedColor};
 
 // -------------------------------------------------------------------------
@@ -8,7 +8,7 @@ use crate::types::color::{Color, NamedColor};
 
 #[test]
 fn test_encode_color_default_is_sentinel() {
-    assert_eq!(encode_color(&Color::Default), 0xFF000000u32);
+    assert_eq!(encode_color(&Color::Default), 0xFF00_0000_u32);
 }
 
 #[test]
@@ -18,13 +18,13 @@ fn test_encode_color_rgb_true_black_is_zero() {
 
 #[test]
 fn test_encode_color_named_red() {
-    let expected = 0x80000000u32 | 1u32;
+    let expected = 0x8000_0000_u32 | 1u32;
     assert_eq!(encode_color(&Color::Named(NamedColor::Red)), expected);
 }
 
 #[test]
 fn test_encode_color_indexed() {
-    let expected = 0x40000000u32 | 16u32;
+    let expected = 0x4000_0000_u32 | 16u32;
     assert_eq!(encode_color(&Color::Indexed(16)), expected);
 }
 
@@ -71,26 +71,20 @@ fn test_encode_attrs_default_is_zero() {
 
 #[test]
 fn test_encode_attrs_bold() {
-    let a = SgrAttributes { bold: true, ..Default::default() };
+    let a = SgrAttributes { flags: SgrFlags::BOLD, ..Default::default() };
     assert_eq!(encode_attrs(&a), 0x1u64);
 }
 
 #[test]
 fn test_encode_attrs_all_flags_set() {
-    use crate::types::cell::UnderlineStyle;
     let attrs = SgrAttributes {
         foreground: Color::Default,
         background: Color::Default,
-        bold: true,
-        dim: true,
-        italic: true,
+        flags: SgrFlags::BOLD | SgrFlags::DIM | SgrFlags::ITALIC
+            | SgrFlags::BLINK_SLOW | SgrFlags::BLINK_FAST
+            | SgrFlags::INVERSE | SgrFlags::HIDDEN | SgrFlags::STRIKETHROUGH,
         underline_style: UnderlineStyle::Straight,
         underline_color: Color::Default,
-        blink_slow: true,
-        blink_fast: true,
-        inverse: true,
-        hidden: true,
-        strikethrough: true,
     };
     let result = encode_attrs(&attrs);
     // All 9 flag bits plus underline-style=1 in bits 9-11 must be set
@@ -157,9 +151,9 @@ fn test_encode_line_all_spaces_preserved() {
 #[test]
 fn test_encode_line_coverage_invariant() {
     // Build 3 cells with distinct attributes so each gets its own range
-    let a1 = SgrAttributes { bold: true, ..Default::default() };
-    let a2 = SgrAttributes { italic: true, ..Default::default() };
-    let a3 = SgrAttributes { dim: true, ..Default::default() };
+    let a1 = SgrAttributes { flags: SgrFlags::BOLD,   ..Default::default() };
+    let a2 = SgrAttributes { flags: SgrFlags::ITALIC, ..Default::default() };
+    let a3 = SgrAttributes { flags: SgrFlags::DIM,    ..Default::default() };
 
     let cells = vec![
         Cell::with_attrs('A', a1),
@@ -231,14 +225,14 @@ fn test_encode_line_col_to_buf_ascii() {
 
 #[test]
 fn test_encode_color_indexed_zero() {
-    // Indexed(0) must encode to 0x40000000 (bit-30 marker with index 0)
-    assert_eq!(encode_color(&Color::Indexed(0)), 0x40000000u32);
+    // Indexed(0) must encode to 0x4000_0000 (bit-30 marker with index 0)
+    assert_eq!(encode_color(&Color::Indexed(0)), 0x4000_0000_u32);
 }
 
 #[test]
 fn test_encode_color_indexed_255() {
     // Indexed(255) must encode to 0x400000FF (bit-30 marker with index 255)
-    assert_eq!(encode_color(&Color::Indexed(255)), 0x400000FFu32);
+    assert_eq!(encode_color(&Color::Indexed(255)), 0x4000_00FF_u32);
 }
 
 // -------------------------------------------------------------------------

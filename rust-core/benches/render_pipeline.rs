@@ -1,7 +1,7 @@
-//! Benchmarks for the render pipeline: encode_line and get_dirty_lines_with_faces.
+//! Benchmarks for the render pipeline: `encode_line` and `get_dirty_lines_with_faces`.
 //!
 //! These benchmarks establish baselines for the cmatrix-scenario performance fix.
-//! Run with: cargo bench --bench render_pipeline
+//! Run with: cargo bench --bench `render_pipeline`
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::ffi::codec::encode_line;
@@ -66,7 +66,7 @@ fn bench_get_dirty_lines_full_24x80(c: &mut Criterion) {
     let cols = 80u16;
 
     let mut group = c.benchmark_group("get_dirty_lines_with_faces");
-    group.throughput(Throughput::Elements((rows as u64) * (cols as u64)));
+    group.throughput(Throughput::Elements(u64::from(rows) * u64::from(cols)));
 
     group.bench_function("full_screen_24x80", |b| {
         b.iter_batched(
@@ -115,7 +115,7 @@ fn bench_get_dirty_lines_sparse(c: &mut Criterion) {
     let cols = 80u16;
 
     let mut group = c.benchmark_group("get_dirty_lines_with_faces");
-    group.throughput(Throughput::Elements(3 * (cols as u64)));
+    group.throughput(Throughput::Elements(3 * u64::from(cols)));
 
     group.bench_function("sparse_3_rows", |b| {
         b.iter_batched(

@@ -10,6 +10,7 @@
 
 ;;; Code:
 
+(require 'subr-x)
 (require 'kuro-ffi)
 
 ;; Forward reference: kuro--schedule-immediate-render is defined in kuro-input.el.
@@ -36,10 +37,12 @@ This is a bitmask integer:
 
 (defun kuro--sanitize-paste (text)
   "Sanitize TEXT before sending as bracketed paste.
-Removes all ESC (\\x1b) bytes to prevent bracketed paste escape injection,
-where clipboard content containing \\e[201~ could prematurely close the
-paste bracket and cause command injection."
-  (replace-regexp-in-string "\x1b" "" text))
+Removes ESC (\\x1b) and C1 CSI (\\x9b) bytes to prevent bracketed paste
+escape injection.  Both \\e[201~ (7-bit) and \\x9b201~ (8-bit C1 CSI) would
+prematurely close the paste bracket and allow command injection."
+  (thread-last text
+    (replace-regexp-in-string "\x1b" "")
+    (replace-regexp-in-string (regexp-quote (string #x9b)) "")))
 
 (defun kuro--yank (&optional arg)
   "Yank from kill ring, wrapping with bracketed paste sequences when active."

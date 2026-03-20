@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `apc` parsing.
 //!
 //! Module under test: `parser/apc.rs`
-//! Tier: T5 — ProptestConfig::with_cases(64)
+//! Tier: T5 — `ProptestConfig::with_cases(64)`
 
 use super::*;
 use super::MAX_APC_PAYLOAD_BYTES;
@@ -13,7 +13,7 @@ fn feed(core: &mut crate::TerminalCore, bytes: &[u8]) {
     core.advance(bytes);
 }
 
-/// The APC scanner must cap the payload buffer at MAX_APC_PAYLOAD_BYTES.
+/// The APC scanner must cap the payload buffer at `MAX_APC_PAYLOAD_BYTES`.
 /// Any bytes beyond that limit are silently dropped; the sequence is still
 /// dispatched with the truncated payload once ST (ESC \\) is received.
 #[test]
@@ -71,8 +71,7 @@ fn test_complete_kitty_apc_sequence_produces_response() {
         .expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1b_Ga=q"),
-        "Kitty query response must start with ESC _ G a=q, got: {:?}",
-        resp
+        "Kitty query response must start with ESC _ G a=q, got: {resp:?}"
     );
 }
 
@@ -98,10 +97,10 @@ fn test_plain_text_bypasses_apc_fast_path() {
 
 /// A false ESC mid-payload (ESC followed by a byte other than '\\') must push
 /// both the ESC and the following byte into the buffer and keep the state
-/// machine in InApc — the sequence must NOT be dispatched prematurely.
+/// machine in `InApc` — the sequence must NOT be dispatched prematurely.
 ///
 /// State path exercised:
-///   InApc --ESC--> AfterApcEsc --non-\\ byte--> InApc (both bytes pushed)
+///   `InApc` --ESC--> `AfterApcEsc` --non-\\ byte--> `InApc` (both bytes pushed)
 #[test]
 fn test_false_esc_mid_sequence_continues() {
     let mut core = crate::TerminalCore::new(24, 80);
@@ -168,7 +167,7 @@ proptest! {
         let mut term = crate::TerminalCore::new(24, 80);
         let p = String::from_utf8(payload).unwrap_or_default();
         // ESC _ payload ESC \\ (APC)
-        let seq = format!("\x1b_{}\x1b\\", p);
+        let seq = format!("\x1b_{p}\x1b\\");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }

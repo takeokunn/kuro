@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for Screen scroll methods.
 //!
 //! Module under test: `grid/screen/scroll.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use crate::grid::screen::Screen;
 use crate::types::color::Color;

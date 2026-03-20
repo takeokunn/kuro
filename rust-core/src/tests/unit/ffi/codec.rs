@@ -1,4 +1,4 @@
-//! Property-based tests for `crate::ffi::codec` (encode_color, encode_attrs, encode_line)
+//! Property-based tests for `crate::ffi::codec` (`encode_color`, `encode_attrs`, `encode_line`)
 //!
 //! Tests in this file complement the 19 example-based tests in
 //! `src/ffi/tests/codec.rs` and add property-based coverage for encoding
@@ -6,7 +6,7 @@
 //! FFI wire format.
 
 use crate::ffi::codec::{encode_attrs, encode_color, encode_line};
-use crate::types::cell::{Cell, SgrAttributes, UnderlineStyle};
+use crate::types::cell::{Cell, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::{Color, NamedColor};
 use proptest::prelude::*;
 
@@ -31,7 +31,7 @@ proptest! {
     // into the lower 24 bits with no marker bits set in bits 30-31.
     fn prop_encode_color_rgb_lossless(r in 0u8..=255u8, g in 0u8..=255u8, b in 0u8..=255u8) {
         let encoded = encode_color(&Color::Rgb(r, g, b));
-        let expected = (r as u32) << 16 | (g as u32) << 8 | (b as u32);
+        let expected = u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
         prop_assert_eq!(
             encoded,
             expected,
@@ -40,7 +40,7 @@ proptest! {
         );
         // Verify no marker bits bleed into the RGB encoding
         prop_assert_eq!(
-            encoded & 0xC0000000,
+            encoded & 0xC000_0000,
             0,
             "RGB encoding must have bits 30-31 clear (got {:#010x})",
             encoded
@@ -48,11 +48,11 @@ proptest! {
     }
 
     #[test]
-    // INVARIANT: encode_color(Indexed(idx)) must have bit 30 set (0x40000000
+    // INVARIANT: encode_color(Indexed(idx)) must have bit 30 set (0x4000_0000
     // marker) and the lower 8 bits equal to idx.
     fn prop_encode_color_indexed_marker(idx in 0u8..=255u8) {
         let encoded = encode_color(&Color::Indexed(idx));
-        let expected = 0x40000000u32 | idx as u32;
+        let expected = 0x4000_0000_u32 | u32::from(idx);
         prop_assert_eq!(
             encoded,
             expected,
@@ -60,9 +60,9 @@ proptest! {
             idx, expected, encoded
         );
         // Marker bit 30 must be set
-        prop_assert_ne!(encoded & 0x40000000, 0, "bit 30 must be set for Indexed (idx={})", idx);
+        prop_assert_ne!(encoded & 0x4000_0000, 0, "bit 30 must be set for Indexed (idx={})", idx);
         // Bit 31 must be clear (Named marker)
-        prop_assert_eq!(encoded & 0x80000000, 0, "bit 31 must be clear for Indexed (idx={})", idx);
+        prop_assert_eq!(encoded & 0x8000_0000, 0, "bit 31 must be clear for Indexed (idx={})", idx);
     }
 
     #[test]
@@ -87,14 +87,14 @@ proptest! {
             _ => unreachable!(),
         };
         let attrs = match field_idx {
-            0 => SgrAttributes { bold:          true, ..Default::default() },
-            1 => SgrAttributes { dim:           true, ..Default::default() },
-            2 => SgrAttributes { italic:        true, ..Default::default() },
-            3 => SgrAttributes { blink_slow:    true, ..Default::default() },
-            4 => SgrAttributes { blink_fast:    true, ..Default::default() },
-            5 => SgrAttributes { inverse:       true, ..Default::default() },
-            6 => SgrAttributes { hidden:        true, ..Default::default() },
-            7 => SgrAttributes { strikethrough: true, ..Default::default() },
+            0 => SgrAttributes { flags: SgrFlags::BOLD,          ..Default::default() },
+            1 => SgrAttributes { flags: SgrFlags::DIM,           ..Default::default() },
+            2 => SgrAttributes { flags: SgrFlags::ITALIC,        ..Default::default() },
+            3 => SgrAttributes { flags: SgrFlags::BLINK_SLOW,    ..Default::default() },
+            4 => SgrAttributes { flags: SgrFlags::BLINK_FAST,    ..Default::default() },
+            5 => SgrAttributes { flags: SgrFlags::INVERSE,       ..Default::default() },
+            6 => SgrAttributes { flags: SgrFlags::HIDDEN,        ..Default::default() },
+            7 => SgrAttributes { flags: SgrFlags::STRIKETHROUGH, ..Default::default() },
             _ => unreachable!(),
         };
         let encoded = encode_attrs(&attrs);
@@ -238,7 +238,7 @@ fn test_encode_color_named_marker() {
     for named in &all_named {
         let encoded = encode_color(&Color::Named(*named));
         assert_ne!(
-            encoded & 0x80000000,
+            encoded & 0x8000_0000,
             0,
             "bit 31 must be set for Named({named:?}): got {encoded:#010x}"
         );
@@ -246,26 +246,26 @@ fn test_encode_color_named_marker() {
 }
 
 #[test]
-// DISTINCTNESS: Color::Default sentinel (0xFF000000) must not be producible
+// DISTINCTNESS: Color::Default sentinel (0xFF00_0000) must not be producible
 // by Named, Indexed, or Rgb color paths.
 fn test_encode_color_default_sentinel_unique() {
-    const SENTINEL: u32 = 0xFF000000;
+    const SENTINEL: u32 = 0xFF00_0000;
     assert_eq!(encode_color(&Color::Default), SENTINEL);
 
-    // Named: bit 31 set, bits 0-3 index (0-15) — range 0x80000000..=0x8000000F
+    // Named: bit 31 set, bits 0-3 index (0-15) — range 0x8000_0000..=0x8000000F
     for i in 0u32..=15u32 {
-        assert_ne!(0x80000000u32 | i, SENTINEL, "Named({i}) must not equal sentinel");
+        assert_ne!(0x8000_0000_u32 | i, SENTINEL, "Named({i}) must not equal sentinel");
     }
 
-    // Indexed: bit 30 set, bits 0-7 index (0-255) — range 0x40000000..=0x400000FF
+    // Indexed: bit 30 set, bits 0-7 index (0-255) — range 0x4000_0000..=0x400000FF
     for i in 0u32..=255u32 {
-        assert_ne!(0x40000000u32 | i, SENTINEL, "Indexed({i}) must not equal sentinel");
+        assert_ne!(0x4000_0000_u32 | i, SENTINEL, "Indexed({i}) must not equal sentinel");
     }
 
-    // Rgb: lower 24 bits only; 0xFF000000 has no lower-24 bits, so it cannot
+    // Rgb: lower 24 bits only; 0xFF00_0000 has no lower-24 bits, so it cannot
     // arise from any (r,g,b) encoding (which only uses bits 0-23).
-    // Verify the boundary: max RGB encoding is 0xFFFFFF (all 255).
-    assert_eq!(encode_color(&Color::Rgb(255, 255, 255)), 0xFFFFFF);
+    // Verify the boundary: max RGB encoding is 0x00FF_FFFF (all 255).
+    assert_eq!(encode_color(&Color::Rgb(255, 255, 255)), 0x00FF_FFFF);
     assert_ne!(encode_color(&Color::Rgb(255, 0, 0)), SENTINEL);
 }
 
@@ -311,9 +311,9 @@ fn test_encode_line_text_length_matches_cells() {
 fn test_encode_line_face_ranges_cover_full() {
     // Use three cells with distinct attrs to force three separate ranges.
     let cells = vec![
-        Cell::with_attrs('A', SgrAttributes { bold:   true, ..Default::default() }),
-        Cell::with_attrs('B', SgrAttributes { italic: true, ..Default::default() }),
-        Cell::with_attrs('C', SgrAttributes { dim:    true, ..Default::default() }),
+        Cell::with_attrs('A', SgrAttributes { flags: SgrFlags::BOLD,   ..Default::default() }),
+        Cell::with_attrs('B', SgrAttributes { flags: SgrFlags::ITALIC, ..Default::default() }),
+        Cell::with_attrs('C', SgrAttributes { flags: SgrFlags::DIM,    ..Default::default() }),
     ];
     let (text, ranges, _) = encode_line(&cells);
     assert_eq!(ranges[0].0, 0, "first range must start at 0");
@@ -329,10 +329,10 @@ fn test_encode_line_face_ranges_cover_full() {
 fn test_encode_line_face_ranges_contiguous() {
     // Each cell gets a distinct SGR attribute to ensure individual ranges.
     let cells = vec![
-        Cell::with_attrs('X', SgrAttributes { bold:         true, ..Default::default() }),
-        Cell::with_attrs('Y', SgrAttributes { italic:       true, ..Default::default() }),
-        Cell::with_attrs('Z', SgrAttributes { strikethrough: true, ..Default::default() }),
-        Cell::with_attrs('W', SgrAttributes { inverse:      true, ..Default::default() }),
+        Cell::with_attrs('X', SgrAttributes { flags: SgrFlags::BOLD,          ..Default::default() }),
+        Cell::with_attrs('Y', SgrAttributes { flags: SgrFlags::ITALIC,        ..Default::default() }),
+        Cell::with_attrs('Z', SgrAttributes { flags: SgrFlags::STRIKETHROUGH, ..Default::default() }),
+        Cell::with_attrs('W', SgrAttributes { flags: SgrFlags::INVERSE,       ..Default::default() }),
     ];
     let (_, ranges, _) = encode_line(&cells);
     for w in ranges.windows(2) {

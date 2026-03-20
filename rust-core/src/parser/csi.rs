@@ -41,7 +41,7 @@ pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c
 ///
 /// Move cursor to the specified row and column (1-indexed).
 /// Functionally identical to HVP (CSI f).
-#[inline(always)]
+#[inline]
 fn csi_cup(term: &mut crate::TerminalCore, params: &vte::Params) {
     csi_hvp(term, params);
 }
@@ -51,13 +51,13 @@ fn csi_cup(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor up by N rows (default 1). Stops at top of screen.
 #[inline]
 fn csi_cuu(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(-n, 0);
 }
@@ -67,13 +67,13 @@ fn csi_cuu(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor down by N rows (default 1). Stops at bottom of screen.
 #[inline]
 fn csi_cud(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(n, 0);
 }
@@ -83,13 +83,13 @@ fn csi_cud(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor right by N columns (default 1). Stops at right margin.
 #[inline]
 fn csi_cuf(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(0, n);
 }
@@ -99,13 +99,13 @@ fn csi_cuf(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor left by N columns (default 1). Stops at left margin.
 #[inline]
 fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(0, -n);
 }
@@ -117,13 +117,13 @@ fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Stops at the bottom of the screen (screen boundary, not scroll region).
 #[inline]
 fn csi_cnl(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(n, 0);
     let row = term.screen.cursor().row;
@@ -137,13 +137,13 @@ fn csi_cnl(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Stops at the top of the screen (screen boundary, not scroll region).
 #[inline]
 fn csi_cpl(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+    let n = i32::from(params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as i32;
+        .max(1));
 
     term.screen.move_cursor_by(-n, 0);
     let row = term.screen.cursor().row;
@@ -165,7 +165,7 @@ fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
     if code == 6 {
         let row = term.screen.cursor().row + 1; // Convert to 1-indexed
         let col = term.screen.cursor().col + 1;
-        let response = format!("\x1b[{};{}R", row, col);
+        let response = format!("\x1b[{row};{col}R");
         term.meta.pending_responses.push(response.into_bytes());
     }
 }
@@ -260,13 +260,13 @@ fn csi_hvp(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// DECSCUSR - Set Cursor Style (CSI Ps SP q)
 ///
 /// Maps the `Ps` parameter to a [`CursorShape`]:
-///   0 / 1 → BlinkingBlock (default)
-///   2     → SteadyBlock
-///   3     → BlinkingUnderline
-///   4     → SteadyUnderline
-///   5     → BlinkingBar
-///   6     → SteadyBar
-///   _     → BlinkingBlock (fallback for unrecognised values)
+///   0 / 1 → `BlinkingBlock` (default)
+///   2     → `SteadyBlock`
+///   3     → `BlinkingUnderline`
+///   4     → `SteadyUnderline`
+///   5     → `BlinkingBar`
+///   6     → `SteadyBar`
+///   _     → `BlinkingBlock` (fallback for unrecognised values)
 #[inline]
 pub fn handle_decscusr(term: &mut crate::TerminalCore, params: &vte::Params) {
     let ps = params
@@ -275,7 +275,7 @@ pub fn handle_decscusr(term: &mut crate::TerminalCore, params: &vte::Params) {
         .and_then(|p| p.first().copied())
         .unwrap_or(0);
     term.dec_modes.cursor_shape =
-        CursorShape::try_from(ps as i64).unwrap_or(CursorShape::BlinkingBlock);
+        CursorShape::try_from(i64::from(ps)).unwrap_or(CursorShape::BlinkingBlock);
 }
 
 #[cfg(test)]

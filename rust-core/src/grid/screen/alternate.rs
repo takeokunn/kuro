@@ -1,6 +1,6 @@
 //! Alternate screen buffer switching methods for Screen
 
-use super::*;
+use super::Screen;
 
 impl Screen {
     /// Switch to alternate screen buffer (DEC mode 1049 set)
@@ -29,7 +29,7 @@ impl Screen {
     }
 
     /// Switch back to primary screen buffer (DEC mode 1049 reset)
-    pub fn switch_to_primary(&mut self) {
+    pub const fn switch_to_primary(&mut self) {
         if !self.is_alternate_active {
             return;
         }
@@ -51,7 +51,8 @@ impl Screen {
     }
 
     /// Check if alternate screen is currently active
-    pub fn is_alternate_screen_active(&self) -> bool {
+    #[must_use] 
+    pub const fn is_alternate_screen_active(&self) -> bool {
         self.is_alternate_active
     }
 }

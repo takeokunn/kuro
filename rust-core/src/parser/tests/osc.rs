@@ -1,7 +1,7 @@
 //! Property-based and example-based tests for `osc` parsing.
 //!
 //! Module under test: `parser/osc.rs`
-//! Tier: T3 — ProptestConfig::with_cases(256)
+//! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
 
@@ -18,7 +18,7 @@ fn test_osc0_sets_title() {
 }
 
 /// OSC 0 with a title longer than 1024 bytes must be silently rejected
-/// (DoS prevention guard in the handler).
+/// (`DoS` prevention guard in the handler).
 #[test]
 fn test_osc0_oversized_title_is_rejected() {
     let mut core = crate::TerminalCore::new(24, 80);
@@ -122,7 +122,7 @@ fn test_osc8_hyperlink_lifecycle() {
     );
 }
 
-/// OSC 0 title of exactly MAX_TITLE_BYTES must be accepted and stored intact.
+/// OSC 0 title of exactly `MAX_TITLE_BYTES` must be accepted and stored intact.
 #[test]
 fn test_osc_title_exactly_at_limit_is_accepted() {
     use crate::parser::limits::MAX_TITLE_BYTES;
@@ -215,7 +215,7 @@ proptest! {
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
         let title_str = String::from_utf8(title).unwrap_or_default();
-        let seq = format!("\x1b]0;{}\x07", title_str);
+        let seq = format!("\x1b]0;{title_str}\x07");
         term.advance(seq.as_bytes());
         // Terminal must remain in a valid state
         prop_assert!(term.screen.cursor().row < 24);
@@ -225,7 +225,7 @@ proptest! {
     // PANIC SAFETY: OSC 4 with any palette index never panics
     fn prop_osc4_no_panic(idx in 0u16..=300u16) {
         let mut term = crate::TerminalCore::new(24, 80);
-        let seq = format!("\x1b]4;{};rgb:ff/00/00\x07", idx);
+        let seq = format!("\x1b]4;{idx};rgb:ff/00/00\x07");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
@@ -237,14 +237,14 @@ proptest! {
     ) {
         let mut term = crate::TerminalCore::new(24, 80);
         let title_str = String::from_utf8(title).unwrap_or_default();
-        let seq = format!("\x1b]2;{}\x07", title_str);
+        let seq = format!("\x1b]2;{title_str}\x07");
         term.advance(seq.as_bytes());
         prop_assert!(term.screen.cursor().row < 24);
     }
 }
 
 /// OSC 4 with index 256 (out of range) must be silently ignored:
-/// the palette must remain all-None and palette_dirty must stay false.
+/// the palette must remain all-None and `palette_dirty` must stay false.
 #[test]
 fn test_osc4_set_index_out_of_bounds() {
     // Index 256 is out of range (palette has 256 entries, indices 0-255)
@@ -254,7 +254,7 @@ fn test_osc4_set_index_out_of_bounds() {
     handle_osc(&mut core, params, false);
     // palette should be unchanged (all None)
     assert!(
-        core.osc_data.palette.iter().all(|p| p.is_none()),
+        core.osc_data.palette.iter().all(std::option::Option::is_none),
         "palette should be unchanged for out-of-range index 256"
     );
     assert!(
@@ -289,18 +289,15 @@ fn test_osc4_query_palette_entry() {
         .expect("response must be valid UTF-8");
     assert!(
         response.starts_with("\x1b]4;1;rgb:"),
-        "OSC 4 query response must start with ESC]4;1;rgb: — got: {:?}",
-        response
+        "OSC 4 query response must start with ESC]4;1;rgb: — got: {response:?}"
     );
     assert!(
         response.ends_with('\x07'),
-        "OSC 4 query response must be BEL-terminated — got: {:?}",
-        response
+        "OSC 4 query response must be BEL-terminated — got: {response:?}"
     );
     // Verify the red channel is ffff (encode_color_spec scales 0xff → 0xffff)
     assert!(
         response.contains("ffff"),
-        "OSC 4 query response for red must contain 'ffff' — got: {:?}",
-        response
+        "OSC 4 query response for red must contain 'ffff' — got: {response:?}"
     );
 }

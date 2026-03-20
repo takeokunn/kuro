@@ -181,7 +181,7 @@ fn test_alternate_screen_deactivated_after_ris() {
 // Synchronized Output mode (?2026)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// ?2026h must set synchronized_output = true.
+/// ?2026h must set `synchronized_output` = true.
 #[test]
 fn test_sync_output_enable() {
     let mut term = TerminalCore::new(24, 80);
@@ -196,7 +196,7 @@ fn test_sync_output_enable() {
     );
 }
 
-/// ?2026l must clear synchronized_output = false.
+/// ?2026l must clear `synchronized_output` = false.
 #[test]
 fn test_sync_output_disable() {
     let mut term = TerminalCore::new(24, 80);
@@ -239,12 +239,12 @@ fn test_sync_output_grid_content_preserved() {
 
     // Grid content must exist even while sync is still active
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('H'),
         "cell (0,0) must contain 'H' while sync is active"
     );
     assert_eq!(
-        term.get_cell(0, 4).map(|c| c.char()),
+        term.get_cell(0, 4).map(kuro_core::Cell::char),
         Some('o'),
         "cell (0,4) must contain 'o' while sync is active"
     );
@@ -252,7 +252,7 @@ fn test_sync_output_grid_content_preserved() {
     // Disable sync — content must still be there
     term.advance(b"\x1b[?2026l");
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('H'),
         "cell (0,0) must still contain 'H' after ?2026l"
     );
@@ -288,17 +288,17 @@ fn test_sync_output_cursor_movement_inside_batch() {
     // Draw separator line on row 0
     term.advance(b"\x1b[1;1H"); // CUP row 1, col 1 (1-indexed)
     term.advance(b"----------");
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()), Some('-'));
+    assert_eq!(term.get_cell(0, 0).map(kuro_core::Cell::char), Some('-'));
 
     // Move to row 1, overwrite with text
     term.advance(b"\x1b[2;1H"); // CUP row 2, col 1
     term.advance(b"Hello");
-    assert_eq!(term.get_cell(1, 0).map(|c| c.char()), Some('H'));
+    assert_eq!(term.get_cell(1, 0).map(kuro_core::Cell::char), Some('H'));
 
     // Erase and rewrite row 0 (simulating TUI overwrite)
     term.advance(b"\x1b[1;1H\x1b[2KReplace"); // CUP + EL(2) + text
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('R'),
         "row 0 must be overwritten with 'R' (EL+text inside sync batch)"
     );
@@ -359,19 +359,19 @@ fn test_sync_output_claude_code_startup_sequence() {
 
     // Verify grid content survives the batch
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('C'),
         "header 'C' must be at row 0, col 0 after sync batch"
     );
     // Box-drawing char at row 1, col 0 (U+2500 ─)
     assert_eq!(
-        term.get_cell(1, 0).map(|c| c.char()),
+        term.get_cell(1, 0).map(kuro_core::Cell::char),
         Some('\u{2500}'),
         "box-drawing ─ (U+2500) must be at row 1, col 0 after sync batch"
     );
     // Status bar at row 23
     // (NerdFont icon varies by font; just verify a printable char landed there)
-    let status_cell = term.get_cell(23, 0).map(|c| c.char());
+    let status_cell = term.get_cell(23, 0).map(kuro_core::Cell::char);
     assert!(
         status_cell.is_some(),
         "status bar row 23 must have content after sync batch"
@@ -404,7 +404,7 @@ fn test_sync_output_independent_of_alternate_screen() {
     assert!(!term.dec_modes().synchronized_output);
 }
 
-/// RIS (ESC c) must reset synchronized_output to false.
+/// RIS (ESC c) must reset `synchronized_output` to false.
 #[test]
 fn test_sync_output_reset_after_ris() {
     let mut term = TerminalCore::new(24, 80);
@@ -441,22 +441,22 @@ fn test_sync_output_rapid_streaming_no_corruption() {
 
     // Verify initial state via CUP-positioned content
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('H'),
         "row 0 col 0 = 'H'"
     );
     assert_eq!(
-        term.get_cell(1, 0).map(|c| c.char()),
+        term.get_cell(1, 0).map(kuro_core::Cell::char),
         Some('\u{2500}'),
         "row 1 col 0 = box-drawing separator"
     );
     assert_eq!(
-        term.get_cell(2, 0).map(|c| c.char()),
+        term.get_cell(2, 0).map(kuro_core::Cell::char),
         Some('P'),
         "row 2 col 0 = 'P' (Prompt)"
     );
     assert_eq!(
-        term.get_cell(3, 2).map(|c| c.char()),
+        term.get_cell(3, 2).map(kuro_core::Cell::char),
         Some('S'),
         "row 3 col 2 = 'S' (StatusBar)"
     );
@@ -503,7 +503,7 @@ fn test_sync_output_rapid_streaming_no_corruption() {
     // Verify: row 5 (0-indexed) has Tool1Result at col 0 (from batch 1)
     // batch=1 → tool_row=5, CUP row_1indexed=6 → \x1b[6;1H → writes to row 5 (0-indexed)
     assert_eq!(
-        term.get_cell(5, 0).map(|c| c.char()),
+        term.get_cell(5, 0).map(kuro_core::Cell::char),
         Some('T'),
         "row 5 col 0 must be 'T' from Tool1Result (batch 1)"
     );
@@ -511,7 +511,7 @@ fn test_sync_output_rapid_streaming_no_corruption() {
     // Row 5 col 29 (0-indexed): [StatusBar] from batch 1 right-aligned mode-line
     // CUP \x1b[6;30H → col 30 (1-indexed) = col 29 (0-indexed)
     assert_eq!(
-        term.get_cell(5, 29).map(|c| c.char()),
+        term.get_cell(5, 29).map(kuro_core::Cell::char),
         Some('['),
         "row 5 col 30 must be '[' from [StatusBar] (batch 1 mode-line)"
     );
@@ -519,21 +519,21 @@ fn test_sync_output_rapid_streaming_no_corruption() {
     // Row 6 (0-indexed): Tool2Result at col 0 (batch 2)
     // batch=2 → tool_row=6, CUP row_1indexed=7 → \x1b[7;1H → writes to row 6 (0-indexed)
     assert_eq!(
-        term.get_cell(6, 0).map(|c| c.char()),
+        term.get_cell(6, 0).map(kuro_core::Cell::char),
         Some('T'),
         "row 6 col 0 must be 'T' from Tool2Result (batch 2)"
     );
 
     // Header (row 0) unchanged
     assert_eq!(
-        term.get_cell(0, 0).map(|c| c.char()),
+        term.get_cell(0, 0).map(kuro_core::Cell::char),
         Some('H'),
         "row 0 must be unchanged after all batches"
     );
 
     // Separator (row 1) unchanged - box-drawing chars must survive batches
     assert_eq!(
-        term.get_cell(1, 0).map(|c| c.char()),
+        term.get_cell(1, 0).map(kuro_core::Cell::char),
         Some('\u{2500}'),
         "row 1 separator must be unchanged"
     );
@@ -548,7 +548,7 @@ fn xtversion_csi_greater_q_produces_dcs_response() {
     let mut t = TerminalCore::new(24, 80);
     // CSI > q — terminal version identification
     t.advance(b"\x1b[>q");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "XTVERSION must produce at least one response"
@@ -557,13 +557,11 @@ fn xtversion_csi_greater_q_produces_dcs_response() {
     // Response format: DCS > | <name>-<version> ST  (ESC P > | kuro-1.0.0 ESC \)
     assert!(
         resp.contains("kuro"),
-        "XTVERSION response must contain 'kuro', got: {:?}",
-        resp
+        "XTVERSION response must contain 'kuro', got: {resp:?}"
     );
     assert!(
         resp.starts_with("\x1bP") || resp.contains(">|"),
-        "XTVERSION response must be a DCS string, got: {:?}",
-        resp
+        "XTVERSION response must be a DCS string, got: {resp:?}"
     );
 }
 
@@ -574,7 +572,7 @@ fn xtversion_csi_greater_0_q_produces_dcs_response() {
     t.advance(b"\x1b[>0q");
     // Should not panic; may or may not produce response (vte may not route "0q" with ">" same way)
     // The main test is no panic and optional response
-    let _ = common::read_responses(&mut t);
+    let _ = common::read_responses(&t);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -587,7 +585,7 @@ fn decrqm_mode_25_cursor_visible_responds_set() {
     // Cursor is visible by default (mode 25 = set)
     // CSI ? 25 $ p
     t.advance(b"\x1b[?25$p");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "DECRQM for mode 25 must produce a response"
@@ -596,8 +594,7 @@ fn decrqm_mode_25_cursor_visible_responds_set() {
     // Response: CSI ? 25 ; 1 $ y  (status=1 means set)
     assert!(
         resp.contains("25") && resp.contains('1') && resp.contains("$y"),
-        "DECRQM response for mode 25 (set) must contain '25;1$y', got: {:?}",
-        resp
+        "DECRQM response for mode 25 (set) must contain '25;1$y', got: {resp:?}"
     );
 }
 
@@ -606,7 +603,7 @@ fn decrqm_mode_1049_alt_screen_responds_reset() {
     let mut t = TerminalCore::new(24, 80);
     // Alternate screen is off by default (mode 1049 = reset)
     t.advance(b"\x1b[?1049$p");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(
         !responses.is_empty(),
         "DECRQM for mode 1049 must produce a response"
@@ -615,8 +612,7 @@ fn decrqm_mode_1049_alt_screen_responds_reset() {
     // Response: CSI ? 1049 ; 2 $ y  (status=2 means reset)
     assert!(
         resp.contains("1049") && resp.contains('2') && resp.contains("$y"),
-        "DECRQM response for mode 1049 (reset) must contain '1049;2$y', got: {:?}",
-        resp
+        "DECRQM response for mode 1049 (reset) must contain '1049;2$y', got: {resp:?}"
     );
 }
 
@@ -625,13 +621,12 @@ fn decrqm_mode_after_enable_responds_set() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[?1004h"); // enable focus events
     t.advance(b"\x1b[?1004$p"); // query
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("1004") && resp.contains('1'),
-        "After enabling mode 1004, DECRQM must report status=1, got: {:?}",
-        resp
+        "After enabling mode 1004, DECRQM must report status=1, got: {resp:?}"
     );
 }
 
@@ -640,14 +635,13 @@ fn decrqm_unknown_mode_responds_not_recognized() {
     let mut t = TerminalCore::new(24, 80);
     // Mode 9999 — unknown/unsupported
     t.advance(b"\x1b[?9999$p");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     // Status 0 = not recognized
     assert!(
         resp.contains("9999") && resp.contains('0'),
-        "Unknown mode must return status=0, got: {:?}",
-        resp
+        "Unknown mode must return status=0, got: {resp:?}"
     );
 }
 
@@ -679,13 +673,12 @@ fn mouse_pixel_mode_1016_reported_by_decrqm() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[?1016h");
     t.advance(b"\x1b[?1016$p");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("1016") && resp.contains('1'),
-        "Mouse pixel mode enabled → DECRQM must report status=1, got: {:?}",
-        resp
+        "Mouse pixel mode enabled → DECRQM must report status=1, got: {resp:?}"
     );
 }
 
@@ -697,13 +690,12 @@ fn mouse_pixel_mode_1016_reported_by_decrqm() {
 fn da1_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[c"); // Primary DA
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty(), "DA1 must produce a response");
     let resp = &responses[0];
     assert!(
         resp.contains("?1"),
-        "DA1 response must contain '?1', got: {:?}",
-        resp
+        "DA1 response must contain '?1', got: {resp:?}"
     );
 }
 
@@ -711,13 +703,12 @@ fn da1_produces_response() {
 fn da2_produces_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[>c"); // Secondary DA
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty(), "DA2 must produce a response");
     let resp = &responses[0];
     assert!(
         resp.starts_with("\x1b[>"),
-        "DA2 response must start with ESC[>, got: {:?}",
-        resp
+        "DA2 response must start with ESC[>, got: {resp:?}"
     );
 }
 
@@ -740,13 +731,12 @@ fn decrqm_synchronized_output_reports_state() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[?2026h");
     t.advance(b"\x1b[?2026$p");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty());
     let resp = &responses[0];
     assert!(
         resp.contains("2026") && resp.contains('1'),
-        "?2026 enabled → DECRQM must report 1, got: {:?}",
-        resp
+        "?2026 enabled → DECRQM must report 1, got: {resp:?}"
     );
 }
 
@@ -763,7 +753,7 @@ fn kitty_keyboard_push_pop_query() {
     assert_eq!(t.dec_modes().keyboard_flags, 1);
     // Query → response with current flags
     t.advance(b"\x1b[?u");
-    let responses = common::read_responses(&mut t);
+    let responses = common::read_responses(&t);
     assert!(!responses.is_empty(), "Kitty keyboard query must respond");
     // Pop
     t.advance(b"\x1b[<u");

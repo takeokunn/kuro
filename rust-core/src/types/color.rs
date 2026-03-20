@@ -55,22 +55,22 @@ pub enum Color {
 
 impl Color {
     /// Convert color to RGB triple
-    pub fn to_rgb(&self) -> (u8, u8, u8) {
+    #[must_use] 
+    pub const fn to_rgb(&self) -> (u8, u8, u8) {
         match self {
-            Color::Named(named) => named.to_rgb(),
-            Color::Indexed(idx) => Self::indexed_to_rgb(*idx),
-            Color::Rgb(r, g, b) => (*r, *g, *b),
-            Color::Default => (255, 255, 255),
+            Self::Named(named) => named.to_rgb(),
+            Self::Indexed(idx) => Self::indexed_to_rgb(*idx),
+            Self::Rgb(r, g, b) => (*r, *g, *b),
+            Self::Default => (255, 255, 255),
         }
     }
 
     /// Convert 256-color palette index to RGB
-    fn indexed_to_rgb(idx: u8) -> (u8, u8, u8) {
+    const fn indexed_to_rgb(idx: u8) -> (u8, u8, u8) {
         match idx {
             0..=15 => {
                 // Standard colors
                 let named = match idx {
-                    0 => NamedColor::Black,
                     1 => NamedColor::Red,
                     2 => NamedColor::Green,
                     3 => NamedColor::Yellow,
@@ -110,24 +110,25 @@ impl Color {
 
 impl NamedColor {
     /// Get RGB values for named color
-    pub fn to_rgb(&self) -> (u8, u8, u8) {
+    #[must_use] 
+    pub const fn to_rgb(&self) -> (u8, u8, u8) {
         match self {
-            NamedColor::Black => (0, 0, 0),
-            NamedColor::Red => (194, 54, 33),
-            NamedColor::Green => (37, 188, 36),
-            NamedColor::Yellow => (173, 173, 39),
-            NamedColor::Blue => (73, 46, 225),
-            NamedColor::Magenta => (211, 56, 211),
-            NamedColor::Cyan => (51, 187, 200),
-            NamedColor::White => (203, 204, 205),
-            NamedColor::BrightBlack => (128, 128, 128),
-            NamedColor::BrightRed => (255, 0, 0),
-            NamedColor::BrightGreen => (0, 255, 0),
-            NamedColor::BrightYellow => (255, 255, 0),
-            NamedColor::BrightBlue => (0, 0, 255),
-            NamedColor::BrightMagenta => (255, 0, 255),
-            NamedColor::BrightCyan => (0, 255, 255),
-            NamedColor::BrightWhite => (255, 255, 255),
+            Self::Black => (0, 0, 0),
+            Self::Red => (194, 54, 33),
+            Self::Green => (37, 188, 36),
+            Self::Yellow => (173, 173, 39),
+            Self::Blue => (73, 46, 225),
+            Self::Magenta => (211, 56, 211),
+            Self::Cyan => (51, 187, 200),
+            Self::White => (203, 204, 205),
+            Self::BrightBlack => (128, 128, 128),
+            Self::BrightRed => (255, 0, 0),
+            Self::BrightGreen => (0, 255, 0),
+            Self::BrightYellow => (255, 255, 0),
+            Self::BrightBlue => (0, 0, 255),
+            Self::BrightMagenta => (255, 0, 255),
+            Self::BrightCyan => (0, 255, 255),
+            Self::BrightWhite => (255, 255, 255),
         }
     }
 }

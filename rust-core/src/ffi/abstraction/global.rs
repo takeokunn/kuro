@@ -1,6 +1,6 @@
 //! Global terminal session state and accessor functions
 //!
-//! This module owns the `TERMINAL_SESSIONS` HashMap and provides
+//! This module owns the `TERMINAL_SESSIONS` `HashMap` and provides
 //! the public API for initializing, accessing, and tearing down
 //! per-session terminal state.  Multiple sessions can coexist;
 //! each is keyed by a unique `u64` ID returned from `init_session`.
@@ -36,6 +36,9 @@ macro_rules! lock_terminals {
 ///
 /// The first call returns `0`; subsequent calls return incrementing values.
 ///
+/// # Errors
+/// Returns `Err` if the PTY process fails to spawn.
+///
 /// # Safety
 /// This function modifies a global static mutex and must be called safely.
 pub fn init_session(command: &str, rows: u16, cols: u16) -> Result<u64> {
@@ -48,39 +51,38 @@ pub fn init_session(command: &str, rows: u16, cols: u16) -> Result<u64> {
 
 /// Get mutable reference to the specified terminal session.
 ///
-/// Returns `Err` if no session with the given ID exists.
+/// # Errors
+/// Returns `Err(NoTerminalSession)` if no session with the given `id` exists.
 pub fn with_session<F, R>(id: u64, f: F) -> Result<R>
 where
     F: FnOnce(&mut TerminalSession) -> Result<R>,
 {
     let mut global = lock_terminals!();
-    if let Some(session) = global.get_mut(&id) {
-        f(session)
-    } else {
-        Err(KuroError::State(
-            crate::ffi::error::StateError::NoTerminalSession,
-        ))
-    }
+    global.get_mut(&id).map_or_else(
+        || Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
+        f,
+    )
 }
 
 /// Get shared reference to the specified terminal session.
 ///
-/// Returns `Err` if no session with the given ID exists.
+/// # Errors
+/// Returns `Err(NoTerminalSession)` if no session with the given `id` exists.
 pub fn with_session_readonly<F, R>(id: u64, f: F) -> Result<R>
 where
     F: FnOnce(&TerminalSession) -> Result<R>,
 {
     let global = lock_terminals!();
-    if let Some(session) = global.get(&id) {
-        f(session)
-    } else {
-        Err(KuroError::State(
-            crate::ffi::error::StateError::NoTerminalSession,
-        ))
-    }
+    global.get(&id).map_or_else(
+        || Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
+        f,
+    )
 }
 
 /// Remove and drop the specified terminal session, killing its PTY process.
+///
+/// # Errors
+/// Never returns an error in the current implementation.
 pub fn shutdown_session(id: u64) -> Result<()> {
     let mut global = lock_terminals!();
     global.remove(&id);
@@ -89,24 +91,22 @@ pub fn shutdown_session(id: u64) -> Result<()> {
 
 /// Mark a session as `Detached`, keeping its PTY alive without a buffer.
 ///
-/// Returns `Err` if no session with the given ID exists.
+/// # Errors
+/// Returns `Err(NoTerminalSession)` if no session with the given `id` exists.
 pub fn detach_session(id: u64) -> Result<()> {
     let mut global = lock_terminals!();
-    if let Some(session) = global.get_mut(&id) {
-        session.set_detached();
-        Ok(())
-    } else {
-        Err(KuroError::State(
-            crate::ffi::error::StateError::NoTerminalSession,
-        ))
-    }
+    global.get_mut(&id).map_or(
+        Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
+        |session| { session.set_detached(); Ok(()) },
+    )
 }
 
 /// Mark a `Detached` session as `Bound`, reattaching it to a buffer.
 ///
+/// # Errors
 /// Returns `Err(TerminalSessionExists)` if the session is already `Bound`
 /// (preventing two buffers from owning the same session simultaneously).
-/// Returns `Err(NoTerminalSession)` if no session with the given ID exists.
+/// Returns `Err(NoTerminalSession)` if no session with the given `id` exists.
 pub fn attach_session(id: u64) -> Result<()> {
     let mut global = lock_terminals!();
     if let Some(session) = global.get_mut(&id) {
@@ -127,11 +127,19 @@ pub fn attach_session(id: u64) -> Result<()> {
 /// Collect metadata for all active sessions.
 ///
 /// Returns `Vec<(session_id, command, is_detached, is_alive)>`.
-/// The order of entries is unspecified (HashMap iteration order).
+/// The order of entries is unspecified (`HashMap` iteration order).
+///
+/// Dead-detached sessions (detached and PTY child has exited) are reaped
+/// opportunistically on each call — they can never be reattached and would
+/// otherwise accumulate in the map indefinitely.
 pub fn list_sessions() -> Vec<(u64, String, bool, bool)> {
     TERMINAL_SESSIONS
         .lock()
-        .map(|guard| {
+        .map(|mut guard| {
+            // Reap sessions that are both detached and have a dead PTY child.
+            // Such sessions can never be reattached, so remove them now rather
+            // than letting them accumulate in the HashMap indefinitely.
+            guard.retain(|_, s| !s.is_detached() || s.is_process_alive());
             guard
                 .iter()
                 .map(|(&id, s)| (id, s.command().to_string(), s.is_detached(), s.is_process_alive()))

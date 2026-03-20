@@ -4,7 +4,7 @@ use crate::{ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::wait::waitpid;
 use nix::unistd::{fork, ForkResult, Pid};
-use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -75,6 +75,7 @@ impl Pty {
     ///
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
+    #[expect(clippy::too_many_lines, reason = "PTY setup is inherently multi-step: open, dup, fork, exec, teardown — splitting into smaller fns would increase complexity without clarity")]
     pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
@@ -99,6 +100,9 @@ impl Pty {
         // Clone master fd for reader thread, with O_CLOEXEC so the fd is
         // automatically closed in any fork()ed child processes (prevents
         // child processes from holding the master fd open across sessions).
+        // SAFETY: master.as_raw_fd() is a valid open fd returned by openpty;
+        // libc::dup and libc::fcntl are safe on valid fds; the result is
+        // checked for -1 (error) before any further use.
         let reader_fd = unsafe {
             // dup3 with O_CLOEXEC is available on macOS via F_DUPFD_CLOEXEC fcntl
             let fd = libc::dup(master.as_raw_fd());
@@ -116,12 +120,18 @@ impl Pty {
             }
             fd
         };
+        // SAFETY: reader_fd was obtained from dup above and is valid; File::from_raw_fd
+        // takes ownership; the fd will only be accessed through this File handle.
         let reader_file = unsafe { std::fs::File::from_raw_fd(reader_fd) };
 
         // Convert master to File for parent
+        // SAFETY: master.into_raw_fd() transfers ownership of the valid PTY master fd;
+        // File::from_raw_fd takes exclusive ownership; the OwnedFd is consumed.
         let master_file = unsafe { std::fs::File::from_raw_fd(master.into_raw_fd()) };
 
         // Fork to create child process
+        // SAFETY: all shared state (channel sender, Arc clones, reader_fd) is fully set
+        // up before forking; the Child branch runs only async-signal-safe code until exec.
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child }) => {
                 // Parent process: spawn reader thread and return Pty
@@ -151,6 +161,8 @@ impl Pty {
                 // TIOCSCTTY is required on all POSIX platforms after setsid()
                 // to establish the slave PTY as the controlling terminal.
                 // Without this, tcgetpgrp() fails in the shell.
+                // SAFETY: slave is a valid PTY slave fd; TIOCSCTTY is async-signal-safe
+                // after setsid(); the third arg (0) is a required no-op placeholder.
                 unsafe {
                     if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY.into(), 0) == -1 {
                         return Err(pty_operation_error(
@@ -164,14 +176,18 @@ impl Pty {
                 }
 
                 // Duplicate slave PTY to stdin, stdout, stderr
-                if unsafe { libc::dup2(slave.as_raw_fd(), 0) } == -1 {
-                    return Err(pty_operation_error("dup2", "Failed to dup2 stdin"));
-                }
-                if unsafe { libc::dup2(slave.as_raw_fd(), 1) } == -1 {
-                    return Err(pty_operation_error("dup2", "Failed to dup2 stdout"));
-                }
-                if unsafe { libc::dup2(slave.as_raw_fd(), 2) } == -1 {
-                    return Err(pty_operation_error("dup2", "Failed to dup2 stderr"));
+                // SAFETY: slave.as_raw_fd() is a valid open fd; dup2 to 0/1/2 is
+                // async-signal-safe and valid in the child process after fork.
+                unsafe {
+                    if libc::dup2(slave.as_raw_fd(), 0) == -1 {
+                        return Err(pty_operation_error("dup2", "Failed to dup2 stdin"));
+                    }
+                    if libc::dup2(slave.as_raw_fd(), 1) == -1 {
+                        return Err(pty_operation_error("dup2", "Failed to dup2 stdout"));
+                    }
+                    if libc::dup2(slave.as_raw_fd(), 2) == -1 {
+                        return Err(pty_operation_error("dup2", "Failed to dup2 stderr"));
+                    }
                 }
 
                 // Close slave PTY (we have duplicates now)
@@ -181,6 +197,9 @@ impl Pty {
                 // Inherited master fds interfere with process group management and can
                 // prevent the parent from detecting child exit (no EOF on master).
                 drop(master_file);
+                // SAFETY: reader_fd is a valid open fd in the child; all File handles for
+                // reader_fd exist only in the parent path; closing it prevents the child
+                // from holding the master end open (which would block parent EOF detection).
                 unsafe {
                     libc::close(reader_fd);
                 }
@@ -227,6 +246,8 @@ impl Pty {
                 // see 0 columns and permanently fall back to dumb/novis mode, causing
                 // C-b/C-f/C-e to be echoed as literal ^X characters instead of moving
                 // the cursor.
+                // SAFETY: fd 0 is the PTY slave we dup2'd above; TIOCSWINSZ reads a
+                // stack-allocated winsize struct that outlives the ioctl call.
                 unsafe {
                     let ws = libc::winsize {
                         ws_row: rows,
@@ -275,7 +296,7 @@ impl Pty {
     /// # Errors
     /// Returns `Err` if the underlying `write_all` to the master file descriptor fails.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
-        use std::io::Write;
+        use std::io::Write as _;
 
         self.master
             .write_all(bytes)
@@ -308,6 +329,7 @@ impl Pty {
     /// Return the child process PID.
     #[inline]
     #[must_use]
+    #[expect(clippy::cast_sign_loss, reason = "PIDs are non-negative; as_raw() returns i32 by POSIX convention but valid PIDs never exceed i32::MAX")]
     pub const fn pid(&self) -> u32 {
         self.child_pid.as_raw() as u32
     }
@@ -334,6 +356,8 @@ impl Pty {
             ws_ypixel: 0,
         };
 
+        // SAFETY: self.master is a valid open PTY master fd held by this Pty;
+        // winsize is stack-allocated and outlives the ioctl call.
         unsafe {
             libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &winsize);
         }

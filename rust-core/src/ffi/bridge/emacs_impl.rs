@@ -27,9 +27,9 @@ pub struct EmacsModuleFFI;
 
 impl KuroFFI for EmacsModuleFFI {
     fn init(_env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
-        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
         init_session(command, rows, cols).map_or(ptr::null_mut(), |_id| ptr::dangling_mut::<emacs_value>())
@@ -61,9 +61,9 @@ impl KuroFFI for EmacsModuleFFI {
     }
 
     fn resize(_env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
-        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let rows = rows as u16;
-        #[expect(clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
         let cols = cols as u16;
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
@@ -84,6 +84,7 @@ impl KuroFFI for EmacsModuleFFI {
         }
     }
 
+    #[expect(clippy::as_ptr_cast_mut, reason = "legacy C ABI stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type")]
     fn get_cursor(_env: *mut emacs_env) -> *mut emacs_value {
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
             let (row, col) = session.get_cursor();
@@ -93,6 +94,7 @@ impl KuroFFI for EmacsModuleFFI {
         result.map_or_else(|_| "0:0".as_ptr() as *mut emacs_value, |s| s.as_ptr() as *mut emacs_value)
     }
 
+    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "max_lines ≤ 0 is handled above; positive values bounded by practical terminal scrollback limits")]
     fn get_scrollback(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
         let max_lines = if max_lines <= 0 {
             usize::MAX
@@ -120,6 +122,7 @@ impl KuroFFI for EmacsModuleFFI {
         }
     }
 
+    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; caller passes non-negative scrollback limit")]
     fn set_scrollback_max_lines(_env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
         let result = with_session(LEGACY_SESSION_ID, |session| {
             session.set_scrollback_max_lines(max_lines as usize);

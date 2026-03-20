@@ -115,9 +115,8 @@ fn test_blank_line_is_not_empty_after_encode() {
 
 /// Feed captured btop output in chunks and report the first divergence.
 /// Reads /tmp/btop-capture.bin and prints row 0 at 10K intervals.
-/// Run with: cargo test `btop_render` -- --ignored --nocapture
+/// Run with: cargo test `btop_render` -- --nocapture
 #[test]
-#[ignore = "requires /tmp/btop-capture.bin fixture"]
 fn test_btop_render_dump() {
     let Ok(data) = std::fs::read("/tmp/btop-capture.bin") else {
         eprintln!("SKIP: /tmp/btop-capture.bin not found");

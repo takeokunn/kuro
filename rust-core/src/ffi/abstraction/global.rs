@@ -44,8 +44,7 @@ macro_rules! lock_terminals {
 pub fn init_session(command: &str, rows: u16, cols: u16) -> Result<u64> {
     let id = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let session = TerminalSession::new(command, rows, cols)?;
-    let mut global = lock_terminals!();
-    global.insert(id, session);
+    lock_terminals!().insert(id, session);
     Ok(id)
 }
 
@@ -84,8 +83,7 @@ where
 /// # Errors
 /// Never returns an error in the current implementation.
 pub fn shutdown_session(id: u64) -> Result<()> {
-    let mut global = lock_terminals!();
-    global.remove(&id);
+    lock_terminals!().remove(&id);
     Ok(())
 }
 
@@ -142,7 +140,7 @@ pub fn list_sessions() -> Vec<(u64, String, bool, bool)> {
             guard.retain(|_, s| !s.is_detached() || s.is_process_alive());
             guard
                 .iter()
-                .map(|(&id, s)| (id, s.command().to_string(), s.is_detached(), s.is_process_alive()))
+                .map(|(&id, s)| (id, s.command().to_owned(), s.is_detached(), s.is_process_alive()))
                 .collect()
         })
         .unwrap_or_default()

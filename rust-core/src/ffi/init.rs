@@ -48,7 +48,7 @@ pub fn initialize(emacs_version: (u32, u32)) -> Result<()> {
     validate_emacs_version(emacs_version)?;
 
     // Verify required functions are available
-    verify_required_functions()?;
+    verify_required_functions();
 
     // Mark as initialized
     INIT_STATE
@@ -87,12 +87,7 @@ const fn validate_emacs_version(version: (u32, u32)) -> Result<()> {
 /// module-load time.  The dynamic linker ensures the emacs-module ABI symbols
 /// (`make-user-ptr`, etc.) are present before `emacs_module_init` runs, so a
 /// separate check would be redundant.
-///
-/// # Returns
-/// * `Ok(())` always
-const fn verify_required_functions() -> Result<()> {
-    Ok(())
-}
+const fn verify_required_functions() {}
 
 /// Check if the module has been initialized
 ///
@@ -167,20 +162,18 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test_is_initialized depends on uninitialized global state; use --test-threads=1 and run in isolation"]
     fn test_is_initialized() {
-        // Initially not initialized
-        assert!(!is_initialized());
-
-        // After initialization
+        // initialize() returns Ok on first call, AlreadyInitialized on any subsequent call.
+        // OnceLock cannot be reset, so this test must tolerate both outcomes.
         let result = initialize((29, 1));
         assert!(
-            result.is_ok() || matches!(result, Err(KuroError::Init(InitError::AlreadyInitialized)))
+            result.is_ok() || matches!(result, Err(KuroError::Init(InitError::AlreadyInitialized))),
+            "initialize must succeed or report AlreadyInitialized, got: {result:?}"
         );
 
-        // Check state
-        let state = get_init_state();
-        assert!(state.is_some());
+        // Regardless of which path was taken, the module is now initialized
+        assert!(is_initialized(), "is_initialized must be true after initialize()");
+        assert!(get_init_state().is_some(), "get_init_state must be Some after initialize()");
     }
 
     #[test]

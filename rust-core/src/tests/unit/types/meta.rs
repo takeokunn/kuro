@@ -70,7 +70,7 @@ fn test_terminal_meta_bell_clear_persists() {
 #[test]
 // MUTATION: Setting title and title_dirty persists
 fn test_terminal_meta_title_set_persists() {
-    let m = TerminalMeta { title: "my terminal".to_string(), title_dirty: true, ..Default::default() };
+    let m = TerminalMeta { title: "my terminal".to_owned(), title_dirty: true, ..Default::default() };
     assert_eq!(m.title, "my terminal");
     assert!(m.title_dirty);
 }
@@ -78,7 +78,7 @@ fn test_terminal_meta_title_set_persists() {
 #[test]
 // MUTATION: Clearing title_dirty after reading persists
 fn test_terminal_meta_title_dirty_clear() {
-    let mut m = TerminalMeta { title: "test".to_string(), title_dirty: true, ..Default::default() };
+    let mut m = TerminalMeta { title: "test".to_owned(), title_dirty: true, ..Default::default() };
     m.title_dirty = false;
     assert!(!m.title_dirty, "title_dirty must persist as false after clear");
 }
@@ -128,6 +128,7 @@ proptest! {
     fn prop_terminal_meta_response_count(count in 0usize..=16usize) {
         let mut m = TerminalMeta::default();
         for i in 0..count {
+            #[expect(clippy::cast_possible_truncation, reason = "i is 0..=16; always fits in u8")]
             m.pending_responses.push(vec![i as u8]);
         }
         prop_assert_eq!(m.pending_responses.len(), count);

@@ -3,7 +3,7 @@
 use super::lock_session;
 use crate::error::KuroError;
 use emacs::defun;
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 /// Retrieve a stored Kitty Graphics image as a base64-encoded PNG string.
 ///
@@ -45,6 +45,7 @@ fn kuro_core_get_image(env: &Env, session_id: u64, image_id: u32) -> EmacsResult
 /// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
 #[defun]
 #[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
+#[expect(clippy::similar_names, reason = "cw_val/ch_val are intentional abbreviations for cell-width and cell-height; renaming would reduce clarity")]
 fn kuro_core_poll_image_notifications(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let notifications = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();

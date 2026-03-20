@@ -4,7 +4,7 @@
 //! `src/grid/dirty_set.rs` by verifying invariants across randomly generated
 //! inputs (proptest T2 tier: 500 cases each).
 
-use crate::grid::dirty_set::{BitVecDirtySet, DirtySet};
+use crate::grid::dirty_set::{BitVecDirtySet, DirtySet as _};
 use proptest::prelude::*;
 
 fn arb_rows() -> impl Strategy<Value = Vec<usize>> {

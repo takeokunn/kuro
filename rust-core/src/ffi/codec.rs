@@ -54,7 +54,7 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_color(color: &Color) -> u32 {
     match color {
-        Color::Default => 0xFF00_0000_u32,
+        Color::Default => 0xFF00_0000u32,
         Color::Named(named) => {
             let idx: u32 = match named {
                 NamedColor::Black => 0,
@@ -74,9 +74,9 @@ pub fn encode_color(color: &Color) -> u32 {
                 NamedColor::BrightCyan => 14,
                 NamedColor::BrightWhite => 15,
             };
-            0x8000_0000_u32 | idx
+            0x8000_0000u32 | idx
         }
-        Color::Indexed(idx) => 0x4000_0000_u32 | u32::from(*idx),
+        Color::Indexed(idx) => 0x4000_0000u32 | u32::from(*idx),
         Color::Rgb(r, g, b) => (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b),
     }
 }
@@ -150,6 +150,7 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
 /// Trailing spaces are preserved so that the cursor can be placed at any
 /// column, including past the last visible character.
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
+#[expect(clippy::similar_names, reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels")]
 pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     if cells.is_empty() {
         return (String::new(), Vec::new(), Vec::new());

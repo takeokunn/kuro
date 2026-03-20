@@ -352,7 +352,7 @@ fn vt_kitty_keyboard_query() {
 fn vt_osc7_cwd() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;file://localhost/tmp/test\x07");
-    assert_eq!(t.osc_data().cwd, Some("/tmp/test".to_string()));
+    assert_eq!(t.osc_data().cwd, Some("/tmp/test".to_owned()));
     assert!(t.osc_data().cwd_dirty);
 }
 
@@ -362,7 +362,7 @@ fn vt_osc8_hyperlink() {
     t.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
         t.osc_data().hyperlink.uri,
-        Some("https://example.com".to_string())
+        Some("https://example.com".to_owned())
     );
     t.advance(b"\x1b]8;;\x07");
     assert!(t.osc_data().hyperlink.uri.is_none());

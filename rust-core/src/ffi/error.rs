@@ -189,8 +189,8 @@ impl From<RuntimeError> for KuroError {
 #[must_use] 
 pub fn pty_spawn_error(command: &str, message: &str) -> KuroError {
     RuntimeError::PtySpawnFailed {
-        command: command.to_string(),
-        message: message.to_string(),
+        command: command.to_owned(),
+        message: message.to_owned(),
     }
     .into()
 }
@@ -199,8 +199,8 @@ pub fn pty_spawn_error(command: &str, message: &str) -> KuroError {
 #[must_use] 
 pub fn pty_operation_error(operation: &str, message: &str) -> KuroError {
     RuntimeError::PtyOperationFailed {
-        operation: operation.to_string(),
-        message: message.to_string(),
+        operation: operation.to_owned(),
+        message: message.to_owned(),
     }
     .into()
 }
@@ -209,7 +209,7 @@ pub fn pty_operation_error(operation: &str, message: &str) -> KuroError {
 #[must_use] 
 pub fn parse_error(message: &str) -> KuroError {
     RuntimeError::ParseError {
-        message: message.to_string(),
+        message: message.to_owned(),
     }
     .into()
 }
@@ -218,8 +218,8 @@ pub fn parse_error(message: &str) -> KuroError {
 #[must_use] 
 pub fn invalid_parameter_error(param: &str, message: &str) -> KuroError {
     RuntimeError::InvalidParameter {
-        param: param.to_string(),
-        message: message.to_string(),
+        param: param.to_owned(),
+        message: message.to_owned(),
     }
     .into()
 }
@@ -228,7 +228,7 @@ pub fn invalid_parameter_error(param: &str, message: &str) -> KuroError {
 #[must_use] 
 pub fn ffi_error(message: &str) -> KuroError {
     RuntimeError::FfiError {
-        message: message.to_string(),
+        message: message.to_owned(),
     }
     .into()
 }

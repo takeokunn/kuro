@@ -2,6 +2,7 @@
 //!
 //! These benchmarks establish baselines for the cmatrix-scenario performance fix.
 //! Run with: cargo bench --bench `render_pipeline`
+#![expect(clippy::cast_possible_truncation, reason = "bench color/index casts: values computed modulo 256/26 always fit in the target type")]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::ffi::codec::encode_line;

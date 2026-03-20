@@ -2,6 +2,8 @@ use super::*;
 
 #[test]
 fn test_safe_env_ref_null_pointer() {
+    // SAFETY: passing null is explicitly the test case for the null-pointer error path;
+    // from_raw immediately validates the pointer and returns Err without dereferencing.
     let result = unsafe { SafeEnvRef::from_raw(std::ptr::null_mut()) };
     assert!(matches!(result, Err(KuroError::NullPointer)));
 }

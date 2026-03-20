@@ -473,7 +473,6 @@ fn test_sync_output_rapid_streaming_no_corruption() {
     // Simplified: position to target row via CUP, write content, update mode-line.
     for batch in 1u8..=4 {
         let tool_row = 4 + batch as usize; // tool result goes to rows 5,6,7,8 (0-indexed)
-        let _modeline_row = tool_row; // mode-line also at same row (right-aligned)
 
         term.advance(b"\x1b[?2026h");
 

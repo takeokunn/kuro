@@ -37,7 +37,7 @@ where
         Err(panic_payload) => {
             let msg = panic_payload.downcast::<String>().map_or_else(
                 |p| p.downcast::<&'static str>().map_or_else(
-                    |_| "kuro test panic: unknown payload".to_string(),
+                    |_| "kuro test panic: unknown payload".to_owned(),
                     |s| format!("kuro test panic: {s}"),
                 ),
                 |s| format!("kuro test panic: {s}"),
@@ -75,8 +75,7 @@ macro_rules! lock_test {
 fn kuro_core_test_create(env: &Env, rows: u16, cols: u16) -> EmacsResult<Value<'_>> {
     catch_panic_test(env, || {
         let terminal = TerminalCore::new(rows, cols);
-        let mut global = lock_test!(mut global);
-        *global = Some(terminal);
+        *lock_test!(mut global) = Some(terminal);
         Ok(true)
     })
 }
@@ -85,8 +84,7 @@ fn kuro_core_test_create(env: &Env, rows: u16, cols: u16) -> EmacsResult<Value<'
 #[defun]
 fn kuro_core_test_destroy(env: &Env) -> EmacsResult<Value<'_>> {
     catch_panic_test(env, || {
-        let mut global = lock_test!(mut global);
-        *global = None;
+        *lock_test!(mut global) = None;
         Ok(true)
     })
 }
@@ -112,13 +110,16 @@ fn kuro_core_test_feed(env: &Env, data: String) -> EmacsResult<Value<'_>> {
 
 /// Get cursor position as `(ROW . COL)` (0-indexed).
 #[defun]
+#[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
 fn kuro_core_test_get_cursor(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_test!(global);
-        let (row, col) = (*global).as_ref().map_or((0, 0), |t| {
-            let c = t.screen.cursor();
-            (c.row, c.col)
-        });
+        let (row, col) = {
+            let global = lock_test!(global);
+            (*global).as_ref().map_or((0, 0), |t| {
+                let c = t.screen.cursor();
+                (c.row, c.col)
+            })
+        };
         Ok::<(usize, usize), KuroError>((row, col))
     }));
     match result {
@@ -142,13 +143,15 @@ fn kuro_core_test_get_cursor(env: &Env) -> EmacsResult<Value<'_>> {
 #[defun]
 fn kuro_core_test_get_cell(env: &Env, row: usize, col: usize) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_test!(global);
-        let s = (*global).as_ref().map_or_else(String::new, |t| {
-            t.screen
-                .get_cell(row, col)
-                .map(|c| c.grapheme.as_str().to_string())
-                .unwrap_or_default()
-        });
+        let s = {
+            let global = lock_test!(global);
+            (*global).as_ref().map_or_else(String::new, |t| {
+                t.screen
+                    .get_cell(row, col)
+                    .map(|c| c.grapheme.as_str().to_owned())
+                    .unwrap_or_default()
+            })
+        };
         Ok::<String, KuroError>(s)
     }));
     match result {
@@ -168,19 +171,21 @@ fn kuro_core_test_get_cell(env: &Env, row: usize, col: usize) -> EmacsResult<Val
 #[defun]
 fn kuro_core_test_get_line(env: &Env, row: usize) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_test!(global);
-        let s = (*global).as_ref().map_or_else(String::new, |t| {
-            t.screen
-                .get_line(row)
-                .map(|line| {
-                    let mut buf = String::new();
-                    for cell in &line.cells {
-                        buf.push_str(cell.grapheme.as_str());
-                    }
-                    buf.trim_end().to_string()
-                })
-                .unwrap_or_default()
-        });
+        let s = {
+            let global = lock_test!(global);
+            (*global).as_ref().map_or_else(String::new, |t| {
+                t.screen
+                    .get_line(row)
+                    .map(|line| {
+                        let mut buf = String::new();
+                        for cell in &line.cells {
+                            buf.push_str(cell.grapheme.as_str());
+                        }
+                        buf.trim_end().to_owned()
+                    })
+                    .unwrap_or_default()
+            })
+        };
         Ok::<String, KuroError>(s)
     }));
     match result {
@@ -200,13 +205,16 @@ fn kuro_core_test_get_line(env: &Env, row: usize) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(0 . 23)` if no test terminal is active.
 #[defun]
+#[expect(clippy::cast_possible_wrap, reason = "top/bottom are terminal dimensions (≤ 65535); usize→i64 never wraps")]
 fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_test!(global);
-        let (top, bottom) = (*global).as_ref().map_or((0, 23), |t| {
-            let r = t.screen.get_scroll_region();
-            (r.top, r.bottom.saturating_sub(1))
-        });
+        let (top, bottom) = {
+            let global = lock_test!(global);
+            (*global).as_ref().map_or((0, 23), |t| {
+                let r = t.screen.get_scroll_region();
+                (r.top, r.bottom.saturating_sub(1))
+            })
+        };
         Ok::<(usize, usize), KuroError>((top, bottom))
     }));
     match result {
@@ -230,12 +238,15 @@ fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(24 . 80)` if no test terminal is active.
 #[defun]
+#[expect(clippy::cast_possible_wrap, reason = "rows/cols are terminal dimensions (≤ 65535); usize→i64 never wraps")]
 fn kuro_core_test_get_size(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let global = lock_test!(global);
-        let (rows, cols) = (*global).as_ref().map_or((24, 80), |t| {
-            (t.screen.rows() as usize, t.screen.cols() as usize)
-        });
+        let (rows, cols) = {
+            let global = lock_test!(global);
+            (*global).as_ref().map_or((24, 80), |t| {
+                (t.screen.rows() as usize, t.screen.cols() as usize)
+            })
+        };
         Ok::<(usize, usize), KuroError>((rows, cols))
     }));
     match result {

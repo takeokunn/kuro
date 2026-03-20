@@ -54,7 +54,8 @@ impl KittyParams {
     /// Parse comma-separated key=value pairs from the APC header bytes.
     ///
     /// Format: `a=t,f=100,i=1,m=0`
-    #[must_use] 
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation, reason = "quiet is 0 or 2 per Kitty graphics protocol spec; u32→u8 is always safe for valid inputs")]
     pub fn parse(header: &[u8]) -> Self {
         let mut params = Self::default();
         for kv in header.split(|&b| b == b',') {

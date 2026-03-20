@@ -14,6 +14,7 @@ use crate::{Result, TerminalCore};
 /// kills the buffer without terminating the process, it becomes `Detached` and
 /// can later be re-attached via `kuro-attach`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionState {
     /// Attached to an Emacs buffer and actively rendered.
     Bound,
@@ -68,7 +69,7 @@ impl TerminalSession {
             Ok(Self {
                 core,
                 pty: Some(pty),
-                command: command.to_string(),
+                command: command.to_owned(),
                 state: SessionState::Bound,
             })
         }
@@ -340,7 +341,7 @@ impl TerminalSession {
     #[must_use] 
     pub const fn pid(&self) -> Option<u32> {
         #[cfg(unix)]
-        if let Some(ref pty) = self.pty {
+        if let Some(pty) = &self.pty {
             return Some(pty.pid());
         }
         None
@@ -355,7 +356,8 @@ impl TerminalSession {
     /// Get current 256-color palette overrides (non-None entries only).
     ///
     /// Returns a Vec of (index, R, G, B) for each overridden palette entry.
-    #[must_use] 
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation, reason = "palette index is enumerate() over a 256-element array; i ≤ 255 always fits in u8")]
     pub fn get_palette_updates(&self) -> Vec<(u8, u8, u8, u8)> {
         self.core
             .osc_data
@@ -371,7 +373,7 @@ impl TerminalSession {
     #[must_use] 
     pub fn get_default_colors(&self) -> (u32, u32, u32) {
         let encode = |color: &Option<crate::types::Color>| -> u32 {
-            color.as_ref().map_or(0xFF00_0000_u32, Self::encode_color)
+            color.as_ref().map_or(0xFF00_0000u32, Self::encode_color)
         };
         (
             encode(&self.core.osc_data.default_fg),

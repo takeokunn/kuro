@@ -102,7 +102,7 @@ impl Screen {
         if idx < 0 || idx >= n {
             return None;
         }
-        self.scrollback_buffer.get(idx as usize)
+        self.scrollback_buffer.get(idx.cast_unsigned())
     }
 
     /// Return true if the viewport scroll position changed and a re-render is needed

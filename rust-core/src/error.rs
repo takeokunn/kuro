@@ -9,6 +9,7 @@ pub use crate::ffi::error::{InitError, RuntimeError, StateError};
 
 /// Main error type for Kuro operations
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum KuroError {
     /// IO-related errors
     #[error("IO error: {0}")]
@@ -160,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let err = KuroError::from("some error".to_string());
+        let err = KuroError::from("some error".to_owned());
         assert!(matches!(err, KuroError::Runtime(_)));
     }
 

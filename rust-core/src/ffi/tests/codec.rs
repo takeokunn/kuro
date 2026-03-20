@@ -8,7 +8,7 @@ use crate::types::color::{Color, NamedColor};
 
 #[test]
 fn test_encode_color_default_is_sentinel() {
-    assert_eq!(encode_color(&Color::Default), 0xFF00_0000_u32);
+    assert_eq!(encode_color(&Color::Default), 0xFF00_0000u32);
 }
 
 #[test]
@@ -18,13 +18,13 @@ fn test_encode_color_rgb_true_black_is_zero() {
 
 #[test]
 fn test_encode_color_named_red() {
-    let expected = 0x8000_0000_u32 | 1u32;
+    let expected = 0x8000_0000u32 | 1u32;
     assert_eq!(encode_color(&Color::Named(NamedColor::Red)), expected);
 }
 
 #[test]
 fn test_encode_color_indexed() {
-    let expected = 0x4000_0000_u32 | 16u32;
+    let expected = 0x4000_0000u32 | 16u32;
     assert_eq!(encode_color(&Color::Indexed(16)), expected);
 }
 
@@ -226,13 +226,13 @@ fn test_encode_line_col_to_buf_ascii() {
 #[test]
 fn test_encode_color_indexed_zero() {
     // Indexed(0) must encode to 0x4000_0000 (bit-30 marker with index 0)
-    assert_eq!(encode_color(&Color::Indexed(0)), 0x4000_0000_u32);
+    assert_eq!(encode_color(&Color::Indexed(0)), 0x4000_0000u32);
 }
 
 #[test]
 fn test_encode_color_indexed_255() {
     // Indexed(255) must encode to 0x400000FF (bit-30 marker with index 255)
-    assert_eq!(encode_color(&Color::Indexed(255)), 0x4000_00FF_u32);
+    assert_eq!(encode_color(&Color::Indexed(255)), 0x4000_00FFu32);
 }
 
 // -------------------------------------------------------------------------

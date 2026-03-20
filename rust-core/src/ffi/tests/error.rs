@@ -10,7 +10,7 @@ fn test_init_error_display() {
     assert!(err.to_string().contains("29.1"));
 
     let err = InitError::MissingFunction {
-        function: "emacs-module-init".to_string(),
+        function: "emacs-module-init".to_owned(),
     };
     assert!(err.to_string().contains("emacs-module-init"));
 
@@ -39,27 +39,27 @@ fn test_state_error_display() {
 #[test]
 fn test_runtime_error_display() {
     let err = RuntimeError::PtySpawnFailed {
-        command: "bash".to_string(),
-        message: "Permission denied".to_string(),
+        command: "bash".to_owned(),
+        message: "Permission denied".to_owned(),
     };
     assert!(err.to_string().contains("bash"));
     assert!(err.to_string().contains("Permission denied"));
 
     let err = RuntimeError::PtyOperationFailed {
-        operation: "write".to_string(),
-        message: "Broken pipe".to_string(),
+        operation: "write".to_owned(),
+        message: "Broken pipe".to_owned(),
     };
     assert!(err.to_string().contains("write"));
     assert!(err.to_string().contains("Broken pipe"));
 
     let err = RuntimeError::ParseError {
-        message: "Invalid CSI sequence".to_string(),
+        message: "Invalid CSI sequence".to_owned(),
     };
     assert!(err.to_string().contains("Invalid CSI sequence"));
 
     let err = RuntimeError::InvalidParameter {
-        param: "rows".to_string(),
-        message: "must be positive".to_string(),
+        param: "rows".to_owned(),
+        message: "must be positive".to_owned(),
     };
     assert!(err.to_string().contains("rows"));
     assert!(err.to_string().contains("must be positive"));
@@ -78,8 +78,8 @@ fn test_error_conversions() {
     assert!(matches!(kuro_err, KuroError::State(_)));
 
     let kuro_err: KuroError = RuntimeError::PtySpawnFailed {
-        command: "bash".to_string(),
-        message: "error".to_string(),
+        command: "bash".to_owned(),
+        message: "error".to_owned(),
     }
     .into();
     assert!(matches!(kuro_err, KuroError::Runtime(_)));

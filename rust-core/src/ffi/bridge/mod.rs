@@ -57,7 +57,7 @@ where
         Err(panic_payload) => {
             let msg = panic_payload.downcast::<String>().map_or_else(
                 |p| p.downcast::<&'static str>().map_or_else(
-                    |_| "Panic: Unknown panic payload".to_string(),
+                    |_| "Panic: Unknown panic payload".to_owned(),
                     |msg| format!("Panic: {msg}"),
                 ),
                 |msg| format!("Panic: {msg}"),

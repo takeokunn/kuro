@@ -60,6 +60,7 @@ impl ScrollRegion {
 
 /// Virtual screen representing the terminal display
 #[derive(Debug)]
+#[expect(clippy::struct_field_names, reason = "alternate_screen is the established name for DEC 1049 alternate buffer; renaming would reduce clarity")]
 pub struct Screen {
     /// Lines in the screen (`VecDeque` enables O(1) full-screen scroll via rotate)
     pub(super) lines: VecDeque<Line>,

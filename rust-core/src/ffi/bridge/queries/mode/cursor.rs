@@ -3,19 +3,22 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use emacs::defun;
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use crate::error::KuroError;
 use super::super::super::{lock_session, query_session};
 
 /// Get cursor position as a (ROW . COL) cons pair
 #[defun]
+#[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
 fn kuro_core_get_cursor(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     // Returns a cons pair (row . col) — cannot use query_session<T: IntoLisp> since
     // cons pairs require two separate into_lisp calls and do not fit a single T.
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let global = lock_session!();
-        let (row, col) = global.get(&session_id).map_or((0, 0), crate::ffi::abstraction::TerminalSession::get_cursor);
+        let (row, col) = {
+            let global = lock_session!();
+            global.get(&session_id).map_or((0, 0), crate::ffi::abstraction::TerminalSession::get_cursor)
+        };
         Ok::<(usize, usize), KuroError>((row, col))
     }));
     match result {

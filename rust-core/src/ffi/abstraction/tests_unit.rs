@@ -40,7 +40,7 @@ fn test_trait_object_safety() {
 fn test_encode_color_delegates_to_codec() {
     assert_eq!(
         TerminalSession::encode_color(&Color::Default),
-        0xFF00_0000_u32
+        0xFF00_0000u32
     );
 }
 

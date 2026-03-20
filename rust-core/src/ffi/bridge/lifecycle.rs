@@ -3,7 +3,7 @@
 use super::{catch_panic, query_session};
 use crate::ffi::abstraction::{attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session};
 use emacs::defun;
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 /// Initialize Kuro with the given shell command and terminal dimensions.
 ///

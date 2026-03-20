@@ -4,7 +4,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::result::Result;
 
 use emacs::defun;
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use crate::error::KuroError;
 use crate::ffi::abstraction::with_session;
@@ -50,16 +50,19 @@ fn kuro_core_poll_updates(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> 
 /// Poll for terminal updates and return dirty lines with face information
 #[defun]
 #[expect(clippy::cast_possible_wrap, reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64")]
+#[expect(clippy::significant_drop_tightening, reason = "`session` borrows from `global` (MutexGuard) across poll_output + get_dirty_lines_with_faces; the guard cannot be released before the borrow ends")]
 fn kuro_core_poll_updates_with_faces(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let result: Result<Vec<crate::ffi::codec::EncodedLine>, KuroError> =
         catch_unwind(AssertUnwindSafe(|| {
-        let mut global = lock_session!();
-
-        let Some(session) = global.get_mut(&session_id) else {
-            return Ok(Vec::new());
+        let lines = {
+            let mut global = lock_session!();
+            let Some(session) = global.get_mut(&session_id) else {
+                return Ok(Vec::new());
+            };
+            session.poll_output()?;
+            session.get_dirty_lines_with_faces()
         };
-        session.poll_output()?;
-        Ok(session.get_dirty_lines_with_faces())
+        Ok(lines)
     }))
     .unwrap_or_else(|_| {
         Err(crate::ffi::error::ffi_error(

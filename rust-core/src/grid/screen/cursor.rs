@@ -1,6 +1,6 @@
 //! Cursor movement and character printing methods for Screen
 
-use super::{Screen, Cursor, Color, SgrAttributes, UnicodeWidthChar, CellWidth, Cell, DirtySet};
+use super::{Screen, Cursor, Color, SgrAttributes, UnicodeWidthChar, CellWidth, Cell, DirtySet as _};
 
 impl Screen {
     /// Get reference to the active screen's cursor

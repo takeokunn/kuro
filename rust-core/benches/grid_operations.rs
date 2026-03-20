@@ -3,6 +3,7 @@
 //! Measures:
 //! - Time to update grid cells (target: >1M cells/s)
 //! - Time to erase lines (target: <1ms per line)
+#![expect(clippy::cast_possible_truncation, reason = "bench dimension casts: rows/cols are small constants (≤ 400); usize→u16 is always safe here")]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::{grid::screen::Screen, types::cell::SgrAttributes};
@@ -12,7 +13,7 @@ fn bench_grid_update(c: &mut Criterion) {
     let mut group = c.benchmark_group("grid_update");
 
     // Test with different grid sizes: 24x80, 50x200, 100x400
-    let sizes = [(24_usize, 80_usize), (50, 200), (100, 400)];
+    let sizes = [(24usize, 80usize), (50, 200), (100, 400)];
 
     for &(rows, cols) in &sizes {
         let cell_count = rows * cols;
@@ -44,7 +45,7 @@ fn bench_grid_update(c: &mut Criterion) {
 fn bench_screen_erase(c: &mut Criterion) {
     let mut group = c.benchmark_group("screen_erase");
 
-    let sizes = [(24_usize, 80_usize), (50, 200), (100, 400)];
+    let sizes = [(24usize, 80usize), (50, 200), (100, 400)];
 
     for &(rows, cols) in &sizes {
         let input = (rows, cols);

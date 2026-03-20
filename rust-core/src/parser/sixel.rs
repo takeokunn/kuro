@@ -419,6 +419,7 @@ impl SixelDecoder {
 
 /// HLS to RGB conversion (H: 0-360, L: 0-100, S: 0-100).
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "L/S are clamped to [0,1] and hue_to_rgb returns [0,1]; multiplied by 255 gives [0,255] — always fits in u8")]
+#[expect(clippy::many_single_char_names, reason = "h/l/s/p/q/r/g/b are standard HLS and RGB color component abbreviations")]
 fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     let l = (l / 100.0).clamp(0.0, 1.0);
     let s = (s / 100.0).clamp(0.0, 1.0);

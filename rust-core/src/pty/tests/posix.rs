@@ -135,7 +135,7 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     // we requested.  This is the parent-side proof that openpty(Some(&winsize))
     // correctly propagated the size.  If this returns 0×0, readline in the child
     // will enter dumb mode.
-    use std::os::unix::io::AsRawFd;
+    use std::os::unix::io::AsRawFd as _;
     let pty = Pty::spawn("sh", 42, 120);
     assert!(pty.is_ok());
     let pty = pty.unwrap();
@@ -146,6 +146,8 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
+    // SAFETY: pty.as_raw_fd() is a valid open PTY master fd; TIOCGWINSZ writes to a
+    // stack-allocated winsize struct that outlives the call; this is test-only code.
     let ret = unsafe { libc::ioctl(pty.as_raw_fd(), libc::TIOCGWINSZ, &mut ws) };
     assert_eq!(ret, 0, "TIOCGWINSZ ioctl failed");
     assert_eq!(ws.ws_row, 42, "ws_row must equal requested rows");

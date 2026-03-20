@@ -76,13 +76,11 @@ impl SafeEnvRef {
     }
 }
 
-// Send and Sync implementations for SafeEnvRef
-//
-// These are safe to implement because:
-// - SafeEnvRef is just a wrapper around a pointer
-// - The actual safety comes from how the pointer is used
-// - The Emacs environment is thread-safe in certain contexts
+// SAFETY: SafeEnvRef wraps a raw pointer; Send is sound because the Emacs
+// runtime is thread-safe when the caller follows its documented protocol.
 unsafe impl Send for SafeEnvRef {}
+// SAFETY: SafeEnvRef contains only a pointer and provides no interior
+// mutability; Sync is sound under the same protocol guarantees as Send.
 unsafe impl Sync for SafeEnvRef {}
 
 /// Environment reference registry for tracking active references

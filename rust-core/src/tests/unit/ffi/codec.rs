@@ -52,7 +52,7 @@ proptest! {
     // marker) and the lower 8 bits equal to idx.
     fn prop_encode_color_indexed_marker(idx in 0u8..=255u8) {
         let encoded = encode_color(&Color::Indexed(idx));
-        let expected = 0x4000_0000_u32 | u32::from(idx);
+        let expected = 0x4000_0000u32 | u32::from(idx);
         prop_assert_eq!(
             encoded,
             expected,
@@ -254,12 +254,12 @@ fn test_encode_color_default_sentinel_unique() {
 
     // Named: bit 31 set, bits 0-3 index (0-15) — range 0x8000_0000..=0x8000000F
     for i in 0u32..=15u32 {
-        assert_ne!(0x8000_0000_u32 | i, SENTINEL, "Named({i}) must not equal sentinel");
+        assert_ne!(0x8000_0000u32 | i, SENTINEL, "Named({i}) must not equal sentinel");
     }
 
     // Indexed: bit 30 set, bits 0-7 index (0-255) — range 0x4000_0000..=0x400000FF
     for i in 0u32..=255u32 {
-        assert_ne!(0x4000_0000_u32 | i, SENTINEL, "Indexed({i}) must not equal sentinel");
+        assert_ne!(0x4000_0000u32 | i, SENTINEL, "Indexed({i}) must not equal sentinel");
     }
 
     // Rgb: lower 24 bits only; 0xFF00_0000 has no lower-24 bits, so it cannot

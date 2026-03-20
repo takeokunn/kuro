@@ -1,7 +1,7 @@
 //! Threaded PTY reader
 
 use std::fs::File;
-use std::io::Read;
+use std::io::Read as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -60,10 +60,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_reader_receives_data() {
-        use std::os::unix::io::FromRawFd;
+        use std::os::unix::io::FromRawFd as _;
 
         // Create a pipe using libc: read_fd -> write_fd
         let mut fds = [0i32; 2];
+        // SAFETY: fds is a 2-element array; libc::pipe fills it with two valid fds on success.
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
         assert_eq!(ret, 0, "pipe() failed");
         let read_fd = fds[0];
@@ -73,6 +74,7 @@ mod tests {
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // Wrap the read end as a File and hand it to read_loop in a background thread
+        // SAFETY: read_fd is a valid fd from pipe above; File takes ownership; not used again.
         let read_file = unsafe { File::from_raw_fd(read_fd) };
         let shutdown_clone = Arc::clone(&shutdown);
         let process_exited = Arc::new(AtomicBool::new(false));
@@ -82,7 +84,8 @@ mod tests {
 
         // Write data to the write end then close it so the reader sees EOF
         {
-            use std::io::Write;
+            use std::io::Write as _;
+            // SAFETY: write_fd is a valid fd from pipe above; File takes ownership.
             let mut write_file = unsafe { File::from_raw_fd(write_fd) };
             write_file.write_all(b"hello").expect("write failed");
             // write_file is dropped here, closing the write end
@@ -108,9 +111,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_reader_shutdown_flag_stops_loop() {
-        use std::os::unix::io::FromRawFd;
+        use std::os::unix::io::FromRawFd as _;
 
         let mut fds = [0i32; 2];
+        // SAFETY: fds is a 2-element array; libc::pipe fills it with two valid fds on success.
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
         assert_eq!(ret, 0, "pipe() failed");
         let read_fd = fds[0];
@@ -120,8 +124,10 @@ mod tests {
         let shutdown = Arc::new(AtomicBool::new(true)); // already set
 
         // Wrap fds as Files so they are closed on drop
+        // SAFETY: read_fd is a valid fd from pipe above; File takes ownership; not used again.
         let read_file = unsafe { File::from_raw_fd(read_fd) };
-        let _write_file = unsafe { File::from_raw_fd(write_fd) };
+        // SAFETY: write_fd is a valid fd from pipe above; File takes ownership; not used again.
+        let write_file = unsafe { File::from_raw_fd(write_fd) };
 
         let shutdown_clone = Arc::clone(&shutdown);
         let process_exited = Arc::new(AtomicBool::new(false));
@@ -130,10 +136,9 @@ mod tests {
         });
 
         // The loop checks shutdown before every read, so it should exit promptly.
-        // We close the write end (by dropping _write_file) so the read end also
+        // We close the write end (by dropping write_file) so the read end also
         // sees EOF if the loop does attempt a read.
-        // Drop write file by moving it into a block:
-        drop(_write_file);
+        drop(write_file);
 
         // Wait up to 2 seconds for the thread to finish
         let finished = handle.join().is_ok();
@@ -151,9 +156,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_reader_empty_channel_on_eof() {
-        use std::os::unix::io::FromRawFd;
+        use std::os::unix::io::FromRawFd as _;
 
         let mut fds = [0i32; 2];
+        // SAFETY: fds is a 2-element array; libc::pipe fills it with two valid fds on success.
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
         assert_eq!(ret, 0, "pipe() failed");
         let read_fd = fds[0];
@@ -162,9 +168,11 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
         let shutdown = Arc::new(AtomicBool::new(false));
 
+        // SAFETY: read_fd is a valid fd from pipe above; File takes ownership; not used again.
         let read_file = unsafe { File::from_raw_fd(read_fd) };
 
         // Close write end immediately so reader sees EOF right away
+        // SAFETY: write_fd is a valid open fd; no File handle wraps it; closing it is safe.
         unsafe { libc::close(write_fd) };
 
         let shutdown_clone = Arc::clone(&shutdown);

@@ -291,15 +291,15 @@ mod tests {
         assert_eq!(cell.hyperlink_id, None);
 
         // with_hyperlink sets the hyperlink_id to the given String
-        let linked_cell = cell.with_hyperlink("https://example.com".to_string());
+        let linked_cell = cell.with_hyperlink("https://example.com".to_owned());
         assert_eq!(
             linked_cell.hyperlink_id,
-            Some("https://example.com".to_string())
+            Some("https://example.com".to_owned())
         );
 
         // Replacing an existing hyperlink with a different one works correctly
-        let relinked = linked_cell.with_hyperlink("https://other.com".to_string());
-        assert_eq!(relinked.hyperlink_id, Some("https://other.com".to_string()));
+        let relinked = linked_cell.with_hyperlink("https://other.com".to_owned());
+        assert_eq!(relinked.hyperlink_id, Some("https://other.com".to_owned()));
 
         // Other fields are preserved after setting a hyperlink
         assert_eq!(relinked.char(), 'A');

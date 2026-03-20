@@ -118,7 +118,7 @@ fn test_osc_7_stores_cwd() {
     let mut core = super::make_term();
     core.advance(b"\x1b]7;file://localhost/tmp/test\x07");
     assert!(core.osc_data.cwd_dirty);
-    assert_eq!(core.osc_data.cwd, Some("/tmp/test".to_string()));
+    assert_eq!(core.osc_data.cwd, Some("/tmp/test".to_owned()));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn test_osc_8_hyperlink() {
     core.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
         core.osc_data.hyperlink.uri,
-        Some("https://example.com".to_string())
+        Some("https://example.com".to_owned())
     );
     // Close hyperlink
     core.advance(b"\x1b]8;;\x07");

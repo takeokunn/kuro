@@ -70,7 +70,7 @@ fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
                 .find('/')
                 .map_or(after_scheme, |i| &after_scheme[i..]);
             if path.len() <= OSC7_MAX_PATH_BYTES {
-                core.osc_data.cwd = Some(path.to_string());
+                core.osc_data.cwd = Some(path.to_owned());
                 core.osc_data.cwd_dirty = true;
             }
         }

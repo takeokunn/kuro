@@ -83,13 +83,13 @@ fn hyperlink_state_default_uri_none() {
 
 #[test]
 fn hyperlink_state_set_uri() {
-    let h = HyperlinkState { uri: Some("https://example.com".to_string()) };
+    let h = HyperlinkState { uri: Some("https://example.com".to_owned()) };
     assert_eq!(h.uri.as_deref(), Some("https://example.com"));
 }
 
 #[test]
 fn hyperlink_state_clear_uri() {
-    let mut h = HyperlinkState { uri: Some("https://example.com".to_string()) };
+    let mut h = HyperlinkState { uri: Some("https://example.com".to_owned()) };
     h.uri = None;
     assert!(h.uri.is_none());
 }
@@ -136,9 +136,9 @@ fn osc_data_push_prompt_mark() {
 
 #[test]
 fn clipboard_action_write_stores_text() {
-    let action = ClipboardAction::Write("hello clipboard".to_string());
+    let action = ClipboardAction::Write("hello clipboard".to_owned());
     match action {
-        ClipboardAction::Write(ref s) => assert_eq!(s, "hello clipboard"),
+        ClipboardAction::Write(s) => assert_eq!(s, "hello clipboard"),
         ClipboardAction::Query => panic!("expected Write"),
     }
 }

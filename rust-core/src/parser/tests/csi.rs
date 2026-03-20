@@ -2,6 +2,7 @@
 //!
 //! Module under test: `parser/csi.rs`
 //! Tier: T2 — `ProptestConfig::with_cases(500)`
+#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts: rows/cols are terminal dimensions (≤ 65535); usize→u16 is safe")]
 
 use super::*;
 

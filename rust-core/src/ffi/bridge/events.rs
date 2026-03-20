@@ -3,7 +3,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use emacs::defun;
-use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
+use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use crate::error::KuroError;
 use super::{lock_session, query_session, query_session_opt};

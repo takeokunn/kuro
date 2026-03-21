@@ -315,21 +315,18 @@
 
 (ert-deftest kuro-faces-attrs-to-face-props-default-colors ()
   ":default fg and bg → no :foreground/:background in face props."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props :default :default 0 nil)))
     (should-not (plist-get props :foreground))
     (should-not (plist-get props :background))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-bold-weight ()
   "Bold flag → :weight bold."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 1))))
+  (let ((props (kuro--attrs-to-face-props :default :default 1 nil)))
     (should (eq (plist-get props :weight) 'bold))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-dim-weight ()
   "Dim flag → :weight light."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 2))))
+  (let ((props (kuro--attrs-to-face-props :default :default 2 nil)))
     (should (eq (plist-get props :weight) 'light))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-normal-weight ()
@@ -337,27 +334,23 @@
 This is intentional: omitting :weight 'normal is more efficient than
 setting it explicitly, because Emacs inherits the default face weight
 without an extra font-metric recomputation pass."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props :default :default 0 nil)))
     ;; :weight should be absent (nil) — normal weight is inherited from default face
     (should-not (plist-get props :weight))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-italic ()
   "Italic flag → :slant italic."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 4))))
+  (let ((props (kuro--attrs-to-face-props :default :default 4 nil)))
     (should (eq (plist-get props :slant) 'italic))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-inverse ()
   "Inverse flag → :inverse-video t."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags #x40))))
+  (let ((props (kuro--attrs-to-face-props :default :default #x40 nil)))
     (should (plist-get props :inverse-video))))
 
 (ert-deftest kuro-faces-attrs-to-face-props-strikethrough ()
   "Strikethrough flag → :strike-through t."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags #x100))))
+  (let ((props (kuro--attrs-to-face-props :default :default #x100 nil)))
     (should (plist-get props :strike-through))))
 
 ;;; Group 9: kuro--apply-ffi-face-at

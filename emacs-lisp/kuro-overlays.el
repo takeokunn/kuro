@@ -33,19 +33,33 @@
 
 (declare-function kuro--get-image "kuro-ffi-osc" (image-id))
 
+(defvar kuro--blink-slow-frames-cached (max 1 (round (* 60 0.5)))
+  "Cached frame interval for slow text blink cycle (SGR 5).
+Number of render frames between each visibility toggle,
+yielding a ~0.5 Hz toggle rate (1.0 s per phase).
+Recomputed by `kuro--recompute-blink-frame-intervals' when `kuro-frame-rate' changes.")
+
+(defvar kuro--blink-fast-frames-cached (max 1 (round (* 60 0.167)))
+  "Cached frame interval for fast text blink cycle (SGR 6).
+Number of render frames between each visibility toggle,
+yielding a ~1.5 Hz toggle rate (~0.33 s per phase).
+Recomputed by `kuro--recompute-blink-frame-intervals' when `kuro-frame-rate' changes.")
+
+(defun kuro--recompute-blink-frame-intervals ()
+  "Recompute cached blink frame intervals from current `kuro-frame-rate'.
+Called from `kuro--start-render-loop' when the render loop starts."
+  (setq kuro--blink-slow-frames-cached (max 1 (round (* kuro-frame-rate 0.5))))
+  (setq kuro--blink-fast-frames-cached (max 1 (round (* kuro-frame-rate 0.167)))))
+
 (defun kuro--blink-slow-frames ()
-  "Compute frame interval for slow text blink cycle (SGR 5).
-Returns the number of render frames between each visibility toggle,
-yielding a ~0.5 Hz toggle rate (1.0 s per phase) at any frame rate.
-Uses `(max 1 ...)' to prevent division by zero in the modulo check."
-  (max 1 (round (* kuro-frame-rate 0.5))))
+  "Return frame interval for slow text blink cycle (SGR 5).
+Returns the cached value from `kuro--blink-slow-frames-cached'."
+  kuro--blink-slow-frames-cached)
 
 (defun kuro--blink-fast-frames ()
-  "Compute frame interval for fast text blink cycle (SGR 6).
-Returns the number of render frames between each visibility toggle,
-yielding a ~1.5 Hz toggle rate (~0.33 s per phase) at any frame rate.
-Uses `(max 1 ...)' to prevent division by zero in the modulo check."
-  (max 1 (round (* kuro-frame-rate 0.167))))
+  "Return frame interval for fast text blink cycle (SGR 6).
+Returns the cached value from `kuro--blink-fast-frames-cached'."
+  kuro--blink-fast-frames-cached)
 
 ;;; Buffer-local state
 
@@ -57,6 +71,9 @@ Uses `(max 1 ...)' to prevent division by zero in the modulo check."
   "List of image display overlays in the current kuro buffer.
 Each overlay has a `kuro-image' property and a `display' image spec.")
 (put 'kuro--image-overlays 'permanent-local t)
+
+(defvar kuro--face-prop-template (list 'face nil)
+  "Reusable property list for face application to avoid per-call allocation.")
 
 (defvar-local kuro--blink-frame-count 0
   "Frame counter used for blink animation timing.")
@@ -84,22 +101,6 @@ visibility state variable is consulted."
     (overlay-put ov 'kuro-blink-type blink-type)
     (overlay-put ov 'invisible (not visible))
     (push ov kuro--blink-overlays)))
-
-(defun kuro--clear-line-blink-overlays (row)
-  "Remove blink overlays on line ROW and remove them from `kuro--blink-overlays'."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line row)
-    (let ((line-start (point))
-          (line-end (1+ (line-end-position)))
-          (remaining nil))
-      (dolist (ov kuro--blink-overlays)
-        (if (and (overlay-buffer ov)
-                 (>= (overlay-start ov) line-start)
-                 (<= (overlay-end ov) line-end))
-            (delete-overlay ov)
-          (push ov remaining)))
-      (setq kuro--blink-overlays (nreverse remaining)))))
 
 (defun kuro--tick-blink-overlays ()
   "Advance the blink frame counter and toggle overlay visibility at correct intervals.
@@ -183,12 +184,6 @@ Creates an overlay with a `display' image property at the correct grid position.
 
 ;;; FFI face application with blink and hidden support
 
-(defsubst kuro--unpack-ffi-face-range (range)
-  "Unpack FFI face RANGE 5-tuple into (start end fg bg flags).
-RANGE is a proper list of the form (start-buf end-buf fg bg flags)
-as returned by `kuro-core-poll-updates-with-faces'."
-  (list (car range) (cadr range) (caddr range) (cadddr range) (car (cddddr range))))
-
 (defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags)
   "Apply FFI face data to the buffer region from START-POS to END-POS.
 FG-ENC and BG-ENC are encoded foreground/background colors (u32).
@@ -205,14 +200,16 @@ to repeat this guard."
     ;; TODO: extend encode_line_faces to emit underline_color as a 6th tuple element
     ;; when SgrAttributes::underline_color != Color::Default, then decode here.
     (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags 0)))
-      (add-text-properties start-pos end-pos `(face ,face)))
-    (cond
-     ((/= 0 (logand flags kuro--sgr-flag-blink-fast))
-      (kuro--apply-blink-overlay start-pos end-pos 'fast))
-     ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
-      (kuro--apply-blink-overlay start-pos end-pos 'slow)))
-    (when (/= 0 (logand flags kuro--sgr-flag-hidden))
-      (add-text-properties start-pos end-pos '(invisible t)))))
+      (setcar (cdr kuro--face-prop-template) face)
+      (add-text-properties start-pos end-pos kuro--face-prop-template))
+    (when (/= 0 (logand flags (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)))
+      (cond
+       ((/= 0 (logand flags kuro--sgr-flag-blink-fast))
+        (kuro--apply-blink-overlay start-pos end-pos 'fast))
+       ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
+        (kuro--apply-blink-overlay start-pos end-pos 'slow)))
+      (when (/= 0 (logand flags kuro--sgr-flag-hidden))
+        (add-text-properties start-pos end-pos '(invisible t))))))
 
 (provide 'kuro-overlays)
 

@@ -189,7 +189,7 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
 
     let mut text = String::with_capacity(cells.len());
     // face_ranges use buf_offset (not col) for start/end
-    let mut face_ranges: Vec<(usize, usize, u32, u32, u64)> = Vec::new();
+    let mut face_ranges: Vec<(usize, usize, u32, u32, u64)> = Vec::with_capacity(8);
     // col_to_buf[col] = buffer char offset; only built when has_wide is true.
     let mut col_to_buf: Vec<usize> = if has_wide {
         Vec::with_capacity(cells.len())
@@ -255,7 +255,11 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
         // that `(insert grapheme)` will consume.  Using a hard-coded 1 here caused
         // col_to_buf entries after any combining-char cell to point to the wrong
         // buffer position, corrupting cursor placement and face application.
-        buf_offset += cell.grapheme.chars().count().max(1);
+        buf_offset += if cell.grapheme.len() <= 1 {
+            1
+        } else {
+            cell.grapheme.chars().count().max(1)
+        };
     }
 
     // Push the final face segment

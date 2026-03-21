@@ -47,7 +47,7 @@
 (declare-function kuro--decode-ffi-color    "kuro-faces-color" (color-enc))
 (declare-function kuro--rgb-to-emacs        "kuro-faces-color" (rgb-value))
 (declare-function kuro--color-to-emacs      "kuro-faces-color" (color))
-(declare-function kuro--attrs-to-face-props "kuro-faces-attrs" (attrs))
+(declare-function kuro--attrs-to-face-props "kuro-faces-attrs" (fg bg attr-flags underline-color))
 
 (defconst kuro--face-cache-max-size 4096
   "Maximum number of entries in the face cache before flushing.")
@@ -92,10 +92,9 @@ This function is a no-op in non-graphical (terminal) Emacs frames."
 
 ;;; Face caching
 
-(defun kuro--make-face (attrs)
-  "Create an Emacs face spec from attribute plist ATTRS."
-  (let ((props (kuro--attrs-to-face-props attrs)))
-    (list props)))
+(defun kuro--make-face (fg bg flags underline-color)
+  "Create an Emacs face spec from decoded FG, BG, FLAGS, and UNDERLINE-COLOR."
+  (kuro--attrs-to-face-props fg bg flags underline-color))
 
 (defun kuro--get-cached-face-raw (fg-enc bg-enc flags ul-enc)
   "Get or create a cached face using raw FFI-encoded integer values.
@@ -107,8 +106,6 @@ On cache miss, decodes all values and delegates to `kuro--make-face'.
 The pre-allocated `kuro--face-cache-lookup-key' vector is mutated in-place
 for the gethash call (avoiding one cons per call).  On cache miss a new
 vector is created for puthash so stored keys are stable across future calls."
-  (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
-    (clrhash kuro--face-cache))
   ;; Normalize ul-enc: both 0 and #xFF000000 mean "no underline color".
   ;; Canonicalizing to 0 prevents duplicate cache entries for the common case.
   (let ((ul-normalized (if (or (null ul-enc)
@@ -121,19 +118,18 @@ vector is created for puthash so stored keys are stable across future calls."
     (aset kuro--face-cache-lookup-key 2 flags)
     (aset kuro--face-cache-lookup-key 3 ul-normalized)
     (or (gethash kuro--face-cache-lookup-key kuro--face-cache)
-        (let* ((fg (kuro--decode-ffi-color fg-enc))
-               (bg (kuro--decode-ffi-color bg-enc))
-               (ul-color (when (/= ul-normalized 0)
-                           (kuro--rgb-to-emacs (logand ul-enc kuro--color-rgb-mask))))
-               (attrs (list :foreground fg
-                            :background bg
-                            :flags flags
-                            :underline-color ul-color))
-               (face (kuro--make-face attrs)))
-          ;; Store a fresh vector as the cache key so the lookup key can be
-          ;; mutated next call without corrupting the stored hash entry.
-          (puthash (vector fg-enc bg-enc flags ul-normalized)
-                   face kuro--face-cache)))))
+        (progn
+          (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
+            (clrhash kuro--face-cache))
+          (let* ((fg (kuro--decode-ffi-color fg-enc))
+                 (bg (kuro--decode-ffi-color bg-enc))
+                 (ul-color (when (/= ul-normalized 0)
+                             (kuro--rgb-to-emacs (logand ul-enc kuro--color-rgb-mask))))
+                 (face (kuro--make-face fg bg flags ul-color)))
+            ;; Store a fresh vector as the cache key so the lookup key can be
+            ;; mutated next call without corrupting the stored hash entry.
+            (puthash (vector fg-enc bg-enc flags ul-normalized)
+                     face kuro--face-cache))))))
 
 (defsubst kuro--clear-face-cache ()
   "Clear the face cache to free memory."
@@ -194,7 +190,7 @@ Updates `kuro--named-colors' entries for indices 0-15 if overridden."
           ;; Update named-colors for indices 0-15
           (when (< idx 16)
             (let ((name (aref kuro--ansi-color-names idx)))
-              (setf (alist-get name kuro--named-colors nil nil #'string=) hex)
+              (puthash name hex kuro--named-colors)
               ;; Clear face cache since colors changed
               (kuro--clear-face-cache))))))))
 

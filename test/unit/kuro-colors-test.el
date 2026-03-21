@@ -17,31 +17,31 @@
 
 ;;; Group 1: kuro--named-colors structure
 
-(ert-deftest kuro-colors--named-colors-is-alist ()
-  "kuro--named-colors must be an alist (list of cons cells)."
+(ert-deftest kuro-colors--named-colors-is-hash-table ()
+  "kuro--named-colors must be a hash table."
   (kuro--rebuild-named-colors)
-  (should (listp kuro--named-colors))
-  (dolist (entry kuro--named-colors)
-    (should (consp entry))))
+  (should (hash-table-p kuro--named-colors)))
 
 (ert-deftest kuro-colors--named-colors-has-16-entries ()
   "kuro--named-colors must have exactly 16 entries after rebuild."
   (kuro--rebuild-named-colors)
-  (should (= (length kuro--named-colors) 16)))
+  (should (= (hash-table-count kuro--named-colors) 16)))
 
 (ert-deftest kuro-colors--named-colors-keys-are-strings ()
   "Every key in kuro--named-colors must be a non-empty string."
   (kuro--rebuild-named-colors)
-  (dolist (entry kuro--named-colors)
-    (should (stringp (car entry)))
-    (should (> (length (car entry)) 0))))
+  (maphash (lambda (k _v)
+             (should (stringp k))
+             (should (> (length k) 0)))
+           kuro--named-colors))
 
 (ert-deftest kuro-colors--named-colors-values-are-hex-strings ()
   "Every value in kuro--named-colors must match #RRGGBB."
   (kuro--rebuild-named-colors)
-  (dolist (entry kuro--named-colors)
-    (should (stringp (cdr entry)))
-    (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" (cdr entry)))))
+  (maphash (lambda (_k v)
+             (should (stringp v))
+             (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" v)))
+           kuro--named-colors))
 
 (ert-deftest kuro-colors--named-colors-contains-all-16-keys ()
   "kuro--named-colors must contain all 16 expected ANSI color name keys."
@@ -50,14 +50,12 @@
                  "blue" "magenta" "cyan" "white"
                  "bright-black" "bright-red" "bright-green" "bright-yellow"
                  "bright-blue" "bright-magenta" "bright-cyan" "bright-white"))
-    (should (assoc key kuro--named-colors))))
+    (should (gethash key kuro--named-colors))))
 
 (ert-deftest kuro-colors--named-colors-bright-black-key ()
-  "The bright-black entry key must be \"bright-black\" (hyphenated)."
+  "The bright-black entry must exist with the correct value."
   (kuro--rebuild-named-colors)
-  (let ((entry (assoc "bright-black" kuro--named-colors)))
-    (should entry)
-    (should (equal (car entry) "bright-black"))))
+  (should (gethash "bright-black" kuro--named-colors)))
 
 ;;; Group 2: kuro--rebuild-named-colors
 
@@ -68,35 +66,29 @@
         (progn
           (setq kuro-color-green "#123456")
           (kuro--rebuild-named-colors)
-          (let ((entry (assoc "green" kuro--named-colors)))
-            (should entry)
-            (should (equal (cdr entry) "#123456"))))
+          (should (equal (gethash "green" kuro--named-colors) "#123456")))
       (setq kuro-color-green original)
       (kuro--rebuild-named-colors))))
 
 (ert-deftest kuro-colors--rebuild-named-colors-idempotent ()
   "Calling kuro--rebuild-named-colors twice produces the same result."
   (kuro--rebuild-named-colors)
-  (let ((first-result (copy-sequence kuro--named-colors)))
+  (let ((first-result (copy-hash-table kuro--named-colors)))
     (kuro--rebuild-named-colors)
-    (should (equal (length kuro--named-colors) (length first-result)))
-    (dolist (entry first-result)
-      (should (equal (cdr (assoc (car entry) kuro--named-colors))
-                     (cdr entry))))))
+    (should (= (hash-table-count kuro--named-colors) (hash-table-count first-result)))
+    (maphash (lambda (k v)
+               (should (equal (gethash k kuro--named-colors) v)))
+             first-result)))
 
 (ert-deftest kuro-colors--rebuild-named-colors-black-maps-to-defcustom ()
   "\"black\" key value matches kuro-color-black defcustom."
   (kuro--rebuild-named-colors)
-  (let ((entry (assoc "black" kuro--named-colors)))
-    (should entry)
-    (should (equal (cdr entry) kuro-color-black))))
+  (should (equal (gethash "black" kuro--named-colors) kuro-color-black)))
 
 (ert-deftest kuro-colors--rebuild-named-colors-bright-white-maps-to-defcustom ()
   "\"bright-white\" key value matches kuro-color-bright-white defcustom."
   (kuro--rebuild-named-colors)
-  (let ((entry (assoc "bright-white" kuro--named-colors)))
-    (should entry)
-    (should (equal (cdr entry) kuro-color-bright-white))))
+  (should (equal (gethash "bright-white" kuro--named-colors) kuro-color-bright-white)))
 
 ;;; Group 3: kuro--set-color validator
 
@@ -152,9 +144,7 @@
     (unwind-protect
         (progn
           (kuro--set-color 'kuro-color-magenta "#aabbcc")
-          (let ((entry (assoc "magenta" kuro--named-colors)))
-            (should entry)
-            (should (equal (cdr entry) "#aabbcc"))))
+          (should (equal (gethash "magenta" kuro--named-colors) "#aabbcc")))
       (set-default 'kuro-color-magenta orig)
       (kuro--rebuild-named-colors))))
 

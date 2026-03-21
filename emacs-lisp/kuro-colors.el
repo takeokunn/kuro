@@ -36,8 +36,8 @@
 
 ;;; Internal Color Table
 
-(defvar kuro--named-colors nil
-  "Internal alist mapping ANSI color names to hex color strings.
+(defvar kuro--named-colors (make-hash-table :test 'equal :size 16)
+  "Internal hash table mapping ANSI color names to hex color strings.
 Rebuilt automatically from `kuro-color-*' defcustom values by
 `kuro--rebuild-named-colors'.  Do not set this variable directly.")
 
@@ -47,23 +47,23 @@ Called at file load and by each color `defcustom' `:set' handler.
 Skips rebuild silently if any color variable is not yet bound (e.g.
 during `defcustom' initialization before all 16 colors are defined)."
   (when (boundp 'kuro-color-bright-white)
-    (setq kuro--named-colors
-          (list (cons "black"          kuro-color-black)
-                (cons "red"            kuro-color-red)
-                (cons "green"          kuro-color-green)
-                (cons "yellow"         kuro-color-yellow)
-                (cons "blue"           kuro-color-blue)
-                (cons "magenta"        kuro-color-magenta)
-                (cons "cyan"           kuro-color-cyan)
-                (cons "white"          kuro-color-white)
-                (cons "bright-black"   kuro-color-bright-black)
-                (cons "bright-red"     kuro-color-bright-red)
-                (cons "bright-green"   kuro-color-bright-green)
-                (cons "bright-yellow"  kuro-color-bright-yellow)
-                (cons "bright-blue"    kuro-color-bright-blue)
-                (cons "bright-magenta" kuro-color-bright-magenta)
-                (cons "bright-cyan"    kuro-color-bright-cyan)
-                (cons "bright-white"   kuro-color-bright-white)))))
+    (clrhash kuro--named-colors)
+    (puthash "black"          kuro-color-black          kuro--named-colors)
+    (puthash "red"            kuro-color-red            kuro--named-colors)
+    (puthash "green"          kuro-color-green          kuro--named-colors)
+    (puthash "yellow"         kuro-color-yellow         kuro--named-colors)
+    (puthash "blue"           kuro-color-blue           kuro--named-colors)
+    (puthash "magenta"        kuro-color-magenta        kuro--named-colors)
+    (puthash "cyan"           kuro-color-cyan           kuro--named-colors)
+    (puthash "white"          kuro-color-white          kuro--named-colors)
+    (puthash "bright-black"   kuro-color-bright-black   kuro--named-colors)
+    (puthash "bright-red"     kuro-color-bright-red     kuro--named-colors)
+    (puthash "bright-green"   kuro-color-bright-green   kuro--named-colors)
+    (puthash "bright-yellow"  kuro-color-bright-yellow  kuro--named-colors)
+    (puthash "bright-blue"    kuro-color-bright-blue    kuro--named-colors)
+    (puthash "bright-magenta" kuro-color-bright-magenta kuro--named-colors)
+    (puthash "bright-cyan"    kuro-color-bright-cyan    kuro--named-colors)
+    (puthash "bright-white"   kuro-color-bright-white   kuro--named-colors)))
 
 ;;; :set handler for color defcustoms
 

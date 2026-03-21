@@ -13,17 +13,19 @@
 
 (require 'kuro-ffi)
 
-(declare-function kuro-core-get-cursor-visible  "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-cursor-shape    "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-app-cursor-keys "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-app-keypad      "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-bracketed-paste "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-mouse-mode      "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-mouse-sgr       "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-focus-events    "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-sync-output     "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-keyboard-flags  "ext:kuro-core" (session-id))
-(declare-function kuro-core-get-mouse-pixel     "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-cursor-visible   "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-cursor-shape     "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-cursor-state     "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-app-cursor-keys  "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-app-keypad       "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-bracketed-paste  "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-mouse-mode       "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-mouse-sgr        "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-focus-events     "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-sync-output      "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-keyboard-flags   "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-mouse-pixel      "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-terminal-modes   "ext:kuro-core" (session-id))
 
 ;;; Cursor visibility / shape
 
@@ -100,6 +102,23 @@ Returns 0 if not initialized or on error."
   "Return t if SGR pixel mouse coordinate mode (?1016) is active.
 Returns nil if not initialized or on error."
   (kuro--call nil (kuro-core-get-mouse-pixel kuro--session-id)))
+
+;;; Consolidated queries (PERF-004, PERF-005)
+
+(defun kuro--get-cursor-state ()
+  "Get all cursor state in a single FFI call.
+Returns a list (ROW COL VISIBLE SHAPE) where:
+  ROW, COL: cursor position (integers)
+  VISIBLE: t or nil (DECTCEM state)
+  SHAPE: DECSCUSR integer (0-6)
+Returns nil if not initialized or on error."
+  (kuro--call nil (kuro-core-get-cursor-state kuro--session-id)))
+
+(defun kuro--get-terminal-modes ()
+  "Get all terminal mode flags in a single FFI call.
+Returns a list (APP-CURSOR-KEYS APP-KEYPAD MOUSE-MODE MOUSE-SGR
+MOUSE-PIXEL BRACKETED-PASTE KEYBOARD-FLAGS) or nil on error."
+  (kuro--call nil (kuro-core-get-terminal-modes kuro--session-id)))
 
 (provide 'kuro-ffi-modes)
 

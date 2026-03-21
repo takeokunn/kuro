@@ -81,6 +81,15 @@
 ;; kuro-overlays.el
 (defvar kuro--blink-overlays nil
   "Forward reference; defvar-local in kuro-overlays.el.")
+;; kuro-render-buffer.el
+(defvar kuro--last-cursor-row nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-col nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-visible nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-shape nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
 ;; kuro-input-mouse.el
 (defvar kuro--mouse-mode 0
   "Forward reference; defvar-local in kuro-input-mouse.el.")
@@ -128,6 +137,12 @@ Switches to the terminal buffer after creation."
           (kuro--set-scrollback-max-lines kuro-scrollback-size)
           (setq kuro--scroll-offset 0)
           (kuro--apply-font-to-buffer buffer)
+          ;; Reset cursor cache so the first render frame always computes
+          ;; cursor position instead of hitting the unchanged-state fast path.
+          (setq kuro--last-cursor-row nil
+                kuro--last-cursor-col nil
+                kuro--last-cursor-visible nil
+                kuro--last-cursor-shape nil)
           (kuro--start-render-loop)
           ;; Schedule an immediate render so the shell prompt appears at once
           ;; instead of waiting for the first periodic timer tick (~16ms at 60fps).
@@ -228,7 +243,7 @@ detached session."
         (let ((inhibit-read-only t))
           (erase-buffer)
           (insert "Kuro Terminal Sessions\n")
-          (insert "======================\n\n")
+          (insert "----------------------\n\n")
           (dolist (entry sessions)
             (let* ((id         (nth 0 entry))
                    (cmd        (nth 1 entry))
@@ -272,6 +287,12 @@ detached state (see `kuro-list-sessions' and `kuro-kill')."
             (setq kuro--scroll-offset 0)
             (kuro--set-scrollback-max-lines kuro-scrollback-size)
             (kuro--apply-font-to-buffer buffer)
+            ;; Reset cursor cache so the first render frame always computes
+            ;; cursor position instead of hitting the unchanged-state fast path.
+            (setq kuro--last-cursor-row nil
+                  kuro--last-cursor-col nil
+                  kuro--last-cursor-visible nil
+                  kuro--last-cursor-shape nil)
             ;; Resize to match the new window — the detached PTY may have a
             ;; different geometry from when it was last attached.
             (kuro--resize rows cols)

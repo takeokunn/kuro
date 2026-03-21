@@ -89,18 +89,16 @@
 ;;; Group 2: kuro--rebuild-named-colors
 
 (ert-deftest test-kuro-rebuild-named-colors-basic ()
-  "After kuro--rebuild-named-colors, kuro--named-colors is a list and
+  "After kuro--rebuild-named-colors, kuro--named-colors is a hash table and
 \"black\" maps to the value of kuro-color-black."
   (kuro--rebuild-named-colors)
-  (should (listp kuro--named-colors))
-  (let ((entry (assoc "black" kuro--named-colors)))
-    (should entry)
-    (should (equal (cdr entry) kuro-color-black))))
+  (should (hash-table-p kuro--named-colors))
+  (should (equal (gethash "black" kuro--named-colors) kuro-color-black)))
 
 (ert-deftest test-kuro-rebuild-named-colors-length ()
   "kuro--named-colors has exactly 16 entries (8 normal + 8 bright)."
   (kuro--rebuild-named-colors)
-  (should (= (length kuro--named-colors) 16)))
+  (should (= (hash-table-count kuro--named-colors) 16)))
 
 (ert-deftest test-kuro-rebuild-named-colors-reflects-custom ()
   "Changing kuro-color-red and calling kuro--rebuild-named-colors updates
@@ -110,9 +108,7 @@ the \"red\" entry in kuro--named-colors."
         (progn
           (setq kuro-color-red "#abcdef")
           (kuro--rebuild-named-colors)
-          (let ((entry (assoc "red" kuro--named-colors)))
-            (should entry)
-            (should (equal (cdr entry) "#abcdef"))))
+          (should (equal (gethash "red" kuro--named-colors) "#abcdef")))
       ;; Restore original value and rebuild so other tests are unaffected.
       (setq kuro-color-red original-red)
       (kuro--rebuild-named-colors))))
@@ -125,7 +121,7 @@ the \"red\" entry in kuro--named-colors."
                          "bright-black" "bright-red" "bright-green" "bright-yellow"
                          "bright-blue" "bright-magenta" "bright-cyan" "bright-white")))
     (dolist (key expected-keys)
-      (should (assoc key kuro--named-colors)))))
+      (should (gethash key kuro--named-colors)))))
 
 ;;; Group 3: kuro-validate-config (interactive wrapper)
 

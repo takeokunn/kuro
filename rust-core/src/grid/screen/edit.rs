@@ -38,6 +38,9 @@ impl Screen {
         // Clamp to lines available between cursor and scroll region bottom
         let count = count.min(bottom - cursor_row);
 
+        // NOTE: O(n * region_size) for n > 1 due to per-iteration VecDeque::remove + insert.
+        // Acceptable because n == 1 is the overwhelmingly common case (single line scroll).
+        // A batch drain+splice approach would be O(region_size) but adds complexity.
         for _ in 0..count {
             // Discard the bottom-most line in the scroll region
             screen.lines.remove(bottom - 1);
@@ -73,6 +76,9 @@ impl Screen {
         // Clamp to lines available between cursor and scroll region bottom
         let count = count.min(bottom - cursor_row);
 
+        // NOTE: O(n * region_size) for n > 1 due to per-iteration VecDeque::remove + insert.
+        // Acceptable because n == 1 is the overwhelmingly common case (single line scroll).
+        // A batch drain+splice approach would be O(region_size) but adds complexity.
         for _ in 0..count {
             // Remove the line at the cursor row (shifts lines below it up)
             screen.lines.remove(cursor_row);
@@ -115,13 +121,16 @@ impl Screen {
                 line.cells[cursor_col - 1] = Cell::default();
             }
 
-            // Drain everything from cursor_col onward, keep only the non-overflowing tail
-            let tail: Vec<Cell> = line.cells.drain(cursor_col..).collect();
-            for _ in 0..count {
-                line.cells.push(blank.clone());
+            // In-place rotation: shift existing cells right, discarding overflow
+            let cols = line.cells.len();
+            if cursor_col < cols {
+                let count = count.min(cols - cursor_col);
+                line.cells[cursor_col..].rotate_right(count);
+                // Fill the inserted positions with blanks
+                for cell in &mut line.cells[cursor_col..cursor_col + count] {
+                    *cell = blank.clone();
+                }
             }
-            let keep = tail.len().saturating_sub(count);
-            line.cells.extend_from_slice(&tail[..keep]);
 
             line.is_dirty = true;
             screen.mark_dirty_range(cursor_row, cursor_row + 1);
@@ -200,10 +209,10 @@ impl Screen {
                 end
             };
 
+            let mut blank = Cell::default();
+            blank.attrs.background = attrs.background;
             for col in erase_start..erase_end {
-                let mut blank = Cell::default();
-                blank.attrs.background = attrs.background;
-                line.cells[col] = blank;
+                line.cells[col] = blank.clone();
             }
             line.is_dirty = true;
             screen.mark_dirty_range(cursor_row, cursor_row + 1);

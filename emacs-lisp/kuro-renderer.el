@@ -86,6 +86,7 @@
 (declare-function kuro--render-image-notification "kuro-overlays"    (notif))
 (declare-function kuro--apply-buffer-scroll     "kuro-render-buffer" (up down))
 (declare-function kuro--tick-blink-overlays     "kuro-overlays"      ())
+(declare-function kuro--recompute-blink-frame-intervals "kuro-overlays" ())
 (declare-function kuro--start-stream-idle-timer    "kuro-stream"        ())
 (declare-function kuro--stop-stream-idle-timer     "kuro-stream"        ())
 (declare-function kuro--update-prompt-positions    "kuro-navigation"    (marks positions max-count))
@@ -161,6 +162,8 @@ Also starts the low-latency streaming idle timer when
 `kuro-streaming-latency-mode' is non-nil."
   (when (timerp kuro--timer)
     (cancel-timer kuro--timer))
+  ;; Recompute cached blink intervals in case kuro-frame-rate changed.
+  (kuro--recompute-blink-frame-intervals)
   (let ((buf (current-buffer)))
     (setq kuro--timer
           (run-with-timer
@@ -213,6 +216,7 @@ resize calls concurrently."
         ;; newlines, which overcounts by 1 when the buffer has a trailing \n
         ;; (the normal state — each row is terminated by \n).
         (let ((inhibit-read-only t)
+              (inhibit-modification-hooks t)
               (current-rows (1- (line-number-at-pos (point-max)))))
           (cond
            ((< current-rows new-rows)
@@ -288,14 +292,17 @@ function runs) to gate two polling tiers:
 Tiering reduces unconditional per-frame Mutex acquisitions from ~11 to ~5,
 cutting lock contention between the Emacs timer thread and the PTY reader."
   (when (zerop (mod kuro--mode-poll-frame-count kuro--mode-poll-cadence))
-    ;; Terminal mode queries (changes are rare; 167ms lag is imperceptible)
-    (setq kuro--application-cursor-keys-mode (kuro--get-app-cursor-keys))
-    (setq kuro--app-keypad-mode (kuro--get-app-keypad))
-    (setq kuro--mouse-mode (kuro--get-mouse-mode))
-    (setq kuro--mouse-sgr (kuro--get-mouse-sgr))
-    (setq kuro--mouse-pixel-mode (kuro--get-mouse-pixel))
-    (setq kuro--bracketed-paste-mode (kuro--get-bracketed-paste))
-    (setq kuro--keyboard-flags (or (kuro--get-keyboard-flags) 0))
+    ;; Terminal mode queries — single consolidated FFI call (PERF-005)
+    ;; replaces 7 individual Mutex acquisitions with one.
+    (let ((modes (kuro--get-terminal-modes)))
+      (when modes
+        (setq kuro--application-cursor-keys-mode (nth 0 modes)
+              kuro--app-keypad-mode              (nth 1 modes)
+              kuro--mouse-mode                   (nth 2 modes)
+              kuro--mouse-sgr                    (nth 3 modes)
+              kuro--mouse-pixel-mode             (nth 4 modes)
+              kuro--bracketed-paste-mode         (nth 5 modes)
+              kuro--keyboard-flags               (or (nth 6 modes) 0))))
     ;; CWD (OSC 7): shell-rate events; 167ms lag acceptable
     (let ((cwd (kuro--get-cwd)))
       (when (and cwd (stringp cwd) (not (string-empty-p cwd)))
@@ -496,7 +503,8 @@ on complex TUI apps like Claude Code."
         ;; `kuro--update-line-full' and pre-existing overlays on non-dirty rows
         ;; see the same blink phase.  Previously this ran before dirty updates,
         ;; causing a one-frame phase mismatch between dirty and non-dirty rows.
-        (kuro--tick-blink-overlays)))))
+        (when kuro--blink-overlays
+          (kuro--tick-blink-overlays))))))
 
 (provide 'kuro-renderer)
 

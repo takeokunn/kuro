@@ -323,7 +323,7 @@ impl Pty {
     /// # Errors
     /// Never returns an error in the current implementation (channel `try_recv` is infallible after data arrives).
     pub fn read(&mut self) -> Result<Vec<u8>> {
-        let mut all_data = Vec::new();
+        let mut all_data = Vec::with_capacity(8192);
 
         // Drain all available data from the channel
         while let Ok(data) = self.receiver.try_recv() {

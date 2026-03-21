@@ -107,12 +107,12 @@ impl TerminalSession {
     ///
     /// # Errors
     /// Returns `Err` if reading from or writing to the PTY file descriptor fails.
-    pub fn poll_output(&mut self) -> Result<Vec<u8>> {
+    pub fn poll_output(&mut self) -> Result<()> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
-            let mut all_data = pty.read()?;
-            if !all_data.is_empty() {
-                self.core.advance(&all_data);
+            let data = pty.read()?;
+            if !data.is_empty() {
+                self.core.advance(&data);
 
                 // Second drain: yield to let the reader thread push any
                 // in-flight data, then drain again.  This coalesces two
@@ -121,18 +121,15 @@ impl TerminalSession {
                 let more = pty.read()?;
                 if !more.is_empty() {
                     self.core.advance(&more);
-                    all_data.extend(more);
                 }
 
                 // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
                 for response in self.core.meta.pending_responses.drain(..) {
                     pty.write(&response)?;
                 }
-
-                return Ok(all_data);
             }
         }
-        Ok(Vec::new())
+        Ok(())
     }
 
     /// Get dirty lines from screen (text only, no face ranges)

@@ -56,9 +56,10 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                 } else {
                     col
                 };
+                let mut blank = Cell::default();
+                blank.attrs.background = bg;
                 for c in erase_start..line.cells.len() {
-                    line.cells[c] = Cell::default();
-                    line.cells[c].attrs.background = bg;
+                    line.cells[c] = blank.clone();
                 }
             }
             term.screen.mark_line_dirty(row);
@@ -90,9 +91,10 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                     } else {
                         col + 1
                     };
+                let mut blank = Cell::default();
+                blank.attrs.background = bg;
                 for c in 0..erase_end {
-                    line.cells[c] = Cell::default();
-                    line.cells[c].attrs.background = bg;
+                    line.cells[c] = blank.clone();
                 }
             }
             term.screen.mark_line_dirty(row);
@@ -150,9 +152,10 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
                 } else {
                     col
                 };
+                let mut blank = Cell::default();
+                blank.attrs.background = bg;
                 for c in erase_start..line.cells.len() {
-                    line.cells[c] = Cell::default();
-                    line.cells[c].attrs.background = bg;
+                    line.cells[c] = blank.clone();
                 }
             }
             1 => {
@@ -164,9 +167,10 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
                     } else {
                         col + 1
                     };
+                let mut blank = Cell::default();
+                blank.attrs.background = bg;
                 for c in 0..erase_end {
-                    line.cells[c] = Cell::default();
-                    line.cells[c].attrs.background = bg;
+                    line.cells[c] = blank.clone();
                 }
             }
             2 => {

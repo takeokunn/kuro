@@ -171,56 +171,47 @@
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-empty-returns-no-weight ()
   "Default attrs (flags=0) → no :weight in the face props (inherit from default)."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props :default :default 0 nil)))
     (should-not (plist-get props :weight))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-bold ()
   "Bold flag (0x01) → :weight bold."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 1))))
+  (let ((props (kuro--attrs-to-face-props :default :default 1 nil)))
     (should (eq (plist-get props :weight) 'bold))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-dim ()
   "Dim flag (0x02) → :weight light."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 2))))
+  (let ((props (kuro--attrs-to-face-props :default :default 2 nil)))
     (should (eq (plist-get props :weight) 'light))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-italic ()
   "Italic flag (0x04) → :slant italic."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 4))))
+  (let ((props (kuro--attrs-to-face-props :default :default 4 nil)))
     (should (eq (plist-get props :slant) 'italic))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-no-italic-omits-slant ()
   "No italic → :slant absent (nil), to inherit from default face."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props :default :default 0 nil)))
     (should-not (plist-get props :slant))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-strikethrough ()
   "Strikethrough flag (0x100) → :strike-through t."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags #x100))))
+  (let ((props (kuro--attrs-to-face-props :default :default #x100 nil)))
     (should (plist-get props :strike-through))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-inverse ()
   "Inverse flag (0x40) → :inverse-video t."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags #x40))))
+  (let ((props (kuro--attrs-to-face-props :default :default #x40 nil)))
     (should (plist-get props :inverse-video))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-rgb-foreground ()
   "RGB foreground → :foreground #rrggbb hex string."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground (rgb . #xFF8000) :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props '(rgb . #xFF8000) :default 0 nil)))
     (should (equal (plist-get props :foreground) "#ff8000"))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-default-fg-bg-omitted ()
   ":default fg and bg → no :foreground or :background in output."
-  (let ((props (kuro--attrs-to-face-props
-                '(:foreground :default :background :default :flags 0))))
+  (let ((props (kuro--attrs-to-face-props :default :default 0 nil)))
     (should-not (plist-get props :foreground))
     (should-not (plist-get props :background))))
 
@@ -228,8 +219,7 @@
   "Underline bit + style 3 → :underline (:style wave)."
   ;; bits: underline=0x08, style=3 (0x600)
   (let* ((flags (logior #x08 #x600))
-         (props (kuro--attrs-to-face-props
-                 (list :foreground :default :background :default :flags flags))))
+         (props (kuro--attrs-to-face-props :default :default flags nil)))
     (let ((ul (plist-get props :underline)))
       (should ul)
       (should (eq (plist-get ul :style) 'wave)))))

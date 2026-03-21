@@ -67,7 +67,7 @@ impl TerminalSession {
         }
 
         let dirty_indices = self.core.screen.take_dirty_lines();
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(dirty_indices.len());
 
         for row in dirty_indices {
             if let Some(line) = self.core.screen.get_line(row) {

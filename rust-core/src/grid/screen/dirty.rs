@@ -58,9 +58,8 @@ impl Screen {
                     alt.dirty_set.clear();
                     return (0..alt.rows as usize).collect();
                 }
-                let mut dirty: Vec<usize> = alt.dirty_set.iter().collect();
+                let dirty: Vec<usize> = alt.dirty_set.iter_ones_direct().collect();
                 alt.dirty_set.clear();
-                dirty.sort_unstable();
                 return dirty;
             }
         }
@@ -70,9 +69,8 @@ impl Screen {
             self.dirty_set.clear();
             (0..self.rows as usize).collect()
         } else {
-            let mut dirty: Vec<usize> = self.dirty_set.iter().collect();
+            let dirty: Vec<usize> = self.dirty_set.iter_ones_direct().collect();
             self.dirty_set.clear();
-            dirty.sort_unstable();
             dirty
         }
     }

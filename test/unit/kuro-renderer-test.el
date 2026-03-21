@@ -169,10 +169,8 @@
   (kuro-renderer-test--with-buffer
     (insert "row0\nrow1\nrow2\n")
     (setq kuro--cursor-marker (point-marker))
-    ;; Stub FFI to return cursor at (1, 2)
-    (cl-letf (((symbol-function 'kuro--get-cursor)        (lambda () '(1 . 2)))
-              ((symbol-function 'kuro--get-cursor-visible) (lambda () t))
-              ((symbol-function 'kuro--get-cursor-shape)   (lambda () 0)))
+    ;; Stub consolidated FFI to return cursor at row=1, col=2, visible=t, shape=0
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0))))
       (kuro--update-cursor))
     ;; Row 1, col 2 → "row1\n" starts at position 6, col 2 → pos 8
     (should (= (marker-position kuro--cursor-marker) 8))))
@@ -182,9 +180,7 @@
   (kuro-renderer-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor)        (lambda () '(0 . 0)))
-              ((symbol-function 'kuro--get-cursor-visible) (lambda () nil))
-              ((symbol-function 'kuro--get-cursor-shape)   (lambda () 0)))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0))))
       (kuro--update-cursor))
     (should-not cursor-type)))
 
@@ -196,9 +192,8 @@
     (dolist (shape-pair '((0 . box) (1 . box) (2 . box)
                           (3 . (hbar . 2)) (4 . (hbar . 2))
                           (5 . (bar . 2)) (6 . (bar . 2))))
-      (cl-letf (((symbol-function 'kuro--get-cursor)        (lambda () '(0 . 0)))
-                ((symbol-function 'kuro--get-cursor-visible) (lambda () t))
-                ((symbol-function 'kuro--get-cursor-shape)   (lambda () (car shape-pair))))
+      (cl-letf (((symbol-function 'kuro--get-cursor-state)
+                 (lambda () (list 0 0 t (car shape-pair)))))
         (kuro--update-cursor))
       (should (equal cursor-type (cdr shape-pair))))))
 
@@ -210,7 +205,8 @@
           kuro--scroll-offset 5)
     ;; Mock should NOT be called — if it is, the test will error
     (let ((called nil))
-      (cl-letf (((symbol-function 'kuro--get-cursor) (lambda () (setq called t) nil)))
+      (cl-letf (((symbol-function 'kuro--get-cursor-state)
+                 (lambda () (setq called t) nil)))
         (kuro--update-cursor))
       (should-not called))))
 

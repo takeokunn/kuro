@@ -27,3 +27,7 @@ base64 = "0.22"
 png = "0.17"
 crossbeam-channel = "0.5"
 memchr = "2.7"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

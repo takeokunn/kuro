@@ -158,7 +158,12 @@ impl Screen {
         let col = screen.cursor.col;
 
         // Determine character width using Unicode width
-        let width = UnicodeWidthChar::width(c).unwrap_or(1);
+        // ASCII fast-path: single comparison avoids the full Unicode lookup
+        let width = if c.is_ascii() {
+            1
+        } else {
+            UnicodeWidthChar::width(c).unwrap_or(1)
+        };
         let cell_width = if width > 1 {
             CellWidth::Full
         } else {
@@ -168,9 +173,7 @@ impl Screen {
         // Check if character fits on current line
         if col + width <= screen.cols as usize {
             // Create and update the main cell
-            let mut cell = Cell::new(c);
-            cell.attrs = attrs;
-            cell.width = cell_width;
+            let cell = Cell::with_char_and_width(c, attrs, cell_width);
 
             if let Some(line) = screen.lines.get_mut(row) {
                 line.update_cell_with(col, cell);
@@ -207,9 +210,7 @@ impl Screen {
             // Print on next line if it fits
             if width <= screen.cols as usize {
                 let new_row = screen.cursor.row;
-                let mut cell = Cell::new(c);
-                cell.attrs = attrs;
-                cell.width = cell_width;
+                let cell = Cell::with_char_and_width(c, attrs, cell_width);
 
                 if let Some(line) = screen.lines.get_mut(new_row) {
                     line.update_cell_with(0, cell);

@@ -1,5 +1,7 @@
 //! Scroll region and scroll event methods for Screen
 
+use std::mem;
+
 use super::{Color, Line, Screen, ScrollRegion};
 
 /// Push `line` onto the scrollback buffer of `screen`, evicting the oldest
@@ -38,25 +40,25 @@ impl Screen {
         if top == 0 && bottom == rows && is_primary {
             let n_actual = n.min(rows);
 
-            // Save the lines that will be rotated out to the scrollback buffer.
+            // Swap each evicted line with a fresh blank, saving the original
+            // to scrollback WITHOUT cloning.  After `rotate_left(n_actual)`
+            // these blank lines end up at positions `rows-n_actual..rows`,
+            // which is exactly where we would have filled blanks anyway.
+            // This eliminates one full `Line` clone per evicted row.
             for i in 0..n_actual {
-                if let Some(line) = self.lines.get(i).cloned() {
-                    push_to_scrollback(self, line);
+                if let Some(line) = self.lines.get_mut(i) {
+                    let evicted = mem::replace(line, Line::new_with_bg(self.cols as usize, bg));
+                    push_to_scrollback(self, evicted);
                 }
             }
 
             // O(n) rotation: shifts indices [0..rows) left by n_actual.
+            // The blank lines we just placed at [0..n_actual) rotate to
+            // [rows-n_actual..rows), so no post-rotation blank fill needed.
             self.lines.rotate_left(n_actual);
 
             // Shift dirty bits to match the rotated content.
             self.dirty_set.shift_left(n_actual);
-
-            // Replace the now-stale tail lines with fresh blank lines.
-            for i in (rows - n_actual)..rows {
-                if let Some(line) = self.lines.get_mut(i) {
-                    *line = Line::new_with_bg(self.cols as usize, bg);
-                }
-            }
 
             // Mark ALL lines dirty so Emacs rewrites every row from Rust state.
             //
@@ -76,14 +78,22 @@ impl Screen {
             self.graphics.scroll_up(n_actual);
         } else {
             // Partial-region scroll: fall back to remove+insert.
+            // Each iteration is O(min(top, len-top)) for both remove and
+            // insert.  For n > 1 this is O(n * region_size), but n > 1 is
+            // extremely rare in practice (most terminal applications scroll
+            // one line at a time).  A batch drain+splice approach would be
+            // O(region_size) regardless of n, but adds complexity and risk
+            // to this correctness-critical path.
             for _ in 0..n {
                 if top == 0 && is_primary {
-                    if let Some(line) = self.lines.get(top).cloned() {
-                        push_to_scrollback(self, line);
+                    // `remove` returns the evicted line — use it directly
+                    // instead of cloning before removal.
+                    if let Some(evicted) = self.lines.remove(top) {
+                        push_to_scrollback(self, evicted);
                     }
+                } else {
+                    self.lines.remove(top);
                 }
-
-                self.lines.remove(top);
                 let new_line = Line::new_with_bg(self.cols as usize, bg);
                 self.lines.insert(bottom - 1, new_line);
 

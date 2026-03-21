@@ -89,9 +89,11 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     }
 
     // --- vte parser for all other sequences ---
-    let mut parser = std::mem::replace(&mut core.parser, vte::Parser::new());
+    // `take()` writes `None` (a single discriminant byte) instead of allocating
+    // a fresh `vte::Parser` (~400 bytes of zeroed state) on every call.
+    let mut parser = core.parser.take().expect("parser must be present");
     parser.advance(core, bytes);
-    core.parser = parser;
+    core.parser = Some(parser);
 }
 
 #[cfg(test)]

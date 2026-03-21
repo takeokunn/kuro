@@ -75,38 +75,6 @@ Sets the following buffer-local variables:
     (let ((ov (car kuro--blink-overlays)))
       (should (overlay-get ov 'invisible)))))
 
-(ert-deftest kuro-overlays-clear-line-blink-overlays-removes-on-row ()
-  "kuro--clear-line-blink-overlays removes overlays on the specified row."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\nline2\n")
-    ;; Add blink overlay on row 1 (line2)
-    (save-excursion
-      (goto-char (point-min))
-      (forward-line 1)
-      (kuro--apply-blink-overlay (point) (line-end-position) 'slow))
-    (should (= (length kuro--blink-overlays) 1))
-    ;; Clear row 1
-    (kuro--clear-line-blink-overlays 1)
-    (should (= (length kuro--blink-overlays) 0))))
-
-(ert-deftest kuro-overlays-clear-line-blink-overlays-preserves-other-rows ()
-  "kuro--clear-line-blink-overlays only removes overlays on the target row."
-  (kuro-overlays-test--with-buffer
-    (insert "row0\nrow1\nrow2\n")
-    ;; Add overlay on row 0
-    (save-excursion
-      (goto-char (point-min))
-      (kuro--apply-blink-overlay (point) (line-end-position) 'slow))
-    ;; Add overlay on row 2
-    (save-excursion
-      (goto-char (point-min))
-      (forward-line 2)
-      (kuro--apply-blink-overlay (point) (line-end-position) 'slow))
-    (should (= (length kuro--blink-overlays) 2))
-    ;; Clear row 1 (no overlays there) — should preserve both
-    (kuro--clear-line-blink-overlays 1)
-    (should (= (length kuro--blink-overlays) 2))))
-
 ;;; Group 2: kuro--tick-blink-overlays
 
 (ert-deftest kuro-overlays-tick-blink-increments-counter ()
@@ -139,20 +107,28 @@ At the default 60 fps, `kuro--blink-fast-frames' returns 10."
       (should-not kuro--blink-visible-fast))))
 
 (ert-deftest kuro-overlays-tick-blink-adapts-to-frame-rate ()
-  "Blink intervals scale with `kuro-frame-rate' for correct real-time timing."
+  "Blink intervals scale with `kuro-frame-rate' for correct real-time timing.
+After changing `kuro-frame-rate', `kuro--recompute-blink-frame-intervals'
+must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (let ((kuro-frame-rate 30))
+      (kuro--recompute-blink-frame-intervals)
       ;; At 30 fps: slow = round(30 * 0.5) = 15, fast = round(30 * 0.167) = 5
       (should (= (kuro--blink-slow-frames) 15))
       (should (= (kuro--blink-fast-frames) 5)))
     (let ((kuro-frame-rate 120))
+      (kuro--recompute-blink-frame-intervals)
       ;; At 120 fps: slow = round(120 * 0.5) = 60, fast = round(120 * 0.167) = 20
       (should (= (kuro--blink-slow-frames) 60))
       (should (= (kuro--blink-fast-frames) 20)))
     ;; Edge case: very low frame rate should not produce 0 (division-by-zero guard)
     (let ((kuro-frame-rate 1))
+      (kuro--recompute-blink-frame-intervals)
       (should (>= (kuro--blink-slow-frames) 1))
-      (should (>= (kuro--blink-fast-frames) 1)))))
+      (should (>= (kuro--blink-fast-frames) 1)))
+    ;; Restore default
+    (let ((kuro-frame-rate 60))
+      (kuro--recompute-blink-frame-intervals))))
 
 (ert-deftest kuro-overlays-tick-blink-no-toggle-at-non-boundary ()
   "Slow/fast blink states do NOT toggle at non-boundary frame counts."
@@ -322,30 +298,7 @@ At the default 60 fps, `kuro--blink-fast-frames' returns 10."
     (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0)
     (should (null kuro--blink-overlays))))
 
-;;; Group 7: kuro--unpack-ffi-face-range and kuro--render-image-notification
-
-(ert-deftest kuro-overlays-unpack-ffi-face-range-returns-five-elements ()
-  "kuro--unpack-ffi-face-range returns a 5-element list from a proper list input."
-  (let* ((range '(10 20 255 0 8))
-         (result (kuro--unpack-ffi-face-range range)))
-    (should (= (length result) 5))))
-
-(ert-deftest kuro-overlays-unpack-ffi-face-range-preserves-values ()
-  "kuro--unpack-ffi-face-range unpacks start, end, fg, bg, flags in correct order."
-  (let* ((range '(10 20 #xFF0000 #x00FF00 #x010))
-         (result (kuro--unpack-ffi-face-range range)))
-    (should (= (nth 0 result) 10))
-    (should (= (nth 1 result) 20))
-    (should (= (nth 2 result) #xFF0000))
-    (should (= (nth 3 result) #x00FF00))
-    (should (= (nth 4 result) #x010))))
-
-(ert-deftest kuro-overlays-unpack-ffi-face-range-zero-values ()
-  "kuro--unpack-ffi-face-range handles all-zero input without error."
-  (let* ((range '(0 0 0 0 0))
-         (result (kuro--unpack-ffi-face-range range)))
-    (should (= (length result) 5))
-    (should (cl-every #'zerop result))))
+;;; Group 7: kuro--render-image-notification
 
 (ert-deftest kuro-overlays-render-image-notification-no-error-when-image-nil ()
   "kuro--render-image-notification is a no-op (no error) when kuro--get-image returns nil."

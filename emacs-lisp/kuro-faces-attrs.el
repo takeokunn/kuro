@@ -114,29 +114,30 @@ Returns the value for the :underline face attribute, or nil for no underline."
          (list :style 'dashes)))
     (_ t)))  ; Unknown style: plain underline
 
-(defun kuro--attrs-to-face-props (attrs)
-  "Convert SGR attributes plist ATTRS to Emacs face property list.
-ATTRS is a plist with keys :foreground, :background, :flags, and
-optionally :underline-color (an Emacs color string for the underline).
+(defun kuro--attrs-to-face-props (fg bg attr-flags underline-color)
+  "Convert SGR attributes to Emacs face property list.
+FG and BG are decoded color specs (from `kuro--decode-ffi-color').
+ATTR-FLAGS is the SGR bitmask integer.  UNDERLINE-COLOR is an Emacs
+color string or nil.
 
 Only non-default attributes are included in the returned plist.  Omitting
 :weight 'normal and :slant 'normal lets text inherit those properties from the
 buffer's default face, which is both more correct and faster to render —
-Emacs does not need to recompute font metrics for every cell."
-  (let* ((fg (plist-get attrs :foreground))
-         (bg (plist-get attrs :background))
-         (fg-color (kuro--color-to-emacs fg))
+Emacs does not need to recompute font metrics for every cell.
+
+Bit-flag tests are inlined to avoid the intermediate 20-element plist
+that `kuro--decode-attrs' would allocate on every call."
+  (let* ((fg-color (kuro--color-to-emacs fg))
          (bg-color (kuro--color-to-emacs bg))
-         (flags (plist-get attrs :flags))
-         (decoded (kuro--decode-attrs (or flags 0)))
-         (bold (plist-get decoded :bold))
-         (italic (plist-get decoded :italic))
-         (underline (plist-get decoded :underline))
-         (underline-style (plist-get decoded :underline-style))
-         (strikethrough (plist-get decoded :strike-through))
-         (inverse (plist-get decoded :inverse))
-         (dim (plist-get decoded :dim))
-         (underline-color (plist-get attrs :underline-color))
+         ;; Inline bit-flag tests (same logic as kuro--decode-attrs)
+         (bold          (/= 0 (logand attr-flags kuro--sgr-flag-bold)))
+         (dim           (/= 0 (logand attr-flags kuro--sgr-flag-dim)))
+         (italic        (/= 0 (logand attr-flags kuro--sgr-flag-italic)))
+         (underline     (/= 0 (logand attr-flags kuro--sgr-flag-underline)))
+         (strikethrough (/= 0 (logand attr-flags kuro--sgr-flag-strikethrough)))
+         (inverse       (/= 0 (logand attr-flags kuro--sgr-flag-inverse)))
+         (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask)
+                               (- kuro--sgr-underline-style-shift)))
          ;; Build :underline value: prefer explicit style if underline bit is set
          (underline-val
           (when underline
@@ -146,17 +147,16 @@ Emacs does not need to recompute font metrics for every cell."
               (if underline-color
                   (list :color underline-color :style 'line)
                 t)))))
-    (nconc
-     (when fg-color (list :foreground fg-color))
-     (when bg-color (list :background bg-color))
-     ;; Only emit :weight when non-normal so the default face is inherited.
-     (cond (bold  (list :weight 'bold))
-           (dim   (list :weight 'light)))
-     ;; Only emit :slant when italic; omitting it inherits 'normal from default.
-     (when italic (list :slant 'italic))
-     (when underline-val (list :underline underline-val))
-     (when strikethrough (list :strike-through t))
-     (when inverse (list :inverse-video t)))))
+    (let (result)
+      (when inverse (setq result (nconc (list :inverse-video t) result)))
+      (when strikethrough (setq result (nconc (list :strike-through t) result)))
+      (when underline-val (setq result (nconc (list :underline underline-val) result)))
+      (when italic (setq result (nconc (list :slant 'italic) result)))
+      (cond (bold (setq result (nconc (list :weight 'bold) result)))
+            (dim  (setq result (nconc (list :weight 'light) result))))
+      (when bg-color (setq result (nconc (list :background bg-color) result)))
+      (when fg-color (setq result (nconc (list :foreground fg-color) result)))
+      result)))
 
 (provide 'kuro-faces-attrs)
 

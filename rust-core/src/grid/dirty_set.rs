@@ -95,6 +95,15 @@ impl BitVecDirtySet {
         self.count = self.bits.count_ones();
     }
 
+    /// Iterate over dirty row indices directly, bypassing the `DirtySet` trait's
+    /// `Box<dyn Iterator>`.  Returns `bitvec::slice::IterOnes` which yields
+    /// indices in ascending order without heap allocation.
+    #[inline]
+    #[must_use]
+    pub fn iter_ones_direct(&self) -> bitvec::slice::IterOnes<'_, usize, bitvec::order::Lsb0> {
+        self.bits.iter_ones()
+    }
+
     /// Internal helper: clear all bits and reset count.
     #[inline]
     fn clear_all(&mut self) {

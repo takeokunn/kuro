@@ -58,14 +58,11 @@ impl Line {
     #[inline]
     pub fn update_cell(&mut self, col: usize, c: char, attrs: SgrAttributes) {
         if let Some(cell) = self.cells.get_mut(col) {
-            let old_grapheme = cell.grapheme.clone();
-            let old_attrs = cell.attrs;
-
-            cell.grapheme = CompactString::new(c.to_string());
-            cell.attrs = attrs;
-
-            // Mark dirty if something changed
-            if old_grapheme.as_str() != c.to_string().as_str() || old_attrs != attrs {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            if cell.grapheme.as_str() != s || cell.attrs != attrs {
+                cell.grapheme = CompactString::new(s);
+                cell.attrs = attrs;
                 self.is_dirty = true;
             }
         }
@@ -74,14 +71,9 @@ impl Line {
     /// Update cell at column index with a Cell struct (includes width)
     #[inline]
     pub fn update_cell_with(&mut self, col: usize, cell: Cell) {
-        if col < self.cells.len() {
-            let old_cell = self.cells[col].clone();
+        if col < self.cells.len() && self.cells[col] != cell {
             self.cells[col] = cell;
-
-            // Mark dirty if something changed
-            if old_cell != self.cells[col] {
-                self.is_dirty = true;
-            }
+            self.is_dirty = true;
         }
     }
 
@@ -99,10 +91,9 @@ impl Line {
     /// receive the given background color rather than the terminal default.
     #[inline]
     pub fn clear_with_bg(&mut self, bg: Color) {
-        for cell in &mut self.cells {
-            *cell = Cell::default();
-            cell.attrs.background = bg;
-        }
+        let mut blank = Cell::default();
+        blank.attrs.background = bg;
+        self.cells.fill(blank);
         self.is_dirty = true;
     }
 
@@ -126,6 +117,7 @@ impl Line {
         } else if new_cols < self.cells.len() {
             // Truncate
             self.cells.truncate(new_cols);
+            self.cells.shrink_to_fit();
         }
         self.is_dirty = true;
     }

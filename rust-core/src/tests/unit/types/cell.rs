@@ -133,8 +133,8 @@ proptest! {
             .with_hyperlink(a.clone())
             .with_hyperlink(b.clone());
         prop_assert_eq!(
-            cell.hyperlink_id,
-            Some(b.clone()),
+            cell.hyperlink_id(),
+            Some(b.as_str()),
             "second with_hyperlink must overwrite first: a={:?} b={:?}",
             a,
             b

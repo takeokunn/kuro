@@ -65,6 +65,26 @@ Indices 232-255 encode 24 shades from near-black to near-white.")
   "Base intensity offset for the first grayscale ramp entry (index 232).
 The formula is: value = index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
 
+;;; Pre-computed 256-color lookup tables
+
+(defconst kuro--color-cube-table
+  (let ((v (make-vector 216 nil)))
+    (dotimes (i 216)
+      (let* ((r (* (/ i 36) 51))
+             (g (* (mod (/ i 6) 6) 51))
+             (b (* (mod i 6) 51)))
+        (aset v i (format "#%02x%02x%02x" r g b))))
+    v)
+  "Pre-computed RGB strings for 256-color cube (indices 16-231).")
+
+(defconst kuro--grayscale-table
+  (let ((v (make-vector 24 nil)))
+    (dotimes (i 24)
+      (let ((val (+ (* i 10) 8)))
+        (aset v i (format "#%02x%02x%02x" val val val))))
+    v)
+  "Pre-computed RGB strings for grayscale ramp (indices 232-255).")
+
 ;;; FFI color tag bit constants
 
 (defconst kuro--color-tag-named #x80000000
@@ -87,7 +107,7 @@ COLOR can be:
     (:default nil)
     ((pred consp)
      (pcase (car color)
-       ('named (or (cdr (assoc (cdr color) kuro--named-colors))
+       ('named (or (gethash (cdr color) kuro--named-colors)
                    (cdr color)))
        ('indexed (kuro--indexed-to-emacs (cdr color)))
        ('rgb (kuro--rgb-to-emacs (cdr color)))))
@@ -98,17 +118,11 @@ COLOR can be:
   (cond
    ((<= idx 15)
     (let* ((name (aref kuro--ansi-color-names idx)))
-      (cdr (assoc name kuro--named-colors))))
+      (gethash name kuro--named-colors)))
    ((<= idx kuro--color-cube-end)
-    (let* ((n (- idx kuro--color-cube-start))
-           (r (* (floor (/ n (* kuro--color-cube-size kuro--color-cube-size))) kuro--color-cube-step))
-           (g (* (mod (floor (/ n kuro--color-cube-size)) kuro--color-cube-size) kuro--color-cube-step))
-           (b (* (mod n kuro--color-cube-size) kuro--color-cube-step)))
-      (format "#%02x%02x%02x" r g b)))
+    (aref kuro--color-cube-table (- idx kuro--color-cube-start)))
    ((<= idx 255)
-    (let* ((n (- idx kuro--color-gray-start))
-           (v (+ (* n kuro--color-gray-step) kuro--color-gray-offset)))
-      (format "#%02x%02x%02x" v v v)))
+    (aref kuro--grayscale-table (- idx kuro--color-gray-start)))
    (t nil)))
 
 (defsubst kuro--rgb-to-emacs (rgb-value)

@@ -116,6 +116,16 @@ impl SgrAttributes {
     }
 }
 
+/// Extended cell data for rarely-used features (hyperlinks, images).
+/// Stored behind `Option<Box<CellExtras>>` to keep the common Cell small.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellExtras {
+    /// Hyperlink ID (if any)
+    pub hyperlink_id: Option<String>,
+    /// Image ID for Kitty Graphics Protocol (if any)
+    pub image_id: Option<u32>,
+}
+
 /// A single cell in the terminal grid
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cell {
@@ -125,10 +135,8 @@ pub struct Cell {
     pub(crate) attrs: SgrAttributes,
     /// Cell width (for Unicode/CJK support)
     pub(crate) width: CellWidth,
-    /// Hyperlink ID (if any)
-    pub(crate) hyperlink_id: Option<String>,
-    /// Image ID for Kitty Graphics Protocol (if any)
-    pub(crate) image_id: Option<u32>,
+    /// Extended data (hyperlinks, images) — None for 99.9% of cells
+    pub(crate) extras: Option<Box<CellExtras>>,
 }
 
 impl Cell {
@@ -136,12 +144,27 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn new(c: char) -> Self {
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(c.to_string()),
+            grapheme: CompactString::new(s),
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
-            hyperlink_id: None,
-            image_id: None,
+            extras: None,
+        }
+    }
+
+    /// Create a new cell with character, attributes, and width
+    #[inline]
+    #[must_use]
+    pub fn with_char_and_width(c: char, attrs: SgrAttributes, width: CellWidth) -> Self {
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        Self {
+            grapheme: CompactString::new(s),
+            attrs,
+            width,
+            extras: None,
         }
     }
 
@@ -149,12 +172,13 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(c.to_string()),
+            grapheme: CompactString::new(s),
             attrs,
             width: CellWidth::Half,
-            hyperlink_id: None,
-            image_id: None,
+            extras: None,
         }
     }
 
@@ -162,8 +186,59 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_hyperlink(mut self, id: String) -> Self {
-        self.hyperlink_id = Some(id);
+        self.set_hyperlink_id(Some(id));
         self
+    }
+
+    /// Get hyperlink ID (if any)
+    #[inline]
+    #[must_use]
+    pub fn hyperlink_id(&self) -> Option<&str> {
+        self.extras.as_ref().and_then(|e| e.hyperlink_id.as_deref())
+    }
+
+    /// Get image ID (if any)
+    #[inline]
+    #[must_use]
+    pub fn image_id(&self) -> Option<u32> {
+        self.extras.as_ref().and_then(|e| e.image_id)
+    }
+
+    /// Set hyperlink ID, allocating or deallocating extras as needed
+    #[inline]
+    pub fn set_hyperlink_id(&mut self, id: Option<String>) {
+        if id.is_none() && self.extras.as_ref().is_none_or(|e| e.image_id.is_none()) {
+            self.extras = None;
+        } else {
+            let extras = self.extras.get_or_insert_with(|| {
+                Box::new(CellExtras {
+                    hyperlink_id: None,
+                    image_id: None,
+                })
+            });
+            extras.hyperlink_id = id;
+        }
+    }
+
+    /// Set image ID, allocating or deallocating extras as needed
+    #[inline]
+    pub fn set_image_id(&mut self, id: Option<u32>) {
+        if id.is_none()
+            && self
+                .extras
+                .as_ref()
+                .is_none_or(|e| e.hyperlink_id.is_none())
+        {
+            self.extras = None;
+        } else {
+            let extras = self.extras.get_or_insert_with(|| {
+                Box::new(CellExtras {
+                    hyperlink_id: None,
+                    image_id: None,
+                })
+            });
+            extras.image_id = id;
+        }
     }
 
     /// Append a combining character to this cell's grapheme cluster.
@@ -206,8 +281,7 @@ impl Default for Cell {
             grapheme: CompactString::new(" "),
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
-            hyperlink_id: None,
-            image_id: None,
+            extras: None,
         }
     }
 }
@@ -217,8 +291,7 @@ impl PartialEq for Cell {
         self.grapheme == other.grapheme
             && self.attrs == other.attrs
             && self.width == other.width
-            && self.hyperlink_id == other.hyperlink_id
-            && self.image_id == other.image_id
+            && self.extras == other.extras
     }
 }
 
@@ -270,10 +343,10 @@ mod tests {
     #[test]
     fn test_cell_image_id_defaults_to_none() {
         let cell_default = Cell::default();
-        assert_eq!(cell_default.image_id, None);
+        assert_eq!(cell_default.image_id(), None);
 
         let cell_new = Cell::new('X');
-        assert_eq!(cell_new.image_id, None);
+        assert_eq!(cell_new.image_id(), None);
     }
 
     #[test]
@@ -294,18 +367,15 @@ mod tests {
     fn test_cell_with_hyperlink() {
         // A freshly created cell has no hyperlink
         let cell = Cell::new('A');
-        assert_eq!(cell.hyperlink_id, None);
+        assert_eq!(cell.hyperlink_id(), None);
 
         // with_hyperlink sets the hyperlink_id to the given String
         let linked_cell = cell.with_hyperlink("https://example.com".to_owned());
-        assert_eq!(
-            linked_cell.hyperlink_id,
-            Some("https://example.com".to_owned())
-        );
+        assert_eq!(linked_cell.hyperlink_id(), Some("https://example.com"));
 
         // Replacing an existing hyperlink with a different one works correctly
         let relinked = linked_cell.with_hyperlink("https://other.com".to_owned());
-        assert_eq!(relinked.hyperlink_id, Some("https://other.com".to_owned()));
+        assert_eq!(relinked.hyperlink_id(), Some("https://other.com"));
 
         // Other fields are preserved after setting a hyperlink
         assert_eq!(relinked.char(), 'A');

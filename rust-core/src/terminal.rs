@@ -13,8 +13,13 @@ pub struct TerminalCore {
     pub(crate) screen: Screen,
     /// Current SGR attributes
     pub(crate) current_attrs: types::cell::SgrAttributes,
-    /// VTE parser (stored to maintain state across advance calls)
-    pub(crate) parser: vte::Parser,
+    /// VTE parser (stored to maintain state across advance calls).
+    ///
+    /// Wrapped in `Option` so that `advance_with_apc` can temporarily `take()`
+    /// the parser without allocating a placeholder — `Option::take()` writes
+    /// `None` (a single discriminant byte) instead of `vte::Parser::new()`
+    /// which would zero ~400 bytes of internal state on every PTY read.
+    pub(crate) parser: Option<vte::Parser>,
     /// DEC private mode state
     pub(crate) dec_modes: DecModes,
     /// Tab stop configuration
@@ -40,7 +45,7 @@ impl TerminalCore {
         Self {
             screen: Screen::new(rows, cols),
             current_attrs: types::cell::SgrAttributes::default(),
-            parser: vte::Parser::new(),
+            parser: Some(vte::Parser::new()),
             dec_modes: DecModes::new(),
             tab_stops: TabStops::new(cols as usize),
             saved_cursor: None,

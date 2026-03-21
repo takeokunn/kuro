@@ -12,7 +12,7 @@ impl vte::Perform for TerminalCore {
     #[inline]
     fn print(&mut self, c: char) {
         // Combining characters (Unicode width 0) are attached to the previous cell.
-        if UnicodeWidthChar::width(c) == Some(0) {
+        if !c.is_ascii() && UnicodeWidthChar::width(c) == Some(0) {
             // Attach to the cell just before the current cursor position
             let cursor = *self.screen.cursor();
             let (row, col) = if cursor.col > 0 {

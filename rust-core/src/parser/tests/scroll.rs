@@ -5,7 +5,10 @@
 
 // Test helpers convert between usize/u16/i64 for grid coordinates; values are
 // bounded by terminal dimensions (≤ 65535 rows/cols) so truncation is safe.
-#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)"
+)]
 
 use super::*;
 
@@ -65,8 +68,14 @@ fn test_decstbm_inverted_margins_ignored() {
     assert!(term.screen.cursor.col < 80);
     // The previously-set valid region must be preserved
     let region = term.screen.get_scroll_region();
-    assert_eq!(region.top, 1, "scroll region top must be unchanged after invalid DECSTBM");
-    assert_eq!(region.bottom, 8, "scroll region bottom must be unchanged after invalid DECSTBM");
+    assert_eq!(
+        region.top, 1,
+        "scroll region top must be unchanged after invalid DECSTBM"
+    );
+    assert_eq!(
+        region.bottom, 8,
+        "scroll region bottom must be unchanged after invalid DECSTBM"
+    );
 }
 
 #[test]
@@ -390,7 +399,10 @@ fn test_ri_moves_cursor_up_when_not_at_region_top() {
 
     // Cursor should have moved up by one row; column unchanged.
     assert_eq!(term.screen.cursor.row, 4, "RI must move cursor up one row");
-    assert_eq!(term.screen.cursor.col, 10, "RI must not change cursor column");
+    assert_eq!(
+        term.screen.cursor.col, 10,
+        "RI must not change cursor column"
+    );
 }
 
 /// RI (ESC M) at the top of the scroll region scrolls content down by one line

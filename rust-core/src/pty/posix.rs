@@ -1,6 +1,10 @@
 //! POSIX PTY implementation using nix crate for safe fork/pty operations
 
-use crate::{ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn_error}, pty::reader::PtyReader, Result};
+use crate::{
+    ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn_error},
+    pty::reader::PtyReader,
+    Result,
+};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::wait::waitpid;
 use nix::unistd::{fork, ForkResult, Pid};
@@ -75,7 +79,10 @@ impl Pty {
     ///
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
-    #[expect(clippy::too_many_lines, reason = "PTY setup is inherently multi-step: open, dup, fork, exec, teardown — splitting into smaller fns would increase complexity without clarity")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "PTY setup is inherently multi-step: open, dup, fork, exec, teardown — splitting into smaller fns would increase complexity without clarity"
+    )]
     pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
@@ -154,8 +161,9 @@ impl Pty {
                 // Child process: set up PTY and exec shell
 
                 // Create new session
-                nix::unistd::setsid()
-                    .map_err(|e| pty_operation_error("setsid", &format!("Failed to setsid: {e}")))?;
+                nix::unistd::setsid().map_err(|e| {
+                    pty_operation_error("setsid", &format!("Failed to setsid: {e}"))
+                })?;
 
                 // Set slave PTY as controlling terminal
                 // TIOCSCTTY is required on all POSIX platforms after setsid()
@@ -287,7 +295,10 @@ impl Pty {
                 // execvp should not return, but if it does, exit
                 std::process::exit(1);
             }
-            Err(errno) => Err(pty_spawn_error(command, &format!("Failed to fork: {errno}"))),
+            Err(errno) => Err(pty_spawn_error(
+                command,
+                &format!("Failed to fork: {errno}"),
+            )),
         }
     }
 
@@ -321,7 +332,7 @@ impl Pty {
     }
 
     /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
-    #[must_use] 
+    #[must_use]
     pub fn has_pending_data(&self) -> bool {
         !self.receiver.is_empty()
     }
@@ -329,7 +340,10 @@ impl Pty {
     /// Return the child process PID.
     #[inline]
     #[must_use]
-    #[expect(clippy::cast_sign_loss, reason = "PIDs are non-negative; as_raw() returns i32 by POSIX convention but valid PIDs never exceed i32::MAX")]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "PIDs are non-negative; as_raw() returns i32 by POSIX convention but valid PIDs never exceed i32::MAX"
+    )]
     pub const fn pid(&self) -> u32 {
         self.child_pid.as_raw() as u32
     }
@@ -358,8 +372,13 @@ impl Pty {
 
         // SAFETY: self.master is a valid open PTY master fd held by this Pty;
         // winsize is stack-allocated and outlives the ioctl call.
-        unsafe {
-            libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &winsize);
+        let ret = unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &winsize) };
+
+        if ret == -1 {
+            return Err(pty_operation_error(
+                "TIOCSWINSZ",
+                "Failed to set PTY window size",
+            ));
         }
 
         Ok(())

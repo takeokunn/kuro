@@ -3,7 +3,10 @@
 use crate::types::cursor::CursorShape;
 
 /// DEC private mode state
-#[expect(clippy::struct_excessive_bools, reason = "DecModes fields map 1:1 to VT DEC private mode numbers; bool semantics are the clearest representation for terminal state flags")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "DecModes fields map 1:1 to VT DEC private mode numbers; bool semantics are the clearest representation for terminal state flags"
+)]
 #[derive(Debug, Clone)]
 pub struct DecModes {
     /// Application Cursor Keys mode (DECCKM - ?1)
@@ -74,7 +77,7 @@ impl Default for DecModes {
 
 impl DecModes {
     /// Create a new DEC modes structure with default values
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             app_cursor_keys: false,
@@ -132,7 +135,7 @@ impl DecModes {
     }
 
     /// Query a DEC private mode state
-    #[must_use] 
+    #[must_use]
     pub const fn get_mode(&self, mode: u16) -> Option<bool> {
         match mode {
             1 => Some(self.app_cursor_keys),
@@ -154,7 +157,7 @@ impl DecModes {
 
     /// Check if tab stops are enabled (tabs always enabled in standard VT)
     /// This is a placeholder for future tab mode support
-    #[must_use] 
+    #[must_use]
     pub const fn tab_stops_enabled(&self) -> bool {
         true
     }

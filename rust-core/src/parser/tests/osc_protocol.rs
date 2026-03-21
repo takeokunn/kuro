@@ -48,7 +48,11 @@ fn test_encode_color_spec_midrange() {
 fn test_encode_color_spec_format_has_three_channels() {
     let result = encode_color_spec([10, 20, 30]);
     let parts: Vec<&str> = result.strip_prefix("rgb:").unwrap().split('/').collect();
-    assert_eq!(parts.len(), 3, "encode_color_spec must produce three channels");
+    assert_eq!(
+        parts.len(),
+        3,
+        "encode_color_spec must produce three channels"
+    );
     for part in &parts {
         assert_eq!(part.len(), 4, "each channel must be exactly 4 hex digits");
     }
@@ -124,8 +128,8 @@ fn test_parse_color_spec_leading_whitespace_trimmed() {
 
 #[test]
 fn test_handle_osc_52_write_clipboard() {
-    use crate::TerminalCore;
     use crate::types::osc::ClipboardAction;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     // base64("hello") = "aGVsbG8="
     let params: &[&[u8]] = &[b"52", b"c", b"aGVsbG8="];
@@ -139,8 +143,8 @@ fn test_handle_osc_52_write_clipboard() {
 
 #[test]
 fn test_handle_osc_52_query_clipboard() {
-    use crate::TerminalCore;
     use crate::types::osc::ClipboardAction;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"52", b"c", b"?"];
     super::handle_osc_52(&mut core, params);
@@ -184,7 +188,11 @@ fn test_handle_osc_104_reset_all_when_empty_arg() {
     // Empty byte slice for index arg → reset all
     let params: &[&[u8]] = &[b"104", b""];
     super::handle_osc_104(&mut core, params);
-    assert!(core.osc_data().palette.iter().all(std::option::Option::is_none));
+    assert!(core
+        .osc_data()
+        .palette
+        .iter()
+        .all(std::option::Option::is_none));
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -196,7 +204,11 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     // No index param at all
     let params: &[&[u8]] = &[b"104"];
     super::handle_osc_104(&mut core, params);
-    assert!(core.osc_data().palette.iter().all(std::option::Option::is_none));
+    assert!(core
+        .osc_data()
+        .palette
+        .iter()
+        .all(std::option::Option::is_none));
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -204,19 +216,22 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
 
 #[test]
 fn test_handle_osc_133_prompt_start() {
-    use crate::TerminalCore;
     use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"A"];
     super::handle_osc_133(&mut core, params);
     assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    assert_eq!(core.osc_data().prompt_marks[0].mark, PromptMark::PromptStart);
+    assert_eq!(
+        core.osc_data().prompt_marks[0].mark,
+        PromptMark::PromptStart
+    );
 }
 
 #[test]
 fn test_handle_osc_133_command_end() {
-    use crate::TerminalCore;
     use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D"];
     super::handle_osc_133(&mut core, params);
@@ -237,30 +252,36 @@ fn test_handle_osc_133_unknown_mark_is_noop() {
 
 #[test]
 fn test_handle_osc_default_colors_set_fg() {
-    use crate::TerminalCore;
     use crate::types::Color;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"10", b"#ff8000"];
     super::handle_osc_default_colors(&mut core, params);
-    assert_eq!(core.osc_data().default_fg, Some(Color::Rgb(0xff, 0x80, 0x00)));
+    assert_eq!(
+        core.osc_data().default_fg,
+        Some(Color::Rgb(0xff, 0x80, 0x00))
+    );
     assert!(core.osc_data().default_colors_dirty);
 }
 
 #[test]
 fn test_handle_osc_default_colors_set_bg() {
-    use crate::TerminalCore;
     use crate::types::Color;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"11", b"#001122"];
     super::handle_osc_default_colors(&mut core, params);
-    assert_eq!(core.osc_data().default_bg, Some(Color::Rgb(0x00, 0x11, 0x22)));
+    assert_eq!(
+        core.osc_data().default_bg,
+        Some(Color::Rgb(0x00, 0x11, 0x22))
+    );
     assert!(core.osc_data().default_colors_dirty);
 }
 
 #[test]
 fn test_handle_osc_default_colors_query_fg_produces_response() {
-    use crate::TerminalCore;
     use crate::types::Color;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     core.osc_data.default_fg = Some(Color::Rgb(255, 0, 0));
     let params: &[&[u8]] = &[b"10", b"?"];
@@ -268,7 +289,10 @@ fn test_handle_osc_default_colors_query_fg_produces_response() {
     assert_eq!(core.pending_responses().len(), 1);
     let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
     assert!(resp.contains("10"), "response must contain OSC number");
-    assert!(resp.contains("rgb:"), "response must contain rgb: color spec");
+    assert!(
+        resp.contains("rgb:"),
+        "response must contain rgb: color spec"
+    );
 }
 
 // ── handle_osc_1337 ───────────────────────────────────────────────────────────

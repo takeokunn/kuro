@@ -58,7 +58,11 @@ where
 {
     let mut global = lock_terminals!();
     global.get_mut(&id).map_or_else(
-        || Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
+        || {
+            Err(KuroError::State(
+                crate::ffi::error::StateError::NoTerminalSession,
+            ))
+        },
         f,
     )
 }
@@ -73,7 +77,11 @@ where
 {
     let global = lock_terminals!();
     global.get(&id).map_or_else(
-        || Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
+        || {
+            Err(KuroError::State(
+                crate::ffi::error::StateError::NoTerminalSession,
+            ))
+        },
         f,
     )
 }
@@ -94,8 +102,13 @@ pub fn shutdown_session(id: u64) -> Result<()> {
 pub fn detach_session(id: u64) -> Result<()> {
     let mut global = lock_terminals!();
     global.get_mut(&id).map_or(
-        Err(KuroError::State(crate::ffi::error::StateError::NoTerminalSession)),
-        |session| { session.set_detached(); Ok(()) },
+        Err(KuroError::State(
+            crate::ffi::error::StateError::NoTerminalSession,
+        )),
+        |session| {
+            session.set_detached();
+            Ok(())
+        },
     )
 }
 
@@ -140,7 +153,14 @@ pub fn list_sessions() -> Vec<(u64, String, bool, bool)> {
             guard.retain(|_, s| !s.is_detached() || s.is_process_alive());
             guard
                 .iter()
-                .map(|(&id, s)| (id, s.command().to_owned(), s.is_detached(), s.is_process_alive()))
+                .map(|(&id, s)| {
+                    (
+                        id,
+                        s.command().to_owned(),
+                        s.is_detached(),
+                        s.is_process_alive(),
+                    )
+                })
                 .collect()
         })
         .unwrap_or_default()

@@ -10,6 +10,26 @@
 (require 'ert)
 (require 'cl-lib)
 
+;;; Module availability check
+
+(defconst kuro-test--module-loaded
+  (and (fboundp 'kuro-core-init)
+       (not (eq (symbol-function 'kuro-core-init)
+                (and (boundp 'kuro-test--stub-fn)
+                     (symbol-value 'kuro-test--stub-fn))))
+       ;; The stub from kuro-test.el returns nil; the real module returns an integer.
+       ;; Check if the function is a compiled (subr) or module function.
+       (or (subrp (symbol-function 'kuro-core-init))
+           (and (symbolp (symbol-function 'kuro-core-init)) nil)
+           ;; module-function-p available in Emacs 29+
+           (and (fboundp 'module-function-p)
+                (module-function-p (symbol-function 'kuro-core-init)))))
+  "Non-nil when the real Rust kuro-core module is loaded (not just stubs).")
+
+(defconst kuro-test--e2e-expected-result
+  (if kuro-test--module-loaded :passed :failed)
+  "Expected result for E2E tests: :passed with module, :failed without.")
+
 ;;; Helpers
 
 (defconst kuro-test--timeout 10.0
@@ -430,12 +450,14 @@ blink-slow, blink-fast, inverse, hidden, strikethrough)."
   (should (fboundp 'kuro-core-shutdown)))
 
 (ert-deftest kuro-e2e-terminal-init ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that a terminal session can be initialized and produces output."
   (kuro-test--with-terminal
    ;; Shell prompt appeared — basic init works
    (should (string-match-p "\\S-" (kuro-test--buffer-content buf)))))
 
 (ert-deftest kuro-e2e-echo-command ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that a simple echo command produces output.
 Uses a short unique marker (KUROX99) to avoid line-wrapping issues with
 long zsh prompts, which can cause the output to scroll off screen between
@@ -446,6 +468,7 @@ render cycles."
    (should (kuro-test--wait-for buf "KUROX99"))))
 
 (ert-deftest kuro-e2e-multiple-commands ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that multiple commands can be run sequentially."
   (kuro-test--with-terminal
    (kuro-test--send "echo first_cmd")
@@ -456,6 +479,7 @@ render cycles."
    (should (kuro-test--wait-for buf "second_cmd"))))
 
 (ert-deftest kuro-e2e-cursor-position ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that cursor position is reported as a valid cons cell."
   (kuro-test--with-terminal
    (kuro-test--render buf)
@@ -467,6 +491,7 @@ render cycles."
      (should (>= (cdr cursor) 0)))))
 
 (ert-deftest kuro-e2e-ansi-colors ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that ANSI color output produces face ranges.
 The command echo and the actual printf output both contain REDTEXT, so we
 search all occurrences for at least one with a non-nil face property."
@@ -516,6 +541,7 @@ search all occurrences for at least one with a non-nil face property."
          (should color-verified))))))
 
 (ert-deftest kuro-e2e-hidden-text ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that SGR 8 (hidden/conceal) makes text invisible via Emacs invisible property.
 Uses a shell variable to avoid the echo of the escape sequence itself containing HIDDEN."
   (kuro-test--with-terminal
@@ -543,6 +569,7 @@ Uses a shell variable to avoid the echo of the escape sequence itself containing
        (should found-hidden)))))
 
 (ert-deftest kuro-e2e-inverse-video ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that SGR 7 (inverse/reverse video) sets :inverse-video face property."
   (kuro-test--with-terminal
    (kuro-test--send "I=\"\\033[7mINVERSETEXT\\033[0m\"; printf \"$I\"")
@@ -570,6 +597,7 @@ Uses a shell variable to avoid the echo of the escape sequence itself containing
        (should found-inverse)))))
 
 (ert-deftest kuro-e2e-blink-structural ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that SGR 5 (blink-slow) produces blink overlays on the rendered line.
 After the initial dirty render creates overlays, subsequent render cycles
 should preserve them on the now-stable line (per-line clearing, not full-buffer)."
@@ -599,6 +627,7 @@ should preserve them on the now-stable line (per-line clearing, not full-buffer)
              (should (eq 'slow (overlay-get blink-ov 'kuro-blink-type))))))))))
 
 (ert-deftest kuro-e2e-resize ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that terminal can be resized."
   (kuro-test--with-terminal
    ;; Resize to smaller dimensions
@@ -608,6 +637,7 @@ should preserve them on the now-stable line (per-line clearing, not full-buffer)
    (should (kuro--resize 24 80))))
 
 (ert-deftest kuro-e2e-no-double-newlines ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that render cycles do not accumulate extra blank lines."
   (kuro-test--with-terminal
    ;; Run 10 render cycles
@@ -623,6 +653,7 @@ should preserve them on the now-stable line (per-line clearing, not full-buffer)
        (should-not (string-match-p "\n\n\n" trimmed))))))
 
 (ert-deftest kuro-e2e-256-color-indexed-fg ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that 256-color indexed foreground (SGR 38;5;196) produces a hex color face.
 Index 196 in the 256-color palette corresponds to pure red (#ff0000) in the
 6x6x6 color cube: n=196-16=180, r=(180/36)*51=255, g=((180/6)%6)*51=0, b=(180%6)*51=0."
@@ -655,6 +686,7 @@ Index 196 in the 256-color palette corresponds to pure red (#ff0000) in the
        (should found-color)))))
 
 (ert-deftest kuro-e2e-truecolor-rgb-fg ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that TrueColor RGB foreground (SGR 38;2;255;0;0) produces #ff0000 face.
 Uses non-zero RGB to avoid the Color::Rgb(0,0,0) == Color::Default encoding collision
 in the Rust FFI layer (encode_color returns 0 for both)."
@@ -687,6 +719,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
        (should found-color)))))
 
 (ert-deftest kuro-e2e-vim-basic ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that vim opens using alternate screen and exits cleanly."
   (skip-unless (executable-find "vim"))
   (kuro-test--with-terminal
@@ -727,6 +760,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
 ;;; Phase 02 acceptance tests
 
 (ert-deftest kuro-e2e-multiline-output ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 02 acceptance: printf produces multiple lines correctly."
   (kuro-test--with-terminal
    (kuro-test--send "printf 'KMULTI1\\nKMULTI2\\nKMULTI3\\n'")
@@ -736,6 +770,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
    (should (kuro-test--wait-for buf "KMULTI3"))))
 
 (ert-deftest kuro-e2e-tab-alignment ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 02 acceptance: tab character indents to next tab stop."
   (kuro-test--with-terminal
    (kuro-test--send "printf '\\tKTABTEXT'")
@@ -749,6 +784,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
 ;;; Phase 03 acceptance tests
 
 (ert-deftest kuro-e2e-clear-command ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 03 acceptance: clear command empties the visible screen."
   (kuro-test--with-terminal
    ;; Output some unique text first
@@ -769,6 +805,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
 ;;; Phase 04 acceptance tests
 
 (ert-deftest kuro-e2e-bold-text ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 04 acceptance: SGR 1 (bold) produces :weight bold face property."
   (kuro-test--with-terminal
    (kuro-test--send "B=\"\\033[1mKBOLDTEXT\\033[0m\"; printf \"$B\"")
@@ -793,6 +830,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
        (should found-bold)))))
 
 (ert-deftest kuro-e2e-underline-text ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 04 acceptance: SGR 4 (underline) produces :underline t face property."
   (kuro-test--with-terminal
    (kuro-test--send "U=\"\\033[4mKUNDERTEXT\\033[0m\"; printf \"$U\"")
@@ -817,6 +855,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
        (should found-underline)))))
 
 (ert-deftest kuro-e2e-background-color ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 04 acceptance: SGR 41 (red background) produces :background hex face."
   (kuro-test--with-terminal
    (kuro-test--send "BG=\"\\033[41mKREDBGTEXT\\033[0m\"; printf \"$BG\"")
@@ -841,6 +880,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
        (should found-bg)))))
 
 (ert-deftest kuro-e2e-bright-color ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 04 acceptance: SGR 91 (bright red) produces #ff0000 foreground."
   (kuro-test--with-terminal
    (kuro-test--send "BR=\"\\033[91mKBRIGHTTEXT\\033[0m\"; printf \"$BR\"")
@@ -868,6 +908,7 @@ in the Rust FFI layer (encode_color returns 0 for both)."
 ;;; Phase 05 acceptance tests
 
 (ert-deftest kuro-e2e-256-color-indexed-bg ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 05 acceptance: 256-color indexed background (SGR 48;5;21) produces hex background.
 Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #0000ff."
   (kuro-test--with-terminal
@@ -894,6 +935,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
        (should found-bg)))))
 
 (ert-deftest kuro-e2e-truecolor-rgb-green ()
+  :expected-result kuro-test--e2e-expected-result
   "Phase 05 acceptance: TrueColor RGB green (SGR 38;2;0;255;128) produces #00ff80 face."
   (kuro-test--with-terminal
    (kuro-test--send "CGRN=\"\\033[38;2;0;255;128mKCOLORGREEN\\033[0m\"; printf \"$CGRN\"")
@@ -1193,9 +1235,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
     (should (functionp binding))
     (with-temp-buffer
       (let ((kuro--initialized t)
+          (kuro--session-id 1)
             (captured nil))
         (cl-letf (((symbol-function 'kuro-core-send-key)
-                   (lambda (bytes) (setq captured bytes)))
+                   (lambda (_sid bytes) (setq captured bytes)))
                   ((symbol-function 'kuro--schedule-immediate-render)
                    (lambda ())))
           (funcall binding)
@@ -1208,9 +1251,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
     (should (functionp binding))
     (with-temp-buffer
       (let ((kuro--initialized t)
+          (kuro--session-id 1)
             (captured nil))
         (cl-letf (((symbol-function 'kuro-core-send-key)
-                   (lambda (bytes) (setq captured bytes)))
+                   (lambda (_sid bytes) (setq captured bytes)))
                   ((symbol-function 'kuro--schedule-immediate-render)
                    (lambda ())))
           (funcall binding)
@@ -1484,9 +1528,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-ffi)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--send-key "hello")
         (should (equal captured "hello"))))))
 
@@ -1495,9 +1540,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-ffi)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--send-key [27 91 65])
         (should (stringp captured))
         (should (= (length captured) 3))
@@ -1519,10 +1565,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-up)
         (should (equal captured "\e[A"))))))
 
@@ -1531,10 +1578,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-up)
         (should (equal captured "\eOA"))))))
 
@@ -1543,10 +1591,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-down)
         (should (equal captured "\e[B"))))))
 
@@ -1555,10 +1604,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-down)
         (should (equal captured "\eOB"))))))
 
@@ -1567,10 +1617,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-left)
         (should (equal captured "\e[D"))))))
 
@@ -1579,10 +1630,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-left)
         (should (equal captured "\eOD"))))))
 
@@ -1591,10 +1643,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-right)
         (should (equal captured "\e[C"))))))
 
@@ -1603,10 +1656,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--arrow-right)
         (should (equal captured "\eOC"))))))
 
@@ -1617,10 +1671,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--HOME)
         (should (equal captured "\e[H"))))))
 
@@ -1629,10 +1684,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--HOME)
         (should (equal captured "\e[1~"))))))
 
@@ -1641,10 +1697,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode nil)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--END)
         (should (equal captured "\e[F"))))))
 
@@ -1653,10 +1710,11 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (kuro--application-cursor-keys-mode t)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--END)
         (should (equal captured "\e[4~"))))))
 
@@ -1665,9 +1723,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         ;; Normal mode
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--INSERT)
@@ -1683,9 +1742,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         ;; Normal mode
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--DELETE)
@@ -1701,9 +1761,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--PAGE-UP)
         (should (equal captured "\e[5~"))))))
@@ -1713,9 +1774,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--PAGE-DOWN)
         (should (equal captured "\e[6~"))))))
@@ -1727,9 +1789,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F1)
         (should (equal captured "\eOP"))))))
@@ -1739,9 +1802,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F4)
         (should (equal captured "\eOS"))))))
@@ -1751,9 +1815,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F5)
         (should (equal captured "\e[15~"))))))
@@ -1763,9 +1828,10 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F12)
         (should (equal captured "\e[24~"))))))
@@ -1816,6 +1882,7 @@ Index 21 in the 6x6x6 color cube: n=21-16=5, r=0*51=0, g=0*51=0, b=5*51=255 => #
 ;;; OSC title end-to-end integration
 
 (ert-deftest kuro-e2e-osc-title-integration ()
+  :expected-result kuro-test--e2e-expected-result
   "OSC 0/2 title sequence propagates through the full PTY→Rust→FFI→Emacs chain.
 Sends a printf OSC sequence through a real shell, waits for the command to
 complete, then runs extra render cycles to let kuro--render-cycle poll the
@@ -1839,6 +1906,7 @@ title via kuro--get-and-clear-title and rename the buffer."
 ;;; Scrollback max-lines FFI propagation
 
 (ert-deftest kuro-e2e-scrollback-max-lines-propagation ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro--set-scrollback-max-lines trims the scrollback buffer to the new limit.
 Tests the full Elisp-wrapper → FFI → Rust chain for scrollback resizing.
 Generates 30 lines of scrollback first, then sets the limit to 10, and verifies
@@ -1870,6 +1938,7 @@ that the Rust-side scrollback count is trimmed to the new limit."
 ;; Timeout is extended to 10s for tmux startup.
 
 (ert-deftest kuro-e2e-tmux-launches ()
+  :expected-result kuro-test--e2e-expected-result
   "tmux starts successfully inside a kuro terminal buffer.
 Verifies that tmux -f /dev/null new-session renders its status bar."
   (skip-unless (executable-find "tmux"))
@@ -1882,6 +1951,7 @@ Verifies that tmux -f /dev/null new-session renders its status bar."
       (shell-command "tmux -L kuro-e2e-test kill-server 2>/dev/null"))))
 
 (ert-deftest kuro-e2e-tmux-pane-split ()
+  :expected-result kuro-test--e2e-expected-result
   "tmux pane splitting works: split-window -h and -v create new panes.
 Uses tmux shell commands from within the session (more reliable than prefix keys)."
   (skip-unless (executable-find "tmux"))
@@ -1909,6 +1979,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
       (shell-command "tmux -L kuro-e2e-test kill-server 2>/dev/null"))))
 
 (ert-deftest kuro-e2e-tmux-pane-navigate ()
+  :expected-result kuro-test--e2e-expected-result
   "tmux pane navigation works: select-pane changes the active pane."
   (skip-unless (executable-find "tmux"))
   (kuro-test--with-terminal
@@ -1937,6 +2008,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
       (shell-command "tmux -L kuro-e2e-test kill-server 2>/dev/null"))))
 
 (ert-deftest kuro-e2e-tmux-window-management ()
+  :expected-result kuro-test--e2e-expected-result
   "tmux window management works: new-window and select-window work correctly."
   (skip-unless (executable-find "tmux"))
   (kuro-test--with-terminal
@@ -1965,6 +2037,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
       (shell-command "tmux -L kuro-e2e-test kill-server 2>/dev/null"))))
 
 (ert-deftest kuro-e2e-tmux-session-cleanup ()
+  :expected-result kuro-test--e2e-expected-result
   "tmux session terminates cleanly: kill-session returns control to shell."
   (skip-unless (executable-find "tmux"))
   (kuro-test--with-terminal
@@ -1989,6 +2062,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
 ;;; Additional SGR rendering tests
 
 (ert-deftest kuro-e2e-italic-text ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 3 (italic) produces :slant italic face property."
   (kuro-test--with-terminal
    (kuro-test--send "IT=\"\\033[3mKITALICTEXT\\033[0m\"; printf \"$IT\"")
@@ -2013,6 +2087,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
        (should found-italic)))))
 
 (ert-deftest kuro-e2e-dim-text ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 2 (dim/faint) produces :weight light face property."
   (kuro-test--with-terminal
    (kuro-test--send "DM=\"\\033[2mKDIMTEXT\\033[0m\"; printf \"$DM\"")
@@ -2037,6 +2112,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
        (should found-dim)))))
 
 (ert-deftest kuro-e2e-strikethrough-text ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 9 (strikethrough) produces :strike-through t face property."
   (kuro-test--with-terminal
    (kuro-test--send "ST=\"\\033[9mKSTRIKETEXT\\033[0m\"; printf \"$ST\"")
@@ -2061,6 +2137,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
        (should found-strike)))))
 
 (ert-deftest kuro-e2e-combined-sgr-attributes ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 1;3;4 (bold + italic + underline) produces all three properties simultaneously."
   (kuro-test--with-terminal
    (kuro-test--send "CB=\"\\033[1;3;4mKCOMBOTEXT\\033[0m\"; printf \"$CB\"")
@@ -2089,6 +2166,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
        (should found-underline)))))
 
 (ert-deftest kuro-e2e-fast-blink ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 6 (blink-fast) produces a blink overlay with type 'fast on the rendered text."
   (kuro-test--with-terminal
    (kuro-test--send "FB=\"\\033[6mKFASTBLINK\\033[0m\"; printf \"$FB\"")
@@ -2113,6 +2191,7 @@ Uses tmux shell commands from within the session (more reliable than prefix keys
 ;;; Signal handling
 
 (ert-deftest kuro-e2e-sigint-interrupts-command ()
+  :expected-result kuro-test--e2e-expected-result
   "C-c (ASCII 3 = SIGINT) interrupts a running foreground process.
 Starts `sleep 100', sends C-c, then verifies the shell is still responsive."
   (kuro-test--with-terminal
@@ -2133,6 +2212,7 @@ Starts `sleep 100', sends C-c, then verifies the shell is still responsive."
 ;;; Input handling
 
 (ert-deftest kuro-e2e-backspace-input ()
+  :expected-result kuro-test--e2e-expected-result
   "Backspace (DEL, byte \\x7f) deletes the preceding typed character.
 Types a stray character, erases it with DEL, then completes a command.
 The shell should execute the corrected command, not the stray character."
@@ -2149,6 +2229,7 @@ The shell should execute the corrected command, not the stray character."
 ;;; Scrollback content
 
 (ert-deftest kuro-e2e-scrollback-content ()
+  :expected-result kuro-test--e2e-expected-result
   "Scrollback buffer stores lines that scroll off the visible screen.
 Generates more lines than the terminal height (24 rows) so the first
 lines scroll into the scrollback buffer. Verifies the Rust-side
@@ -2180,6 +2261,7 @@ kuro-core-get-scrollback API returns the scrolled-off content."
 ;;; Unicode output
 
 (ert-deftest kuro-e2e-unicode-output ()
+  :expected-result kuro-test--e2e-expected-result
   "UTF-8 multibyte characters appear correctly in the terminal buffer.
 Tests that the PTY ↔ Rust ↔ Emacs pipeline preserves non-ASCII text."
   (kuro-test--with-terminal
@@ -2196,6 +2278,7 @@ Tests that the PTY ↔ Rust ↔ Emacs pipeline preserves non-ASCII text."
 ;;; Large output
 
 (ert-deftest kuro-e2e-large-output ()
+  :expected-result kuro-test--e2e-expected-result
   "Generating 200 lines of output does not crash or hang the terminal.
 Verifies that large PTY bursts are processed without data loss."
   (kuro-test--with-terminal
@@ -2222,6 +2305,7 @@ Verifies that large PTY bursts are processed without data loss."
 ;;; Alternate screen (less pager)
 
 (ert-deftest kuro-e2e-less-pager ()
+  :expected-result kuro-test--e2e-expected-result
   "less opens on the alternate screen and returns to primary screen on exit.
 Verifies the SMCUP/RMCUP sequence pair used by full-screen applications."
   (skip-unless (executable-find "less"))
@@ -2245,6 +2329,7 @@ Verifies the SMCUP/RMCUP sequence pair used by full-screen applications."
 ;;; Ctrl+L screen clear
 
 (ert-deftest kuro-e2e-ctrl-l-clear-screen ()
+  :expected-result kuro-test--e2e-expected-result
   "Ctrl+L (\\x0c = form-feed) clears the visible screen via shell line editor.
 After the clear, old visible text should not appear, and the shell remains
 responsive (verified by echoing a new marker)."
@@ -2268,6 +2353,7 @@ responsive (verified by echoing a new marker)."
 ;;; Additional E2E coverage — public API, FFI functions, and terminal modes
 
 (ert-deftest kuro-e2e-send-string-api ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro-send-string (public API in kuro.el) delivers a string to the PTY.
 Verifies the public-facing wrapper works end-to-end, distinct from the
 internal kuro--send-key helper used by all other E2E tests."
@@ -2278,6 +2364,7 @@ internal kuro--send-key helper used by all other E2E tests."
    (should (kuro-test--wait-for buf "KSENDSTRAPI"))))
 
 (ert-deftest kuro-e2e-bell-character ()
+  :expected-result kuro-test--e2e-expected-result
   "BEL byte (\\007) causes the render cycle to call ding and then clear the bell.
 Exercises kuro-core-bell-pending and kuro-core-clear-bell FFI functions.
 
@@ -2306,6 +2393,7 @@ verify that (a) ding was called and (b) bell_pending is cleared afterward."
          (should-not (kuro-core-bell-pending)))))))
 
 (ert-deftest kuro-e2e-clear-scrollback ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro--clear-scrollback resets the scrollback count to zero.
 Exercises kuro-core-clear-scrollback and kuro-core-get-scrollback-count FFI."
   (kuro-test--with-terminal
@@ -2326,6 +2414,7 @@ Exercises kuro-core-clear-scrollback and kuro-core-get-scrollback-count FFI."
          (should (and count-after (= count-after 0))))))))
 
 (ert-deftest kuro-e2e-cursor-visibility ()
+  :expected-result kuro-test--e2e-expected-result
   "DECTCEM CSI?25l hides the cursor; CSI?25h makes it visible again.
 Exercises kuro-core-get-cursor-visible FFI function via kuro--get-cursor-visible."
   (kuro-test--with-terminal
@@ -2348,6 +2437,7 @@ Exercises kuro-core-get-cursor-visible FFI function via kuro--get-cursor-visible
      (should (kuro--get-cursor-visible)))))
 
 (ert-deftest kuro-e2e-decckm-mode ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI?1h enables application cursor keys mode (DECCKM).
 Exercises kuro-core-get-app-cursor-keys FFI function via kuro--get-app-cursor-keys.
 Only verifies the enabled state; disabling is a no-op test (shell resets on prompt)."
@@ -2365,6 +2455,7 @@ Only verifies the enabled state; disabling is a no-op test (shell resets on prom
    (sleep-for 0.1)))
 
 (ert-deftest kuro-e2e-bracketed-paste-mode ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI?2004h enables bracketed paste mode.
 Exercises kuro-core-get-bracketed-paste FFI function via kuro--get-bracketed-paste."
   (kuro-test--with-terminal
@@ -2377,6 +2468,7 @@ Exercises kuro-core-get-bracketed-paste FFI function via kuro--get-bracketed-pas
      (should (kuro--get-bracketed-paste)))))
 
 (ert-deftest kuro-e2e-scroll-viewport ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro--scroll-up and kuro--scroll-down shift the viewport into scrollback history.
 Exercises kuro-core-scroll-up, kuro-core-scroll-down, and
 kuro-core-get-scroll-offset FFI functions via their Elisp wrappers."
@@ -2402,6 +2494,7 @@ kuro-core-get-scroll-offset FFI functions via their Elisp wrappers."
 ;;; Additional E2E coverage — ED 3, bracketed-paste yank, keyboard scroll, Unicode send
 
 (ert-deftest kuro-e2e-erase-scrollback-ed3 ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 3J (ED J=3) erases the scrollback buffer and resets the scrollback count to zero.
 Exercises the ED J=3 branch in erase.rs, which is distinct from ED 2 (erase screen)
 and is not covered by any other E2E test.  The scrollback buffer accumulates lines
@@ -2430,6 +2523,7 @@ purge it (Ctrl-L in bash uses CSI 2J which only erases the screen, not scrollbac
      (should (<= (kuro--get-scrollback-count) 1)))))
 
 (ert-deftest kuro-e2e-bracketed-paste-yank ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro--yank wraps kill-ring content with ESC[200~/ESC[201~ in bracketed paste mode.
 Also verifies that kuro--sanitize-paste strips ESC bytes from pasted content to prevent
 bracketed paste injection attacks.  Tests kuro-input.el paste path without hitting PTY."
@@ -2465,6 +2559,7 @@ bracketed paste injection attacks.  Tests kuro-input.el paste path without hitti
      (should (string= "RAW_PAYLOAD" sent-string)))))
 
 (ert-deftest kuro-e2e-scrollback-keyboard-commands ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro-scroll-up, kuro-scroll-down, and kuro-scroll-bottom are the keyboard-accessible
 scrollback commands (Shift+PgUp / Shift+PgDn / Shift+End).  They differ from the
 FFI-level kuro--scroll-up/down tested in kuro-e2e-scroll-viewport: they use
@@ -2493,6 +2588,7 @@ Exercises kuro-input.el public scroll API and the kuro--initialized guard."
        (should (= (kuro--get-scroll-offset) 0))))))
 
 (ert-deftest kuro-e2e-kuro-send-interrupt-api ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro-send-interrupt (public API in kuro.el) delivers SIGINT to interrupt a process.
 This exercises a different code path from kuro-e2e-sigint-interrupts-command: that test
 sends the raw \\x03 byte via kuro-test--send, whereas this test calls the Lisp function
@@ -2519,9 +2615,10 @@ which sends a vector [?\\C-c] through kuro--send-key's vector→string conversio
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--RET)
         (should (equal captured "\r"))))))
 
@@ -2530,9 +2627,10 @@ which sends a vector [?\\C-c] through kuro--send-key's vector→string conversio
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--TAB)
         (should (equal captured "\t"))))))
 
@@ -2541,9 +2639,10 @@ which sends a vector [?\\C-c] through kuro--send-key's vector→string conversio
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--DEL)
         (should (equal captured (string ?\x7f)))))))
 
@@ -2552,9 +2651,10 @@ which sends a vector [?\\C-c] through kuro--send-key's vector→string conversio
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--send-char ?A)
         (should (equal captured "A"))))))
 
@@ -2563,10 +2663,11 @@ which sends a vector [?\\C-c] through kuro--send-key's vector→string conversio
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (last-command-event ?Z)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--self-insert)
         (should (equal captured "Z"))))))
 
@@ -2576,9 +2677,10 @@ Ctrl+E: logand ?e 31 = 5 (ENQ byte)."
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (captured nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (setq captured bytes))))
+                 (lambda (_sid bytes) (setq captured bytes))))
         (kuro--ctrl-modified ?e 1)
         (should (equal captured (string 5)))))))
 
@@ -2589,9 +2691,10 @@ PTY write system calls.  Result: one call with \"\\ex\" content."
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (sent-calls nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (push bytes sent-calls))))
+                 (lambda (_sid bytes) (push bytes sent-calls))))
         (kuro--alt-modified ?x)
         (let ((calls (nreverse sent-calls)))
           ;; One atomic send: ESC + char concatenated
@@ -2604,9 +2707,10 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   (require 'kuro-input)
   (with-temp-buffer
     (let ((kuro--initialized t)
+          (kuro--session-id 1)
           (sent-calls nil))
       (cl-letf (((symbol-function 'kuro-core-send-key)
-                 (lambda (bytes) (push bytes sent-calls))))
+                 (lambda (_sid bytes) (push bytes sent-calls))))
         (kuro--ctrl-alt-modified ?a 1)
         (let ((calls (nreverse sent-calls)))
           ;; One atomic send: ESC + ctrl-byte concatenated
@@ -2619,8 +2723,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F2 sends SS3 Q (\\eOQ)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F2)
         (should (equal captured "\eOQ"))))))
@@ -2629,8 +2734,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F3 sends SS3 R (\\eOR)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F3)
         (should (equal captured "\eOR"))))))
@@ -2639,8 +2745,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F6 sends \\e[17~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F6)
         (should (equal captured "\e[17~"))))))
@@ -2649,8 +2756,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F7 sends \\e[18~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F7)
         (should (equal captured "\e[18~"))))))
@@ -2659,8 +2767,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F8 sends \\e[19~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F8)
         (should (equal captured "\e[19~"))))))
@@ -2669,8 +2778,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F9 sends \\e[20~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F9)
         (should (equal captured "\e[20~"))))))
@@ -2679,8 +2789,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F10 sends \\e[21~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F10)
         (should (equal captured "\e[21~"))))))
@@ -2689,8 +2800,9 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
   "kuro--F11 sends \\e[23~ (CSI tilde)."
   (require 'kuro-input)
   (with-temp-buffer
-    (let ((kuro--initialized t) (captured nil))
-      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (b) (setq captured b))))
+    (let ((kuro--initialized t)
+          (kuro--session-id 1) (captured nil))
+      (cl-letf (((symbol-function 'kuro-core-send-key) (lambda (_sid b) (setq captured b))))
         (setq kuro--application-cursor-keys-mode nil)
         (kuro--F11)
         (should (equal captured "\e[23~"))))))
@@ -2756,6 +2868,7 @@ Ctrl+Alt+A: ESC then (logand ?a 31) = byte 1 (SOH), sent as one string."
 ;;; E2E: kuro--RET key function and DECKPAM mode
 
 (ert-deftest kuro-e2e-ret-key-function ()
+  :expected-result kuro-test--e2e-expected-result
   "kuro--RET (\\r, carriage return) submits a typed command to the shell.
 Exercises the kuro--RET function directly, which sends a CR byte via
 kuro--send-ctrl.  This is distinct from kuro-test--send which calls
@@ -2768,6 +2881,7 @@ kuro--send-key directly; the test proves the round-trip works end-to-end."
    (should (kuro-test--wait-for buf "KRETTEST"))))
 
 (ert-deftest kuro-e2e-deckpam-mode ()
+  :expected-result kuro-test--e2e-expected-result
   "ESC= (DECKPAM) enables application keypad mode; verified via kuro--get-app-keypad.
 Exercises the esc_dispatch path in lib.rs: ([], b'=') → app_keypad = true.
 Mirrors the kuro-e2e-decckm-mode pattern: only the enabled state is asserted
@@ -2789,6 +2903,7 @@ since some shells may emit ESC> on prompt redraw."
 ;;; Additional mouse tracking mode E2E tests
 
 (ert-deftest kuro-e2e-mouse-mode-normal-enable ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI?1000h enables normal (X10 compatible) mouse tracking mode.
 Exercises kuro-core-get-mouse-mode FFI via kuro--get-mouse-mode.
 Only verifies the enabled state; shells may reset mouse mode on prompt redraw."
@@ -2805,6 +2920,7 @@ Only verifies the enabled state; shells may reset mouse mode on prompt redraw."
    (sleep-for 0.1)))
 
 (ert-deftest kuro-e2e-mouse-mode-button-event-enable ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI?1002h enables button-event mouse tracking mode.
 kuro--get-mouse-mode returns 1002 after the sequence is processed."
   (kuro-test--with-terminal
@@ -2819,6 +2935,7 @@ kuro--get-mouse-mode returns 1002 after the sequence is processed."
    (sleep-for 0.1)))
 
 (ert-deftest kuro-e2e-mouse-sgr-mode-enable ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI?1006h enables SGR extended coordinates mouse mode.
 Exercises kuro-core-get-mouse-sgr FFI via kuro--get-mouse-sgr.
 Only verifies the enabled state."
@@ -2840,6 +2957,7 @@ Only verifies the enabled state."
 ;; printf output — never in the command echo.
 
 (ert-deftest kuro-e2e-delete-characters-dch ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 2P (DCH) deletes 2 characters at the cursor position.
 Prints 'KDCH_ABC' (cursor at col 8), CSI 1D moves cursor to col 7 (at 'C'),
 CSI 2P deletes 2 chars ('C' and the empty cell at col 8), then 'END' is
@@ -2851,6 +2969,7 @@ printed at col 7, yielding 'KDCH_ABEND'.  The command echo shows the raw
    (should (kuro-test--wait-for buf "KDCH_ABEND"))))
 
 (ert-deftest kuro-e2e-insert-characters-ich ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 1@ (ICH) inserts 1 blank character at the cursor position.
 Prints 'KICH_AB' (cursor at col 7), CSI 1D moves cursor to col 6 (at 'B'),
 CSI 1@ inserts 1 blank (shifts 'B' to col 7, cursor stays at col 6), then
@@ -2866,6 +2985,7 @@ contain 'KICH_AZB'."
 ;;; Erase line (EL 0) E2E test
 
 (ert-deftest kuro-e2e-erase-line-to-end-el0 ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI K (EL 0) erases from the cursor position to the end of line.
 Prints 'KEL0_AX' (cursor at col 7), CSI 1D moves cursor to col 6 (at 'X'),
 CSI K erases col 6 through end-of-line (removing 'X' and beyond), then 'END'
@@ -2897,6 +3017,7 @@ so callers receive nil — not 0 — when no terminal session is active."
 ;;; SGR attribute coverage — reset and bright background
 
 (ert-deftest kuro-e2e-sgr-reset-bold ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 22 resets bold intensity: text rendered after SGR 22 has :weight normal.
 Uses the variable trick so the marker does not appear in the command echo
 with the face property applied — only the printf output has the face."
@@ -2923,6 +3044,7 @@ with the face property applied — only the printf output has the face."
        (should found-normal)))))
 
 (ert-deftest kuro-e2e-bright-background-color ()
+  :expected-result kuro-test--e2e-expected-result
   "SGR 101 (bright red background) produces a :background hex face property.
 Bright background codes (SGR 100-107) are distinct from normal backgrounds
 (SGR 40-47) — this test verifies the bright palette is rendered."
@@ -2951,6 +3073,7 @@ Bright background codes (SGR 100-107) are distinct from normal backgrounds
 ;;; Cursor movement — CUU, CUB, CUF, CHA
 
 (ert-deftest kuro-e2e-cursor-up-cuu ()
+  :expected-result kuro-test--e2e-expected-result
   "CUU (cursor up, ESC[NA) moves the cursor up by N rows.
 Print KCUU_A (row 0), newline, print KCUU_B (row 1), CUU 1 back to row 0,
 then X appended at col 6 — result: KCUU_AX on the first output row.
@@ -2961,6 +3084,7 @@ The trailing \\n prevents fish's partial-line indicator from overwriting."
    (should (kuro-test--wait-for buf "KCUU_AX"))))
 
 (ert-deftest kuro-e2e-cursor-backward-cub ()
+  :expected-result kuro-test--e2e-expected-result
   "CUB (cursor backward, ESC[ND) moves the cursor left by N columns.
 Print KCUB_ABCDE (cursor at col 10), CUB 5 (col 5), X overwrites A
 — result: KCUB_XBCDE."
@@ -2970,6 +3094,7 @@ Print KCUB_ABCDE (cursor at col 10), CUB 5 (col 5), X overwrites A
    (should (kuro-test--wait-for buf "KCUB_XBCDE"))))
 
 (ert-deftest kuro-e2e-cursor-forward-cuf ()
+  :expected-result kuro-test--e2e-expected-result
   "CUF (cursor forward, ESC[NC) moves the cursor right by N columns.
 Print KCUF_ABCDE, CUB 5 (col 5), CUF 3 (col 8), X overwrites D
 — result: KCUF_ABCXE."
@@ -2979,6 +3104,7 @@ Print KCUF_ABCDE, CUB 5 (col 5), CUF 3 (col 8), X overwrites D
    (should (kuro-test--wait-for buf "KCUF_ABCXE"))))
 
 (ert-deftest kuro-e2e-cursor-cha ()
+  :expected-result kuro-test--e2e-expected-result
   "CHA (cursor horizontal absolute, ESC[NG) moves to column N (1-indexed).
 Print KCHA_ABCDE (cursor at col 10), CHA 1 moves to col 0, X overwrites K
 — result: XCHA_ABCDE."
@@ -2990,6 +3116,7 @@ Print KCHA_ABCDE (cursor at col 10), CHA 1 moves to col 0, X overwrites K
 ;;; Insert / delete line operations — IL, DL
 
 (ert-deftest kuro-e2e-insert-lines-il ()
+  :expected-result kuro-test--e2e-expected-result
   "IL (insert lines, ESC[NL) inserts N blank rows at the cursor row,
 pushing existing content down.
 Print KIL_ORIG (row 0), IL 1 pushes it to row 1, CUD 1 follows, X appended
@@ -3000,6 +3127,7 @@ at col 8 — result: KIL_ORIGX on the new row 1."
    (should (kuro-test--wait-for buf "KIL_ORIGX"))))
 
 (ert-deftest kuro-e2e-delete-lines-dl ()
+  :expected-result kuro-test--e2e-expected-result
   "DL (delete lines, ESC[NM) removes N rows at the cursor, scrolling up.
 Print KDL_A (row 0), KDL_B (row 1), CUU 1 back to row 0, DL 1 removes row 0
 (KDL_B shifts up), then XDL at col 5 — result: KDL_BXDL."
@@ -3011,6 +3139,7 @@ Print KDL_A (row 0), KDL_B (row 1), CUU 1 back to row 0, DL 1 removes row 0
 ;;; Erase operations — ECH, EL1
 
 (ert-deftest kuro-e2e-erase-characters-ech ()
+  :expected-result kuro-test--e2e-expected-result
   "ECH (erase characters, ESC[NX) replaces N chars from the cursor with spaces.
 Print KECH_ABCDE (col 10), CUB 5 (col 5), ECH 3 blanks A,B,C,
 then END printed at col 5 — result: KECH_ENDDE."
@@ -3020,6 +3149,7 @@ then END printed at col 5 — result: KECH_ENDDE."
    (should (kuro-test--wait-for buf "KECH_ENDDE"))))
 
 (ert-deftest kuro-e2e-erase-line-from-start-el1 ()
+  :expected-result kuro-test--e2e-expected-result
   "EL 1 (erase from start of line to cursor, ESC[1K) clears the left portion.
 Print KEL1_ABCDE, CHA 3 moves to col 2, EL 1 erases cols 0-2 to spaces,
 then X at col 2 — result contains X1_ABCDE (the erased prefix becomes spaces)."
@@ -3031,6 +3161,7 @@ then X at col 2 — result contains X1_ABCDE (the erased prefix becomes spaces).
 ;;; Terminal control — DECSC / DECRC cursor save / restore
 
 (ert-deftest kuro-e2e-cursor-save-restore-decsc ()
+  :expected-result kuro-test--e2e-expected-result
   "DECSC/DECRC (ESC-7 / ESC-8) saves and restores the cursor position.
 Print KDSC_AB (cols 0-6, cursor at col 7), ESC-7 saves that position,
 CHA 1 moves to col 0, CURSOR overwrites cols 0-5, ESC-8 restores to col 7,
@@ -3045,6 +3176,7 @@ parsed by printf as octal 337 (0xDF) instead of ESC + literal '7'."
 ;;; Cursor movement — CUD
 
 (ert-deftest kuro-e2e-cursor-down-cud ()
+  :expected-result kuro-test--e2e-expected-result
   "CUD (cursor down, ESC[NB) moves cursor down by N rows.
 Print KCUDA (row 0), newline, KCUDB (row 1), CUU 1 back to row 0, CUD 1
 back to row 1 — X appended at col 5: result KCUDBX.
@@ -3057,6 +3189,7 @@ Trailing \\n prevents fish's partial-line indicator."
 ;;; Erase operations — ED 0, ED 1, EL 2
 
 (ert-deftest kuro-e2e-erase-display-to-end-ed0 ()
+  :expected-result kuro-test--e2e-expected-result
   "ED 0 (CSI J) erases from cursor position to end of display.
 Cursor homed to (1;1), so the entire screen is cleared."
   (kuro-test--with-terminal
@@ -3072,6 +3205,7 @@ Cursor homed to (1;1), so the entire screen is cleared."
      (should-not (string-match-p "KED0_MARK" (buffer-string))))))
 
 (ert-deftest kuro-e2e-erase-display-from-start-ed1 ()
+  :expected-result kuro-test--e2e-expected-result
   "ED 1 (CSI 1J) erases from start of display to cursor.
 Cursor moved to last row/col (24;80), so the entire screen is cleared."
   (kuro-test--with-terminal
@@ -3087,6 +3221,7 @@ Cursor moved to last row/col (24;80), so the entire screen is cleared."
      (should-not (string-match-p "KED1_MARK" (buffer-string))))))
 
 (ert-deftest kuro-e2e-erase-line-entire-el2 ()
+  :expected-result kuro-test--e2e-expected-result
   "EL 2 (CSI 2K) erases the entire current line.
 Variable split prevents the marker from appearing in the command echo;
 CUU 1 positions on the echo row; EL 2 erases it; KEL2_DONE confirms."
@@ -3101,6 +3236,7 @@ CUU 1 positions on the echo row; EL 2 erases it; KEL2_DONE confirms."
 ;;; Alternate screen buffer — mode 1049
 
 (ert-deftest kuro-e2e-alternate-screen-buffer ()
+  :expected-result kuro-test--e2e-expected-result
   "Mode 1049 switches between primary and alternate screen buffers.
 Primary content is hidden on the alternate screen and restored on return."
   (kuro-test--with-terminal
@@ -3124,6 +3260,7 @@ Primary content is hidden on the alternate screen and restored on return."
 ;;; Scroll operations — SU, SD
 
 (ert-deftest kuro-e2e-scroll-up-su ()
+  :expected-result kuro-test--e2e-expected-result
   "SU (CSI S) scrolls content up, saving rows to scrollback.
 SU 24 fills the screen with blank rows; previous content moves to scrollback."
   (kuro-test--with-terminal
@@ -3142,6 +3279,7 @@ SU 24 fills the screen with blank rows; previous content moves to scrollback."
        (should (string-match-p "KSU_MARKER" joined))))))
 
 (ert-deftest kuro-e2e-scroll-down-sd ()
+  :expected-result kuro-test--e2e-expected-result
   "SD (CSI T) scrolls content down: blank rows at top, bottom content dropped.
 Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
   (kuro-test--with-terminal
@@ -3163,6 +3301,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
 ;;; E2E Gap Analysis Tests (E01-E15)
 
 (ert-deftest kuro-e2e-erase-line-to-cursor ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 1 K (EL 1) erases from start of line to cursor position.
   Fills a line with text, positions cursor mid-line, sends CSI 1 K, and
   verifies that characters from SOL to cursor are erased."
@@ -3188,6 +3327,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should-not (string-match-p "KEL1_START" content))))))
 
 (ert-deftest kuro-e2e-erase-entire-line ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 2 K (EL 2) erases the entire current line.
   Fills a line with text and sends CSI 2 K, verifying that the entire
   line becomes blank."
@@ -3214,6 +3354,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
       (should-not (string-match-p "KEL2_ENTIRE_LINE_TEXT" (buffer-string))))))
 
 (ert-deftest kuro-e2e-erase-from-start-to-cursor ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI 1 J (ED 1) erases from start of display to cursor.
   Fills screen with numbered rows, positions cursor mid-screen, sends CSI 1 J,
   and verifies that content from SOF to cursor is erased."
@@ -3244,6 +3385,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should-not (string-match-p "ROW_1\\|ROW_2\\|ROW_3\\|ROW_4\\|ROW_5" content))))))
 
 (ert-deftest kuro-e2e-cursor-up-movement ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI A (CUU) moves cursor up by N rows.
   Positions cursor down, sends CSI A N times, and verifies position via kuro--get-cursor."
   (kuro-test--with-terminal
@@ -3268,6 +3410,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (car cursor) 5))))))
 
 (ert-deftest kuro-e2e-cursor-down-movement ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI B (CUD) moves cursor down by N rows.
   Positions cursor at row 0, sends CSI B, and verifies the cursor moved down."
   (kuro-test--with-terminal
@@ -3291,6 +3434,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (car cursor) 3))))))
 
 (ert-deftest kuro-e2e-cursor-left-movement ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI D (CUB) moves cursor left by N columns.
   Positions cursor at column 10, sends CSI 5 D, and verifies column = 5."
   (kuro-test--with-terminal
@@ -3314,6 +3458,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (cdr cursor) 5))))))
 
 (ert-deftest kuro-e2e-cursor-right-movement ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI C (CUF) moves cursor right by N columns.
   Positions cursor at column 0, sends CSI 10 C, and verifies column = 10."
   (kuro-test--with-terminal
@@ -3337,6 +3482,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (cdr cursor) 10))))))
 
 (ert-deftest kuro-e2e-character-position-absolute ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI G (CHA) moves cursor to absolute column N (1-indexed).
   Sends CSI 40 G and verifies cursor at column 39 (0-indexed)."
   (kuro-test--with-terminal
@@ -3352,6 +3498,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (cdr cursor) 39))))))
 
 (ert-deftest kuro-e2e-vertical-position-absolute ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI d (VPA) moves cursor to absolute row N (1-indexed).
   Sends CSI 12 d and verifies cursor at row 11 (0-indexed)."
   (kuro-test--with-terminal
@@ -3367,6 +3514,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (= (car cursor) 11))))))
 
 (ert-deftest kuro-e2e-insert-characters ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI @ (ICH) inserts N blank characters at cursor position.
   Types 'hello', moves cursor to 'e', sends CSI 3 @, and verifies
   the result is 'hel   lo' (3 spaces inserted)."
@@ -3390,6 +3538,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (string-match-p "hel.*lo" content))))))
 
 (ert-deftest kuro-e2e-delete-characters ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI P (DCH) deletes N characters at cursor position.
   Types 'hello', moves cursor to 'l', sends CSI 2 P, and verifies
   the result is 'helo' (deleted 'l' and 'l')."
@@ -3412,6 +3561,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (string-match-p "helo" content))))))
 
 (ert-deftest kuro-e2e-erase-characters ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI X (ECH) erases N characters from cursor position.
   Types 'hello', moves cursor to 'h', sends CSI 3 X, and verifies
   the result is '   lo' (first 3 chars erased to spaces)."
@@ -3434,6 +3584,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
         (should (string-match-p "ECH_DONE" content))))))
 
 (ert-deftest kuro-e2e-insert-lines ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI L (IL) inserts N blank lines at cursor row.
   Fills screen with row numbers, moves to row 5, sends CSI 2 L,
   and verifies that 2 blank lines are inserted, shifting content down."
@@ -3460,6 +3611,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
       (should (string-match-p "IL_OK" (buffer-string))))))
 
 (ert-deftest kuro-e2e-delete-lines ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI M (DL) deletes N lines at cursor row.
   Fills screen with row numbers, moves to row 5, sends CSI 2 M,
   and verifies that 2 lines are deleted, shifting content up."
@@ -3486,6 +3638,7 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
       (should (string-match-p "DL_OK" (buffer-string))))))
 
 (ert-deftest kuro-e2e-auto-wrap-mode ()
+  :expected-result kuro-test--e2e-expected-result
   "CSI ?7 l/h controls DECAWM (auto-wrap mode).
   Disables auto-wrap (CSI ?7 l), types beyond right margin, verifies
   cursor stays at margin. Then re-enables (CSI ?7 h) and verifies

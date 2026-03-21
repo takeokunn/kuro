@@ -69,8 +69,8 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --workspace -- -D warnings
 
-      - name: Build documentation
-        run: cargo doc --workspace --no-deps
+      - name: Build documentation (no warnings)
+        run: cargo doc --workspace --no-deps 2>&1 | { ! grep -q "^warning:"; }
 
       # Security audit - if emacs crate 0.19.0 is flagged by RUSTSEC,
       # document the advisory in .cargo/audit.toml with a rationale comment.
@@ -87,13 +87,15 @@ jobs:
         run: cargo test --workspace --release
 
       - name: Run Elisp ERT tests
+        run: make test-elisp
+
+      - name: Run package-lint
         run: |
           emacs -Q --batch \
-            -L emacs-lisp \
-            -L test/elisp \
-            --eval "(setq load-prefer-newer t)" \
-            --eval "(mapc #'load (directory-files (expand-file-name \"test/elisp\") t \"\\\\.el\\\\'\"))" \
-            --eval "(ert-run-tests-batch-and-exit)"
+            --eval "(progn (require 'package) (push '(\"melpa\" . \"https://melpa.org/packages/\") package-archives) (package-initialize) (package-refresh-contents) (package-install 'package-lint))" \
+            --eval "(require 'package-lint)" \
+            -f package-lint-batch-and-exit \
+            emacs-lisp/kuro.el
 
       - name: Install tmux
         run: |

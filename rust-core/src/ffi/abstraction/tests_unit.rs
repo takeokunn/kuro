@@ -1,6 +1,9 @@
 //! Unit tests for FFI abstraction: session management, encode delegates, sync output.
 
-use super::global::{attach_session, detach_session, list_sessions, shutdown_session, with_session, TERMINAL_SESSIONS};
+use super::global::{
+    attach_session, detach_session, list_sessions, shutdown_session, with_session,
+    TERMINAL_SESSIONS,
+};
 use super::session::{SessionState, TerminalSession};
 use crate::error::KuroError;
 use crate::ffi::error::StateError;
@@ -144,7 +147,10 @@ fn test_encode_line_faces_empty_line() {
 fn test_session_send_input_empty() {
     let mut session = make_session();
     let result = session.send_input(&[]);
-    assert!(result.is_ok(), "send_input with empty slice should return Ok");
+    assert!(
+        result.is_ok(),
+        "send_input with empty slice should return Ok"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +200,9 @@ fn test_take_cwd_if_dirty_with_cwd_set() {
     let mut session = make_session();
 
     // OSC 7 sets the current working directory
-    session.core.advance(b"\x1b]7;file://localhost/home/user\x07");
+    session
+        .core
+        .advance(b"\x1b]7;file://localhost/home/user\x07");
 
     // First call: dirty flag set, should return the path and clear the flag
     let result = session.take_cwd_if_dirty();
@@ -271,7 +279,9 @@ fn test_take_clipboard_actions_drains_queue() {
         crate::types::osc::ClipboardAction::Write(text) => {
             assert_eq!(text, "hello", "Write action should contain decoded text");
         }
-        other @ crate::types::osc::ClipboardAction::Query => panic!("Expected Write action, got {other:?}"),
+        other @ crate::types::osc::ClipboardAction::Query => {
+            panic!("Expected Write action, got {other:?}")
+        }
     }
 
     // Second call: queue was drained, should return empty Vec
@@ -504,7 +514,10 @@ fn test_consume_scroll_events_returns_zero_after_full_screen_scroll() {
 
     // Full-screen scroll now uses full_dirty, not pending_scroll_up.
     let (up, down) = session.consume_scroll_events();
-    assert_eq!(up, 0, "full-screen scroll should not accumulate pending_scroll_up");
+    assert_eq!(
+        up, 0,
+        "full-screen scroll should not accumulate pending_scroll_up"
+    );
     assert_eq!(down, 0, "no scroll-down events expected");
 
     // Verify full_dirty was set instead.
@@ -533,7 +546,10 @@ fn test_consume_scroll_events_scroll_down_returns_zero() {
     // Full-screen scroll_down now uses full_dirty, not pending_scroll_down.
     let (up, down) = session.consume_scroll_events();
     assert_eq!(up, 0, "no scroll-up events expected after RI-only input");
-    assert_eq!(down, 0, "full-screen scroll should not accumulate pending_scroll_down");
+    assert_eq!(
+        down, 0,
+        "full-screen scroll should not accumulate pending_scroll_down"
+    );
 
     // Verify full_dirty was set instead.
     let dirty = session.core.screen.take_dirty_lines();
@@ -589,7 +605,10 @@ fn test_detach_session_bound_to_detached() {
     insert_bound_session(ID);
 
     let result = detach_session(ID);
-    assert!(result.is_ok(), "detach_session should succeed for a Bound session");
+    assert!(
+        result.is_ok(),
+        "detach_session should succeed for a Bound session"
+    );
 
     let is_detached = TERMINAL_SESSIONS
         .lock()
@@ -609,14 +628,20 @@ fn test_attach_session_detached_to_bound() {
     insert_detached_session(ID);
 
     let result = attach_session(ID);
-    assert!(result.is_ok(), "attach_session should succeed for a Detached session");
+    assert!(
+        result.is_ok(),
+        "attach_session should succeed for a Detached session"
+    );
 
     let is_detached = TERMINAL_SESSIONS
         .lock()
         .unwrap()
         .get(&ID)
         .is_none_or(super::session::TerminalSession::is_detached);
-    assert!(!is_detached, "session must be Bound (not Detached) after attach_session");
+    assert!(
+        !is_detached,
+        "session must be Bound (not Detached) after attach_session"
+    );
 
     shutdown_session(ID).ok();
 }
@@ -654,9 +679,15 @@ fn test_detach_session_nonexistent_returns_no_session() {
     shutdown_session(ID).ok(); // ensure absent
 
     let result = detach_session(ID);
-    assert!(result.is_err(), "detach_session must return Err for nonexistent ID");
     assert!(
-        matches!(result.unwrap_err(), KuroError::State(StateError::NoTerminalSession)),
+        result.is_err(),
+        "detach_session must return Err for nonexistent ID"
+    );
+    assert!(
+        matches!(
+            result.unwrap_err(),
+            KuroError::State(StateError::NoTerminalSession)
+        ),
         "error must be NoTerminalSession"
     );
 }
@@ -668,9 +699,15 @@ fn test_attach_session_nonexistent_returns_no_session() {
     shutdown_session(ID).ok(); // ensure absent
 
     let result = attach_session(ID);
-    assert!(result.is_err(), "attach_session must return Err for nonexistent ID");
     assert!(
-        matches!(result.unwrap_err(), KuroError::State(StateError::NoTerminalSession)),
+        result.is_err(),
+        "attach_session must return Err for nonexistent ID"
+    );
+    assert!(
+        matches!(
+            result.unwrap_err(),
+            KuroError::State(StateError::NoTerminalSession)
+        ),
         "error must be NoTerminalSession"
     );
 }
@@ -688,12 +725,21 @@ fn test_list_sessions_tuple_order_detached() {
 
     let sessions = list_sessions();
     let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(entry.is_some(), "list_sessions must include the inserted session");
+    assert!(
+        entry.is_some(),
+        "list_sessions must include the inserted session"
+    );
 
     let (found_id, _command, is_detached, is_alive) = entry.unwrap();
     assert_eq!(*found_id, ID, "index 0 must be the session ID");
-    assert!(*is_detached, "index 2 must be is_detached=true for a Detached session");
-    assert!(*is_alive, "index 3 must be is_alive=true (pty:None reports alive)");
+    assert!(
+        *is_detached,
+        "index 2 must be is_detached=true for a Detached session"
+    );
+    assert!(
+        *is_alive,
+        "index 3 must be is_alive=true (pty:None reports alive)"
+    );
 
     shutdown_session(ID).ok();
 }
@@ -707,11 +753,20 @@ fn test_list_sessions_bound_session_not_detached() {
 
     let sessions = list_sessions();
     let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(entry.is_some(), "list_sessions must include the inserted session");
+    assert!(
+        entry.is_some(),
+        "list_sessions must include the inserted session"
+    );
 
     let (_, _, is_detached, is_alive) = entry.unwrap();
-    assert!(!is_detached, "index 2 must be is_detached=false for a Bound session");
-    assert!(*is_alive, "index 3 must be is_alive=true for a Bound session with pty:None");
+    assert!(
+        !is_detached,
+        "index 2 must be is_detached=false for a Bound session"
+    );
+    assert!(
+        *is_alive,
+        "index 3 must be is_alive=true for a Bound session with pty:None"
+    );
 
     shutdown_session(ID).ok();
 }
@@ -745,9 +800,15 @@ fn test_list_sessions_command_field_included() {
 
     let sessions = list_sessions();
     let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(entry.is_some(), "list_sessions must include the inserted session");
+    assert!(
+        entry.is_some(),
+        "list_sessions must include the inserted session"
+    );
     let (_, command, _, _) = entry.unwrap();
-    assert_eq!(command, "fish", "command field must match the session's command string");
+    assert_eq!(
+        command, "fish",
+        "command field must match the session's command string"
+    );
 
     shutdown_session(ID).ok();
 }
@@ -766,13 +827,22 @@ fn test_list_sessions_mixed_bound_and_detached() {
     let bound_entry = sessions.iter().find(|(id, ..)| *id == BOUND_ID);
     let detached_entry = sessions.iter().find(|(id, ..)| *id == DETACHED_ID);
 
-    assert!(bound_entry.is_some(), "list_sessions must include the Bound session");
-    assert!(detached_entry.is_some(), "list_sessions must include the Detached session");
+    assert!(
+        bound_entry.is_some(),
+        "list_sessions must include the Bound session"
+    );
+    assert!(
+        detached_entry.is_some(),
+        "list_sessions must include the Detached session"
+    );
 
     let (_, _, is_detached_b, _) = bound_entry.unwrap();
     let (_, _, is_detached_d, _) = detached_entry.unwrap();
     assert!(!is_detached_b, "Bound session must have is_detached=false");
-    assert!(*is_detached_d, "Detached session must have is_detached=true");
+    assert!(
+        *is_detached_d,
+        "Detached session must have is_detached=true"
+    );
 
     shutdown_session(BOUND_ID).ok();
     shutdown_session(DETACHED_ID).ok();
@@ -822,6 +892,12 @@ fn test_consume_scroll_events_suppressed_during_scrollback() {
 
     // consume_scroll_events must return (0, 0) while in scrollback
     let (up, down) = session.consume_scroll_events();
-    assert_eq!(up, 0, "scroll events must be suppressed during scrollback view");
-    assert_eq!(down, 0, "scroll events must be suppressed during scrollback view");
+    assert_eq!(
+        up, 0,
+        "scroll events must be suppressed during scrollback view"
+    );
+    assert_eq!(
+        down, 0,
+        "scroll events must be suppressed during scrollback view"
+    );
 }

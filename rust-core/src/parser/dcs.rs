@@ -20,7 +20,6 @@ pub enum DcsState {
     Sixel(crate::parser::sixel::SixelDecoder),
 }
 
-
 /// Called when DCS final byte is received (hook).
 pub fn dcs_hook(
     core: &mut TerminalCore,
@@ -78,7 +77,9 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
     // Example: "544e" = "TN" (terminal name).
     // Response format: DCS 1 + r <hex-name>=<hex-value> ST
     //                  DCS 0 + r <hex-name> ST (unknown)
-    let Ok(s) = std::str::from_utf8(buf) else { return };
+    let Ok(s) = std::str::from_utf8(buf) else {
+        return;
+    };
 
     for cap_hex in s.split(';') {
         let cap_hex = cap_hex.trim();
@@ -86,7 +87,9 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
             continue;
         }
 
-        let Some(cap_name) = hex_decode(cap_hex) else { continue };
+        let Some(cap_name) = hex_decode(cap_hex) else {
+            continue;
+        };
 
         let response = match cap_name.as_str() {
             "TN" | "name" => {

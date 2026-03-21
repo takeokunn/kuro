@@ -1,7 +1,7 @@
 //! Unit tests for `crate::types::osc` (`OscData`, `HyperlinkState`, `PromptMark`, `ClipboardAction`).
 
-use crate::types::osc::{ClipboardAction, HyperlinkState, OscData, PromptMark, PromptMarkEvent};
 use crate::types::color::Color;
+use crate::types::osc::{ClipboardAction, HyperlinkState, OscData, PromptMark, PromptMarkEvent};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -40,13 +40,20 @@ fn osc_data_default_colors_are_none() {
 #[test]
 fn osc_data_default_prompt_marks_empty() {
     let d = OscData::default();
-    assert!(d.prompt_marks.is_empty(), "prompt_marks must be empty on construction");
+    assert!(
+        d.prompt_marks.is_empty(),
+        "prompt_marks must be empty on construction"
+    );
 }
 
 #[test]
 fn osc_data_palette_has_256_entries() {
     let d = OscData::default();
-    assert_eq!(d.palette.len(), 256, "palette must have exactly 256 entries");
+    assert_eq!(
+        d.palette.len(),
+        256,
+        "palette must have exactly 256 entries"
+    );
 }
 
 #[test]
@@ -83,13 +90,17 @@ fn hyperlink_state_default_uri_none() {
 
 #[test]
 fn hyperlink_state_set_uri() {
-    let h = HyperlinkState { uri: Some("https://example.com".to_owned()) };
+    let h = HyperlinkState {
+        uri: Some("https://example.com".to_owned()),
+    };
     assert_eq!(h.uri.as_deref(), Some("https://example.com"));
 }
 
 #[test]
 fn hyperlink_state_clear_uri() {
-    let mut h = HyperlinkState { uri: Some("https://example.com".to_owned()) };
+    let mut h = HyperlinkState {
+        uri: Some("https://example.com".to_owned()),
+    };
     h.uri = None;
     assert!(h.uri.is_none());
 }
@@ -155,19 +166,28 @@ fn clipboard_action_query_variant() {
 
 #[test]
 fn osc_data_set_default_fg() {
-    let d = OscData { default_fg: Some(Color::Indexed(1)), ..Default::default() };
+    let d = OscData {
+        default_fg: Some(Color::Indexed(1)),
+        ..Default::default()
+    };
     assert!(matches!(d.default_fg, Some(Color::Indexed(1))));
 }
 
 #[test]
 fn osc_data_set_default_bg() {
-    let d = OscData { default_bg: Some(Color::Rgb(255, 128, 0)), ..Default::default() };
+    let d = OscData {
+        default_bg: Some(Color::Rgb(255, 128, 0)),
+        ..Default::default()
+    };
     assert!(matches!(d.default_bg, Some(Color::Rgb(255, 128, 0))));
 }
 
 #[test]
 fn osc_data_set_cursor_color() {
-    let d = OscData { cursor_color: Some(Color::Default), ..Default::default() };
+    let d = OscData {
+        cursor_color: Some(Color::Default),
+        ..Default::default()
+    };
     assert!(matches!(d.cursor_color, Some(Color::Default)));
 }
 

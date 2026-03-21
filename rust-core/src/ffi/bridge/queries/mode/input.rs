@@ -27,5 +27,7 @@ fn kuro_core_get_app_keypad(env: &Env, session_id: u64) -> EmacsResult<Value<'_>
 ///   Bit 4 (16): Report associated text
 #[defun]
 fn kuro_core_get_keyboard_flags(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, 0i64, |s| Ok(i64::from(s.get_keyboard_flags())))
+    query_session(env, session_id, 0i64, |s| {
+        Ok(i64::from(s.get_keyboard_flags()))
+    })
 }

@@ -43,7 +43,7 @@ pub struct Cursor {
 
 impl Cursor {
     /// Create a new cursor at the specified position
-    #[must_use] 
+    #[must_use]
     pub fn new(col: usize, row: usize) -> Self {
         Self {
             col,

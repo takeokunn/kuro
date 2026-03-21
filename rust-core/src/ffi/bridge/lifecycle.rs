@@ -1,7 +1,9 @@
 //! Session lifecycle: init / `send_key` / resize / shutdown / detach / attach / list
 
 use super::{catch_panic, query_session};
-use crate::ffi::abstraction::{attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session};
+use crate::ffi::abstraction::{
+    attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session,
+};
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
@@ -16,15 +18,16 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 /// programs (vim, htop, …) that start before the resize is processed will render
 /// using the stale 24×80 geometry and never re-draw correctly.
 // `#[defun]` requires owned String for Emacs string arguments — &str is not supported.
-#[expect(clippy::needless_pass_by_value, reason = "#[defun] requires owned String for Emacs string args")]
-#[expect(clippy::cast_possible_wrap, reason = "session_id is a monotonically increasing counter starting at 0; will never reach i64::MAX in practice")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "#[defun] requires owned String for Emacs string args"
+)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "session_id is a monotonically increasing counter starting at 0; will never reach i64::MAX in practice"
+)]
 #[defun]
-fn kuro_core_init(
-    env: &Env,
-    command: String,
-    rows: u16,
-    cols: u16,
-) -> EmacsResult<Value<'_>> {
+fn kuro_core_init(env: &Env, command: String, rows: u16, cols: u16) -> EmacsResult<Value<'_>> {
     catch_panic(env, || {
         let session_id = init_session(&command, rows, cols)?;
         Ok(session_id as i64)
@@ -91,7 +94,9 @@ fn kuro_core_attach(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
 /// has no PTY (non-Unix builds).
 #[defun]
 fn kuro_core_get_pid(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, 0i64, |session| Ok(i64::from(session.pid().unwrap_or(0))))
+    query_session(env, session_id, 0i64, |session| {
+        Ok(i64::from(session.pid().unwrap_or(0)))
+    })
 }
 
 /// List all active terminal sessions.
@@ -99,7 +104,10 @@ fn kuro_core_get_pid(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
 /// Returns a proper list where each element is `(SESSION-ID COMMAND DETACHED-P ALIVE-P)`.
 /// SESSION-ID is an integer, COMMAND is a string, DETACHED-P and ALIVE-P are booleans.
 #[defun]
-#[expect(clippy::cast_possible_wrap, reason = "session IDs are small monotonically increasing counters; will never reach i64::MAX")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "session IDs are small monotonically increasing counters; will never reach i64::MAX"
+)]
 fn kuro_core_list_sessions(env: &Env) -> EmacsResult<Value<'_>> {
     let sessions = list_sessions();
     let mut list = false.into_lisp(env)?;

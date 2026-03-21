@@ -1,7 +1,7 @@
 //! OSC (Operating System Command) sequence handler
 
 use super::osc_protocol::{
-    encode_color_spec, handle_osc_1337, handle_osc_104, handle_osc_133, handle_osc_52,
+    encode_color_spec, handle_osc_104, handle_osc_133, handle_osc_1337, handle_osc_52,
     handle_osc_default_colors, parse_color_spec,
 };
 

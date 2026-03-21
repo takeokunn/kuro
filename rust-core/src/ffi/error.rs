@@ -140,10 +140,7 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::PtySpawnFailed { command, message } => {
-                write!(
-                    f,
-                    "Failed to spawn PTY for command '{command}': {message}"
-                )
+                write!(f, "Failed to spawn PTY for command '{command}': {message}")
             }
             Self::PtyOperationFailed { operation, message } => {
                 write!(f, "PTY operation '{operation}' failed: {message}")
@@ -186,7 +183,7 @@ impl From<RuntimeError> for KuroError {
 }
 
 /// Helper function to create a PTY spawn error
-#[must_use] 
+#[must_use]
 pub fn pty_spawn_error(command: &str, message: &str) -> KuroError {
     RuntimeError::PtySpawnFailed {
         command: command.to_owned(),
@@ -196,7 +193,7 @@ pub fn pty_spawn_error(command: &str, message: &str) -> KuroError {
 }
 
 /// Helper function to create a PTY operation error
-#[must_use] 
+#[must_use]
 pub fn pty_operation_error(operation: &str, message: &str) -> KuroError {
     RuntimeError::PtyOperationFailed {
         operation: operation.to_owned(),
@@ -206,7 +203,7 @@ pub fn pty_operation_error(operation: &str, message: &str) -> KuroError {
 }
 
 /// Helper function to create a parse error
-#[must_use] 
+#[must_use]
 pub fn parse_error(message: &str) -> KuroError {
     RuntimeError::ParseError {
         message: message.to_owned(),
@@ -215,7 +212,7 @@ pub fn parse_error(message: &str) -> KuroError {
 }
 
 /// Helper function to create an invalid parameter error
-#[must_use] 
+#[must_use]
 pub fn invalid_parameter_error(param: &str, message: &str) -> KuroError {
     RuntimeError::InvalidParameter {
         param: param.to_owned(),
@@ -225,7 +222,7 @@ pub fn invalid_parameter_error(param: &str, message: &str) -> KuroError {
 }
 
 /// Helper function to create an FFI error
-#[must_use] 
+#[must_use]
 pub fn ffi_error(message: &str) -> KuroError {
     RuntimeError::FfiError {
         message: message.to_owned(),

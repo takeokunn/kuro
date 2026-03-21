@@ -5,8 +5,8 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::TerminalCore;
     use crate::Color;
+    use crate::TerminalCore;
 
     fn create_terminal() -> TerminalCore {
         TerminalCore::new(24, 80)
@@ -137,30 +137,54 @@ mod tests {
     fn test_sgr_bold() {
         let mut term = create_terminal();
         feed(&mut term, &csi("1m"));
-        assert!(term.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD), "SGR 1 should set bold");
+        assert!(
+            term.current_attrs
+                .flags
+                .contains(crate::types::cell::SgrFlags::BOLD),
+            "SGR 1 should set bold"
+        );
         feed(&mut term, &csi("0m"));
-        assert!(!term.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD), "SGR 0 should reset");
+        assert!(
+            !term
+                .current_attrs
+                .flags
+                .contains(crate::types::cell::SgrFlags::BOLD),
+            "SGR 0 should reset"
+        );
     }
 
     #[test]
     fn test_sgr_italic() {
         let mut term = create_terminal();
         feed(&mut term, &csi("3m"));
-        assert!(term.current_attrs.flags.contains(crate::types::cell::SgrFlags::ITALIC), "SGR 3 should set italic");
+        assert!(
+            term.current_attrs
+                .flags
+                .contains(crate::types::cell::SgrFlags::ITALIC),
+            "SGR 3 should set italic"
+        );
     }
 
     #[test]
     fn test_sgr_256_color() {
         let mut term = create_terminal();
         feed(&mut term, &csi("38;5;196m"));
-        assert_eq!(term.current_attrs.foreground, Color::Indexed(196), "256-color should set foreground to Indexed(196)");
+        assert_eq!(
+            term.current_attrs.foreground,
+            Color::Indexed(196),
+            "256-color should set foreground to Indexed(196)"
+        );
     }
 
     #[test]
     fn test_sgr_true_color() {
         let mut term = create_terminal();
         feed(&mut term, &csi("38;2;255;128;64m"));
-        assert_eq!(term.current_attrs.foreground, Color::Rgb(255, 128, 64), "true-color should set foreground to Rgb(255, 128, 64)");
+        assert_eq!(
+            term.current_attrs.foreground,
+            Color::Rgb(255, 128, 64),
+            "true-color should set foreground to Rgb(255, 128, 64)"
+        );
     }
 
     // -------------------- Test 4: Line Operations --------------------
@@ -220,7 +244,10 @@ mod tests {
         feed(&mut term, &csi("5;15r"));
         // No panic occurred - DECSTBM (set scroll region) did not crash
         let cursor = term.screen.cursor();
-        assert!(cursor.row < 24 && cursor.col < 80, "cursor should remain in bounds after DECSTBM");
+        assert!(
+            cursor.row < 24 && cursor.col < 80,
+            "cursor should remain in bounds after DECSTBM"
+        );
     }
 
     // -------------------- Test 7: Tab Stops --------------------

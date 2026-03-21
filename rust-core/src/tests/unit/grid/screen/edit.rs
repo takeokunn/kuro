@@ -283,10 +283,26 @@ fn erase_chars_blanks_cells_in_place() {
     s.move_cursor(0, 1);
     s.erase_chars(2, attrs);
 
-    assert_eq!(s.get_cell(0, 0).unwrap().char(), 'A', "col 0 must be untouched");
-    assert_eq!(s.get_cell(0, 1).unwrap().char(), ' ', "col 1 must be erased");
-    assert_eq!(s.get_cell(0, 2).unwrap().char(), ' ', "col 2 must be erased");
-    assert_eq!(s.get_cell(0, 3).unwrap().char(), 'D', "col 3 must be untouched");
+    assert_eq!(
+        s.get_cell(0, 0).unwrap().char(),
+        'A',
+        "col 0 must be untouched"
+    );
+    assert_eq!(
+        s.get_cell(0, 1).unwrap().char(),
+        ' ',
+        "col 1 must be erased"
+    );
+    assert_eq!(
+        s.get_cell(0, 2).unwrap().char(),
+        ' ',
+        "col 2 must be erased"
+    );
+    assert_eq!(
+        s.get_cell(0, 3).unwrap().char(),
+        'D',
+        "col 3 must be untouched"
+    );
 }
 
 #[test]

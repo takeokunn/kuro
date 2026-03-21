@@ -134,9 +134,16 @@ fn test_btop_render_dump() {
         offset = end;
 
         if let Some(line) = term.screen.get_line(0) {
-            let text: String = line.cells.iter().map(super::super::types::cell::Cell::char).collect();
+            let text: String = line
+                .cells
+                .iter()
+                .map(super::super::types::cell::Cell::char)
+                .collect();
             let trimmed = text.trim_end();
-            let end_idx = trimmed.char_indices().nth(40).map_or(trimmed.len(), |(i, _)| i);
+            let end_idx = trimmed
+                .char_indices()
+                .nth(40)
+                .map_or(trimmed.len(), |(i, _)| i);
             let starts_with = &trimmed[..end_idx];
             eprintln!("@{end:6}: |{starts_with}|");
         }
@@ -146,11 +153,20 @@ fn test_btop_render_dump() {
     eprintln!("\n--- Final screen dump (40x120) ---");
     for row in 0..40usize {
         if let Some(line) = term.screen.get_line(row) {
-            let text: String = line.cells.iter().map(super::super::types::cell::Cell::char).collect();
+            let text: String = line
+                .cells
+                .iter()
+                .map(super::super::types::cell::Cell::char)
+                .collect();
             eprintln!("{:02}: |{}|", row, text.trim_end());
         }
     }
-    eprintln!("cursor: ({}, {}), alt: {}", term.screen.cursor().row, term.screen.cursor().col, term.screen.is_alternate_screen_active());
+    eprintln!(
+        "cursor: ({}, {}), alt: {}",
+        term.screen.cursor().row,
+        term.screen.cursor().col,
+        term.screen.is_alternate_screen_active()
+    );
 }
 
 /// Spaces appearing between non-space characters must be preserved.
@@ -276,7 +292,11 @@ fn test_cr_clears_pending_wrap() {
     // Print — should NOT scroll
     term.advance(b"Z");
     let cell = term.get_cell(0, 0).expect("cell at (0,0)");
-    assert_eq!(cell.char(), 'A', "CR must clear pending wrap; row 0 must be intact");
+    assert_eq!(
+        cell.char(),
+        'A',
+        "CR must clear pending wrap; row 0 must be intact"
+    );
 }
 
 /// BS (backspace) must clear pending wrap.
@@ -340,6 +360,10 @@ fn test_lf_clears_pending_wrap() {
     term.advance(b"\x1b[1;10HX");
     // LF — should clear pending wrap and move down (not cause double-advance)
     term.advance(b"\n");
-    assert_eq!(term.cursor_row(), 1, "LF after pending wrap: cursor at row 1");
+    assert_eq!(
+        term.cursor_row(),
+        1,
+        "LF after pending wrap: cursor at row 1"
+    );
     assert_eq!(term.cursor_col(), 9, "LF should not change column");
 }

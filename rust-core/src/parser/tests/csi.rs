@@ -2,7 +2,10 @@
 //!
 //! Module under test: `parser/csi.rs`
 //! Tier: T2 — `ProptestConfig::with_cases(500)`
-#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts: rows/cols are terminal dimensions (≤ 65535); usize→u16 is safe")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "test coordinate casts: rows/cols are terminal dimensions (≤ 65535); usize→u16 is safe"
+)]
 
 use super::*;
 
@@ -503,7 +506,10 @@ fn test_decscusr_blinking_block_param0() {
     let mut term = crate::TerminalCore::new(24, 80);
     // First set a non-default shape so the assertion is meaningful
     term.advance(b"\x1b[6 q"); // SteadyBar
-    assert_eq!(term.dec_modes.cursor_shape, crate::types::cursor::CursorShape::SteadyBar);
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::SteadyBar
+    );
     term.advance(b"\x1b[0 q");
     assert_eq!(
         term.dec_modes.cursor_shape,

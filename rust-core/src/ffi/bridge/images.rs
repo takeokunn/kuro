@@ -14,8 +14,10 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 fn kuro_core_get_image(env: &Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'_>> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let global = lock_session!();
-        global.get(&session_id)
-            .map_or_else(|| Ok(String::new()), |session| Ok::<String, KuroError>(session.get_image_png_base64(image_id)))
+        global.get(&session_id).map_or_else(
+            || Ok(String::new()),
+            |session| Ok::<String, KuroError>(session.get_image_png_base64(image_id)),
+        )
     }));
     match result {
         Ok(Ok(b64)) => {
@@ -44,13 +46,21 @@ fn kuro_core_get_image(env: &Env, session_id: u64, image_id: u32) -> EmacsResult
 /// This is separate from `kuro-core-poll-updates-with-faces` for backward compatibility.
 /// Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
 #[defun]
-#[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
-#[expect(clippy::similar_names, reason = "cw_val/ch_val are intentional abbreviations for cell-width and cell-height; renaming would reduce clarity")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
+)]
+#[expect(
+    clippy::similar_names,
+    reason = "cw_val/ch_val are intentional abbreviations for cell-width and cell-height; renaming would reduce clarity"
+)]
 fn kuro_core_poll_image_notifications(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let notifications = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut global = lock_session!();
-        global.get_mut(&session_id)
-            .map_or_else(|| Ok(Vec::new()), |session| Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications()))
+        global.get_mut(&session_id).map_or_else(
+            || Ok(Vec::new()),
+            |session| Ok::<Vec<_>, KuroError>(session.take_pending_image_notifications()),
+        )
     }))
     .unwrap_or_else(|_| Ok(Vec::new()))
     .unwrap_or_default();

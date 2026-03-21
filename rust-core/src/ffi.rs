@@ -24,7 +24,7 @@
 //!   - **bridge/events.rs**: OSC event polling (CWD, clipboard, prompt marks, focus)
 //!   - **bridge/images.rs**: Kitty Graphics Protocol image functions
 //! - **fallback.rs**: Raw FFI bindings as contingency
-//! - **`test_terminal.rs`**: Test-only #[defun] functions that bypass the PTY
+//! - **`test_terminal.rs`**: Test-only `#[defun]` functions that bypass the PTY
 //!
 //! # Usage
 //!
@@ -51,8 +51,8 @@ pub mod test_terminal;
 
 // Re-export the trait and implementations
 pub use abstraction::{
-    attach_session, detach_session, init_session, list_sessions, shutdown_session,
-    with_session, with_session_readonly,
+    attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session,
+    with_session_readonly,
 };
 pub use abstraction::{SessionState, TerminalSession, TERMINAL_SESSIONS};
 pub use bridge::EmacsModuleFFI;

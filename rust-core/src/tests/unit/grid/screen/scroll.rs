@@ -295,5 +295,8 @@ fn test_full_dirty_cleared_by_take_dirty_lines() {
     assert_eq!(dirty.len(), 24);
     // Second drain must be empty (full_dirty flag was cleared).
     let dirty2 = screen.take_dirty_lines();
-    assert!(dirty2.is_empty(), "full_dirty must be cleared after take_dirty_lines");
+    assert!(
+        dirty2.is_empty(),
+        "full_dirty must be cleared after take_dirty_lines"
+    );
 }

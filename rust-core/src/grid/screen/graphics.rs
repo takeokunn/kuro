@@ -1,10 +1,10 @@
 //! Graphics store access methods for Screen
 
-use super::{Screen, GraphicsStore};
+use super::{GraphicsStore, Screen};
 
 impl Screen {
     /// Get reference to the active screen's graphics store
-    #[must_use] 
+    #[must_use]
     pub fn active_graphics(&self) -> &GraphicsStore {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_ref() {
@@ -25,7 +25,7 @@ impl Screen {
     }
 
     /// Get image from any screen (primary first, then active if alternate)
-    #[must_use] 
+    #[must_use]
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
         // Check primary screen's store
         let result = self.graphics.get_image_png_base64(image_id);

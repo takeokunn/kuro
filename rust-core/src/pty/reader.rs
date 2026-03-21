@@ -15,7 +15,10 @@ impl PtyReader {
     /// for graceful termination.
     // The Arc and Sender args are moved into the thread body — taking references
     // would require 'static lifetimes, which defeats the purpose.
-    #[expect(clippy::needless_pass_by_value, reason = "args are moved into the thread body")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "args are moved into the thread body"
+    )]
     pub fn read_loop(
         mut master: File,
         sender: crossbeam_channel::Sender<Vec<u8>>,

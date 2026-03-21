@@ -41,7 +41,10 @@ pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: ch
 ///
 /// Note: The top margin is inclusive, bottom margin is exclusive (following the
 /// existing `ScrollRegion` convention in Screen).
-#[expect(clippy::cast_possible_truncation, reason = "rows = screen.rows() which is u16; usize→u16 round-trip is lossless")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "rows = screen.rows() which is u16; usize→u16 round-trip is lossless"
+)]
 fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
     let rows = term.screen.rows() as usize;
 

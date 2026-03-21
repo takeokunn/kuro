@@ -223,7 +223,11 @@ fn test_kitty_three_chunk_with_intermediate_payload() {
             pixel_height,
             ..
         } => {
-            assert_eq!(image_id, Some(9), "image_id must match the first-chunk param");
+            assert_eq!(
+                image_id,
+                Some(9),
+                "image_id must match the first-chunk param"
+            );
             assert_eq!(format, ImageFormat::Rgb, "format must be Rgb (f=24)");
             assert_eq!(pixel_width, 1, "pixel_width must match s=1");
             assert_eq!(pixel_height, 3, "pixel_height must match v=3");

@@ -51,7 +51,11 @@ enum SixelParseState {
 impl SixelDecoder {
     /// Create a decoder using Sixel P2 behavior.
     #[must_use]
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "VT340 default palette values are 0-100 (positive); (v * 255 / 100) is always ≤ 255")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "VT340 default palette values are 0-100 (positive); (v * 255 / 100) is always ≤ 255"
+    )]
     pub fn new(p2: u16) -> Self {
         let mut color_map = HashMap::new();
         // VT340-like default palette (first 16 entries, 0-100 mapped to 0-255).
@@ -216,8 +220,14 @@ impl SixelDecoder {
         }
     }
 
-    #[expect(clippy::cast_possible_truncation, reason = "register index: DCS params are u32 but Sixel only defines 0-255 registers (VT340); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255")]
-    #[expect(clippy::cast_precision_loss, reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "register index: DCS params are u32 but Sixel only defines 0-255 registers (VT340); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255"
+    )]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation"
+    )]
     fn apply_color_command(&mut self) {
         if self.params.is_empty() {
             return;
@@ -377,7 +387,7 @@ impl SixelDecoder {
     /// Finalize decoding.
     ///
     /// Returns `(pixels_rgba, width, height)` or `None` when nothing was decoded.
-    #[must_use] 
+    #[must_use]
     pub fn finish(mut self) -> Option<(Vec<u8>, u32, u32)> {
         // Flush an unterminated command at sequence end.
         match self.state {
@@ -418,8 +428,15 @@ impl SixelDecoder {
 }
 
 /// HLS to RGB conversion (H: 0-360, L: 0-100, S: 0-100).
-#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "L/S are clamped to [0,1] and hue_to_rgb returns [0,1]; multiplied by 255 gives [0,255] — always fits in u8")]
-#[expect(clippy::many_single_char_names, reason = "h/l/s/p/q/r/g/b are standard HLS and RGB color component abbreviations")]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "L/S are clamped to [0,1] and hue_to_rgb returns [0,1]; multiplied by 255 gives [0,255] — always fits in u8"
+)]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "h/l/s/p/q/r/g/b are standard HLS and RGB color component abbreviations"
+)]
 fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     let l = (l / 100.0).clamp(0.0, 1.0);
     let s = (s / 100.0).clamp(0.0, 1.0);

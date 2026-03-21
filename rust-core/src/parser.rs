@@ -1,13 +1,13 @@
 //! VTE Parser integration
 
 pub mod apc;
-pub(crate) mod limits;
 pub mod csi;
 pub mod dcs;
 pub mod dec_private;
 pub mod erase;
 pub mod insert_delete;
 pub mod kitty;
+pub(crate) mod limits;
 pub mod osc;
 pub mod osc_protocol;
 pub mod scroll;

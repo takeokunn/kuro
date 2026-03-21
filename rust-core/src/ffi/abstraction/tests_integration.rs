@@ -54,7 +54,19 @@ fn arb_sgr_attrs() -> impl Strategy<Value = SgrAttributes> {
         any::<bool>(),
     )
         .prop_map(
-            |(fg, bg, bold, dim, italic, underline, blink_slow, blink_fast, inverse, hidden, strikethrough)| {
+            |(
+                fg,
+                bg,
+                bold,
+                dim,
+                italic,
+                underline,
+                blink_slow,
+                blink_fast,
+                inverse,
+                hidden,
+                strikethrough,
+            )| {
                 let mut flags = SgrFlags::empty();
                 flags.set(SgrFlags::BOLD, bold);
                 flags.set(SgrFlags::DIM, dim);
@@ -148,8 +160,14 @@ fn test_integration_bold_rgb_fg() {
     let (start, end, fg, bg, flags) = face_ranges[0];
     assert_eq!(start, 0);
     assert_eq!(end, 1);
-    assert_eq!(fg, 0x00FF_0080u32, "fg should be Rgb(255,0,128) = 0x00FF0080");
-    assert_eq!(bg, 0xFF00_0000u32, "bg should be Default sentinel = 0xFF00_0000");
+    assert_eq!(
+        fg, 0x00FF_0080u32,
+        "fg should be Rgb(255,0,128) = 0x00FF0080"
+    );
+    assert_eq!(
+        bg, 0xFF00_0000u32,
+        "bg should be Default sentinel = 0xFF00_0000"
+    );
     assert_eq!(flags, 0x01u64, "flags should have bold bit set (0x01)");
 }
 
@@ -182,7 +200,10 @@ fn test_integration_indexed_color() {
     assert!(!face_ranges.is_empty());
 
     let (_, _, fg, _, _) = face_ranges[0];
-    assert_eq!(fg, 0x4000_002Au32, "Indexed(42) should encode as 0x4000002A");
+    assert_eq!(
+        fg, 0x4000_002Au32,
+        "Indexed(42) should encode as 0x4000002A"
+    );
 }
 
 #[test]
@@ -197,7 +218,10 @@ fn test_integration_true_black_vs_default() {
 
     let (_, _, fg, bg, _) = face_ranges[0];
     assert_eq!(fg, 0u32, "Rgb(0,0,0) must encode as 0 (true black)");
-    assert_eq!(bg, 0xFF00_0000u32, "Default bg should encode as 0xFF00_0000");
+    assert_eq!(
+        bg, 0xFF00_0000u32,
+        "Default bg should encode as 0xFF00_0000"
+    );
 }
 
 #[test]
@@ -211,7 +235,13 @@ fn test_integration_default_color_sentinel() {
     assert!(!face_ranges.is_empty());
 
     let (_, _, fg, bg, flags) = face_ranges[0];
-    assert_eq!(fg, 0xFF00_0000u32, "Default fg should be 0xFF00_0000 sentinel");
-    assert_eq!(bg, 0xFF00_0000u32, "Default bg should be 0xFF00_0000 sentinel");
+    assert_eq!(
+        fg, 0xFF00_0000u32,
+        "Default fg should be 0xFF00_0000 sentinel"
+    );
+    assert_eq!(
+        bg, 0xFF00_0000u32,
+        "Default bg should be 0xFF00_0000 sentinel"
+    );
     assert_eq!(flags, 0u64, "No attributes set");
 }

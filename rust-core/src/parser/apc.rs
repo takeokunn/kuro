@@ -30,7 +30,6 @@ pub enum ApcScanState {
 /// 2. Slow path: Run the APC state machine only when ESC is detected or we're mid-sequence
 /// 3. Always run the vte parser for all other terminal sequences
 pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
-
     // --- Hybrid APC pre-scanner for Kitty Graphics ---
     // Only run the byte-by-byte scanner if:
     // 1. There's an ESC byte in the buffer (detected via memchr), OR

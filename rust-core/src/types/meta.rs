@@ -16,4 +16,3 @@ pub(crate) struct TerminalMeta {
     /// DCS (Device Control String) sequence state
     pub(crate) dcs_state: DcsState,
 }
-

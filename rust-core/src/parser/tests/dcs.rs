@@ -33,8 +33,8 @@ fn test_xtgettcap_known_capability_response() {
         1,
         "exactly one response should be queued for TN capability"
     );
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
         "known capability response must start with ESC P 1 + r, got: {resp:?}"
@@ -59,8 +59,8 @@ fn test_xtgettcap_unknown_capability_response() {
         1,
         "exactly one response should be queued for unknown capability"
     );
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP0+r"),
         "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
@@ -138,13 +138,16 @@ fn test_xtgettcap_truecolor_flag_response() {
     run_dcs(&mut core, b"+", 'q', b"5463");
 
     assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
         "Tc capability response must start with ESC P 1 + r, got: {resp:?}"
     );
-    assert!(resp.contains("5463"), "response must echo back the hex-encoded name");
+    assert!(
+        resp.contains("5463"),
+        "response must echo back the hex-encoded name"
+    );
 }
 
 /// XTGETTCAP for "colors" (hex "636f6c6f7273") must produce a success response
@@ -157,8 +160,8 @@ fn test_xtgettcap_colors_capability_response() {
     run_dcs(&mut core, b"+", 'q', b"636f6c6f7273");
 
     assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1bP1+r"),
         "colors capability response must start with ESC P 1 + r, got: {resp:?}"
@@ -271,7 +274,10 @@ fn test_sixel_advances_cursor_after_render() {
         "cursor row must advance past the rendered sixel region, got row {}",
         cursor.row
     );
-    assert_eq!(cursor.col, 0, "sixel rendering must reset cursor column to 0");
+    assert_eq!(
+        cursor.col, 0,
+        "sixel rendering must reset cursor column to 0"
+    );
 }
 
 /// A Sixel DCS sequence with empty data (no pixel commands) must not add any

@@ -229,11 +229,22 @@ proptest! {
 // INVARIANT: All 16 Named color encodings have bit 31 set.
 fn test_encode_color_named_marker() {
     let all_named = [
-        NamedColor::Black, NamedColor::Red, NamedColor::Green, NamedColor::Yellow,
-        NamedColor::Blue, NamedColor::Magenta, NamedColor::Cyan, NamedColor::White,
-        NamedColor::BrightBlack, NamedColor::BrightRed, NamedColor::BrightGreen,
-        NamedColor::BrightYellow, NamedColor::BrightBlue, NamedColor::BrightMagenta,
-        NamedColor::BrightCyan, NamedColor::BrightWhite,
+        NamedColor::Black,
+        NamedColor::Red,
+        NamedColor::Green,
+        NamedColor::Yellow,
+        NamedColor::Blue,
+        NamedColor::Magenta,
+        NamedColor::Cyan,
+        NamedColor::White,
+        NamedColor::BrightBlack,
+        NamedColor::BrightRed,
+        NamedColor::BrightGreen,
+        NamedColor::BrightYellow,
+        NamedColor::BrightBlue,
+        NamedColor::BrightMagenta,
+        NamedColor::BrightCyan,
+        NamedColor::BrightWhite,
     ];
     for named in &all_named {
         let encoded = encode_color(&Color::Named(*named));
@@ -254,12 +265,20 @@ fn test_encode_color_default_sentinel_unique() {
 
     // Named: bit 31 set, bits 0-3 index (0-15) — range 0x8000_0000..=0x8000000F
     for i in 0u32..=15u32 {
-        assert_ne!(0x8000_0000u32 | i, SENTINEL, "Named({i}) must not equal sentinel");
+        assert_ne!(
+            0x8000_0000u32 | i,
+            SENTINEL,
+            "Named({i}) must not equal sentinel"
+        );
     }
 
     // Indexed: bit 30 set, bits 0-7 index (0-255) — range 0x4000_0000..=0x400000FF
     for i in 0u32..=255u32 {
-        assert_ne!(0x4000_0000u32 | i, SENTINEL, "Indexed({i}) must not equal sentinel");
+        assert_ne!(
+            0x4000_0000u32 | i,
+            SENTINEL,
+            "Indexed({i}) must not equal sentinel"
+        );
     }
 
     // Rgb: lower 24 bits only; 0xFF00_0000 has no lower-24 bits, so it cannot
@@ -273,20 +292,22 @@ fn test_encode_color_default_sentinel_unique() {
 // MAPPING: encode_attrs bits 9-11 must encode UnderlineStyle as 0–5.
 fn test_encode_attrs_underline_style_bits() {
     let cases: &[(UnderlineStyle, u64)] = &[
-        (UnderlineStyle::None,     0),
+        (UnderlineStyle::None, 0),
         (UnderlineStyle::Straight, 1),
-        (UnderlineStyle::Double,   2),
-        (UnderlineStyle::Curly,    3),
-        (UnderlineStyle::Dotted,   4),
-        (UnderlineStyle::Dashed,   5),
+        (UnderlineStyle::Double, 2),
+        (UnderlineStyle::Curly, 3),
+        (UnderlineStyle::Dotted, 4),
+        (UnderlineStyle::Dashed, 5),
     ];
     for (style, expected_style_val) in cases {
-        let attrs = SgrAttributes { underline_style: *style, ..Default::default() };
+        let attrs = SgrAttributes {
+            underline_style: *style,
+            ..Default::default()
+        };
         let encoded = encode_attrs(&attrs);
         let bits_9_11 = (encoded >> 9) & 0x7;
         assert_eq!(
-            bits_9_11,
-            *expected_style_val,
+            bits_9_11, *expected_style_val,
             "bits 9-11 for {style:?} must be {expected_style_val}, got {bits_9_11}"
         );
     }
@@ -311,9 +332,27 @@ fn test_encode_line_text_length_matches_cells() {
 fn test_encode_line_face_ranges_cover_full() {
     // Use three cells with distinct attrs to force three separate ranges.
     let cells = vec![
-        Cell::with_attrs('A', SgrAttributes { flags: SgrFlags::BOLD,   ..Default::default() }),
-        Cell::with_attrs('B', SgrAttributes { flags: SgrFlags::ITALIC, ..Default::default() }),
-        Cell::with_attrs('C', SgrAttributes { flags: SgrFlags::DIM,    ..Default::default() }),
+        Cell::with_attrs(
+            'A',
+            SgrAttributes {
+                flags: SgrFlags::BOLD,
+                ..Default::default()
+            },
+        ),
+        Cell::with_attrs(
+            'B',
+            SgrAttributes {
+                flags: SgrFlags::ITALIC,
+                ..Default::default()
+            },
+        ),
+        Cell::with_attrs(
+            'C',
+            SgrAttributes {
+                flags: SgrFlags::DIM,
+                ..Default::default()
+            },
+        ),
     ];
     let (text, ranges, _) = encode_line(&cells);
     assert_eq!(ranges[0].0, 0, "first range must start at 0");
@@ -329,10 +368,34 @@ fn test_encode_line_face_ranges_cover_full() {
 fn test_encode_line_face_ranges_contiguous() {
     // Each cell gets a distinct SGR attribute to ensure individual ranges.
     let cells = vec![
-        Cell::with_attrs('X', SgrAttributes { flags: SgrFlags::BOLD,          ..Default::default() }),
-        Cell::with_attrs('Y', SgrAttributes { flags: SgrFlags::ITALIC,        ..Default::default() }),
-        Cell::with_attrs('Z', SgrAttributes { flags: SgrFlags::STRIKETHROUGH, ..Default::default() }),
-        Cell::with_attrs('W', SgrAttributes { flags: SgrFlags::INVERSE,       ..Default::default() }),
+        Cell::with_attrs(
+            'X',
+            SgrAttributes {
+                flags: SgrFlags::BOLD,
+                ..Default::default()
+            },
+        ),
+        Cell::with_attrs(
+            'Y',
+            SgrAttributes {
+                flags: SgrFlags::ITALIC,
+                ..Default::default()
+            },
+        ),
+        Cell::with_attrs(
+            'Z',
+            SgrAttributes {
+                flags: SgrFlags::STRIKETHROUGH,
+                ..Default::default()
+            },
+        ),
+        Cell::with_attrs(
+            'W',
+            SgrAttributes {
+                flags: SgrFlags::INVERSE,
+                ..Default::default()
+            },
+        ),
     ];
     let (_, ranges, _) = encode_line(&cells);
     for w in ranges.windows(2) {

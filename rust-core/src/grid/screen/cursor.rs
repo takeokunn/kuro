@@ -1,11 +1,13 @@
 //! Cursor movement and character printing methods for Screen
 
-use super::{Screen, Cursor, Color, SgrAttributes, UnicodeWidthChar, CellWidth, Cell, DirtySet as _};
+use super::{
+    Cell, CellWidth, Color, Cursor, DirtySet as _, Screen, SgrAttributes, UnicodeWidthChar,
+};
 
 impl Screen {
     /// Get reference to the active screen's cursor
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn cursor(&self) -> &Cursor {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_ref() {
@@ -139,7 +141,9 @@ impl Screen {
         // (called from line_feed_impl) sees the correct value even when
         // operating on the alternate screen.
         let is_primary = !self.is_alternate_active;
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
 
         // --- Deferred wrap: execute the pending wrap from a previous print ---
         if screen.cursor.pending_wrap {

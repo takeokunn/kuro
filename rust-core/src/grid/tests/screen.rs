@@ -744,7 +744,7 @@ fn test_push_combining_at_col0_no_panic() {
     // No characters printed; cursor at (0, 0).
     // Directly call attach_combining at (0, 0) — the "nothing to combine onto" case.
     screen.attach_combining(0, 0, '\u{0301}'); // combining acute accent
-    // Must not panic; grapheme may or may not have changed, but cell must be valid.
+                                               // Must not panic; grapheme may or may not have changed, but cell must be valid.
     let cell = screen.get_cell(0, 0).unwrap();
     assert!(
         !cell.grapheme().is_empty(),
@@ -1006,7 +1006,8 @@ fn test_scrollback_max_size_eviction() {
         "scrollback_line_count must be clamped to scrollback_max_lines"
     );
     assert_eq!(
-        screen.scrollback_buffer.len(), 5,
+        screen.scrollback_buffer.len(),
+        5,
         "scrollback_buffer length must equal scrollback_max_lines after eviction"
     );
 }
@@ -1030,7 +1031,8 @@ fn test_scrollback_eviction_retains_newest_lines() {
 
     // After 6 pushes with max=3, the 3 oldest ('1','2','3') must be evicted.
     assert_eq!(
-        screen.scrollback_buffer.len(), 3,
+        screen.scrollback_buffer.len(),
+        3,
         "scrollback_buffer must hold exactly 3 lines after eviction"
     );
 
@@ -1064,7 +1066,8 @@ fn test_scroll_offset_clamping() {
 
     // Offset must be clamped to scrollback_line_count
     assert_eq!(
-        screen.scroll_offset(), screen.scrollback_line_count,
+        screen.scroll_offset(),
+        screen.scrollback_line_count,
         "scroll_offset must not exceed scrollback_line_count"
     );
 }
@@ -1088,13 +1091,15 @@ fn test_scroll_to_live_view() {
     screen.viewport_scroll_down(15);
 
     assert_eq!(
-        screen.scroll_offset(), 0,
+        screen.scroll_offset(),
+        0,
         "scroll_offset must be 0 when returned to the live view"
     );
     // full_dirty is set when returning to offset 0 to force a full re-render
     let dirty = screen.take_dirty_lines();
     assert_eq!(
-        dirty.len(), 24,
+        dirty.len(),
+        24,
         "all rows must be dirty after returning to live view"
     );
 }
@@ -1139,8 +1144,7 @@ fn test_default_scrollback_max_exact_eviction() {
 
     // The buffer must be clamped to DEFAULT_SCROLLBACK_MAX; the oldest line was evicted
     assert_eq!(
-        screen.scrollback_line_count,
-        DEFAULT_SCROLLBACK_MAX,
+        screen.scrollback_line_count, DEFAULT_SCROLLBACK_MAX,
         "scrollback_line_count must equal DEFAULT_SCROLLBACK_MAX after one eviction"
     );
     assert_eq!(
@@ -1158,8 +1162,14 @@ fn test_scroll_down_no_pending_in_alternate_screen() {
     // Full-screen scroll-down in alternate should NOT accumulate pending_scroll_down
     screen.scroll_down(3, Color::Default);
     let (up, down) = screen.consume_scroll_events();
-    assert_eq!(up, 0, "alternate screen scroll_down must not set pending_scroll_up");
-    assert_eq!(down, 0, "alternate screen scroll_down must not set pending_scroll_down");
+    assert_eq!(
+        up, 0,
+        "alternate screen scroll_down must not set pending_scroll_up"
+    );
+    assert_eq!(
+        down, 0,
+        "alternate screen scroll_down must not set pending_scroll_down"
+    );
 }
 
 #[test]
@@ -1185,6 +1195,12 @@ fn test_viewport_scroll_down_resets_pending_scroll_counters() {
 
     // The pending counters should have been reset to 0 by viewport_scroll_down
     let (up, down) = screen.consume_scroll_events();
-    assert_eq!(up, 0, "pending_scroll_up must be reset when returning to live view");
-    assert_eq!(down, 0, "pending_scroll_down must be reset when returning to live view");
+    assert_eq!(
+        up, 0,
+        "pending_scroll_up must be reset when returning to live view"
+    );
+    assert_eq!(
+        down, 0,
+        "pending_scroll_down must be reset when returning to live view"
+    );
 }

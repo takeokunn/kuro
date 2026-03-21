@@ -105,7 +105,10 @@ fn test_osc_title_non_utf8() {
     // Verify that non-UTF8 bytes are handled via lossy conversion (U+FFFD replacement)
     let mut core = super::make_term();
     core.advance(b"\x1b]2;hello\xff\xfeworld\x07");
-    assert!(core.meta.title_dirty, "Non-UTF8 title should still set dirty");
+    assert!(
+        core.meta.title_dirty,
+        "Non-UTF8 title should still set dirty"
+    );
     assert!(
         !core.meta.title.is_empty(),
         "Non-UTF8 title should produce non-empty result via lossy conversion"

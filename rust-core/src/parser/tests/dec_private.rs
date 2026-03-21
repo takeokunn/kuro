@@ -302,8 +302,8 @@ fn test_get_mode_new_modes() {
 
 #[test]
 fn test_alt_screen_saves_and_restores_sgr_attrs() {
-    use crate::types::{Color, NamedColor};
     use crate::types::cell::SgrFlags;
+    use crate::types::{Color, NamedColor};
 
     let mut term = crate::TerminalCore::new(5, 10);
 

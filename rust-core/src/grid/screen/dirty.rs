@@ -1,6 +1,6 @@
 //! Dirty tracking methods for Screen
 
-use super::{Screen, DirtySet as _};
+use super::{DirtySet as _, Screen};
 
 impl Screen {
     /// Attach a combining character to the cell at (row, col).

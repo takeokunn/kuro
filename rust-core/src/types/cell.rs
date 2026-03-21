@@ -160,7 +160,7 @@ impl Cell {
 
     /// Set hyperlink ID
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn with_hyperlink(mut self, id: String) -> Self {
         self.hyperlink_id = Some(id);
         self
@@ -194,7 +194,7 @@ impl Cell {
 
     /// Get the full grapheme cluster string (may include combining characters)
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn grapheme(&self) -> &str {
         self.grapheme.as_str()
     }
@@ -256,7 +256,10 @@ mod tests {
 
     #[test]
     fn test_sgr_reset() {
-        let mut attrs = SgrAttributes { flags: SgrFlags::BOLD | SgrFlags::ITALIC, ..Default::default() };
+        let mut attrs = SgrAttributes {
+            flags: SgrFlags::BOLD | SgrFlags::ITALIC,
+            ..Default::default()
+        };
 
         attrs.reset();
         assert!(!attrs.flags.contains(SgrFlags::BOLD));
@@ -279,7 +282,10 @@ mod tests {
         let cell2 = Cell::new('A');
         assert_eq!(cell1, cell2);
 
-        let attrs = SgrAttributes { flags: SgrFlags::BOLD, ..Default::default() };
+        let attrs = SgrAttributes {
+            flags: SgrFlags::BOLD,
+            ..Default::default()
+        };
         let cell3 = Cell::with_attrs('A', attrs);
         assert_ne!(cell1, cell3);
     }

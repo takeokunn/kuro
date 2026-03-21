@@ -10,7 +10,6 @@ use std::sync::OnceLock;
 /// Minimum supported Emacs version
 pub const MIN_EMACS_VERSION: (u32, u32) = (29, 1);
 
-
 /// Global initialization state
 static INIT_STATE: OnceLock<InitializationState> = OnceLock::new();
 
@@ -125,7 +124,7 @@ pub const fn reset_init_state() {
 ///
 /// # Returns
 /// A vector of symbol names
-#[must_use] 
+#[must_use]
 pub fn get_exported_symbols() -> Vec<&'static str> {
     vec![
         "kuro-core-init",
@@ -172,8 +171,14 @@ mod tests {
         );
 
         // Regardless of which path was taken, the module is now initialized
-        assert!(is_initialized(), "is_initialized must be true after initialize()");
-        assert!(get_init_state().is_some(), "get_init_state must be Some after initialize()");
+        assert!(
+            is_initialized(),
+            "is_initialized must be true after initialize()"
+        );
+        assert!(
+            get_init_state().is_some(),
+            "get_init_state must be Some after initialize()"
+        );
     }
 
     #[test]

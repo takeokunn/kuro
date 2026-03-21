@@ -60,7 +60,10 @@ impl ScrollRegion {
 
 /// Virtual screen representing the terminal display
 #[derive(Debug)]
-#[expect(clippy::struct_field_names, reason = "alternate_screen is the established name for DEC 1049 alternate buffer; renaming would reduce clarity")]
+#[expect(
+    clippy::struct_field_names,
+    reason = "alternate_screen is the established name for DEC 1049 alternate buffer; renaming would reduce clarity"
+)]
 pub struct Screen {
     /// Lines in the screen (`VecDeque` enables O(1) full-screen scroll via rotate)
     pub(super) lines: VecDeque<Line>,
@@ -106,7 +109,7 @@ pub struct Screen {
 
 impl Screen {
     /// Create a new screen with the specified dimensions
-    #[must_use] 
+    #[must_use]
     pub fn new(rows: u16, cols: u16) -> Self {
         let lines: VecDeque<Line> = (0..rows).map(|_| Line::new(cols as usize)).collect();
 
@@ -135,14 +138,14 @@ impl Screen {
 
     /// Get number of rows
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub const fn rows(&self) -> u16 {
         self.rows
     }
 
     /// Get number of columns
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub const fn cols(&self) -> u16 {
         self.cols
     }
@@ -237,7 +240,9 @@ impl Screen {
                 self.alternate_screen.is_some(),
                 "Screen invariant violated: is_alternate_active=true but alternate_screen=None"
             );
-            self.alternate_screen.as_mut().map(std::convert::AsMut::as_mut)
+            self.alternate_screen
+                .as_mut()
+                .map(std::convert::AsMut::as_mut)
         } else {
             Some(self)
         }
@@ -251,7 +256,9 @@ impl Screen {
                 self.alternate_screen.is_some(),
                 "Screen invariant violated: is_alternate_active=true but alternate_screen=None"
             );
-            self.alternate_screen.as_ref().map(std::convert::AsRef::as_ref)
+            self.alternate_screen
+                .as_ref()
+                .map(std::convert::AsRef::as_ref)
         } else {
             Some(self)
         }

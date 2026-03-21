@@ -173,7 +173,10 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// color for a truncated truecolor sequence like `\e[38;2;255;128m` (missing blue).
 /// Values > 255 are truncated to the low 8 bits (xterm-compatible behavior).
 #[inline]
-#[expect(clippy::cast_possible_truncation, reason = "VTE sub-params are u16; RGB values 0-255 fit; out-of-range values truncate to low 8 bits (xterm-compatible)")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "VTE sub-params are u16; RGB values 0-255 fit; out-of-range values truncate to low 8 bits (xterm-compatible)"
+)]
 fn next_component(groups: &[&[u16]], i: &mut usize) -> u8 {
     if *i < groups.len() && !groups[*i].is_empty() {
         let v = groups[*i][0] as u8;
@@ -208,13 +211,19 @@ fn parse_color_from_subparams(
         match current_group.get(COLOR_MODE_IDX).copied() {
             Some(5) => {
                 // 256-color indexed: XX:5:n
-                #[expect(clippy::cast_possible_truncation, reason = "palette index 0-255 from u16 sub-param; values > 255 truncate (xterm-compatible)")]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "palette index 0-255 from u16 sub-param; values > 255 truncate (xterm-compatible)"
+                )]
                 let n = current_group.get(COLOR_INDEX_IDX).copied()? as u8;
                 Some(Color::Indexed(n))
             }
             Some(2) => {
                 // TrueColor RGB: XX:2:r:g:b
-                #[expect(clippy::cast_possible_truncation, reason = "RGB components 0-255 from u16 sub-params; values > 255 truncate (xterm-compatible)")]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "RGB components 0-255 from u16 sub-params; values > 255 truncate (xterm-compatible)"
+                )]
                 let (r, g, b) = (
                     current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8,
                     current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8,
@@ -240,7 +249,10 @@ fn parse_color_from_subparams(
                 // via `next_component` (producing black channel, not black color).
                 // 256-color indexed: XX;5;n
                 if *i < groups.len() && !groups[*i].is_empty() {
-                    #[expect(clippy::cast_possible_truncation, reason = "palette index 0-255; values > 255 truncate (xterm-compatible)")]
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "palette index 0-255; values > 255 truncate (xterm-compatible)"
+                    )]
                     let n = groups[*i][0] as u8;
                     *i += 1;
                     Some(Color::Indexed(n))

@@ -35,7 +35,7 @@ pub struct BitVecDirtySet {
 
 impl BitVecDirtySet {
     /// Create an empty set pre-allocated for `capacity` rows.
-    #[must_use] 
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             bits: bitvec![0; capacity],

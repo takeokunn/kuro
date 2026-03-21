@@ -294,7 +294,7 @@ fn test_move_cursor_by_positive_offsets() {
     let mut screen = make_screen();
     screen.move_cursor(5, 10);
     screen.move_cursor_by(3, 5); // row_offset=3, col_offset=5
-    // move_by(col_offset=5, row_offset=3): col += 5 → 15, row += 3 → 8
+                                 // move_by(col_offset=5, row_offset=3): col += 5 → 15, row += 3 → 8
     assert_eq!(screen.cursor().row, 8);
     assert_eq!(screen.cursor().col, 15);
 }

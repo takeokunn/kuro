@@ -51,13 +51,15 @@ fn csi_cup(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor up by N rows (default 1). Stops at top of screen.
 #[inline]
 fn csi_cuu(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(-n, 0);
 }
@@ -67,13 +69,15 @@ fn csi_cuu(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor down by N rows (default 1). Stops at bottom of screen.
 #[inline]
 fn csi_cud(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(n, 0);
 }
@@ -83,13 +87,15 @@ fn csi_cud(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor right by N columns (default 1). Stops at right margin.
 #[inline]
 fn csi_cuf(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(0, n);
 }
@@ -99,13 +105,15 @@ fn csi_cuf(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Move cursor left by N columns (default 1). Stops at left margin.
 #[inline]
 fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(0, -n);
 }
@@ -117,13 +125,15 @@ fn csi_cub(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Stops at the bottom of the screen (screen boundary, not scroll region).
 #[inline]
 fn csi_cnl(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(n, 0);
     let row = term.screen.cursor().row;
@@ -137,13 +147,15 @@ fn csi_cnl(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Stops at the top of the screen (screen boundary, not scroll region).
 #[inline]
 fn csi_cpl(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = i32::from(params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1));
+    let n = i32::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    );
 
     term.screen.move_cursor_by(-n, 0);
     let row = term.screen.cursor().row;

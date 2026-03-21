@@ -3,8 +3,8 @@
 //! Module under test: `parser/apc.rs`
 //! Tier: T5 — `ProptestConfig::with_cases(64)`
 
-use super::*;
 use super::MAX_APC_PAYLOAD_BYTES;
+use super::*;
 
 /// Feed raw bytes through the APC pre-scanner (and the VTE parser) using
 /// the public `TerminalCore::advance` method, which delegates to
@@ -67,8 +67,8 @@ fn test_complete_kitty_apc_sequence_produces_response() {
         !core.meta.pending_responses.is_empty(),
         "a pending response should be queued after a Kitty query"
     );
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         resp.starts_with("\x1b_Ga=q"),
         "Kitty query response must start with ESC _ G a=q, got: {resp:?}"

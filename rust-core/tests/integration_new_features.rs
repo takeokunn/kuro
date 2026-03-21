@@ -26,7 +26,10 @@ fn osc_data_palette_initialized_to_256_nones() {
         "OscData.palette must have 256 entries"
     );
     assert!(
-        t.osc_data().palette.iter().all(std::option::Option::is_none),
+        t.osc_data()
+            .palette
+            .iter()
+            .all(std::option::Option::is_none),
         "All palette entries must be None initially"
     );
 }
@@ -100,7 +103,9 @@ fn decrqm_mode_after_disable_responds_reset() {
     // The last response is the new DECRQM reply: should contain status 2 (reset)
     let resp_disabled = responses_after_disable.last().unwrap();
     assert!(
-        resp_disabled.contains("1004") && resp_disabled.contains('2') && resp_disabled.contains("$y"),
+        resp_disabled.contains("1004")
+            && resp_disabled.contains('2')
+            && resp_disabled.contains("$y"),
         "DECRQM for disabled mode 1004 must contain '1004;2$y', got: {resp_disabled:?}"
     );
 }
@@ -167,15 +172,27 @@ fn test_kitty_stack_depth() {
 
     // Push flags=1
     t.advance(b"\x1b[>1u");
-    assert_eq!(t.dec_modes().keyboard_flags, 1, "flags should be 1 after first push");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        1,
+        "flags should be 1 after first push"
+    );
 
     // Push flags=2
     t.advance(b"\x1b[>2u");
-    assert_eq!(t.dec_modes().keyboard_flags, 2, "flags should be 2 after second push");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        2,
+        "flags should be 2 after second push"
+    );
 
     // Push flags=3
     t.advance(b"\x1b[>3u");
-    assert_eq!(t.dec_modes().keyboard_flags, 3, "flags should be 3 after third push");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        3,
+        "flags should be 3 after third push"
+    );
     assert_eq!(
         t.dec_modes().keyboard_flags_stack.len(),
         3,
@@ -197,15 +214,27 @@ fn test_kitty_stack_depth() {
 
     // Pop — flags should revert to 2
     t.advance(b"\x1b[<u");
-    assert_eq!(t.dec_modes().keyboard_flags, 2, "flags should be 2 after first pop");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        2,
+        "flags should be 2 after first pop"
+    );
 
     // Pop — flags should revert to 1
     t.advance(b"\x1b[<u");
-    assert_eq!(t.dec_modes().keyboard_flags, 1, "flags should be 1 after second pop");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        1,
+        "flags should be 1 after second pop"
+    );
 
     // Pop — flags should revert to 0 (default)
     t.advance(b"\x1b[<u");
-    assert_eq!(t.dec_modes().keyboard_flags, 0, "flags should be 0 after third pop");
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        0,
+        "flags should be 0 after third pop"
+    );
     assert_eq!(
         t.dec_modes().keyboard_flags_stack.len(),
         0,

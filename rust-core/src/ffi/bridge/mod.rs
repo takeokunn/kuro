@@ -32,7 +32,9 @@ macro_rules! lock_session {
     () => {
         crate::ffi::abstraction::TERMINAL_SESSIONS
             .lock()
-            .map_err(|_e| crate::error::KuroError::State(crate::ffi::error::StateError::NoTerminalSession))?
+            .map_err(|_e| {
+                crate::error::KuroError::State(crate::ffi::error::StateError::NoTerminalSession)
+            })?
     };
 }
 
@@ -56,10 +58,12 @@ where
         }
         Err(panic_payload) => {
             let msg = panic_payload.downcast::<String>().map_or_else(
-                |p| p.downcast::<&'static str>().map_or_else(
-                    |_| "Panic: Unknown panic payload".to_owned(),
-                    |msg| format!("Panic: {msg}"),
-                ),
+                |p| {
+                    p.downcast::<&'static str>().map_or_else(
+                        |_| "Panic: Unknown panic payload".to_owned(),
+                        |msg| format!("Panic: {msg}"),
+                    )
+                },
                 |msg| format!("Panic: {msg}"),
             );
             let _ = env.message(&msg);

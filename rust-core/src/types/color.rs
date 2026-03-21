@@ -55,7 +55,7 @@ pub enum Color {
 
 impl Color {
     /// Convert color to RGB triple
-    #[must_use] 
+    #[must_use]
     pub const fn to_rgb(&self) -> (u8, u8, u8) {
         match self {
             Self::Named(named) => named.to_rgb(),
@@ -110,7 +110,7 @@ impl Color {
 
 impl NamedColor {
     /// Get RGB values for named color
-    #[must_use] 
+    #[must_use]
     pub const fn to_rgb(&self) -> (u8, u8, u8) {
         match self {
             Self::Black => (0, 0, 0),

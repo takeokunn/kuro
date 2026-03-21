@@ -70,7 +70,10 @@ fn test_sgr_compound_256_with_attrs() {
     // \e[1;38;5;196;4m — groups: [1], [38], [5], [196], [4]
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;38;5;196;4m");
-    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be set");
+    assert!(
+        term.current_attrs.flags.contains(SgrFlags::BOLD),
+        "bold should be set"
+    );
     assert!(term.current_attrs.underline(), "underline should be set");
     assert_eq!(
         term.current_attrs.foreground,
@@ -186,7 +189,10 @@ fn test_sgr_empty_sequence_resets_all() {
     let mut term = crate::TerminalCore::new(24, 80);
     // First set some attributes
     term.advance(b"\x1b[1;3;4m"); // bold, italic, underline
-    assert!(term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be set before reset");
+    assert!(
+        term.current_attrs.flags.contains(SgrFlags::BOLD),
+        "bold should be set before reset"
+    );
     assert!(
         term.current_attrs.flags.contains(SgrFlags::ITALIC),
         "italic should be set before reset"
@@ -198,8 +204,14 @@ fn test_sgr_empty_sequence_resets_all() {
     // Now reset with empty sequence
     term.advance(b"\x1b[m");
     // All attributes should be reset
-    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD), "bold should be reset");
-    assert!(!term.current_attrs.flags.contains(SgrFlags::ITALIC), "italic should be reset");
+    assert!(
+        !term.current_attrs.flags.contains(SgrFlags::BOLD),
+        "bold should be reset"
+    );
+    assert!(
+        !term.current_attrs.flags.contains(SgrFlags::ITALIC),
+        "italic should be reset"
+    );
     assert!(!term.current_attrs.underline(), "underline should be reset");
 }
 
@@ -218,7 +230,10 @@ fn test_sgr_bold_turn_off_code_22() {
     term.advance(b"\x1b[1m"); // bold on
     assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b[22m"); // turn off bold+dim
-    assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD), "Bold should be off after CSI 22m");
+    assert!(
+        !term.current_attrs.flags.contains(SgrFlags::BOLD),
+        "Bold should be off after CSI 22m"
+    );
 }
 
 #[test]

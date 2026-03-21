@@ -168,12 +168,20 @@ fn vt_decawm_pending_wrap() {
     // CUP clears pending wrap — subsequent print must NOT wrap
     t.advance(b"\x1b[1;5H"); // move to (0,4) — last col
     t.advance(b"B");
-    assert_eq!(t.cursor_col(), 4, "after overwriting last col, pending wrap again");
+    assert_eq!(
+        t.cursor_col(),
+        4,
+        "after overwriting last col, pending wrap again"
+    );
     assert_eq!(t.cursor_row(), 0, "still on row 0");
     // Now print another char — this must fire the deferred wrap
     t.advance(b"C");
     assert_eq!(t.cursor_row(), 1, "deferred wrap fires on next char");
-    assert_eq!(t.cursor_col(), 1, "cursor at col 1 after wrapping and printing 'C'");
+    assert_eq!(
+        t.cursor_col(),
+        1,
+        "cursor at col 1 after wrapping and printing 'C'"
+    );
     // 'C' should be at row 1, col 0
     assert_eq!(t.get_cell(1, 0).unwrap().char(), 'C');
 }

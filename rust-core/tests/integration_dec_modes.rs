@@ -762,4 +762,3 @@ fn kitty_keyboard_push_pop_query() {
         "Flags should revert after pop"
     );
 }
-

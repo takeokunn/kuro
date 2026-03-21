@@ -3,7 +3,10 @@
 //! Measures:
 //! - Time to update grid cells (target: >1M cells/s)
 //! - Time to erase lines (target: <1ms per line)
-#![expect(clippy::cast_possible_truncation, reason = "bench dimension casts: rows/cols are small constants (≤ 400); usize→u16 is always safe here")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "bench dimension casts: rows/cols are small constants (≤ 400); usize→u16 is always safe here"
+)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::{grid::screen::Screen, types::cell::SgrAttributes};

@@ -17,7 +17,7 @@ pub struct Line {
 impl Line {
     /// Create a new line with the specified number of columns
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn new(cols: usize) -> Self {
         Self {
             cells: vec![Cell::default(); cols],
@@ -28,7 +28,7 @@ impl Line {
     /// Create a new line with all cells carrying the given BCE background color.
     /// When `bg` is `Color::Default` this is identical to `Line::new(cols)`.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn new_with_bg(cols: usize, bg: Color) -> Self {
         if bg == Color::Default {
             return Self::new(cols);

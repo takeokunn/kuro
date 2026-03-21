@@ -1,6 +1,6 @@
 //! Scrollback buffer and viewport scroll methods for Screen
 
-use super::{Screen, Line};
+use super::{Line, Screen};
 
 impl Screen {
     /// Set maximum scrollback buffer size
@@ -18,7 +18,7 @@ impl Screen {
     }
 
     /// Get scrollback lines (most recent first)
-    #[must_use] 
+    #[must_use]
     pub fn get_scrollback_lines(&self, max_lines: usize) -> Vec<Line> {
         self.active_screen().map_or_else(Vec::new, |screen| {
             screen
@@ -90,7 +90,10 @@ impl Screen {
     /// `(n - scroll_offset) + r - (rows - 1)`, where `n` is the scrollback
     /// line count. Returns `None` when the computed index is negative.
     #[must_use]
-    #[expect(clippy::cast_possible_wrap, reason = "terminal dimensions are bounded by u16::MAX; usize/u32→isize for signed arithmetic index bounds checking")]
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "terminal dimensions are bounded by u16::MAX; usize/u32→isize for signed arithmetic index bounds checking"
+    )]
     pub fn get_scrollback_viewport_line(&self, row_in_viewport: usize) -> Option<&Line> {
         let n = self.scrollback_line_count as isize;
         let offset = self.scroll_offset as isize;
@@ -107,7 +110,7 @@ impl Screen {
 
     /// Return true if the viewport scroll position changed and a re-render is needed
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub const fn is_scroll_dirty(&self) -> bool {
         self.scroll_dirty
     }
@@ -120,7 +123,7 @@ impl Screen {
 
     /// Return the current viewport scroll offset (0 = live view)
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub const fn scroll_offset(&self) -> usize {
         self.scroll_offset
     }

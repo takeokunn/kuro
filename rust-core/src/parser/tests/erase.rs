@@ -30,11 +30,7 @@ fn test_ed_default() {
     // Check that cursor line from col 5+ is cleared
     let line = term.screen.get_line(2).unwrap();
     for c in 0..5 {
-        assert_eq!(
-            line.cells[c].char(),
-            'X',
-            "Column {c} should still be 'X'"
-        );
+        assert_eq!(line.cells[c].char(), 'X', "Column {c} should still be 'X'");
     }
     for c in 5..20 {
         assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
@@ -202,11 +198,7 @@ fn test_el_default() {
     // Check line
     let line = term.screen.get_line(row).unwrap();
     for c in 0..5 {
-        assert_eq!(
-            line.cells[c].char(),
-            'Y',
-            "Column {c} should still be 'Y'"
-        );
+        assert_eq!(line.cells[c].char(), 'Y', "Column {c} should still be 'Y'");
     }
     for c in 5..20 {
         assert_eq!(line.cells[c].char(), ' ', "Column {c} should be cleared");
@@ -294,7 +286,10 @@ fn test_erase_with_default_bg_preserves_default() {
 #[test]
 fn test_erase_with_colored_bg_applies_bce() {
     let mut term = crate::TerminalCore::new(5, 10);
-    let attrs = SgrAttributes { background: Color::Named(NamedColor::Blue), ..Default::default() };
+    let attrs = SgrAttributes {
+        background: Color::Named(NamedColor::Blue),
+        ..Default::default()
+    };
     term.current_attrs = attrs;
     term.screen.print('A', attrs, true);
     term.screen.move_cursor(0, 0);
@@ -518,7 +513,10 @@ fn test_ed_mode1_splits_wide_char() {
 fn test_el_mode1_with_colored_bg_applies_bce() {
     // EL mode 1 (erase from start of line to cursor) should use the current SGR background.
     let mut term = crate::TerminalCore::new(5, 10);
-    let attrs = SgrAttributes { background: Color::Named(NamedColor::Red), ..Default::default() };
+    let attrs = SgrAttributes {
+        background: Color::Named(NamedColor::Red),
+        ..Default::default()
+    };
     term.current_attrs = attrs;
 
     // Fill row 2 with content, then erase from start to col 5
@@ -551,7 +549,10 @@ fn test_el_mode1_with_colored_bg_applies_bce() {
 fn test_el_mode2_with_colored_bg_applies_bce() {
     // EL mode 2 (erase entire line) should use the current SGR background.
     let mut term = crate::TerminalCore::new(5, 10);
-    let attrs = SgrAttributes { background: Color::Named(NamedColor::Green), ..Default::default() };
+    let attrs = SgrAttributes {
+        background: Color::Named(NamedColor::Green),
+        ..Default::default()
+    };
     term.current_attrs = attrs;
 
     let row = 1;

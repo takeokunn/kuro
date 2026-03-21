@@ -144,7 +144,11 @@ impl TerminalSession {
             let text_opt: Option<String> = self.core.screen.get_line(row).map(|line| {
                 // Wide placeholder cells (CellWidth::Wide) are included as ' ' chars,
                 // maintaining the grid_col == buffer_char_offset invariant (Phase 11).
-                let s: String = line.cells.iter().map(crate::types::cell::Cell::char).collect();
+                let s: String = line
+                    .cells
+                    .iter()
+                    .map(crate::types::cell::Cell::char)
+                    .collect();
                 // NOTE: trailing spaces are intentionally NOT trimmed.
                 // Trimming would cause the Emacs-side cursor clamp
                 // `(min (+ line-start col) line-end)` to place the cursor at
@@ -164,7 +168,7 @@ impl TerminalSession {
     ///
     /// Delegates to [`crate::ffi::codec::encode_color`].
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn encode_color(color: &crate::types::Color) -> u32 {
         crate::ffi::codec::encode_color(color)
     }
@@ -173,7 +177,7 @@ impl TerminalSession {
     ///
     /// Delegates to [`crate::ffi::codec::encode_attrs`].
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn encode_attrs(attrs: &crate::types::cell::SgrAttributes) -> u64 {
         crate::ffi::codec::encode_attrs(attrs)
     }
@@ -184,12 +188,15 @@ impl TerminalSession {
     /// while holding a shared borrow of the screen — eliminating the need to
     /// `clone()` the cell slice just to satisfy the borrow checker.
     ///
-    /// Returns [`crate::ffi::codec::EncodedLine`] where:
+    /// Returns `EncodedLine` where:
     /// - `text` has wide placeholder cells removed (CJK renders correctly in Emacs)
     /// - `face_ranges` use buffer offsets (not grid column indices)
     /// - `col_to_buf[col]` maps grid column to buffer character offset
-    #[must_use] 
-    pub fn encode_line_faces(row: usize, cells: &[crate::types::cell::Cell]) -> crate::ffi::codec::EncodedLine {
+    #[must_use]
+    pub fn encode_line_faces(
+        row: usize,
+        cells: &[crate::types::cell::Cell],
+    ) -> crate::ffi::codec::EncodedLine {
         let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(cells);
         (row, text, face_ranges, col_to_buf)
     }
@@ -208,20 +215,20 @@ impl TerminalSession {
     }
 
     /// Get cursor position
-    #[must_use] 
+    #[must_use]
     pub fn get_cursor(&self) -> (usize, usize) {
         let c = self.core.screen.cursor();
         (c.row, c.col)
     }
 
     /// Get cursor visibility (DECTCEM state)
-    #[must_use] 
+    #[must_use]
     pub const fn get_cursor_visible(&self) -> bool {
         self.core.dec_modes.cursor_visible
     }
 
     /// Get scrollback lines
-    #[must_use] 
+    #[must_use]
     pub fn get_scrollback(&self, max_lines: usize) -> Vec<String> {
         let lines = self.core.screen.get_scrollback_lines(max_lines);
         lines.iter().map(std::string::ToString::to_string).collect()
@@ -239,7 +246,7 @@ impl TerminalSession {
 
     /// Return a base64-encoded PNG string for the given image ID.
     /// Returns an empty string if the image is not found (orphan reference).
-    #[must_use] 
+    #[must_use]
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
         self.core.screen.get_image_png_base64(image_id)
     }
@@ -252,7 +259,7 @@ impl TerminalSession {
     }
 
     /// Get scrollback line count
-    #[must_use] 
+    #[must_use]
     pub const fn get_scrollback_count(&self) -> usize {
         self.core.screen.scrollback_line_count
     }
@@ -268,7 +275,7 @@ impl TerminalSession {
     }
 
     /// Return the current viewport scroll offset (0 = live view)
-    #[must_use] 
+    #[must_use]
     pub const fn scroll_offset(&self) -> usize {
         self.core.screen.scroll_offset()
     }
@@ -277,9 +284,11 @@ impl TerminalSession {
     ///
     /// Used by Elisp to trigger immediate rendering when streaming output arrives.
     #[cfg(unix)]
-    #[must_use] 
+    #[must_use]
     pub fn has_pending_output(&self) -> bool {
-        self.pty.as_ref().is_some_and(crate::pty::posix::Pty::has_pending_data)
+        self.pty
+            .as_ref()
+            .is_some_and(crate::pty::posix::Pty::has_pending_data)
     }
 
     #[cfg(not(unix))]
@@ -298,9 +307,11 @@ impl TerminalSession {
     /// On non-Unix: always returns `true` (no PTY process to track).
     #[cfg(unix)]
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn is_process_alive(&self) -> bool {
-        self.pty.as_ref().is_none_or(crate::pty::posix::Pty::is_alive)
+        self.pty
+            .as_ref()
+            .is_none_or(crate::pty::posix::Pty::is_alive)
     }
 
     #[cfg(not(unix))]
@@ -311,14 +322,14 @@ impl TerminalSession {
 
     /// Return the shell command used to spawn this session.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn command(&self) -> &str {
         &self.command
     }
 
     /// Return `true` if this session is in the `Detached` state.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn is_detached(&self) -> bool {
         self.state == SessionState::Detached
     }
@@ -338,7 +349,7 @@ impl TerminalSession {
     /// Return the PID of the PTY child process, if available.
     ///
     /// Returns `None` on non-Unix platforms or when no PTY is attached.
-    #[must_use] 
+    #[must_use]
     pub const fn pid(&self) -> Option<u32> {
         #[cfg(unix)]
         if let Some(pty) = &self.pty {
@@ -348,7 +359,7 @@ impl TerminalSession {
     }
 
     /// Get mouse pixel mode state (?1016)
-    #[must_use] 
+    #[must_use]
     pub const fn get_mouse_pixel(&self) -> bool {
         self.core.dec_modes.mouse_pixel
     }
@@ -357,7 +368,10 @@ impl TerminalSession {
     ///
     /// Returns a Vec of (index, R, G, B) for each overridden palette entry.
     #[must_use]
-    #[expect(clippy::cast_possible_truncation, reason = "palette index is enumerate() over a 256-element array; i ≤ 255 always fits in u8")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "palette index is enumerate() over a 256-element array; i ≤ 255 always fits in u8"
+    )]
     pub fn get_palette_updates(&self) -> Vec<(u8, u8, u8, u8)> {
         self.core
             .osc_data
@@ -370,7 +384,7 @@ impl TerminalSession {
 
     /// Get default foreground/background/cursor colors (None = unset = use Emacs default).
     /// Returns (`fg_encoded`, `bg_encoded`, `cursor_encoded`) as u32 FFI color values.
-    #[must_use] 
+    #[must_use]
     pub fn get_default_colors(&self) -> (u32, u32, u32) {
         let encode = |color: &Option<crate::types::Color>| -> u32 {
             color.as_ref().map_or(0xFF00_0000u32, Self::encode_color)
@@ -436,55 +450,55 @@ impl TerminalSession {
     }
 
     /// Get the current mouse tracking mode.
-    #[must_use] 
+    #[must_use]
     pub const fn get_mouse_mode(&self) -> u16 {
         self.core.dec_modes.mouse_mode
     }
 
     /// Get whether SGR mouse coordinate encoding is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_mouse_sgr(&self) -> bool {
         self.core.dec_modes.mouse_sgr
     }
 
     /// Get whether application cursor keys mode (DECCKM) is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_app_cursor_keys(&self) -> bool {
         self.core.dec_modes.app_cursor_keys
     }
 
     /// Get whether application keypad mode is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_app_keypad(&self) -> bool {
         self.core.dec_modes.app_keypad
     }
 
     /// Get the kitty keyboard protocol flags bitmask.
-    #[must_use] 
+    #[must_use]
     pub const fn get_keyboard_flags(&self) -> u32 {
         self.core.dec_modes.keyboard_flags
     }
 
     /// Get the current cursor shape.
-    #[must_use] 
+    #[must_use]
     pub const fn get_cursor_shape(&self) -> crate::types::cursor::CursorShape {
         self.core.dec_modes.cursor_shape
     }
 
     /// Get whether bracketed paste mode is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_bracketed_paste(&self) -> bool {
         self.core.dec_modes.bracketed_paste
     }
 
     /// Get whether focus event reporting is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_focus_events(&self) -> bool {
         self.core.dec_modes.focus_events
     }
 
     /// Get whether synchronized output mode (DEC ?2026) is active.
-    #[must_use] 
+    #[must_use]
     pub const fn get_synchronized_output(&self) -> bool {
         self.core.dec_modes.synchronized_output
     }

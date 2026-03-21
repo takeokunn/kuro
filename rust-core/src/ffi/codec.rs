@@ -34,7 +34,12 @@ use crate::types::color::{Color, NamedColor};
 /// - `text`: UTF-8 content with wide-placeholder cells removed
 /// - `face_ranges`: `(start_buf, end_buf, fg, bg, flags)` in buffer offsets
 /// - `col_to_buf`: maps grid column → buffer char offset (empty = identity)
-pub(crate) type EncodedLine = (usize, String, Vec<(usize, usize, u32, u32, u64)>, Vec<usize>);
+pub(crate) type EncodedLine = (
+    usize,
+    String,
+    Vec<(usize, usize, u32, u32, u64)>,
+    Vec<usize>,
+);
 
 /// Inner line data without row index: `(text, face_ranges, col_to_buf)`.
 ///
@@ -90,10 +95,18 @@ pub fn encode_color(color: &Color) -> u32 {
 pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
     let f = attrs.flags;
     let mut bits = 0u64;
-    if f.contains(SgrFlags::BOLD)          { bits |= 0x001; }
-    if f.contains(SgrFlags::DIM)           { bits |= 0x002; }
-    if f.contains(SgrFlags::ITALIC)        { bits |= 0x004; }
-    if attrs.underline()                   { bits |= 0x008; }
+    if f.contains(SgrFlags::BOLD) {
+        bits |= 0x001;
+    }
+    if f.contains(SgrFlags::DIM) {
+        bits |= 0x002;
+    }
+    if f.contains(SgrFlags::ITALIC) {
+        bits |= 0x004;
+    }
+    if attrs.underline() {
+        bits |= 0x008;
+    }
     let style_bits: u64 = match attrs.underline_style {
         UnderlineStyle::None => 0,
         UnderlineStyle::Straight => 1,
@@ -103,11 +116,21 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
         UnderlineStyle::Dashed => 5,
     };
     bits |= style_bits << 9;
-    if f.contains(SgrFlags::BLINK_SLOW)    { bits |= 0x010; }
-    if f.contains(SgrFlags::BLINK_FAST)    { bits |= 0x020; }
-    if f.contains(SgrFlags::INVERSE)       { bits |= 0x040; }
-    if f.contains(SgrFlags::HIDDEN)        { bits |= 0x080; }
-    if f.contains(SgrFlags::STRIKETHROUGH) { bits |= 0x100; }
+    if f.contains(SgrFlags::BLINK_SLOW) {
+        bits |= 0x010;
+    }
+    if f.contains(SgrFlags::BLINK_FAST) {
+        bits |= 0x020;
+    }
+    if f.contains(SgrFlags::INVERSE) {
+        bits |= 0x040;
+    }
+    if f.contains(SgrFlags::HIDDEN) {
+        bits |= 0x080;
+    }
+    if f.contains(SgrFlags::STRIKETHROUGH) {
+        bits |= 0x100;
+    }
     bits
 }
 
@@ -150,7 +173,10 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
 /// Trailing spaces are preserved so that the cursor can be placed at any
 /// column, including past the last visible character.
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
-#[expect(clippy::similar_names, reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels")]
+#[expect(
+    clippy::similar_names,
+    reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
+)]
 pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     if cells.is_empty() {
         return (String::new(), Vec::new(), Vec::new());

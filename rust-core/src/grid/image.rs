@@ -21,7 +21,7 @@ pub struct ImageData {
 
 impl ImageData {
     /// Byte count of raw pixel data
-    #[must_use] 
+    #[must_use]
     pub const fn byte_count(&self) -> usize {
         self.pixels.len()
     }
@@ -45,7 +45,7 @@ impl ImageData {
     }
 
     /// Re-encode as base64-encoded PNG string (for Emacs FFI transfer)
-    #[must_use] 
+    #[must_use]
     pub fn to_png_base64(&self) -> String {
         use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
         use base64::Engine as _;
@@ -106,7 +106,7 @@ impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
     /// Create a new empty graphics store with the default 256 MB capacity cap
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             images: HashMap::new(),
@@ -153,9 +153,11 @@ impl GraphicsStore {
 
     /// Return the image as a base64-encoded PNG string.
     /// Returns an empty string if the `image_id` is not found (orphan reference).
-    #[must_use] 
+    #[must_use]
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
-        self.images.get(&image_id).map_or_else(String::new, ImageData::to_png_base64)
+        self.images
+            .get(&image_id)
+            .map_or_else(String::new, ImageData::to_png_base64)
     }
 
     /// Add a placement and return an `ImageNotification` (or None if `image_id` unknown)

@@ -51,10 +51,7 @@ fn test_osc7_extracts_path() {
         Some("/home/user"),
         "OSC 7 must extract the path component from the file:// URL"
     );
-    assert!(
-        core.osc_data.cwd_dirty,
-        "cwd_dirty must be set after OSC 7"
-    );
+    assert!(core.osc_data.cwd_dirty, "cwd_dirty must be set after OSC 7");
 }
 
 /// OSC 2 must behave identically to OSC 0 for window title setting:
@@ -70,10 +67,7 @@ fn test_osc2_sets_title_same_as_osc0() {
         core.meta.title, "window-title",
         "OSC 2 must set the window title identically to OSC 0"
     );
-    assert!(
-        core.meta.title_dirty,
-        "title_dirty must be set after OSC 2"
-    );
+    assert!(core.meta.title_dirty, "title_dirty must be set after OSC 2");
 }
 
 /// OSC 7 with a URL that does NOT start with `file://` must be silently
@@ -254,7 +248,10 @@ fn test_osc4_set_index_out_of_bounds() {
     handle_osc(&mut core, params, false);
     // palette should be unchanged (all None)
     assert!(
-        core.osc_data.palette.iter().all(std::option::Option::is_none),
+        core.osc_data
+            .palette
+            .iter()
+            .all(std::option::Option::is_none),
         "palette should be unchanged for out-of-range index 256"
     );
     assert!(
@@ -285,8 +282,8 @@ fn test_osc4_query_palette_entry() {
     );
 
     // The response must be OSC 4 ; 1 ; rgb:ffff/0000/0000 BEL
-    let response = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
+    let response =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
     assert!(
         response.starts_with("\x1b]4;1;rgb:"),
         "OSC 4 query response must start with ESC]4;1;rgb: — got: {response:?}"

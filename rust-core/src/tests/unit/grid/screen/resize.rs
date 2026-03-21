@@ -70,7 +70,7 @@ fn resize_clears_pending_wrap() {
     // Move to last col and print to trigger pending_wrap
     s.move_cursor(0, 79);
     s.print('X', attrs, false); // auto_wrap=false keeps cursor at col 79 with pending_wrap
-    // Force pending_wrap directly (safest: just resize and check the invariant)
+                                // Force pending_wrap directly (safest: just resize and check the invariant)
     s.resize(24, 80);
     assert!(
         !s.cursor().pending_wrap,

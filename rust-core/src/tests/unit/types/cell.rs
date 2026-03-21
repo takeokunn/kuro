@@ -176,7 +176,11 @@ fn underline_style_all_variants_correct_bool() {
 // both color fields equal to Color::Default.
 fn sgr_default_all_false() {
     let attrs = SgrAttributes::default();
-    assert_eq!(attrs.flags, SgrFlags::empty(), "all boolean flags must be clear in default attrs");
+    assert_eq!(
+        attrs.flags,
+        SgrFlags::empty(),
+        "all boolean flags must be clear in default attrs"
+    );
     assert!(!attrs.underline());
     assert_eq!(attrs.underline_style, UnderlineStyle::None);
     assert_eq!(attrs.foreground, Color::Default);

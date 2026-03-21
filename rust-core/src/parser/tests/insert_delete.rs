@@ -5,7 +5,10 @@
 
 // Test helpers convert between usize/u16/i64 for grid coordinates; values are
 // bounded by terminal dimensions (≤ 65535 rows/cols) so truncation is safe.
-#![expect(clippy::cast_possible_truncation, reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)")]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "test coordinate casts bounded by terminal dimensions (≤ 65535)"
+)]
 
 use super::*;
 
@@ -399,8 +402,7 @@ fn test_dch_basic() {
     // Fill row 0 with '0'..'9'
     if let Some(line) = term.screen.get_line_mut(0) {
         for (i, cell) in line.cells.iter_mut().enumerate() {
-            cell.grapheme =
-                compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
+            cell.grapheme = compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
         }
     }
     term.screen.move_cursor(0, 2);

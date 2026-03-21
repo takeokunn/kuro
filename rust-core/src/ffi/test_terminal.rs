@@ -36,10 +36,12 @@ where
         }
         Err(panic_payload) => {
             let msg = panic_payload.downcast::<String>().map_or_else(
-                |p| p.downcast::<&'static str>().map_or_else(
-                    |_| "kuro test panic: unknown payload".to_owned(),
-                    |s| format!("kuro test panic: {s}"),
-                ),
+                |p| {
+                    p.downcast::<&'static str>().map_or_else(
+                        |_| "kuro test panic: unknown payload".to_owned(),
+                        |s| format!("kuro test panic: {s}"),
+                    )
+                },
                 |s| format!("kuro test panic: {s}"),
             );
             let _ = env.message(&msg);
@@ -110,7 +112,10 @@ fn kuro_core_test_feed(env: &Env, data: String) -> EmacsResult<Value<'_>> {
 
 /// Get cursor position as `(ROW . COL)` (0-indexed).
 #[defun]
-#[expect(clippy::cast_possible_wrap, reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
+)]
 fn kuro_core_test_get_cursor(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (row, col) = {
@@ -205,7 +210,10 @@ fn kuro_core_test_get_line(env: &Env, row: usize) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(0 . 23)` if no test terminal is active.
 #[defun]
-#[expect(clippy::cast_possible_wrap, reason = "top/bottom are terminal dimensions (≤ 65535); usize→i64 never wraps")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "top/bottom are terminal dimensions (≤ 65535); usize→i64 never wraps"
+)]
 fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (top, bottom) = {
@@ -238,7 +246,10 @@ fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(24 . 80)` if no test terminal is active.
 #[defun]
-#[expect(clippy::cast_possible_wrap, reason = "rows/cols are terminal dimensions (≤ 65535); usize→i64 never wraps")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "rows/cols are terminal dimensions (≤ 65535); usize→i64 never wraps"
+)]
 fn kuro_core_test_get_size(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (rows, cols) = {

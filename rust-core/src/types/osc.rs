@@ -64,7 +64,7 @@ pub struct OscData {
     pub default_bg: Option<Color>,
     /// Cursor color from OSC 12
     pub cursor_color: Option<Color>, // NOTE: kept pub for integration test access (tests/ crate)
-    /// 256-color palette overrides from OSC 4 (index → [R,G,B] or None=unset)
+    /// 256-color palette overrides from OSC 4 (index → `[R,G,B]` or `None`=unset)
     pub palette: Vec<Option<[u8; 3]>>,
     /// Pending default-color-change notifications for FFI (fg, bg, cursor)
     pub(crate) default_colors_dirty: bool,

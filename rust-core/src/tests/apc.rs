@@ -118,7 +118,11 @@ fn test_apc_with_false_esc_st() {
     let input = b"\x1b_Gtest\x1bXmore\x1b\\";
     core.advance(input);
     // APC should complete and buffer should be cleared
-    assert_eq!(core.kitty.apc_buf.len(), 0, "APC with false ST should complete");
+    assert_eq!(
+        core.kitty.apc_buf.len(),
+        0,
+        "APC with false ST should complete"
+    );
 }
 
 /// Test: Mixed APC, CSI, and OSC in single buffer
@@ -141,7 +145,11 @@ fn test_apc_split_across_three_advance_calls() {
     let mut core = super::make_term();
     // Part 1: ESC _ (APC start)
     core.advance(b"\x1b_");
-    assert_eq!(core.kitty.apc_buf.len(), 0, "After ESC _, waiting for payload");
+    assert_eq!(
+        core.kitty.apc_buf.len(),
+        0,
+        "After ESC _, waiting for payload"
+    );
     // Part 2: Payload
     core.advance(b"Ga=q,s=100");
     assert!(!core.kitty.apc_buf.is_empty(), "Payload should be buffered");
@@ -176,7 +184,11 @@ fn test_apc_maximum_payload_no_panic() {
     input.extend_from_slice(b"\x1b\\");
     // Should not panic
     core.advance(&input);
-    assert_eq!(core.kitty.apc_buf.len(), 0, "APC at max size should complete");
+    assert_eq!(
+        core.kitty.apc_buf.len(),
+        0,
+        "APC at max size should complete"
+    );
 }
 
 /// Test: Rapid ESC sequences don't confuse APC scanner
@@ -188,7 +200,11 @@ fn test_rapid_esc_sequences_apc_scanner() {
     core.advance(input);
     // ESC [ A = CUU (cursor up) - should process correctly
     // apc_buf should be empty (no APC started)
-    assert_eq!(core.kitty.apc_buf.len(), 0, "Rapid ESCs should not start APC");
+    assert_eq!(
+        core.kitty.apc_buf.len(),
+        0,
+        "Rapid ESCs should not start APC"
+    );
 }
 
 // === Conditional APC scanning tests ===
@@ -202,7 +218,11 @@ fn test_plain_text_no_esc_no_apc_state_change() {
     // Plain ASCII text - no ESC bytes
     core.advance(b"Hello, World! This is plain text without escape sequences.");
     // apc_state should remain Idle (we can check by ensuring apc_buf is empty)
-    assert_eq!(core.kitty.apc_buf.len(), 0, "No APC buffering for plain text");
+    assert_eq!(
+        core.kitty.apc_buf.len(),
+        0,
+        "No APC buffering for plain text"
+    );
     // Text should be printed correctly
     assert_eq!(core.get_cell(0, 0).unwrap().char(), 'H');
 }
@@ -245,7 +265,10 @@ fn test_esc_at_buffer_start_detected() {
     let input = b"\x1b_Gtest"; // ESC _ G (APC start without terminator)
     core.advance(input);
     // Should be in InApc state, buffering "test"
-    assert!(!core.kitty.apc_buf.is_empty(), "APC payload should be buffered");
+    assert!(
+        !core.kitty.apc_buf.is_empty(),
+        "APC payload should be buffered"
+    );
 }
 
 /// Test: Multiple ESC bytes in sequence
@@ -332,5 +355,8 @@ fn test_mixed_content_all_sequences_processed() {
     // "Start" should be at position 0
     assert_eq!(core.get_cell(0, 0).unwrap().char(), 'S');
     // Should not have current bold (reset)
-    assert!(!core.current_attrs.flags.contains(crate::types::cell::SgrFlags::BOLD));
+    assert!(!core
+        .current_attrs
+        .flags
+        .contains(crate::types::cell::SgrFlags::BOLD));
 }

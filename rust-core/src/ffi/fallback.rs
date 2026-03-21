@@ -46,9 +46,17 @@ pub struct RawFFI;
 impl KuroFFI for RawFFI {
     fn init(env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
         // Convert i64 to u16 — KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
+        )]
         let rows = rows as u16;
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
+        )]
         let cols = cols as u16;
 
         // Initialize session
@@ -58,8 +66,12 @@ impl KuroFFI for RawFFI {
         }
     }
 
-    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::cast_possible_wrap,
-             reason = "raw FFI bridge: max_updates (i64→usize) has >0 guard; line_no (usize→i64) bounded by terminal height (≤ u16::MAX)")]
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "raw FFI bridge: max_updates (i64→usize) has >0 guard; line_no (usize→i64) bounded by terminal height (≤ u16::MAX)"
+    )]
     fn poll_updates(env: *mut emacs_env, max_updates: i64) -> *mut emacs_value {
         let result: std::result::Result<Vec<(usize, String)>, KuroError> =
             with_session(LEGACY_SESSION_ID, |session| {
@@ -86,17 +98,20 @@ impl KuroFFI for RawFFI {
                 Ok(updates)
             });
 
-        result.map_or_else(|_| Self::make_nil(env), |dirty_lines| {
-            // Convert to Emacs list of (line_no . text) pairs
-            let mut list = Self::make_nil(env);
-            for (line_no, text) in dirty_lines.into_iter().rev() {
-                let line_no_val = Self::make_integer(env, line_no as i64);
-                let text_val = Self::make_string(env, &text);
-                let pair = Self::cons(env, line_no_val, text_val);
-                list = Self::cons(env, pair, list);
-            }
-            list
-        })
+        result.map_or_else(
+            |_| Self::make_nil(env),
+            |dirty_lines| {
+                // Convert to Emacs list of (line_no . text) pairs
+                let mut list = Self::make_nil(env);
+                for (line_no, text) in dirty_lines.into_iter().rev() {
+                    let line_no_val = Self::make_integer(env, line_no as i64);
+                    let text_val = Self::make_string(env, &text);
+                    let pair = Self::cons(env, line_no_val, text_val);
+                    list = Self::cons(env, pair, list);
+                }
+                list
+            },
+        )
     }
 
     fn send_key(env: *mut emacs_env, data: &[u8]) -> *mut emacs_value {
@@ -112,9 +127,17 @@ impl KuroFFI for RawFFI {
     }
 
     fn resize(env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
+        )]
         let rows = rows as u16;
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
+        )]
         let cols = cols as u16;
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
@@ -141,10 +164,17 @@ impl KuroFFI for RawFFI {
             Ok(format!("{row}:{col}"))
         });
 
-        result.map_or_else(|_| Self::make_string(env, "0:0"), |s| Self::make_string(env, &s))
+        result.map_or_else(
+            |_| Self::make_string(env, "0:0"),
+            |s| Self::make_string(env, &s),
+        )
     }
 
-    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "max_lines ≤ 0 is handled above; positive values bounded by practical terminal scrollback limits")]
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        reason = "max_lines ≤ 0 is handled above; positive values bounded by practical terminal scrollback limits"
+    )]
     fn get_scrollback(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
         let max_lines = if max_lines <= 0 {
             usize::MAX
@@ -152,16 +182,21 @@ impl KuroFFI for RawFFI {
             max_lines as usize
         };
 
-        let result = with_session_readonly(LEGACY_SESSION_ID, |session| Ok(session.get_scrollback(max_lines)));
+        let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
+            Ok(session.get_scrollback(max_lines))
+        });
 
-        result.map_or_else(|_| Self::make_nil(env), |lines| {
-            let mut list = Self::make_nil(env);
-            for line in lines.into_iter().rev() {
-                let line_val = Self::make_string(env, &line);
-                list = Self::cons(env, line_val, list);
-            }
-            list
-        })
+        result.map_or_else(
+            |_| Self::make_nil(env),
+            |lines| {
+                let mut list = Self::make_nil(env);
+                for line in lines.into_iter().rev() {
+                    let line_val = Self::make_string(env, &line);
+                    list = Self::cons(env, line_val, list);
+                }
+                list
+            },
+        )
     }
 
     fn clear_scrollback(env: *mut emacs_env) -> *mut emacs_value {
@@ -176,7 +211,11 @@ impl KuroFFI for RawFFI {
         }
     }
 
-    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "KuroFFI trait requires i64; caller passes non-negative scrollback limit")]
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        reason = "KuroFFI trait requires i64; caller passes non-negative scrollback limit"
+    )]
     fn set_scrollback_max_lines(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
         let result = with_session(LEGACY_SESSION_ID, |session| {
             session.set_scrollback_max_lines(max_lines as usize);
@@ -212,7 +251,11 @@ impl RawFFI {
     }
 
     /// Create an integer value
-    #[expect(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "placeholder: encodes i64 as pointer offset; test double only — never called in production")]
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        reason = "placeholder: encodes i64 as pointer offset; test double only — never called in production"
+    )]
     const fn make_integer(_env: *mut emacs_env, value: i64) -> *mut emacs_value {
         // In a real implementation, this would call env.make_integer(value)
         // For now, return a pointer with the value encoded (placeholder)
@@ -220,7 +263,10 @@ impl RawFFI {
     }
 
     /// Create a string value
-    #[expect(clippy::as_ptr_cast_mut, reason = "test double stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type")]
+    #[expect(
+        clippy::as_ptr_cast_mut,
+        reason = "test double stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type"
+    )]
     const fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
         // In a real implementation, this would call env.make_string(s)
         // For now, return a pointer to the string (placeholder)
@@ -228,7 +274,10 @@ impl RawFFI {
     }
 
     /// Create a cons cell (pair)
-    #[expect(clippy::similar_names, reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent")]
+    #[expect(
+        clippy::similar_names,
+        reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent"
+    )]
     fn cons(
         _env: *mut emacs_env,
         car: *mut emacs_value,

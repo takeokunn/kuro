@@ -89,7 +89,8 @@ impl vte::Perform for TerminalCore {
                 }
                 'q' => {
                     // XTVERSION — terminal version identification: CSI > q → DCS > | name ST
-                    self.meta.pending_responses
+                    self.meta
+                        .pending_responses
                         .push(b"\x1bP>|kuro-1.0.0\x1b\\".to_vec());
                 }
                 _ => {}
@@ -161,7 +162,7 @@ impl vte::Perform for TerminalCore {
 
     /// Handle OSC (Operating System Command) sequences from the VTE parser.
     ///
-    /// Delegates to [`parser::osc::handle_osc`] for the full implementation.
+    /// Delegates to `parser::osc::handle_osc` for the full implementation.
     #[inline]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         parser::osc::handle_osc(self, params, bell_terminated);

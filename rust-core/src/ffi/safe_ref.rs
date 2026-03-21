@@ -42,7 +42,7 @@ impl SafeEnvRef {
     ///
     /// # Returns
     /// Raw pointer to the Emacs environment
-    #[must_use] 
+    #[must_use]
     pub const fn as_ptr(&self) -> *mut emacs_env {
         self.env.as_ptr()
     }
@@ -55,8 +55,11 @@ impl SafeEnvRef {
     /// # Returns
     /// * `true` if the pointer is non-null
     /// * `false` if the pointer is null (should never happen)
-    #[expect(useless_ptr_null_checks, reason = "runtime guard: Emacs env pointer validity is enforced by the Emacs runtime, not statically provable")]
-    #[must_use] 
+    #[expect(
+        useless_ptr_null_checks,
+        reason = "runtime guard: Emacs env pointer validity is enforced by the Emacs runtime, not statically provable"
+    )]
+    #[must_use]
     pub const fn is_valid(&self) -> bool {
         !self.env.as_ptr().is_null()
     }
@@ -70,7 +73,7 @@ impl SafeEnvRef {
     ///
     /// # Returns
     /// A new `SafeEnvRef` pointing to the same environment
-    #[must_use] 
+    #[must_use]
     pub const unsafe fn clone_ref(&self) -> Self {
         Self { env: self.env }
     }
@@ -94,7 +97,7 @@ pub struct EnvRefRegistry {
 
 impl EnvRefRegistry {
     /// Create a new environment reference registry
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             ref_count: std::sync::atomic::AtomicUsize::new(0),
@@ -180,8 +183,11 @@ impl EnvRefGuard {
     /// Create a new environment reference guard
     ///
     /// This automatically registers the reference in the global registry.
-    #[expect(clippy::new_without_default, reason = "EnvRefGuard::new() has a side effect (register_env_ref); a Default impl would be misleading")]
-    #[must_use] 
+    #[expect(
+        clippy::new_without_default,
+        reason = "EnvRefGuard::new() has a side effect (register_env_ref); a Default impl would be misleading"
+    )]
+    #[must_use]
     pub fn new() -> Self {
         register_env_ref();
         Self
@@ -225,7 +231,7 @@ impl ScopedEnvRef {
     ///
     /// # Returns
     /// Reference to the `SafeEnvRef`
-    #[must_use] 
+    #[must_use]
     pub const fn env(&self) -> &SafeEnvRef {
         &self.env
     }
@@ -234,7 +240,7 @@ impl ScopedEnvRef {
     ///
     /// # Returns
     /// Raw pointer to the Emacs environment
-    #[must_use] 
+    #[must_use]
     pub const fn as_ptr(&self) -> *mut emacs_env {
         self.env.as_ptr()
     }

@@ -307,7 +307,10 @@ fn test_osc_unknown_command_number_ignored() {
     let mut term = super::make_term();
     term.advance(b"\x1b]99;some_data\x07");
     // Title must not have changed (OSC 99 is not handled)
-    assert_eq!(term.meta.title, "", "unknown OSC number must not update title");
+    assert_eq!(
+        term.meta.title, "",
+        "unknown OSC number must not update title"
+    );
     assert!(
         !term.meta.title_dirty,
         "unknown OSC number must not set title_dirty"

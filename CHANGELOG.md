@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `.elpaignore` for clean package distribution (excludes Rust, tests, docs from package)
+- `package-lint` CI step for MELPA compliance validation
+- Module availability detection in E2E tests (`kuro-test--module-loaded`)
+
+### Fixed
+
+- 40 ERT unit test failures: `kuro-core-send-key` stubs updated from 1-arg to 2-arg `(_sid bytes)` to match multi-session FFI signature
+- 93 E2E tests marked `:expected-result :failed` when Rust module not loaded (previously errored unexpectedly)
+- 7 cargo doc warnings: escaped `<bool>`, `[R,G,B]`, `#[defun]` and private item links
+- CI ERT test step now uses `make test-elisp` (was referencing nonexistent `test/elisp/` directory)
+- CI cargo doc step enforces zero-warning policy
+- `set_winsize()` TIOCSWINSZ ioctl return value now checked (was silently ignored)
+- Code formatting applied via `cargo fmt --all`
+
+## Previously in [Unreleased]
+
+### Added
+
 - **ESC M (RI — Reverse Index)**: moves cursor up one line; scrolls down when at top of scroll region. Enables correct `less`, `man`, and vim reverse-scroll behavior.
 - **ESC D (IND — Index)**: moves cursor down one line, scrolling up at bottom of scroll region. Completes the vertical motion ESC set.
 - **ESC E (NEL — Next Line)**: combined CR+LF in a single escape sequence. Required for correct ANSI compliance.

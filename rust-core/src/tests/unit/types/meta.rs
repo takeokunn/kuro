@@ -21,21 +21,30 @@ use proptest::prelude::*;
 // INVARIANT: TerminalMeta::default() has empty title
 fn test_terminal_meta_default_title_empty() {
     let m = TerminalMeta::default();
-    assert!(m.title.is_empty(), "TerminalMeta default must have empty title");
+    assert!(
+        m.title.is_empty(),
+        "TerminalMeta default must have empty title"
+    );
 }
 
 #[test]
 // INVARIANT: TerminalMeta::default() has title_dirty == false
 fn test_terminal_meta_default_title_not_dirty() {
     let m = TerminalMeta::default();
-    assert!(!m.title_dirty, "TerminalMeta default must have title_dirty == false");
+    assert!(
+        !m.title_dirty,
+        "TerminalMeta default must have title_dirty == false"
+    );
 }
 
 #[test]
 // INVARIANT: TerminalMeta::default() has bell_pending == false
 fn test_terminal_meta_default_no_bell() {
     let m = TerminalMeta::default();
-    assert!(!m.bell_pending, "TerminalMeta default must have bell_pending == false");
+    assert!(
+        !m.bell_pending,
+        "TerminalMeta default must have bell_pending == false"
+    );
 }
 
 #[test]
@@ -55,22 +64,38 @@ fn test_terminal_meta_default_pending_empty() {
 #[test]
 // MUTATION: Setting bell_pending to true persists
 fn test_terminal_meta_bell_set_persists() {
-    let m = TerminalMeta { bell_pending: true, ..Default::default() };
-    assert!(m.bell_pending, "bell_pending must persist after being set to true");
+    let m = TerminalMeta {
+        bell_pending: true,
+        ..Default::default()
+    };
+    assert!(
+        m.bell_pending,
+        "bell_pending must persist after being set to true"
+    );
 }
 
 #[test]
 // MUTATION: Clearing bell_pending back to false persists
 fn test_terminal_meta_bell_clear_persists() {
-    let mut m = TerminalMeta { bell_pending: true, ..Default::default() };
+    let mut m = TerminalMeta {
+        bell_pending: true,
+        ..Default::default()
+    };
     m.bell_pending = false;
-    assert!(!m.bell_pending, "bell_pending must persist after being cleared");
+    assert!(
+        !m.bell_pending,
+        "bell_pending must persist after being cleared"
+    );
 }
 
 #[test]
 // MUTATION: Setting title and title_dirty persists
 fn test_terminal_meta_title_set_persists() {
-    let m = TerminalMeta { title: "my terminal".to_owned(), title_dirty: true, ..Default::default() };
+    let m = TerminalMeta {
+        title: "my terminal".to_owned(),
+        title_dirty: true,
+        ..Default::default()
+    };
     assert_eq!(m.title, "my terminal");
     assert!(m.title_dirty);
 }
@@ -78,9 +103,16 @@ fn test_terminal_meta_title_set_persists() {
 #[test]
 // MUTATION: Clearing title_dirty after reading persists
 fn test_terminal_meta_title_dirty_clear() {
-    let mut m = TerminalMeta { title: "test".to_owned(), title_dirty: true, ..Default::default() };
+    let mut m = TerminalMeta {
+        title: "test".to_owned(),
+        title_dirty: true,
+        ..Default::default()
+    };
     m.title_dirty = false;
-    assert!(!m.title_dirty, "title_dirty must persist as false after clear");
+    assert!(
+        !m.title_dirty,
+        "title_dirty must persist as false after clear"
+    );
 }
 
 #[test]

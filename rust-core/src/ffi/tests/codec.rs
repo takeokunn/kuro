@@ -71,7 +71,10 @@ fn test_encode_attrs_default_is_zero() {
 
 #[test]
 fn test_encode_attrs_bold() {
-    let a = SgrAttributes { flags: SgrFlags::BOLD, ..Default::default() };
+    let a = SgrAttributes {
+        flags: SgrFlags::BOLD,
+        ..Default::default()
+    };
     assert_eq!(encode_attrs(&a), 0x1u64);
 }
 
@@ -80,9 +83,14 @@ fn test_encode_attrs_all_flags_set() {
     let attrs = SgrAttributes {
         foreground: Color::Default,
         background: Color::Default,
-        flags: SgrFlags::BOLD | SgrFlags::DIM | SgrFlags::ITALIC
-            | SgrFlags::BLINK_SLOW | SgrFlags::BLINK_FAST
-            | SgrFlags::INVERSE | SgrFlags::HIDDEN | SgrFlags::STRIKETHROUGH,
+        flags: SgrFlags::BOLD
+            | SgrFlags::DIM
+            | SgrFlags::ITALIC
+            | SgrFlags::BLINK_SLOW
+            | SgrFlags::BLINK_FAST
+            | SgrFlags::INVERSE
+            | SgrFlags::HIDDEN
+            | SgrFlags::STRIKETHROUGH,
         underline_style: UnderlineStyle::Straight,
         underline_color: Color::Default,
     };
@@ -151,9 +159,18 @@ fn test_encode_line_all_spaces_preserved() {
 #[test]
 fn test_encode_line_coverage_invariant() {
     // Build 3 cells with distinct attributes so each gets its own range
-    let a1 = SgrAttributes { flags: SgrFlags::BOLD,   ..Default::default() };
-    let a2 = SgrAttributes { flags: SgrFlags::ITALIC, ..Default::default() };
-    let a3 = SgrAttributes { flags: SgrFlags::DIM,    ..Default::default() };
+    let a1 = SgrAttributes {
+        flags: SgrFlags::BOLD,
+        ..Default::default()
+    };
+    let a2 = SgrAttributes {
+        flags: SgrFlags::ITALIC,
+        ..Default::default()
+    };
+    let a3 = SgrAttributes {
+        flags: SgrFlags::DIM,
+        ..Default::default()
+    };
 
     let cells = vec![
         Cell::with_attrs('A', a1),
@@ -189,7 +206,11 @@ fn test_encode_line_wide_chars_no_placeholder_space() {
     wide_cell.width = CellWidth::Half; // main cell is Half (it's the glyph cell)
                                        // Actually the main cell width is set by unicode_width, not CellWidth::Wide.
                                        // The placeholder is the second cell with CellWidth::Wide and grapheme=" ".
-    let placeholder = Cell { width: CellWidth::Wide, grapheme: CompactString::new(" "), ..Default::default() };
+    let placeholder = Cell {
+        width: CellWidth::Wide,
+        grapheme: CompactString::new(" "),
+        ..Default::default()
+    };
 
     let cells = vec![wide_cell, placeholder];
     let (text, _, col_to_buf) = encode_line(&cells);

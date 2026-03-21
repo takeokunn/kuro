@@ -299,7 +299,7 @@ fn test_viewport_scroll_down_to_zero_sets_full_dirty() {
     screen.viewport_scroll_up(10);
     let _ = screen.take_dirty_lines(); // drain scroll_up dirty state
     screen.viewport_scroll_down(10); // return to live view
-    // full_dirty must be set.
+                                     // full_dirty must be set.
     let dirty = screen.take_dirty_lines();
     assert_eq!(
         dirty.len(),
@@ -345,9 +345,18 @@ fn test_get_scrollback_lines_order_most_recent_first() {
     let lines = screen.get_scrollback_lines(3);
     assert_eq!(lines.len(), 3);
     // Most recent line ('3') must come first.
-    assert_eq!(lines[0].get_cell(0).map(crate::types::cell::Cell::char), Some('3'));
-    assert_eq!(lines[1].get_cell(0).map(crate::types::cell::Cell::char), Some('2'));
-    assert_eq!(lines[2].get_cell(0).map(crate::types::cell::Cell::char), Some('1'));
+    assert_eq!(
+        lines[0].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('3')
+    );
+    assert_eq!(
+        lines[1].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('2')
+    );
+    assert_eq!(
+        lines[2].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('1')
+    );
 }
 
 #[test]
@@ -375,7 +384,7 @@ fn test_viewport_scroll_down_partial_sets_scroll_dirty() {
 #[test]
 fn test_get_scrollback_viewport_line_empty_returns_none() {
     let screen = make_screen(); // no scrollback
-    // No lines scrolled off → every row in viewport maps to None
+                                // No lines scrolled off → every row in viewport maps to None
     assert!(screen.get_scrollback_viewport_line(0).is_none());
     assert!(screen.get_scrollback_viewport_line(23).is_none());
 }

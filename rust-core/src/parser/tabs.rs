@@ -2,7 +2,7 @@
 
 /// Tab stop manager using bitmap for O(1) tab stop lookups
 ///
-/// Uses a Vec<bool> bitmap where index i represents whether there's a tab stop at column i.
+/// Uses a `Vec<bool>` bitmap where index i represents whether there's a tab stop at column i.
 /// This provides constant-time set/clear operations and linear scan for `next_stop`, which
 /// is efficient for typical terminal widths (< 256 columns).
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct TabStops {
 
 impl TabStops {
     /// Create a new tab stop manager with default stops every 8 columns
-    #[must_use] 
+    #[must_use]
     pub fn new(cols: usize) -> Self {
         let mut stops = vec![false; cols];
         // Default tabs every 8 columns
@@ -60,7 +60,7 @@ impl TabStops {
     /// but typically O(cols/8) since tab stops are usually spaced every 8 columns.
     /// For typical terminals (< 256 columns), this is very fast and eliminates the
     /// O(n log n) sort operation from the previous `HashSet` implementation.
-    #[must_use] 
+    #[must_use]
     pub fn next_stop(&self, from: usize) -> usize {
         // Find the first tab stop >= from
         for i in from..self.cols {
@@ -95,7 +95,7 @@ impl TabStops {
     }
 
     /// Get a copy of all tab stops as a sorted vector
-    #[must_use] 
+    #[must_use]
     pub fn get_stops(&self) -> Vec<usize> {
         self.stops
             .iter()
@@ -107,7 +107,7 @@ impl TabStops {
 
     /// Restore tab stops from a saved state
     ///
-    /// Note: The saved state is now a Vec<bool> bitmap for consistency with the new implementation.
+    /// Note: The saved state is now a `Vec<bool>` bitmap for consistency with the new implementation.
     /// This maintains the same interface but changes the internal representation.
     pub fn restore(&mut self, stops: Vec<bool>) {
         // Use the saved stops, truncated/padded to current width
@@ -123,7 +123,7 @@ impl TabStops {
     /// Get a copy of tab stops for saving
     ///
     /// Returns the full bitmap state for restoration.
-    #[must_use] 
+    #[must_use]
     pub fn save(&self) -> Vec<bool> {
         self.stops.clone()
     }

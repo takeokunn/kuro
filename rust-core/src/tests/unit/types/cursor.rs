@@ -136,5 +136,9 @@ fn test_cursor_new_sets_initial_position() {
 fn test_cursor_shape_param1_alias_maps_to_zero() {
     let shape = CursorShape::try_from(1i64).expect("param 1 must be valid");
     assert_eq!(shape, CursorShape::BlinkingBlock);
-    assert_eq!(i64::from(shape), 0, "canonical encoding of BlinkingBlock is 0");
+    assert_eq!(
+        i64::from(shape),
+        0,
+        "canonical encoding of BlinkingBlock is 0"
+    );
 }

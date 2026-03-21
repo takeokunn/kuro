@@ -154,7 +154,12 @@ fn new_with_bg_default_equals_new() {
     let with_default_bg = Line::new_with_bg(cols, Color::Default);
     assert_eq!(plain.cells.len(), with_default_bg.cells.len());
     assert_eq!(plain.is_dirty, with_default_bg.is_dirty);
-    for (i, (a, b)) in plain.cells.iter().zip(with_default_bg.cells.iter()).enumerate() {
+    for (i, (a, b)) in plain
+        .cells
+        .iter()
+        .zip(with_default_bg.cells.iter())
+        .enumerate()
+    {
         assert_eq!(a, b, "cell mismatch at col {i}");
     }
 }
@@ -189,5 +194,8 @@ fn test_update_cell_different_content_marks_dirty() {
     line.update_cell(5, 'X', attrs);
     line.mark_clean();
     line.update_cell(5, 'Y', attrs); // different char
-    assert!(line.is_dirty, "update_cell with changed content must set is_dirty");
+    assert!(
+        line.is_dirty,
+        "update_cell with changed content must set is_dirty"
+    );
 }

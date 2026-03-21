@@ -125,7 +125,10 @@ fn test_mark_line_dirty_idempotent() {
     s.mark_line_dirty(4);
     s.mark_line_dirty(4);
     let dirty = s.take_dirty_lines();
-    assert!(dirty.contains(&4), "row 4 must be present after double mark");
+    assert!(
+        dirty.contains(&4),
+        "row 4 must be present after double mark"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -139,11 +142,7 @@ fn test_mark_all_dirty_returns_all_rows() {
     let _ = s.take_dirty_lines(); // drain
     s.mark_all_dirty();
     let dirty = s.take_dirty_lines();
-    assert_eq!(
-        dirty.len(),
-        24,
-        "mark_all_dirty must dirty all 24 rows"
-    );
+    assert_eq!(dirty.len(), 24, "mark_all_dirty must dirty all 24 rows");
 }
 
 #[test]
@@ -154,7 +153,10 @@ fn test_mark_all_dirty_result_sorted() {
     s.mark_all_dirty();
     let dirty = s.take_dirty_lines();
     let expected: Vec<usize> = (0..24).collect();
-    assert_eq!(dirty, expected, "mark_all_dirty result must be sorted 0..rows");
+    assert_eq!(
+        dirty, expected,
+        "mark_all_dirty result must be sorted 0..rows"
+    );
 }
 
 #[test]

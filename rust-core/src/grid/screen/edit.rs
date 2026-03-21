@@ -1,6 +1,6 @@
 //! Line and character editing methods for Screen
 
-use super::{Screen, Line, SgrAttributes, Cell, CellWidth};
+use super::{Cell, CellWidth, Line, Screen, SgrAttributes};
 
 impl Screen {
     /// Clear all lines in range
@@ -23,7 +23,9 @@ impl Screen {
     /// default cell attributes. No-op when the cursor is outside the scroll region.
     #[inline]
     pub fn insert_lines(&mut self, count: usize) {
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
         let cursor_row = screen.cursor.row;
         let top = screen.scroll_region.top;
         let bottom = screen.scroll_region.bottom;
@@ -56,7 +58,9 @@ impl Screen {
     /// scroll region. Does NOT save lines to the scrollback buffer.
     #[inline]
     pub fn delete_lines(&mut self, count: usize) {
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
         let cursor_row = screen.cursor.row;
         let top = screen.scroll_region.top;
         let bottom = screen.scroll_region.bottom;
@@ -88,7 +92,9 @@ impl Screen {
     /// the right margin are discarded. Blank cells use the current SGR background color.
     #[inline]
     pub fn insert_chars(&mut self, count: usize, attrs: SgrAttributes) {
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
         let cursor_row = screen.cursor.row;
         let cursor_col = screen.cursor.col;
         let cols = screen.cols as usize;
@@ -128,7 +134,9 @@ impl Screen {
     /// the right end of the line.
     #[inline]
     pub fn delete_chars(&mut self, count: usize) {
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
         let cursor_row = screen.cursor.row;
         let cursor_col = screen.cursor.col;
         let cols = screen.cols as usize;
@@ -165,7 +173,9 @@ impl Screen {
     /// The cursor position does not change. Characters beyond the right margin are ignored.
     #[inline]
     pub fn erase_chars(&mut self, count: usize, attrs: SgrAttributes) {
-        let Some(screen) = self.active_screen_mut() else { return };
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
         let cursor_row = screen.cursor.row;
         let cursor_col = screen.cursor.col;
         let cols = screen.cols as usize;

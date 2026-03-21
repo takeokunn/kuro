@@ -19,7 +19,10 @@ pub(super) fn encode_color_spec(rgb: [u8; 3]) -> String {
 ///
 /// Supports both xterm-style `rgb:RR/GG/BB` (16-bit per channel, upper 8 bits used)
 /// and CSS-style `#RRGGBB` (8-bit per channel).
-#[expect(clippy::cast_possible_truncation, reason = "2-digit hex colors are 0x00..=0xFF; the else branch is only reached when digits ≤ 2, so v fits in u8")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "2-digit hex colors are 0x00..=0xFF; the else branch is only reached when digits ≤ 2, so v fits in u8"
+)]
 pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("rgb:") {
@@ -264,8 +267,7 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
                             }
                             // Advance cursor
                             let max_row = (core.screen.rows() as usize).saturating_sub(1);
-                            let new_row =
-                                cursor.row.saturating_add(rows as usize).min(max_row);
+                            let new_row = cursor.row.saturating_add(rows as usize).min(max_row);
                             core.screen.move_cursor(new_row, 0);
                         }
                     }

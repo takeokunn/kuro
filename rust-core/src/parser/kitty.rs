@@ -4,9 +4,9 @@
 //! The APC payload bytes are extracted by the scanner in `TerminalCore::advance()`
 //! and dispatched here for parsing and decoding.
 
+use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
-use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 
 /// Post-decode image format (stored in `GraphicsStore`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +55,10 @@ impl KittyParams {
     ///
     /// Format: `a=t,f=100,i=1,m=0`
     #[must_use]
-    #[expect(clippy::cast_possible_truncation, reason = "quiet is 0 or 2 per Kitty graphics protocol spec; u32→u8 is always safe for valid inputs")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "quiet is 0 or 2 per Kitty graphics protocol spec; u32→u8 is always safe for valid inputs"
+    )]
     pub fn parse(header: &[u8]) -> Self {
         let mut params = Self::default();
         for kv in header.split(|&b| b == b',') {
@@ -91,7 +94,10 @@ fn parse_u32(bytes: &[u8]) -> Option<u32> {
 }
 
 /// A finalized, decoded Kitty Graphics command ready for dispatch to `GraphicsStore`
-#[expect(missing_docs, reason = "KittyCommand variants are self-documenting from the Kitty Graphics Protocol spec; prose docs add no value here")]
+#[expect(
+    missing_docs,
+    reason = "KittyCommand variants are self-documenting from the Kitty Graphics Protocol spec; prose docs add no value here"
+)]
 #[derive(Debug)]
 pub enum KittyCommand {
     /// Transmit image data and store (a=t)
@@ -171,7 +177,9 @@ pub fn process_apc_payload(
     // Base64 decode the payload
     let decoded = if b64_data.is_empty() {
         Vec::new()
-    } else if let Ok(d) = BASE64_STANDARD.decode(b64_data) { d } else {
+    } else if let Ok(d) = BASE64_STANDARD.decode(b64_data) {
+        d
+    } else {
         // Malformed base64 — discard entire sequence including any chunk state
         *chunk_state = None;
         return None;

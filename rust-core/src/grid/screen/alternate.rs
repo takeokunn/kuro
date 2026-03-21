@@ -51,7 +51,7 @@ impl Screen {
     }
 
     /// Check if alternate screen is currently active
-    #[must_use] 
+    #[must_use]
     pub const fn is_alternate_screen_active(&self) -> bool {
         self.is_alternate_active
     }

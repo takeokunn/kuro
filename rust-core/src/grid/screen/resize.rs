@@ -1,6 +1,6 @@
 //! Screen resize methods for Screen
 
-use super::{VecDeque, Line, Screen, ScrollRegion};
+use super::{Line, Screen, ScrollRegion, VecDeque};
 
 /// Grow or shrink `lines` to exactly `new_rows` rows, then resize every
 /// existing row to `new_cols` columns.

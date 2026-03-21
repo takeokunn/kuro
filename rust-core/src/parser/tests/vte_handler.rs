@@ -140,11 +140,13 @@ fn test_esc_decsc_decrc_save_restore_cursor() {
     // Restore cursor with ESC 8
     term.advance(b"\x1b8");
     assert_eq!(
-        term.screen.cursor().row, saved_row,
+        term.screen.cursor().row,
+        saved_row,
         "DECRC should restore saved row"
     );
     assert_eq!(
-        term.screen.cursor().col, saved_col,
+        term.screen.cursor().col,
+        saved_col,
         "DECRC should restore saved col"
     );
 }
@@ -168,7 +170,8 @@ fn test_esc_hts_sets_tab_stop() {
     // HT should advance to the new stop at column 5 (before the default at 8)
     term.advance(b"\t");
     assert_eq!(
-        term.screen.cursor().col, 5,
+        term.screen.cursor().col,
+        5,
         "ESC H should set a tab stop at the cursor column"
     );
 }
@@ -239,7 +242,8 @@ fn test_print_combining_char_does_not_advance_cursor() {
     term.advance(combining.as_bytes());
 
     assert_eq!(
-        term.screen.cursor().col, col_after_base,
+        term.screen.cursor().col,
+        col_after_base,
         "combining character must not advance the cursor"
     );
 }

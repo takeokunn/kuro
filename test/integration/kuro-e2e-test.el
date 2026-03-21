@@ -440,6 +440,7 @@ blink-slow, blink-fast, inverse, hidden, strikethrough)."
 ;;; E2E Tests
 
 (ert-deftest kuro-e2e-module-loads ()
+  :expected-result kuro-test--e2e-expected-result
   "Test that the Rust module loaded and provides expected functions."
   (should (fboundp 'kuro-core-init))
   (should (fboundp 'kuro-core-send-key))

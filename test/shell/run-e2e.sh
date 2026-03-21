@@ -17,7 +17,8 @@ echo ""
 echo "--- Running E2E tests ---"
 emacs -Q --batch \
   -L "$PROJECT_DIR/emacs-lisp" \
-  -L "$PROJECT_DIR/test/elisp" \
+  -L "$PROJECT_DIR/test/unit" \
+  -L "$PROJECT_DIR/test/integration" \
   --eval "(require 'kuro)" \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")" \
@@ -27,7 +28,8 @@ echo ""
 echo "--- Running config unit tests ---"
 emacs -Q --batch \
   -L "$PROJECT_DIR/emacs-lisp" \
-  -L "$PROJECT_DIR/test/elisp" \
+  -L "$PROJECT_DIR/test/unit" \
+  -L "$PROJECT_DIR/test/integration" \
   --eval "(require 'kuro-config)" \
   --eval "(require 'kuro-config-test)" \
   --eval "(ert-run-tests-batch-and-exit \"test-kuro\")" \
@@ -37,7 +39,8 @@ echo ""
 echo "--- Running unit tests (kuro-unit-* in kuro-e2e-test.el) ---"
 emacs -Q --batch \
   -L "$PROJECT_DIR/emacs-lisp" \
-  -L "$PROJECT_DIR/test/elisp" \
+  -L "$PROJECT_DIR/test/unit" \
+  -L "$PROJECT_DIR/test/integration" \
   --eval "(require 'kuro)" \
   --eval "(require 'kuro-e2e-test)" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")" \

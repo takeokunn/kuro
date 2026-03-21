@@ -2,9 +2,13 @@ use super::*;
 
 #[test]
 fn test_validate_allowed_shells() {
-    assert!(Pty::validate_shell("bash").is_ok());
-    assert!(Pty::validate_shell("zsh").is_ok());
     assert!(Pty::validate_shell("sh").is_ok());
+    if which::which("bash").is_ok() {
+        assert!(Pty::validate_shell("bash").is_ok());
+    }
+    if which::which("zsh").is_ok() {
+        assert!(Pty::validate_shell("zsh").is_ok());
+    }
     if which::which("fish").is_ok() {
         assert!(Pty::validate_shell("fish").is_ok());
     }

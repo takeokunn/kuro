@@ -25,8 +25,8 @@
 //! - Bit 7 (`0x080`): hidden
 //! - Bit 8 (`0x100`): strikethrough
 
-use crate::types::cell::{Cell, CellWidth, SgrAttributes, SgrFlags, UnderlineStyle};
-use crate::types::color::{Color, NamedColor};
+use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
+use crate::types::color::Color;
 
 /// Encoded line data for FFI transfer: `(row, text, face_ranges, col_to_buf)`.
 ///
@@ -60,27 +60,9 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 pub fn encode_color(color: &Color) -> u32 {
     match color {
         Color::Default => 0xFF00_0000u32,
-        Color::Named(named) => {
-            let idx: u32 = match named {
-                NamedColor::Black => 0,
-                NamedColor::Red => 1,
-                NamedColor::Green => 2,
-                NamedColor::Yellow => 3,
-                NamedColor::Blue => 4,
-                NamedColor::Magenta => 5,
-                NamedColor::Cyan => 6,
-                NamedColor::White => 7,
-                NamedColor::BrightBlack => 8,
-                NamedColor::BrightRed => 9,
-                NamedColor::BrightGreen => 10,
-                NamedColor::BrightYellow => 11,
-                NamedColor::BrightBlue => 12,
-                NamedColor::BrightMagenta => 13,
-                NamedColor::BrightCyan => 14,
-                NamedColor::BrightWhite => 15,
-            };
-            0x8000_0000u32 | idx
-        }
+        // NamedColor is #[repr(u8)] with discriminants 0..=15,
+        // so a direct cast replaces the 16-arm match with a single instruction.
+        Color::Named(named) => 0x8000_0000u32 | u32::from(*named as u8),
         Color::Indexed(idx) => 0x4000_0000u32 | u32::from(*idx),
         Color::Rgb(r, g, b) => (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b),
     }
@@ -93,17 +75,11 @@ pub fn encode_color(color: &Color) -> u32 {
 #[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
-    let f = attrs.flags;
-    let mut bits = 0u64;
-    if f.contains(SgrFlags::BOLD) {
-        bits |= 0x001;
-    }
-    if f.contains(SgrFlags::DIM) {
-        bits |= 0x002;
-    }
-    if f.contains(SgrFlags::ITALIC) {
-        bits |= 0x004;
-    }
+    // SgrFlags layout:  BOLD=0, DIM=1, ITALIC=2, BLINK_SLOW=3, BLINK_FAST=4, INVERSE=5, HIDDEN=6, STRIKETHROUGH=7
+    // Encode layout:    bold=0, dim=1,  italic=2, underline=3,  blink_slow=4, blink_fast=5, inverse=6, hidden=7, strike=8
+    // Bits 0-2 map directly; bits 3-7 shift left by 1 to make room for the underline flag at bit 3.
+    let raw = u64::from(attrs.flags.bits());
+    let mut bits = (raw & 0x07) | ((raw >> 3) << 4);
     if attrs.underline() {
         bits |= 0x008;
     }
@@ -116,21 +92,6 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
         UnderlineStyle::Dashed => 5,
     };
     bits |= style_bits << 9;
-    if f.contains(SgrFlags::BLINK_SLOW) {
-        bits |= 0x010;
-    }
-    if f.contains(SgrFlags::BLINK_FAST) {
-        bits |= 0x020;
-    }
-    if f.contains(SgrFlags::INVERSE) {
-        bits |= 0x040;
-    }
-    if f.contains(SgrFlags::HIDDEN) {
-        bits |= 0x080;
-    }
-    if f.contains(SgrFlags::STRIKETHROUGH) {
-        bits |= 0x100;
-    }
     bits
 }
 

@@ -36,6 +36,19 @@ pub struct TerminalCore {
     pub(crate) kitty: types::KittyState,
     /// Terminal metadata and pending-response state
     pub(crate) meta: types::TerminalMeta,
+    /// Whether the VTE parser is known to be in the Ground state.
+    /// Used by the ASCII fast-path in `advance_with_apc` to determine
+    /// if printable bytes can bypass VTE.
+    pub(crate) parser_in_ground: bool,
+    /// Number of VTE Perform callbacks fired during current `advance()` call.
+    /// Zero means VTE processed transitional bytes with no dispatch.
+    pub(crate) vte_callback_count: u32,
+    /// Whether the last VTE callback was one that returns to Ground state.
+    pub(crate) vte_last_ground: bool,
+    /// Buffer for batching ASCII characters from VTE `print()` callbacks.
+    /// Flushed via `Screen::print_ascii_run()` when a non-print callback
+    /// fires, a non-ASCII char is printed, or VTE `advance()` returns.
+    pub(crate) print_buf: Vec<u8>,
 }
 
 impl TerminalCore {
@@ -54,6 +67,27 @@ impl TerminalCore {
             osc_data: types::osc::OscData::default(),
             kitty: types::KittyState::default(),
             meta: types::TerminalMeta::default(),
+            parser_in_ground: true,
+            vte_callback_count: 0,
+            vte_last_ground: true,
+            print_buf: Vec::with_capacity(256),
+        }
+    }
+
+    /// Flush the VTE print buffer — sends any buffered ASCII bytes to
+    /// `Screen::print_ascii_run()` in a single batch.
+    ///
+    /// Called automatically before any non-print VTE callback, after a
+    /// non-ASCII `print()`, and after `advance()` returns.
+    #[inline]
+    pub(crate) fn flush_print_buf(&mut self) {
+        if !self.print_buf.is_empty() {
+            self.screen.print_ascii_run(
+                &self.print_buf,
+                self.current_attrs,
+                self.dec_modes.auto_wrap,
+            );
+            self.print_buf.clear();
         }
     }
 
@@ -307,5 +341,10 @@ impl TerminalCore {
         self.kitty.pending_image_notifications.clear();
         // Clear OSC data
         self.osc_data = types::osc::OscData::default();
+        // Reset VTE parser to fresh Ground state
+        self.parser = Some(vte::Parser::new());
+        self.parser_in_ground = true;
+        // Clear any buffered print characters
+        self.print_buf.clear();
     }
 }

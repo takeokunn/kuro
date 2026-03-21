@@ -104,6 +104,21 @@ impl BitVecDirtySet {
         self.bits.iter_ones()
     }
 
+    /// Bulk-insert all rows in `lo..hi` (half-open range).
+    ///
+    /// More efficient than calling `insert()` in a loop because the backing
+    /// bit-vector is grown once and the count is recomputed once at the end.
+    #[inline]
+    pub fn insert_range(&mut self, lo: usize, hi: usize) {
+        if lo >= hi {
+            return;
+        }
+        self.ensure_capacity(hi - 1);
+        let slice = &mut self.bits[lo..hi];
+        slice.fill(true);
+        self.count = self.bits.count_ones();
+    }
+
     /// Internal helper: clear all bits and reset count.
     #[inline]
     fn clear_all(&mut self) {

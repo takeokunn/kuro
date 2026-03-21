@@ -31,3 +31,4 @@ memchr = "2.7"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = "symbols"

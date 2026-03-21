@@ -11,8 +11,21 @@ use unicode_width::UnicodeWidthChar;
 impl vte::Perform for TerminalCore {
     #[inline]
     fn print(&mut self, c: char) {
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
+
+        // ASCII fast-path: buffer printable ASCII and defer to batch flush.
+        // This avoids per-character Cell construction + width lookup overhead.
+        if c.is_ascii() {
+            self.print_buf.push(c as u8);
+            return;
+        }
+
+        // Non-ASCII: flush any buffered ASCII first, then handle this character.
+        self.flush_print_buf();
+
         // Combining characters (Unicode width 0) are attached to the previous cell.
-        if !c.is_ascii() && UnicodeWidthChar::width(c) == Some(0) {
+        if UnicodeWidthChar::width(c) == Some(0) {
             // Attach to the cell just before the current cursor position
             let cursor = *self.screen.cursor();
             let (row, col) = if cursor.col > 0 {
@@ -37,6 +50,9 @@ impl vte::Perform for TerminalCore {
 
     #[inline]
     fn execute(&mut self, byte: u8) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
         match byte {
             0x07 => self.meta.bell_pending = true,
             0x08 => self.screen.backspace(),
@@ -56,6 +72,9 @@ impl vte::Perform for TerminalCore {
     }
 
     fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, c: char) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
         // Check for DEC private mode sequences (CSI ? Pm h/l) and CSI ? u (query keyboard flags)
         if !intermediates.is_empty() && intermediates[0] == b'?' {
             match c {
@@ -165,10 +184,16 @@ impl vte::Perform for TerminalCore {
     /// Delegates to `parser::osc::handle_osc` for the full implementation.
     #[inline]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
         parser::osc::handle_osc(self, params, bell_terminated);
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
         match (intermediates, byte) {
             ([], b'7') => self.save_cursor(), // DECSC: Save cursor position and attributes
             ([], b'8') => self.restore_cursor(), // DECRC: Restore cursor position and attributes
@@ -206,16 +231,25 @@ impl vte::Perform for TerminalCore {
 
     #[inline]
     fn hook(&mut self, params: &vte::Params, intermediates: &[u8], ignore: bool, c: char) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = false;
         parser::dcs::dcs_hook(self, params, intermediates, ignore, c);
     }
 
     #[inline]
     fn put(&mut self, byte: u8) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = false;
         parser::dcs::dcs_put(self, byte);
     }
 
     #[inline]
     fn unhook(&mut self) {
+        self.flush_print_buf();
+        self.vte_callback_count += 1;
+        self.vte_last_ground = true;
         parser::dcs::dcs_unhook(self);
     }
 }

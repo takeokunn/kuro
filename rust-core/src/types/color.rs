@@ -3,40 +3,44 @@
 use serde::{Deserialize, Serialize};
 
 /// Named ANSI colors (standard 16-color palette)
+///
+/// `#[repr(u8)]` with explicit discriminants enables zero-cost `as u8` casts
+/// for FFI color encoding, replacing a 16-arm match with a single instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum NamedColor {
     /// Black color (index 0)
-    Black,
+    Black = 0,
     /// Red color (index 1)
-    Red,
+    Red = 1,
     /// Green color (index 2)
-    Green,
+    Green = 2,
     /// Yellow color (index 3)
-    Yellow,
+    Yellow = 3,
     /// Blue color (index 4)
-    Blue,
+    Blue = 4,
     /// Magenta color (index 5)
-    Magenta,
+    Magenta = 5,
     /// Cyan color (index 6)
-    Cyan,
+    Cyan = 6,
     /// White color (index 7)
-    White,
+    White = 7,
     /// Bright black color (index 8)
-    BrightBlack,
+    BrightBlack = 8,
     /// Bright red color (index 9)
-    BrightRed,
+    BrightRed = 9,
     /// Bright green color (index 10)
-    BrightGreen,
+    BrightGreen = 10,
     /// Bright yellow color (index 11)
-    BrightYellow,
+    BrightYellow = 11,
     /// Bright blue color (index 12)
-    BrightBlue,
+    BrightBlue = 12,
     /// Bright magenta color (index 13)
-    BrightMagenta,
+    BrightMagenta = 13,
     /// Bright cyan color (index 14)
-    BrightCyan,
+    BrightCyan = 14,
     /// Bright white color (index 15)
-    BrightWhite,
+    BrightWhite = 15,
 }
 
 /// Terminal color representation

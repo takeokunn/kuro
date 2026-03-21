@@ -27,9 +27,7 @@ impl Screen {
     /// [`mark_line_dirty`] instead.
     #[inline]
     pub(super) fn mark_dirty_range(&mut self, lo: usize, hi: usize) {
-        for row in lo..hi {
-            self.dirty_set.insert(row);
-        }
+        self.dirty_set.insert_range(lo, hi);
     }
 
     /// Mark a line as dirty in both the line flag and the dirty set

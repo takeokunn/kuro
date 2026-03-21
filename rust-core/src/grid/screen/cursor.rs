@@ -1,5 +1,7 @@
 //! Cursor movement and character printing methods for Screen
 
+use compact_str::CompactString;
+
 use super::{
     Cell, CellWidth, Color, Cursor, DirtySet as _, Screen, SgrAttributes, UnicodeWidthChar,
 };
@@ -232,6 +234,86 @@ impl Screen {
                 if screen.cursor.col >= screen.cols as usize {
                     // Clamp to last column; set pending wrap flag only if auto-wrap is on
                     screen.cursor.col = (screen.cols as usize).saturating_sub(1);
+                    if auto_wrap {
+                        screen.cursor.pending_wrap = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Print a contiguous run of printable ASCII bytes (0x20..=0x7E) directly,
+    /// bypassing VTE per-character dispatch.
+    ///
+    /// This is a performance-critical fast path: for ASCII-dominated terminal
+    /// output, this avoids the overhead of VTE state machine dispatch,
+    /// `UnicodeWidthChar` lookups, and per-character `Cell` construction.
+    ///
+    /// Caller must ensure all bytes are in the range 0x20..=0x7E.
+    /// This method must only be called when the VTE parser is in Ground state.
+    #[inline]
+    pub fn print_ascii_run(&mut self, bytes: &[u8], attrs: SgrAttributes, auto_wrap: bool) {
+        if bytes.is_empty() {
+            return;
+        }
+
+        // Pre-compute before borrowing self through active_screen_mut()
+        let is_primary = !self.is_alternate_active;
+        let cols = self.cols as usize;
+
+        // Hoist active_screen_mut() outside the per-byte loop.
+        // Previously called per byte, adding a branch + Option unwrap per iteration.
+        let Some(screen) = self.active_screen_mut() else {
+            return;
+        };
+
+        for &byte in bytes {
+            // Handle pending wrap from previous print
+            if screen.cursor.pending_wrap {
+                screen.cursor.pending_wrap = false;
+                if auto_wrap {
+                    screen.cursor.col = 0;
+                    screen.line_feed_impl(attrs.background, is_primary);
+                }
+            }
+
+            let row = screen.cursor.row;
+            let col = screen.cursor.col;
+
+            // ASCII is always width 1, always fits (col + 1 <= cols)
+            if col < cols {
+                if let Some(line) = screen.lines.get_mut(row) {
+                    // Direct cell write: avoid Cell construction + PartialEq comparison
+                    let cell = &mut line.cells[col];
+                    // Direct byte comparison: avoid encode_utf8 + str compare overhead.
+                    // For ASCII bytes, checking the raw byte is faster than encoding
+                    // to UTF-8 and comparing &str slices.
+                    let grapheme_matches =
+                        cell.grapheme.len() == 1 && cell.grapheme.as_bytes()[0] == byte;
+                    if !grapheme_matches
+                        || cell.attrs != attrs
+                        || cell.width != CellWidth::Half
+                        || cell.extras.is_some()
+                    {
+                        // SAFETY: byte is guaranteed 0x20..=0x7E (printable ASCII),
+                        // which is always valid UTF-8.
+                        let buf = [byte];
+                        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+                        cell.grapheme = CompactString::new(s);
+                        cell.attrs = attrs;
+                        cell.width = CellWidth::Half;
+                        cell.extras = None;
+                        line.is_dirty = true;
+                        screen.dirty_set.insert(row);
+                    }
+                }
+
+                // Advance cursor
+                screen.cursor.col += 1;
+
+                // Check for pending wrap at end of line
+                if screen.cursor.col >= cols {
+                    screen.cursor.col = cols.saturating_sub(1);
                     if auto_wrap {
                         screen.cursor.pending_wrap = true;
                     }

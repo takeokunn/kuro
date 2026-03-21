@@ -88,12 +88,49 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
         }
     }
 
-    // --- vte parser for all other sequences ---
-    // `take()` writes `None` (a single discriminant byte) instead of allocating
-    // a fresh `vte::Parser` (~400 bytes of zeroed state) on every call.
-    let mut parser = core.parser.take().expect("parser must be present");
-    parser.advance(core, bytes);
-    core.parser = Some(parser);
+    // --- ASCII fast-path + vte parser ---
+    // When the VTE parser is known to be in Ground state, scan for contiguous
+    // runs of printable ASCII bytes (0x20-0x7E) and handle them directly via
+    // Screen::print_ascii_run(), bypassing VTE's per-byte state machine dispatch.
+    // Only non-ASCII or escape-containing segments are forwarded to VTE.
+    let mut pos = 0;
+
+    // ASCII fast-path: scan for printable ASCII run at start of buffer
+    if core.parser_in_ground {
+        while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
+            pos += 1;
+        }
+        if pos > 0 {
+            core.screen.print_ascii_run(
+                &bytes[..pos],
+                core.current_attrs,
+                core.dec_modes.auto_wrap,
+            );
+            // After printing ASCII, parser is still in Ground (we didn't touch VTE)
+        }
+    }
+
+    // Feed remaining bytes (if any) to VTE
+    if pos < bytes.len() {
+        core.vte_callback_count = 0;
+        core.vte_last_ground = false;
+
+        let mut parser = core.parser.take().expect("parser must be present");
+        parser.advance(core, &bytes[pos..]);
+        core.parser = Some(parser);
+
+        // Flush any remaining buffered ASCII from VTE print() callbacks
+        core.flush_print_buf();
+
+        // Update Ground-state tracking based on VTE callback observations
+        if core.vte_callback_count == 0 {
+            // VTE processed bytes without dispatching — mid-sequence
+            core.parser_in_ground = false;
+        } else {
+            core.parser_in_ground = core.vte_last_ground;
+        }
+    }
+    // If pos == bytes.len(), entire buffer was ASCII — parser_in_ground stays true
 }
 
 #[cfg(test)]

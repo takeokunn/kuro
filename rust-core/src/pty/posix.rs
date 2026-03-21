@@ -171,6 +171,8 @@ impl Pty {
                 // Without this, tcgetpgrp() fails in the shell.
                 // SAFETY: slave is a valid PTY slave fd; TIOCSCTTY is async-signal-safe
                 // after setsid(); the third arg (0) is a required no-op placeholder.
+                // TIOCSCTTY is u32 on macOS, u64 on Linux; .into() needed cross-platform
+                #[allow(clippy::useless_conversion)]
                 unsafe {
                     if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY.into(), 0) == -1 {
                         return Err(pty_operation_error(

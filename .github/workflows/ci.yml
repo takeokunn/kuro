@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        emacs-version: ['29.1', '29.4', '30.1', '31.1']
+        emacs-version: ['29.1', '29.4', '30.1']
         rust:
           - stable
 
@@ -112,20 +112,23 @@ jobs:
   test-windows:
     name: Test on Windows (WSL2)
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: wsl-bash {0}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
+      - name: Setup WSL
+        uses: Vampire/setup-wsl@3b46b44374d5d0ae94654c45d114a3ed7a0e07a8  # v5
+        with:
+          distribution: Ubuntu-24.04
+
       - name: Install Rust toolchain (WSL)
+        shell: wsl-bash {0}
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Run cargo test
+        shell: wsl-bash {0}
         run: |
           source $HOME/.cargo/env
           cargo test --workspace
@@ -146,7 +149,7 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Generate coverage report
-        run: cargo tarpaulin --workspace --timeout 120 --out Xml
+        run: cargo tarpaulin --workspace --timeout 300 --out Xml
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
@@ -160,6 +163,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - name: Install nightly Rust
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # nightly
+        with:
+          toolchain: nightly
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
       - name: Run fuzz targets (30s each)

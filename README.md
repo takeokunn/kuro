@@ -1,7 +1,7 @@
 # Kuro - Modern Terminal Emulator for Emacs
 
 ![CI](https://github.com/takeokunn/kuro/actions/workflows/ci.yml/badge.svg)
-![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
+![License](https://img.shields.io/badge/license-MIT-blue)
 ![Emacs](https://img.shields.io/badge/Emacs-29.1%2B-purple)
 ![Rust](https://img.shields.io/badge/rust-1.84.0%2B-orange)
 
@@ -143,7 +143,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT OR Apache-2.0 -- see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).
 
 ## Acknowledgments
 

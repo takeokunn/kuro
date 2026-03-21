@@ -7,7 +7,7 @@ resolver = "2"
 version = "1.0.0"
 edition = "2021"
 authors = ["takeokunn"]
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/takeokunn/kuro"
 rust-version = "1.84.0"
 

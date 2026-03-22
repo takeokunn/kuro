@@ -25,7 +25,7 @@ impl PtyReader {
         shutdown: Arc<AtomicBool>,
         process_exited: Arc<AtomicBool>,
     ) {
-        const BUFFER_SIZE: usize = 8192;
+        const BUFFER_SIZE: usize = 65536;
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
         while !shutdown.load(Ordering::Relaxed) {

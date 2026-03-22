@@ -295,11 +295,13 @@ impl Screen {
                         || cell.width != CellWidth::Half
                         || cell.extras.is_some()
                     {
-                        // SAFETY: byte is guaranteed 0x20..=0x7E (printable ASCII),
-                        // which is always valid UTF-8.
-                        let buf = [byte];
-                        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
-                        cell.grapheme = CompactString::new(s);
+                        if !grapheme_matches {
+                            // SAFETY: byte is guaranteed 0x20..=0x7E (printable ASCII),
+                            // which is always valid UTF-8.
+                            let buf = [byte];
+                            let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+                            cell.grapheme = CompactString::new(s);
+                        }
                         cell.attrs = attrs;
                         cell.width = CellWidth::Half;
                         cell.extras = None;

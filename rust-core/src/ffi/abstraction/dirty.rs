@@ -56,14 +56,28 @@ impl TerminalSession {
         // If viewport is scrolled but not dirty (scroll_dirty == false),
         // suppress live dirty lines to preserve the scrollback view.
         if self.core.screen.scroll_offset() > 0 {
-            let _discard = self.core.screen.take_dirty_lines();
+            self.core.screen.clear_dirty();
             return vec![];
         }
 
         // Synchronized Output mode (DEC ?2026): hold until batch complete.
         if self.core.dec_modes.synchronized_output {
-            let _discard = self.core.screen.take_dirty_lines();
+            self.core.screen.clear_dirty();
             return vec![];
+        }
+
+        // Fast path: full_dirty → iterate 0..rows directly without allocating a Vec
+        if self.core.screen.is_full_dirty() {
+            let rows = self.core.screen.rows() as usize;
+            self.core.screen.clear_dirty();
+            let mut result = Vec::with_capacity(rows);
+            for row in 0..rows {
+                if let Some(line) = self.core.screen.get_line(row) {
+                    let encoded = Self::encode_line_faces(row, &line.cells);
+                    result.push(encoded);
+                }
+            }
+            return result;
         }
 
         let dirty_indices = self.core.screen.take_dirty_lines();

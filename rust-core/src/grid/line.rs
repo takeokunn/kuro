@@ -60,9 +60,15 @@ impl Line {
         if let Some(cell) = self.cells.get_mut(col) {
             let mut buf = [0u8; 4];
             let s = c.encode_utf8(&mut buf);
-            if cell.grapheme.as_str() != s || cell.attrs != attrs {
-                cell.grapheme = CompactString::new(s);
-                cell.attrs = attrs;
+            let grapheme_changed = cell.grapheme.as_str() != s;
+            let attrs_changed = cell.attrs != attrs;
+            if grapheme_changed || attrs_changed {
+                if grapheme_changed {
+                    cell.grapheme = CompactString::new(s);
+                }
+                if attrs_changed {
+                    cell.attrs = attrs;
+                }
                 self.is_dirty = true;
             }
         }

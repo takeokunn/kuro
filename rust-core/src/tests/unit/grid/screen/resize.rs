@@ -131,6 +131,41 @@ fn resize_while_alternate_active_updates_both_screens() {
     assert_eq!(s.cols(), 40);
 }
 
+#[test]
+fn resize_marks_all_dirty() {
+    let mut s = make_screen();
+    // Drain any initial dirty state
+    let _ = s.take_dirty_lines();
+    assert!(!s.is_full_dirty());
+
+    s.resize(30, 100);
+    assert!(
+        s.is_full_dirty(),
+        "resize must set full_dirty so the next render redraws all lines"
+    );
+    let dirty = s.take_dirty_lines();
+    assert_eq!(
+        dirty.len(),
+        30,
+        "take_dirty_lines after resize must return all 30 rows"
+    );
+}
+
+#[test]
+fn resize_same_dimensions_marks_dirty() {
+    let mut s = make_screen();
+    let _ = s.take_dirty_lines();
+    assert!(!s.is_full_dirty());
+
+    // Resize to the exact same dimensions — must still mark dirty so the
+    // render cycle redraws with potentially updated content/geometry state.
+    s.resize(24, 80);
+    assert!(
+        s.is_full_dirty(),
+        "resize to same dimensions must still set full_dirty"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // PBT — T2 tier (500 cases)
 // ---------------------------------------------------------------------------
@@ -246,6 +281,27 @@ proptest! {
             'K',
             "cell (0,0) must survive resize to ({}, {})",
             new_rows, new_cols
+        );
+    }
+
+    #[test]
+    // INVARIANT: resize always sets full_dirty regardless of dimensions
+    fn prop_resize_marks_all_dirty(
+        r in 1u16..=200u16,
+        c in 1u16..=200u16,
+    ) {
+        let mut s = Screen::new(24, 80);
+        let _ = s.take_dirty_lines();
+        s.resize(r, c);
+        prop_assert!(
+            s.is_full_dirty(),
+            "full_dirty must be true after resize to ({}, {})", r, c
+        );
+        let dirty = s.take_dirty_lines();
+        prop_assert_eq!(
+            dirty.len(),
+            r as usize,
+            "take_dirty_lines must return {} rows after resize", r
         );
     }
 }

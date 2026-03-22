@@ -40,7 +40,12 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     let has_esc = memchr(0x1B, bytes).is_some();
     let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
 
-    if has_esc || in_apc_sequence {
+    // Quick bail-out: when starting Idle and the buffer contains no '_' byte,
+    // no APC start sequence (ESC _) can exist, so skip the byte-by-byte
+    // scanner entirely.  This is the common case for CSI/OSC-heavy TUI output
+    // where ESC bytes are frequent but APC sequences are absent.
+    // memchr is SIMD-accelerated (~1μs for 64KB) and replaces a ~100μs loop.
+    if in_apc_sequence || (has_esc && memchr(b'_', bytes).is_some()) {
         for &byte in bytes {
             match (core.kitty.apc_state, byte) {
                 // Idle: watch for ESC

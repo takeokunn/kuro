@@ -57,6 +57,15 @@
   "Forward reference; defvar-local in kuro-ffi.el.")
 (defvar kuro--col-to-buf-map nil
   "Forward reference; defvar-local in kuro-ffi.el.")
+;; kuro-render-buffer.el
+(defvar kuro--last-cursor-row nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-col nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-visible nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-shape nil
+  "Forward reference; defvar-local in kuro-render-buffer.el.")
 ;; kuro.el
 (defvar kuro--last-rows 0
   "Forward reference; defvar-local in kuro.el.")
@@ -105,7 +114,9 @@ At 30 fps this yields approximately 1 second between polls.")
   "Maximum number of prompt positions to track.")
 
 (defconst kuro--tui-dirty-threshold 0.8
-  "Fraction of dirty lines (0.0–1.0) that triggers TUI mode detection. A value of 0.8 means 80% of rows must be dirty before the renderer switches to TUI mode.")
+  "Fraction of dirty lines (0.0-1.0) that triggers TUI mode detection.
+A value of 0.8 means 80% of rows must be dirty before the renderer
+switches to TUI mode.")
 
 (defconst kuro--col-to-buf-evict-factor 2
   "Hysteresis multiplier for the col-to-buf hash map eviction threshold.
@@ -114,7 +125,7 @@ stale entries are pruned to prevent unbounded growth during long sessions.")
 
 (defconst kuro--tui-mode-threshold 10
   "Consecutive full-dirty frames before suppressing the streaming idle timer.
-At 60fps this is ~167ms — fast enough to detect a TUI app within ~167ms
+At 120fps this is ~83ms — fast enough to detect a TUI app within ~83ms
 but slow enough to avoid false suppression during a burst of AI output.")
 
 ;;; Buffer-local render state
@@ -142,17 +153,27 @@ See `kuro--mode-poll-cadence' and `kuro--osc-rare-poll-cadence'.")
 When this reaches `kuro--tui-mode-threshold', the streaming idle timer is
 suppressed because TUI apps (cmatrix, htop, vim, etc.) always have pending
 output and the idle timer would only add spurious render cycles on top of
-the normal 60fps ticker.")
+the normal 120fps ticker.")
 (put 'kuro--tui-mode-frame-count 'permanent-local t)
 
 (defvar-local kuro--last-render-time 0.0
   "Float-time of the last completed render cycle.
-Used for frame coalescing: when multiple timer sources (60fps periodic,
+Used for frame coalescing: when multiple timer sources (120fps periodic,
 streaming idle, input echo delay) all fire within the same frame period,
 only the first actually renders.  Subsequent fires within half a frame
 period are skipped, preventing redundant partial-screen redraws that
 manifest as flickering on complex TUI apps like Claude Code.")
 (put 'kuro--last-render-time 'permanent-local t)
+
+(defvar-local kuro--tui-mode-active nil
+  "Non-nil when TUI mode is active and the render timer is running at `kuro-tui-frame-rate'.")
+(put 'kuro--tui-mode-active 'permanent-local t)
+
+(defvar-local kuro--last-dirty-count 0
+  "Number of dirty lines from the last actual render.
+Stored during `kuro--apply-dirty-updates' and read by the TUI detection
+logic in `kuro--render-cycle' which runs outside the frame coalescing guard.")
+(put 'kuro--last-dirty-count 'permanent-local t)
 
 ;;; Render loop lifecycle
 
@@ -203,7 +224,7 @@ adjusts the number of lines in the buffer to match the new row count.
 Separating resize from the rest of the render cycle eliminates the race
 that previously existed when both the hook and the timer could issue
 resize calls concurrently."
-  (when kuro--resize-pending
+  (when (and kuro--resize-pending (buffer-live-p (current-buffer)))
     (let ((new-rows (car kuro--resize-pending))
           (new-cols (cdr kuro--resize-pending)))
       (setq kuro--resize-pending nil)
@@ -211,6 +232,15 @@ resize calls concurrently."
         (setq kuro--last-rows new-rows
               kuro--last-cols new-cols)
         (kuro--resize new-rows new-cols)
+        ;; Invalidate col-to-buf mappings: column count changed so every
+        ;; row's grid-column → buffer-offset vector is stale.
+        (clrhash kuro--col-to-buf-map)
+        ;; Reset cursor cache so the first post-resize render recomputes
+        ;; cursor position instead of hitting the unchanged-state fast path.
+        (setq kuro--last-cursor-row nil
+              kuro--last-cursor-col nil
+              kuro--last-cursor-visible nil
+              kuro--last-cursor-shape nil)
         ;; Adjust buffer line count to match new rows.
         ;; Use line-number-at-pos instead of count-lines: count-lines counts
         ;; newlines, which overcounts by 1 when the buffer has a trailing \n
@@ -233,10 +263,10 @@ resize calls concurrently."
                   (delete-region (line-end-position) (point-max))))))))))))
 
 (defun kuro--handle-clipboard-actions ()
-  "Process pending OSC 52 clipboard actions according to `kuro-clipboard-policy'.
+  "Process pending OSC 52 clipboard actions per `kuro-clipboard-policy'.
 Drains the action queue returned by `kuro--poll-clipboard-actions' and
 dispatches each entry:
-  `write' — place terminal-supplied text on the kill ring (with optional prompt).
+  `write' -- place terminal-supplied text on the kill ring (optional prompt).
   `query' — respond with the current kill-ring head (with optional prompt).
 
 On `query': sends an OSC 52 response with the current kill-ring head
@@ -350,30 +380,57 @@ scroll shifts to a frozen scrollback view would corrupt the display."
         (kuro--apply-buffer-scroll (car scroll-ev) (cdr scroll-ev))))))
 
 (defsubst kuro--detect-tui-mode (dirty-lines total-rows threshold)
-  "Return t if the dirty-line fraction indicates a full-screen TUI app is active.
+  "Return t when the dirty-line fraction indicates a full-screen TUI app.
 DIRTY-LINES is the number of terminal rows updated this frame.
 TOTAL-ROWS is the total number of terminal rows.
 THRESHOLD is the minimum fraction (0.0–1.0) of rows that must be dirty.
-Returns t when DIRTY-LINES >= ceiling(THRESHOLD * TOTAL-ROWS), nil otherwise."
-  (>= dirty-lines (ceiling (* threshold total-rows))))
+Uses integer arithmetic (both sides multiplied by 10) to avoid
+floating-point precision issues in `ceiling'.  For THRESHOLD=0.8:
+\(round (* 0.8 10)) = 8, so the check becomes >= (* 10 dirty) (* 8 rows)."
+  (>= (* 10 dirty-lines) (* (round (* threshold 10)) total-rows)))
 
-(defun kuro--update-tui-streaming-timer (updates)
-  "Update streaming idle timer state based on dirty-row fraction in UPDATES.
+(defun kuro--switch-render-timer (new-rate)
+  "Cancel the current render timer and recreate it at NEW-RATE fps."
+  (when (timerp kuro--timer)
+    (cancel-timer kuro--timer))
+  (let ((buf (current-buffer)))
+    (setq kuro--timer
+          (run-with-timer
+           0
+           (/ 1.0 new-rate)
+           (lambda () (when (buffer-live-p buf)
+                         (with-current-buffer buf
+                           (kuro--render-cycle)))))))
+  (kuro--recompute-blink-frame-intervals))
+
+(defun kuro--update-tui-streaming-timer ()
+  "Update TUI mode state based on `kuro--last-dirty-count'.
+Called OUTSIDE the frame coalescing guard in `kuro--render-cycle' so it
+runs on every timer invocation, not just non-coalesced frames.  This fixes
+the bug where frame coalescing prevented `kuro--tui-mode-frame-count'
+from ever accumulating to the threshold.
+
 When >= `kuro--tui-dirty-threshold' of terminal rows are dirty for
->= `kuro--tui-mode-threshold' consecutive frames, stops the streaming
-idle timer.  Restarts it when dirty-row fraction drops below the threshold."
+>= `kuro--tui-mode-threshold' consecutive frames, enters TUI mode:
+stops the streaming idle timer and switches the render timer to
+`kuro-tui-frame-rate'.  When dirty-row fraction drops below the threshold,
+exits TUI mode and restores the normal `kuro-frame-rate' timer."
   (when (and kuro-streaming-latency-mode (> kuro--last-rows 0))
-    (let* ((dirty-count (if updates (length updates) 0))
-           (full-dirty-p (kuro--detect-tui-mode dirty-count kuro--last-rows kuro--tui-dirty-threshold)))
+    (let ((full-dirty-p (kuro--detect-tui-mode kuro--last-dirty-count kuro--last-rows kuro--tui-dirty-threshold)))
       (cond
        (full-dirty-p
         (setq kuro--tui-mode-frame-count (1+ kuro--tui-mode-frame-count))
-        (when (= kuro--tui-mode-frame-count kuro--tui-mode-threshold)
-          (kuro--stop-stream-idle-timer)))
+        (when (and (= kuro--tui-mode-frame-count kuro--tui-mode-threshold)
+                   (not kuro--tui-mode-active))
+          (kuro--stop-stream-idle-timer)
+          (kuro--switch-render-timer kuro-tui-frame-rate)
+          (setq kuro--tui-mode-active t)))
        ((>= kuro--tui-mode-frame-count kuro--tui-mode-threshold)
-        ;; Transition: leaving TUI mode — restart idle timer
         (setq kuro--tui-mode-frame-count 0)
-        (kuro--start-stream-idle-timer))
+        (when kuro--tui-mode-active
+          (kuro--switch-render-timer kuro-frame-rate)
+          (setq kuro--tui-mode-active nil)
+          (kuro--start-stream-idle-timer)))
        (t
         (setq kuro--tui-mode-frame-count 0))))))
 
@@ -423,9 +480,8 @@ Responsibilities:
   3. Move point to the current cursor position (`kuro--update-cursor').
   4. Evict stale entries from `kuro--col-to-buf-map' when the table grows
      beyond 2× the current row count (hysteresis prevents churn).
-  5. Detect full-screen TUI apps (≥80% dirty rows for
-     `kuro--tui-mode-threshold' consecutive frames) and suppress the
-     streaming idle timer while in TUI mode, restoring it when the app exits."
+  5. Store the dirty line count in `kuro--last-dirty-count' for TUI
+     detection (performed outside the frame coalescing guard)."
   ;; --- Scroll events + dirty line updates + cursor + title ---
   ;; ALL buffer/frame modifications are wrapped in a single `inhibit-redisplay'
   ;; block so Emacs performs exactly one display flush per frame.  This includes
@@ -466,45 +522,72 @@ Responsibilities:
     ;; Outside inhibit-redisplay: lightweight bookkeeping that doesn't
     ;; modify buffer content and doesn't need display suppression.
     (kuro--evict-stale-col-to-buf-entries updates)
-    (kuro--update-tui-streaming-timer updates)))
+    (setq kuro--last-dirty-count (if updates (length updates) 0))))
 
 ;;; Render cycle
+
+(defconst kuro--frame-budget-ratio 0.8
+  "Fraction of frame interval available for render work before yielding.
+When dirty-line updates consume more than this fraction of the frame
+interval, mode polling is deferred to the next frame.  This prevents
+high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
+loop.  Process-exit detection is always performed regardless of budget.")
 
 (defun kuro--render-cycle ()
   "Single render cycle: poll updates and update buffer.
 Frame coalescing: when multiple timer sources fire within the same frame
 period, only the first actually renders.  This prevents the streaming idle
-timer, input echo timer, and periodic 60fps timer from each producing a
-separate partial-screen update within 16ms, which causes visible flickering
-on complex TUI apps like Claude Code."
+timer, input echo timer, and periodic 120fps timer from each producing a
+separate partial-screen update within 8ms, which causes visible flickering
+on complex TUI apps like Claude Code.
+
+Frame budget: dirty-line updates run first.  If they consume more than
+`kuro--frame-budget-ratio' of the frame interval, mode polling is
+deferred to keep the Emacs event loop responsive."
+  ;; Resize must run unconditionally — never gated by frame coalescing —
+  ;; so the PTY dimensions stay in sync even when renders are skipped.
+  (kuro--handle-pending-resize)
   ;; Frame coalescing: skip if we rendered within half a frame period.
-  ;; At 60fps, half-frame = 8.3ms — enough to coalesce the input echo
+  ;; At 120fps, half-frame = 4.2ms — enough to coalesce the input echo
   ;; timer (10ms) and streaming idle timer into the next periodic tick.
   (let ((now (float-time)))
-    (when (>= (- now kuro--last-render-time) (/ 0.5 kuro-frame-rate))
+    (when (>= (- now kuro--last-render-time) (/ 0.5 (if kuro--tui-mode-active kuro-tui-frame-rate kuro-frame-rate)))
       (setq kuro--last-render-time now)
-      (kuro--handle-pending-resize)
-      ;; Advance the frame counter before polling so that cadence checks inside
-      ;; `kuro--poll-terminal-modes' see the incremented value.
-      (setq kuro--mode-poll-frame-count (1+ kuro--mode-poll-frame-count))
-      (kuro--poll-terminal-modes)
-      ;; Guard: kuro-kill may have been called from within kuro--poll-terminal-modes
-      ;; (process-exit path).  If the buffer was killed, abort the render cycle so
-      ;; the bell, dirty-update, and blink-overlay operations do not run against
-      ;; whatever buffer Emacs switched to after kill-buffer.
       (when (buffer-live-p (current-buffer))
         ;; --- Bell ---
         (when (kuro--call nil (kuro-core-take-bell-pending kuro--session-id))
           (ding))
         ;; --- Dirty updates (buffer modifications + cursor) ---
+        ;; Run BEFORE mode polling: this is the heaviest work and must
+        ;; complete to keep the display up-to-date.
         (kuro--apply-dirty-updates)
+        ;; --- Frame budget gate ---
+        ;; Mode polling (DECCKM, mouse, clipboard, CWD, process-exit)
+        ;; is deferred when the dirty-update phase already consumed
+        ;; most of the frame interval.  This keeps the Emacs event
+        ;; loop responsive during high-throughput output (cmatrix).
+        (let ((elapsed (- (float-time) now))
+              (budget (/ kuro--frame-budget-ratio kuro-frame-rate)))
+          (if (< elapsed budget)
+              (progn
+                (setq kuro--mode-poll-frame-count (1+ kuro--mode-poll-frame-count))
+                (kuro--poll-terminal-modes))
+            ;; Over budget: still check process exit so the buffer
+            ;; is cleaned up promptly when the child exits.
+            (when (and kuro-kill-buffer-on-exit
+                       (not (kuro--is-process-alive)))
+              (kuro-kill))))
         ;; --- Blink overlays ---
         ;; Tick AFTER dirty updates so that newly created blink overlays from
         ;; `kuro--update-line-full' and pre-existing overlays on non-dirty rows
         ;; see the same blink phase.  Previously this ran before dirty updates,
         ;; causing a one-frame phase mismatch between dirty and non-dirty rows.
         (when kuro--blink-overlays
-          (kuro--tick-blink-overlays))))))
+          (kuro--tick-blink-overlays)))))
+  ;; TUI mode detection runs OUTSIDE the frame coalescing guard so it
+  ;; fires on every timer invocation.  This fixes the bug where coalesced
+  ;; frames prevented kuro--tui-mode-frame-count from accumulating.
+  (kuro--update-tui-streaming-timer))
 
 (provide 'kuro-renderer)
 

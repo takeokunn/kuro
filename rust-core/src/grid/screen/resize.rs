@@ -84,5 +84,10 @@ impl Screen {
             alt.cursor.col = alt.cursor.col.min(new_cols.saturating_sub(1) as usize);
             alt.scroll_region = ScrollRegion::full_screen(new_rows as usize);
         }
+
+        // Mark every line dirty so the next render cycle redraws the entire
+        // screen with the new geometry.  Without this, resize leaves dirty
+        // flags empty and Emacs never receives updated line content.
+        self.mark_all_dirty();
     }
 }

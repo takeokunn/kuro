@@ -49,7 +49,22 @@ fn kuro_core_poll_updates(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> 
     }
 }
 
-/// Poll for terminal updates and return dirty lines with face information
+/// Poll for terminal updates and return dirty lines with face information.
+///
+/// # 1-frame latency between reading and rendering
+///
+/// This function calls `poll_output()` followed by
+/// `get_dirty_lines_with_faces()` in a single lock acquisition:
+///
+/// - **`poll_output()`** reads new bytes from the PTY channel and feeds them
+///   into the parser/grid, which may mark additional lines as dirty.
+/// - **`get_dirty_lines_with_faces()`** returns (and clears) the lines that
+///   were marked dirty by *previous* `poll_output()` calls.
+///
+/// Consequently, bytes read in *this* call will not appear in the returned
+/// dirty set — they will surface as dirty lines in the *next* render cycle.
+/// This is correct behaviour: the worst-case additional latency is bounded
+/// to `1 / frame_rate` (typically ≤ 16 ms at 60 fps), which is imperceptible.
 #[defun]
 #[expect(
     clippy::cast_possible_wrap,

@@ -366,6 +366,31 @@ without an extra font-metric recomputation pass."
       (let ((prop (get-text-property 1 'face)))
         (should prop)))))
 
+;;; Group 10: Character width table and font detection
+
+(ert-deftest kuro-test-char-width-table-emoji ()
+  "After setup, fire emoji (U+1F525) has char-width 2."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    (should (= (char-width ?\U0001F525) 2))))
+
+(ert-deftest kuro-test-char-width-table-cjk ()
+  "After setup, CJK ideograph U+65E5 has char-width 2."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    (should (= (char-width ?\u65E5) 2))))
+
+(ert-deftest kuro-test-char-width-table-pua ()
+  "After setup, PUA codepoint U+E0B0 (Nerd Font) has char-width 1."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    (should (= (char-width ?\xE0B0) 1))))
+
+(ert-deftest kuro-test-detect-nerd-font-nil ()
+  "kuro--detect-nerd-font returns nil or a string without error."
+  (let ((result (kuro--detect-nerd-font)))
+    (should (or (null result) (stringp result)))))
+
 (provide 'kuro-faces-test)
 
 ;;; kuro-faces-test.el ends here

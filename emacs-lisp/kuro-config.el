@@ -72,6 +72,17 @@
         (kuro--stop-render-loop)
         (kuro--start-render-loop)))))
 
+(defun kuro--set-tui-frame-rate (symbol value)
+  "Set SYMBOL to VALUE and switch render timer in active TUI-mode Kuro buffers."
+  (unless (and (integerp value) (> value 0))
+    (user-error "kuro: tui-frame-rate must be a positive integer, got: %s" value))
+  (set-default symbol value)
+  (when (fboundp 'kuro--switch-render-timer)
+    (dolist (buf (kuro--kuro-buffers))
+      (with-current-buffer buf
+        (when (bound-and-true-p kuro--tui-mode-active)
+          (kuro--switch-render-timer value))))))
+
 (defun kuro--set-font (symbol value)
   "Set SYMBOL to VALUE and apply font remap to all active Kuro buffers."
   (set-default symbol value)
@@ -153,22 +164,34 @@ Changes take effect immediately in all running Kuro buffers."
 
 ;;; Display Settings
 
-(defcustom kuro-frame-rate 60
+(defcustom kuro-frame-rate 120
   "Frame rate for terminal rendering in frames per second.
 Must be a positive integer (greater than zero).
 Changes take effect immediately by restarting the render loop.
-60 fps (≈16 ms between frames) matches modern terminal emulators such as kitty
-and wezterm.  The idle-timer mechanism in kuro--self-insert also triggers an
+120 fps (≈8 ms between frames) provides smooth, low-latency rendering.
+The idle-timer mechanism in kuro--self-insert also triggers an
 immediate render after each keypress, so input echo is not limited by this rate."
   :type '(integer :tag "Positive integer (> 0)")
   :group 'kuro-display
   :set #'kuro--set-frame-rate)
 
+(defcustom kuro-tui-frame-rate 5
+  "Frame rate used when a full-screen TUI app is detected.
+When the renderer detects that a TUI application (cmatrix, htop, vim, etc.)
+is running — identified by >= `kuro--tui-dirty-threshold' of terminal rows
+being dirty for several consecutive frames — it switches the render timer
+to this lower rate.  This reduces CPU usage significantly during sustained
+full-screen redraws.  The normal `kuro-frame-rate' is restored immediately
+when the TUI app exits."
+  :type '(integer :tag "Positive integer (> 0)")
+  :group 'kuro-display
+  :set #'kuro--set-tui-frame-rate)
+
 (defcustom kuro-streaming-latency-mode t
   "When non-nil, enable low-latency mode for AI agent streaming output.
 In this mode, a zero-delay idle timer fires an immediate render cycle
 whenever the PTY has pending data, giving token-by-token responsiveness
-without waiting for the next 60fps frame tick."
+without waiting for the next 120fps frame tick."
   :type 'boolean
   :group 'kuro)
 
@@ -198,7 +221,7 @@ The PTY reader thread needs a short window to receive the shell's echo and
 deposit it in the crossbeam channel before the Emacs side polls.  A 0 s
 delay is too aggressive on most systems: the idle timer fires before the
 reader thread wakes from its blocking read call, resulting in an empty poll
-and no cursor movement until the next 60 fps periodic tick (~16 ms later).
+and no cursor movement until the next 120 fps periodic tick (~8 ms later).
 
 10 ms (0.01 s) comfortably covers the PTY kernel round-trip on both macOS
 and Linux without adding perceptible latency to keystroke echo."
@@ -248,6 +271,10 @@ An empty list indicates that all settings are valid."
     (unless (and (integerp kuro-frame-rate) (> kuro-frame-rate 0))
       (push (format "kuro-frame-rate: must be a positive integer, got: %s"
                     kuro-frame-rate)
+            errors))
+    (unless (and (integerp kuro-tui-frame-rate) (> kuro-tui-frame-rate 0))
+      (push (format "kuro-tui-frame-rate: must be a positive integer, got: %s"
+                    kuro-tui-frame-rate)
             errors))
     (when kuro-font-size
       (unless (and (integerp kuro-font-size) (> kuro-font-size 0))

@@ -13,7 +13,7 @@
 ;; # Features
 ;;
 ;; 1. **Low-latency PTY notification**: A fast idle timer fires immediately
-;;    when PTY data arrives, bypassing the normal 60fps polling interval.
+;;    when PTY data arrives, bypassing the normal 120fps polling interval.
 ;;    This makes streaming text appear token-by-token without batching delay.
 ;;
 ;; 2. **Adaptive frame rate**: When PTY output is flowing (AI streaming),

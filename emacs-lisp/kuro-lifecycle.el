@@ -34,6 +34,9 @@
 (declare-function kuro--start-render-loop "kuro-renderer" ())
 (declare-function kuro--stop-render-loop  "kuro-renderer" ())
 
+;; Forward-declare initial color setup defined in kuro-faces.el
+(declare-function kuro--apply-initial-default-colors "kuro-faces" ())
+
 ;; kuro--ensure-module-loaded is defined in kuro-module.el
 (declare-function kuro--ensure-module-loaded "kuro-module" ())
 
@@ -58,6 +61,10 @@
 ;; kuro--apply-font-to-buffer is defined in kuro-faces.el
 (declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
 
+;; kuro--setup-char-width-table and kuro--setup-fontset are defined in kuro-faces.el
+(declare-function kuro--setup-char-width-table "kuro-faces" ())
+(declare-function kuro--setup-fontset "kuro-faces" ())
+
 ;; kuro--clear-all-image-overlays is defined in kuro-overlays.el
 (declare-function kuro--clear-all-image-overlays "kuro-overlays" ())
 
@@ -81,6 +88,13 @@
 ;; kuro-overlays.el
 (defvar kuro--blink-overlays nil
   "Forward reference; defvar-local in kuro-overlays.el.")
+;; kuro-renderer.el (TUI mode state)
+(defvar kuro--tui-mode-active nil
+  "Forward reference; defvar-local in kuro-renderer.el.")
+(defvar kuro--tui-mode-frame-count 0
+  "Forward reference; defvar-local in kuro-renderer.el.")
+(defvar kuro--last-dirty-count 0
+  "Forward reference; defvar-local in kuro-renderer.el.")
 ;; kuro-render-buffer.el
 (defvar kuro--last-cursor-row nil
   "Forward reference; defvar-local in kuro-render-buffer.el.")
@@ -137,6 +151,9 @@ Switches to the terminal buffer after creation."
           (kuro--set-scrollback-max-lines kuro-scrollback-size)
           (setq kuro--scroll-offset 0)
           (kuro--apply-font-to-buffer buffer)
+          (kuro--setup-char-width-table)
+          (kuro--setup-fontset)
+          (kuro--apply-initial-default-colors)
           ;; Reset cursor cache so the first render frame always computes
           ;; cursor position instead of hitting the unchanged-state fast path.
           (setq kuro--last-cursor-row nil
@@ -145,7 +162,7 @@ Switches to the terminal buffer after creation."
                 kuro--last-cursor-shape nil)
           (kuro--start-render-loop)
           ;; Schedule an immediate render so the shell prompt appears at once
-          ;; instead of waiting for the first periodic timer tick (~16ms at 60fps).
+          ;; instead of waiting for the first periodic timer tick (~8ms at 120fps).
           ;; This is what makes kuro feel as instant as kitty on startup.
           (run-with-idle-timer kuro--startup-render-delay nil
                                (lambda (buf)
@@ -190,6 +207,10 @@ Detached sessions can be re-attached with `kuro-attach'."
   (interactive)
   (when (derived-mode-p 'kuro-mode)
     (kuro--stop-render-loop)
+    ;; Reset TUI mode state
+    (setq kuro--tui-mode-active nil)
+    (setq kuro--tui-mode-frame-count 0)
+    (setq kuro--last-dirty-count 0)
     ;; Clean up blink overlays
     (remove-overlays (point-min) (point-max) 'kuro-blink t)
     (setq kuro--blink-overlays nil)
@@ -287,6 +308,9 @@ detached state (see `kuro-list-sessions' and `kuro-kill')."
             (setq kuro--scroll-offset 0)
             (kuro--set-scrollback-max-lines kuro-scrollback-size)
             (kuro--apply-font-to-buffer buffer)
+            (kuro--setup-char-width-table)
+            (kuro--setup-fontset)
+            (kuro--apply-initial-default-colors)
             ;; Reset cursor cache so the first render frame always computes
             ;; cursor position instead of hitting the unchanged-state fast path.
             (setq kuro--last-cursor-row nil

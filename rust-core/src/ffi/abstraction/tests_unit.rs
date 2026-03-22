@@ -18,6 +18,8 @@ pub(super) fn make_session() -> TerminalSession {
         pty: None,
         command: String::new(),
         state: SessionState::Bound,
+        #[cfg(unix)]
+        pending_input: Vec::new(),
     }
 }
 

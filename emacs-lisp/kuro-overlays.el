@@ -133,7 +133,9 @@ Called once per render cycle from `kuro--render-cycle'."
   (setq kuro--image-overlays nil))
 
 (defun kuro--clear-row-image-overlays (row)
-  "Remove image overlays that start on ROW."
+  "Remove image overlays that overlap ROW.
+An overlay overlaps when it starts before row end
+and ends after row start."
   (save-excursion
     (goto-char (point-min))
     (forward-line row)
@@ -142,8 +144,8 @@ Called once per render cycle from `kuro--render-cycle'."
           (remaining nil))
       (dolist (ov kuro--image-overlays)
         (if (and (overlay-buffer ov)
-                 (>= (overlay-start ov) line-start)
-                 (< (overlay-start ov) line-end))
+                 (< (overlay-start ov) line-end)
+                 (> (overlay-end ov) line-start))
             (delete-overlay ov)
           (push ov remaining)))
       (setq kuro--image-overlays (nreverse remaining)))))

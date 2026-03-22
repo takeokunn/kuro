@@ -60,12 +60,15 @@
            (kuro--last-rows 24)
            (kuro--last-cols 80)
            (kuro--tui-mode-frame-count 0)
+           (kuro--tui-mode-active nil)
+           (kuro--last-dirty-count 0)
            (kuro--col-to-buf-map (make-hash-table :test 'eql))
            (kuro-streaming-latency-mode t)
            kuro--stream-idle-timer
            kuro--cursor-marker
            kuro--blink-overlays
-           kuro--image-overlays)
+           kuro--image-overlays
+           kuro--timer)
        ,@body)))
 
 ;;; Group 1: kuro--sanitize-title
@@ -374,98 +377,108 @@ kuro--detect-tui-mode with total-rows=0 in the real render loop."
 (ert-deftest kuro-renderer-update-tui-increments-frame-count-when-full-dirty ()
   "kuro--update-tui-streaming-timer increments kuro--tui-mode-frame-count on full-dirty frames."
   (kuro-renderer-helpers-test--with-buffer
-    ;; 24 rows; dirty-threshold = 0.8 → ceiling(0.8*24) = 20.
-    ;; Pass 20 updates (>= threshold) to trigger full-dirty detection.
     (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 0)
-    (let ((updates (make-list 20 '(((0 . "") . nil) . nil))))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil)))
-        (kuro--update-tui-streaming-timer updates)
-        (should (= kuro--tui-mode-frame-count 1))))))
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 1)))))
 
 (ert-deftest kuro-renderer-update-tui-resets-count-when-below-threshold ()
   "kuro--update-tui-streaming-timer resets frame count when dirty-row fraction is below threshold."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 3)
-    ;; 5 dirty rows out of 24 is well below 80%
-    (let ((updates (make-list 5 '(((0 . "") . nil) . nil))))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil)))
-        (kuro--update-tui-streaming-timer updates)
-        (should (= kuro--tui-mode-frame-count 0))))))
+          kuro--tui-mode-frame-count 3
+          kuro--last-dirty-count 5)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 0)))))
 
 (ert-deftest kuro-renderer-update-tui-stops-idle-timer-at-threshold ()
   "kuro--update-tui-streaming-timer calls kuro--stop-stream-idle-timer when threshold is reached."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 24
-          ;; One frame away from threshold (threshold = 10)
-          kuro--tui-mode-frame-count (1- kuro--tui-mode-threshold))
-    (let ((stop-called nil))
-      (let ((updates (make-list 20 '(((0 . "") . nil) . nil))))
-        (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
-                   (lambda () (setq stop-called t)))
-                  ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil)))
-          (kuro--update-tui-streaming-timer updates)
-          (should stop-called)
-          (should (= kuro--tui-mode-frame-count kuro--tui-mode-threshold)))))))
+          kuro--tui-mode-frame-count (1- kuro--tui-mode-threshold)
+          kuro--last-dirty-count 20)
+    (let ((stop-called nil)
+          (switch-rate nil))
+      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
+                 (lambda () (setq stop-called t)))
+                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+                ((symbol-function 'kuro--switch-render-timer)
+                 (lambda (rate) (setq switch-rate rate))))
+        (kuro--update-tui-streaming-timer)
+        (should stop-called)
+        (should (= kuro--tui-mode-frame-count kuro--tui-mode-threshold))
+        (should kuro--tui-mode-active)
+        (should (= switch-rate kuro-tui-frame-rate))))))
 
 (ert-deftest kuro-renderer-update-tui-restarts-idle-timer-on-tui-exit ()
   "kuro--update-tui-streaming-timer calls kuro--start-stream-idle-timer when leaving TUI mode."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 24
-          ;; Already in TUI mode (frame count >= threshold)
-          kuro--tui-mode-frame-count kuro--tui-mode-threshold)
-    (let ((start-called nil))
-      ;; Only 5 dirty rows — below threshold, transitions out of TUI mode
-      (let ((updates (make-list 5 '(((0 . "") . nil) . nil))))
-        (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-                  ((symbol-function 'kuro--start-stream-idle-timer)
-                   (lambda () (setq start-called t))))
-          (kuro--update-tui-streaming-timer updates)
-          (should start-called)
-          (should (= kuro--tui-mode-frame-count 0)))))))
+          kuro--tui-mode-frame-count kuro--tui-mode-threshold
+          kuro--tui-mode-active t
+          kuro--last-dirty-count 5)
+    (let ((start-called nil)
+          (switch-rate nil))
+      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+                ((symbol-function 'kuro--start-stream-idle-timer)
+                 (lambda () (setq start-called t)))
+                ((symbol-function 'kuro--switch-render-timer)
+                 (lambda (rate) (setq switch-rate rate))))
+        (kuro--update-tui-streaming-timer)
+        (should start-called)
+        (should (= kuro--tui-mode-frame-count 0))
+        (should-not kuro--tui-mode-active)
+        (should (= switch-rate kuro-frame-rate))))))
 
 (ert-deftest kuro-renderer-update-tui-noop-when-streaming-mode-disabled ()
   "kuro--update-tui-streaming-timer is a no-op when kuro-streaming-latency-mode is nil."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro-streaming-latency-mode nil
           kuro--last-rows 24
-          kuro--tui-mode-frame-count 0)
-    (let ((updates (make-list 20 '(((0 . "") . nil) . nil))))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
-                 (lambda () (error "should not be called")))
-                ((symbol-function 'kuro--start-stream-idle-timer)
-                 (lambda () (error "should not be called"))))
-        ;; Should not error and frame count should remain 0
-        (should-not (condition-case err
-                        (progn (kuro--update-tui-streaming-timer updates) nil)
-                      (error err)))
-        (should (= kuro--tui-mode-frame-count 0))))))
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
+               (lambda () (error "should not be called")))
+              ((symbol-function 'kuro--start-stream-idle-timer)
+               (lambda () (error "should not be called")))
+              ((symbol-function 'kuro--switch-render-timer)
+               (lambda (_rate) (error "should not be called"))))
+      (should-not (condition-case err
+                      (progn (kuro--update-tui-streaming-timer) nil)
+                    (error err)))
+      (should (= kuro--tui-mode-frame-count 0)))))
 
 (ert-deftest kuro-renderer-update-tui-noop-when-last-rows-zero ()
   "kuro--update-tui-streaming-timer is a no-op when kuro--last-rows is 0."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 0
-          kuro--tui-mode-frame-count 0)
-    (let ((updates (make-list 20 '(((0 . "") . nil) . nil))))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil)))
-        (kuro--update-tui-streaming-timer updates)
-        (should (= kuro--tui-mode-frame-count 0))))))
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 0)))))
 
-(ert-deftest kuro-renderer-update-tui-noop-on-nil-updates ()
-  "kuro--update-tui-streaming-timer handles nil updates (no dirty rows) without error."
+(ert-deftest kuro-renderer-update-tui-noop-on-zero-dirty ()
+  "kuro--update-tui-streaming-timer handles zero dirty rows without error."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 0)
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 0)
     (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil)))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
       (should-not (condition-case err
-                      (progn (kuro--update-tui-streaming-timer nil) nil)
+                      (progn (kuro--update-tui-streaming-timer) nil)
                     (error err)))
-      ;; 0 dirty rows < threshold; count stays 0
       (should (= kuro--tui-mode-frame-count 0)))))
 
 ;;; Group 10: kuro--handle-clipboard-actions
@@ -547,6 +560,70 @@ kuro--detect-tui-mode with total-rows=0 in the real render loop."
         (should (= (length killed-texts) 2))
         (should (member "first" killed-texts))
         (should (member "second" killed-texts))))))
+
+;;; Group 10: Blink overlay clearing during line update
+
+(ert-deftest test-kuro-update-line-full-clears-blink-overlays-on-row ()
+  "Updating a line removes blink overlays on that row."
+  (with-temp-buffer
+    (insert "old text\n")
+    (insert "other row\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 0
+      (let ((ov (make-overlay 1 5)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'slow)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should clear blink overlay on that row
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (null kuro--blink-overlays)))))
+
+(ert-deftest test-kuro-update-line-full-preserves-blink-overlays-other-row ()
+  "Updating a line preserves blink overlays on other rows."
+  (with-temp-buffer
+    (insert "row zero\n")
+    (insert "row one\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 1
+      (let ((ov (make-overlay 10 15)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'fast)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should NOT clear blink overlay on row 1
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (= 1 (length kuro--blink-overlays))))))
+
+;;; Group 11: col-to-buf nil handling
+
+(ert-deftest test-kuro-update-line-full-nil-col-to-buf-removes-stale ()
+  "Nil col-to-buf removes stale mapping from hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Pre-populate stale CJK mapping for row 0
+      (puthash 0 [0 0 1 1 2 2] kuro--col-to-buf-map)
+      ;; Update with nil col-to-buf (pure ASCII line)
+      (kuro--update-line-full 0 "ascii" nil nil)
+      ;; Stale mapping should be removed
+      (should (null (gethash 0 kuro--col-to-buf-map))))))
+
+(ert-deftest test-kuro-update-line-full-vector-col-to-buf-stores ()
+  "Vector col-to-buf is stored in hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Update with a vector col-to-buf
+      (kuro--update-line-full 0 "日本" nil [0 0 1 1])
+      ;; Mapping should be stored
+      (should (equal (gethash 0 kuro--col-to-buf-map) [0 0 1 1])))))
 
 (provide 'kuro-renderer-test)
 

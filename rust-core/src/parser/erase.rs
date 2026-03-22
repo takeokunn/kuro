@@ -58,9 +58,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                 };
                 let mut blank = Cell::default();
                 blank.attrs.background = bg;
-                for c in erase_start..line.cells.len() {
-                    line.cells[c] = blank.clone();
-                }
+                line.cells[erase_start..].fill(blank);
             }
             term.screen.mark_line_dirty(row);
 
@@ -93,9 +91,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
                     };
                 let mut blank = Cell::default();
                 blank.attrs.background = bg;
-                for c in 0..erase_end {
-                    line.cells[c] = blank.clone();
-                }
+                line.cells[..erase_end].fill(blank);
             }
             term.screen.mark_line_dirty(row);
         }
@@ -154,9 +150,7 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
                 };
                 let mut blank = Cell::default();
                 blank.attrs.background = bg;
-                for c in erase_start..line.cells.len() {
-                    line.cells[c] = blank.clone();
-                }
+                line.cells[erase_start..].fill(blank);
             }
             1 => {
                 // Erase from start of line to cursor (including cursor)
@@ -169,9 +163,7 @@ fn csi_el(term: &mut crate::TerminalCore, params: &vte::Params) {
                     };
                 let mut blank = Cell::default();
                 blank.attrs.background = bg;
-                for c in 0..erase_end {
-                    line.cells[c] = blank.clone();
-                }
+                line.cells[..erase_end].fill(blank);
             }
             2 => {
                 // Erase entire line

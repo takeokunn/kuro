@@ -86,7 +86,7 @@ Sets the following buffer-local variables:
 
 (ert-deftest kuro-overlays-tick-blink-slow-toggles-at-interval ()
   "Slow blink state toggles when frame count reaches multiple of slow-frames.
-At the default 60 fps, `kuro--blink-slow-frames' returns 30."
+At the default 120 fps, `kuro--blink-slow-frames' returns 60."
   (kuro-overlays-test--with-buffer
     (let ((slow (kuro--blink-slow-frames)))
       (setq kuro--blink-frame-count (1- slow)
@@ -97,7 +97,7 @@ At the default 60 fps, `kuro--blink-slow-frames' returns 30."
 
 (ert-deftest kuro-overlays-tick-blink-fast-toggles-at-interval ()
   "Fast blink state toggles when frame count reaches multiple of fast-frames.
-At the default 60 fps, `kuro--blink-fast-frames' returns 10."
+At the default 120 fps, `kuro--blink-fast-frames' returns 20."
   (kuro-overlays-test--with-buffer
     (let ((fast (kuro--blink-fast-frames)))
       (setq kuro--blink-frame-count (1- fast)
@@ -325,6 +325,38 @@ must be called to update the cached values."
              (kuro--render-image-notification '(42 0 0 2 1))
              nil)
          (error err))))))
+
+;;; Group 8: Multi-row image overlay clearing
+
+(ert-deftest test-kuro-overlays-clear-row-image-overlays-multi-row-overlap ()
+  "Clearing a row removes overlays that span across it (not just start on it)."
+  (with-temp-buffer
+    (dotimes (_ 5) (insert "test line\n"))
+    (let* ((kuro--image-overlays nil)
+           ;; Create an overlay that spans rows 1-3 (starts at row 1, ends at row 3)
+           (start (save-excursion (goto-char (point-min)) (forward-line 1) (point)))
+           (end (save-excursion (goto-char (point-min)) (forward-line 3) (+ (point) 5))))
+      (let ((ov (make-overlay start end)))
+        (overlay-put ov 'kuro-image t)
+        (push ov kuro--image-overlays))
+      ;; Clearing row 2 should remove the multi-row overlay (it overlaps row 2)
+      (kuro--clear-row-image-overlays 2)
+      (should (null kuro--image-overlays)))))
+
+(ert-deftest test-kuro-overlays-clear-row-image-overlays-multi-row-no-overlap ()
+  "Clearing a row preserves overlays that do not overlap it."
+  (with-temp-buffer
+    (dotimes (_ 5) (insert "test line\n"))
+    (let* ((kuro--image-overlays nil)
+           ;; Create an overlay that spans rows 1-2
+           (start (save-excursion (goto-char (point-min)) (forward-line 1) (point)))
+           (end (save-excursion (goto-char (point-min)) (forward-line 2) (+ (point) 5))))
+      (let ((ov (make-overlay start end)))
+        (overlay-put ov 'kuro-image t)
+        (push ov kuro--image-overlays))
+      ;; Clearing row 4 should NOT remove the overlay (no overlap)
+      (kuro--clear-row-image-overlays 4)
+      (should (= 1 (length kuro--image-overlays))))))
 
 (provide 'kuro-overlays-test)
 

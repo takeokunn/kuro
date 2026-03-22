@@ -225,46 +225,93 @@ lacks a glyph for a given codepoint Emacs falls back to the original
 Each probe character is a representative glyph from the corresponding
 `kuro--char-width-overrides' range.")
 
+(defconst kuro--glyph-extra-probes
+  '(#x23FA    ; ⏺ — record symbol (Claude Code status indicator)
+    #x25CF    ; ● — black circle (common TUI bullet)
+    #x2714    ; ✔ — check mark
+    #x276F)   ; ❯ — heavy right-pointing angle quotation mark ornament
+  "Individual codepoints to probe for glyph metric correction.
+The per-range probing in `kuro--glyph-probe-chars' uses one representative
+character per Unicode range, but different characters within the same range
+may use different fallback fonts with mismatched metrics.  This list targets
+specific high-frequency characters known to cause visual shaking (line-height
+fluctuation) or horizontal misalignment in TUI applications.")
+
+(defun kuro--rescale-font-for-glyph (probe-char range cell-width cell-height)
+  "Probe PROBE-CHAR and rescale its font if metrics don't match cell dimensions.
+RANGE is the fontset range to apply the rescaled font to — either a cons
+cell (START . END) for a Unicode range, or a single character for per-char
+correction.  CELL-WIDTH and CELL-HEIGHT are the expected pixel dimensions.
+Returns non-nil if a rescaling was applied."
+  (condition-case nil
+      (let* ((probe-str (string probe-char))
+             (font-obj (with-temp-buffer
+                         (insert probe-str)
+                         (font-at 0)))
+             (glyphs (and font-obj
+                          (font-get-glyphs font-obj 0 1 probe-str)))
+             (glyph (and glyphs (> (length glyphs) 0) (aref glyphs 0)))
+             (glyph-width (and glyph (aref glyph 4)))
+             (glyph-ascent (and glyph (> (length glyph) 7) (aref glyph 7)))
+             (glyph-descent (and glyph (> (length glyph) 8) (aref glyph 8)))
+             (glyph-height (and glyph-ascent glyph-descent
+                                (+ (abs glyph-ascent) (abs glyph-descent)))))
+        (when (and glyph-width (> glyph-width 0))
+          (let* ((width-ratio (/ (float glyph-width) cell-width))
+                 (height-ratio (if (and glyph-height (> glyph-height 0)
+                                        (> glyph-height cell-height))
+                                   (/ (float glyph-height) cell-height)
+                                 1.0))
+                 (max-ratio (max width-ratio height-ratio)))
+            (when (> max-ratio 1.05)
+              (let* ((fname (font-get font-obj :family))
+                     (fsize (font-get font-obj :size))
+                     (new-size (* fsize (/ 1.0 max-ratio)))
+                     (rescaled (font-spec
+                                :family (if (symbolp fname)
+                                            (symbol-name fname)
+                                          fname)
+                                :size new-size)))
+                (set-fontset-font nil range rescaled nil 'prepend)
+                (set-fontset-font t   range rescaled nil 'prepend)
+                t)))))
+    (error nil)))
+
 (defun kuro--refine-glyph-widths ()
-  "Probe actual rendered glyph widths and rescale fonts that are too wide.
+  "Probe actual rendered glyph widths and heights, rescale mismatched fonts.
 Called from a short timer after the kuro buffer is displayed in a window,
 so `font-at' can determine which font Emacs actually chose for each range.
 
-If `kuro--assign-mono-fonts' already assigned a font that renders at the
-correct cell width, this function is a no-op for that range.  Otherwise it
-rescales the active font so each glyph is exactly `frame-char-width' pixels."
+Two passes:
+  1. Per-range: probe one representative character per
+     `kuro--char-width-overrides' range (from `kuro--glyph-probe-chars').
+     Rescales the range-level font.
+  2. Per-character: probe individual high-frequency characters from
+     `kuro--glyph-extra-probes' that may use a different fallback font
+     than the range-level probe.  Applies a per-codepoint override.
+
+Both passes check width AND height: a fallback font matching cell width
+may still have taller ascent+descent, causing line-height fluctuation
+\(visible as vertical buffer shaking when the character blinks)."
   (when (display-graphic-p)
     (let* ((cell-width (frame-char-width))
+           (cell-height (frame-char-height))
            (did-change nil))
-      (when (and cell-width (> cell-width 0))
+      (when (and cell-width (> cell-width 0) cell-height (> cell-height 0))
+        ;; Pass 1: per-range probing (existing behavior, now with height check)
         (dolist (entry kuro--char-width-overrides)
           (let* ((range-start (car entry))
                  (probe-assoc (assq range-start kuro--glyph-probe-chars))
                  (probe-char (and probe-assoc (cdr probe-assoc))))
-            (when probe-char
-              (condition-case nil
-                  (let* ((probe-str (string probe-char))
-                         (font-obj (with-temp-buffer
-                                     (insert probe-str)
-                                     (font-at 0)))
-                         (glyphs (and font-obj
-                                      (font-get-glyphs font-obj 0 1 probe-str)))
-                         (glyph-width (and glyphs (> (length glyphs) 0)
-                                           (aref (aref glyphs 0) 4))))
-                    (when (and glyph-width (> glyph-width 0)
-                               (/= glyph-width cell-width))
-                      (let* ((fname (font-get font-obj :family))
-                             (fsize (font-get font-obj :size))
-                             (new-size (* fsize (/ (float cell-width) glyph-width)))
-                             (rescaled (font-spec
-                                        :family (if (symbolp fname)
-                                                    (symbol-name fname)
-                                                  fname)
-                                        :size new-size)))
-                        (set-fontset-font nil entry rescaled)
-                        (set-fontset-font t   entry rescaled)
-                        (setq did-change t))))
-                (error nil)))))
+            (when (and probe-char
+                       (kuro--rescale-font-for-glyph
+                        probe-char entry cell-width cell-height))
+              (setq did-change t))))
+        ;; Pass 2: per-character probing for known-problematic glyphs
+        (dolist (char kuro--glyph-extra-probes)
+          (when (kuro--rescale-font-for-glyph
+                 char (cons char char) cell-width cell-height)
+            (setq did-change t)))
         (when did-change
           (redraw-display))))))
 

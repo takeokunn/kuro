@@ -69,7 +69,7 @@ events that were not caught by the explicit Ctrl+letter bindings."
     (when (characterp char)
       (kuro--send-char char)
       ;; Schedule an immediate render so the echoed character appears without
-      ;; waiting for the next 30/60 fps timer tick.  This is the key mechanism
+      ;; waiting for the next periodic fps timer tick.  This is the key mechanism
       ;; that makes SPC and all other printable keys feel instant — the idle
       ;; timer fires as soon as the current command finishes, giving the PTY
       ;; just enough time to echo the character back.

@@ -143,20 +143,12 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
         return (String::new(), Vec::new(), Vec::new());
     }
 
-    // ASCII fast path: if no wide-placeholder cells exist, col_to_buf[i] == i
-    // identically, so skip building the vector entirely.  A CellWidth::Wide
-    // entry signals that the line contains at least one CJK/emoji character.
-    let has_wide = cells.iter().any(|c| c.width == CellWidth::Wide);
-
     let mut text = String::with_capacity(cells.len());
     // face_ranges use buf_offset (not col) for start/end
     let mut face_ranges: Vec<(usize, usize, u32, u32, u64)> = Vec::with_capacity(8);
-    // col_to_buf[col] = buffer char offset; only built when has_wide is true.
-    let mut col_to_buf: Vec<usize> = if has_wide {
-        Vec::with_capacity(cells.len())
-    } else {
-        Vec::new()
-    };
+    // col_to_buf[col] = buffer char offset; lazily built on the first Wide cell.
+    // Stays empty for pure-ASCII lines (identity mapping implied on Emacs side).
+    let mut col_to_buf: Vec<usize> = Vec::new();
     let mut buf_offset = 0usize;
     let mut current_start_buf = 0usize;
     // Sentinel values that cannot match any valid encoded color/flags.
@@ -166,25 +158,33 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     let mut current_fg = u32::MAX;
     let mut current_bg = u32::MAX;
     let mut current_flags = u64::MAX;
+    // Column counter for lazy col_to_buf backfill.
+    let mut col = 0usize;
 
     for cell in cells {
         // Any CellWidth::Wide cell is a placeholder for the second column of a wide
         // (CJK/emoji) character.  Skip it: the base character was already emitted and
         // advances the Emacs buffer by exactly one char position.
         if cell.width == CellWidth::Wide {
-            // Map this grid column to the same buf_offset as the wide char (one behind).
-            // Only needed when col_to_buf is being built (has_wide path).
-            if has_wide {
-                col_to_buf.push(buf_offset.saturating_sub(1));
+            // Lazily initialise col_to_buf on the first Wide cell encountered.
+            // Backfill identity mappings (0,1,2,…) for all columns already processed.
+            if col_to_buf.is_empty() {
+                col_to_buf.reserve(cells.len());
+                col_to_buf.extend(0..col);
             }
+            // Map this grid column to the same buf_offset as the wide char (one behind).
+            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
+            col_to_buf.push(buf_offset.saturating_sub(1));
+            col += 1;
             // Do NOT advance buf_offset or write to text.
             continue;
         }
 
-        // Record col → buf mapping for this cell (wide path only).
-        if has_wide {
+        // Record col → buf mapping for this cell (only when col_to_buf was activated).
+        if !col_to_buf.is_empty() {
             col_to_buf.push(buf_offset);
         }
+        col += 1;
 
         // Push the full grapheme cluster (covers combining chars too)
         text.push_str(cell.grapheme.as_str());

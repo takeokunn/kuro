@@ -22,6 +22,14 @@ pub enum SessionState {
     Detached,
 }
 
+/// Maximum bytes to parse per `poll_output()` call.
+///
+/// Limits how much PTY data is fed to the parser in a single render frame,
+/// preventing high-throughput TUI apps (cmatrix, btop) from starving the
+/// Emacs event loop.  Any excess data is held in `pending_input` and
+/// processed on the next frame.
+const MAX_BYTES_PER_POLL: usize = 128 * 1024;
+
 /// Terminal session state (shared by all FFI implementations)
 ///
 /// This struct contains the actual terminal logic, independent of any
@@ -36,6 +44,9 @@ pub struct TerminalSession {
     pub(super) command: String,
     /// Current lifecycle state
     pub(super) state: SessionState,
+    /// Buffered PTY data that exceeded `MAX_BYTES_PER_POLL` in the previous frame
+    #[cfg(unix)]
+    pub(super) pending_input: Vec<u8>,
 }
 
 // TerminalSession Facade
@@ -71,6 +82,7 @@ impl TerminalSession {
                 pty: Some(pty),
                 command: command.to_owned(),
                 state: SessionState::Bound,
+                pending_input: Vec::new(),
             })
         }
 
@@ -110,23 +122,54 @@ impl TerminalSession {
     pub fn poll_output(&mut self) -> Result<()> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
-            let data = pty.read()?;
-            if !data.is_empty() {
-                self.core.advance(&data);
+            // Drain pending_input from previous frame first
+            let mut budget = MAX_BYTES_PER_POLL;
+            if !self.pending_input.is_empty() {
+                let pending = std::mem::take(&mut self.pending_input);
+                if pending.len() <= budget {
+                    budget -= pending.len();
+                    self.core.advance(&pending);
+                } else {
+                    self.core.advance(&pending[..budget]);
+                    self.pending_input = pending[budget..].to_vec();
+                    budget = 0;
+                }
+            }
 
-                // Second drain: yield to let the reader thread push any
-                // in-flight data, then drain again.  This coalesces two
-                // chunks that would otherwise require two render cycles.
+            // Drain channel data up to the remaining budget
+            if budget > 0 {
+                let data = pty.read()?;
+                if !data.is_empty() {
+                    if data.len() <= budget {
+                        budget -= data.len();
+                        self.core.advance(&data);
+                    } else {
+                        self.core.advance(&data[..budget]);
+                        self.pending_input.extend_from_slice(&data[budget..]);
+                        budget = 0;
+                    }
+                }
+            }
+
+            // Second drain: yield to let the reader thread push any
+            // in-flight data, then drain again.  This coalesces two
+            // chunks that would otherwise require two render cycles.
+            if budget > 0 {
                 std::thread::yield_now();
                 let more = pty.read()?;
                 if !more.is_empty() {
-                    self.core.advance(&more);
+                    if more.len() <= budget {
+                        self.core.advance(&more);
+                    } else {
+                        self.core.advance(&more[..budget]);
+                        self.pending_input.extend_from_slice(&more[budget..]);
+                    }
                 }
+            }
 
-                // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
-                for response in self.core.meta.pending_responses.drain(..) {
-                    pty.write(&response)?;
-                }
+            // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
+            for response in self.core.meta.pending_responses.drain(..) {
+                pty.write(&response)?;
             }
         }
         Ok(())
@@ -134,11 +177,9 @@ impl TerminalSession {
 
     /// Get dirty lines from screen (text only, no face ranges)
     pub fn get_dirty_lines(&mut self) -> Vec<(usize, String)> {
-        let dirty_indices = self.core.screen.take_dirty_lines();
-        let mut result = Vec::with_capacity(dirty_indices.len());
-
-        for row in dirty_indices {
-            let text_opt: Option<String> = self.core.screen.get_line(row).map(|line| {
+        // Helper: encode a single dirty row as (row, text)
+        fn encode_row(screen: &crate::grid::screen::Screen, row: usize) -> Option<(usize, String)> {
+            screen.get_line(row).map(|line| {
                 // Wide placeholder cells (CellWidth::Wide) are included as ' ' chars,
                 // maintaining the grid_col == buffer_char_offset invariant (Phase 11).
                 let s: String = line
@@ -151,13 +192,30 @@ impl TerminalSession {
                 // `(min (+ line-start col) line-end)` to place the cursor at
                 // the wrong column when the terminal cursor is inside whitespace
                 // (e.g. after pressing SPC at a bash prompt).
-                s
-            });
-            if let Some(text) = text_opt {
-                result.push((row, text));
-            }
+                (row, s)
+            })
         }
 
+        // Fast path: full_dirty → iterate 0..rows directly without allocating index Vec
+        if self.core.screen.is_full_dirty() {
+            let rows = self.core.screen.rows() as usize;
+            self.core.screen.clear_dirty();
+            let mut result = Vec::with_capacity(rows);
+            for row in 0..rows {
+                if let Some(entry) = encode_row(&self.core.screen, row) {
+                    result.push(entry);
+                }
+            }
+            return result;
+        }
+
+        let dirty_indices = self.core.screen.take_dirty_lines();
+        let mut result = Vec::with_capacity(dirty_indices.len());
+        for row in dirty_indices {
+            if let Some(entry) = encode_row(&self.core.screen, row) {
+                result.push(entry);
+            }
+        }
         result
     }
 
@@ -283,9 +341,11 @@ impl TerminalSession {
     #[cfg(unix)]
     #[must_use]
     pub fn has_pending_output(&self) -> bool {
-        self.pty
-            .as_ref()
-            .is_some_and(crate::pty::posix::Pty::has_pending_data)
+        !self.pending_input.is_empty()
+            || self
+                .pty
+                .as_ref()
+                .is_some_and(crate::pty::posix::Pty::has_pending_data)
     }
 
     #[cfg(not(unix))]

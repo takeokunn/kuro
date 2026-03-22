@@ -248,6 +248,85 @@ fn test_print_combining_char_does_not_advance_cursor() {
     );
 }
 
+/// VS16 (U+FE0F) after a base character should combine into the previous cell,
+/// not occupy its own cell.  ❤ (U+2764) has width 1, so the combined grapheme
+/// should still be `CellWidth::Half`.
+#[test]
+fn test_variation_selector_16_combines() {
+    use crate::types::cell::CellWidth;
+
+    let mut term = TerminalCore::new(24, 80);
+    // Print ❤ followed by VS16
+    term.advance("❤\u{FE0F}".as_bytes());
+
+    let cell = term.screen.get_cell(0, 0).unwrap();
+    assert_eq!(
+        cell.grapheme(),
+        "❤\u{FE0F}",
+        "VS16 should be combined into the previous cell's grapheme"
+    );
+    assert_eq!(
+        cell.width,
+        CellWidth::Half,
+        "base char ❤ is width 1, so cell should be Half"
+    );
+    // Cursor should be at column 1 (only the base character advanced it)
+    assert_eq!(
+        term.screen.cursor().col,
+        1,
+        "VS16 must not advance the cursor"
+    );
+}
+
+/// VS15 (U+FE0E) after a base character should combine into the previous cell.
+#[test]
+fn test_variation_selector_15_combines() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance("A\u{FE0E}".as_bytes());
+
+    let cell = term.screen.get_cell(0, 0).unwrap();
+    assert_eq!(
+        cell.grapheme(),
+        "A\u{FE0E}",
+        "VS15 should be combined into the previous cell's grapheme"
+    );
+    assert_eq!(
+        term.screen.cursor().col,
+        1,
+        "VS15 must not advance the cursor"
+    );
+}
+
+/// Standalone wide emoji (U+1F525 🔥) should still occupy two cells
+/// (`CellWidth::Full` + `CellWidth::Wide` placeholder).
+#[test]
+fn test_standalone_emoji_still_wide() {
+    use crate::types::cell::CellWidth;
+
+    let mut term = TerminalCore::new(24, 80);
+    term.advance("🔥".as_bytes());
+
+    let cell = term.screen.get_cell(0, 0).unwrap();
+    assert_eq!(cell.char(), '🔥');
+    assert_eq!(
+        cell.width,
+        CellWidth::Full,
+        "wide emoji should be CellWidth::Full"
+    );
+    // The second cell should be the wide placeholder
+    let placeholder = term.screen.get_cell(0, 1).unwrap();
+    assert_eq!(
+        placeholder.width,
+        CellWidth::Wide,
+        "second cell of wide emoji should be CellWidth::Wide placeholder"
+    );
+    assert_eq!(
+        term.screen.cursor().col,
+        2,
+        "wide emoji should advance cursor by 2"
+    );
+}
+
 use proptest::prelude::*;
 
 proptest! {

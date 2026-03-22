@@ -25,7 +25,12 @@ impl vte::Perform for TerminalCore {
         self.flush_print_buf();
 
         // Combining characters (Unicode width 0) are attached to the previous cell.
-        if UnicodeWidthChar::width(c) == Some(0) {
+        // Characters returning `None` from unicode-width (Variation Selectors
+        // U+FE00–U+FE0F, interlinear annotations, tag characters, etc.) that
+        // are not C0/C1 control characters are also treated as combining —
+        // they are effectively zero-width and would otherwise waste a grid cell.
+        let w = UnicodeWidthChar::width(c);
+        if w == Some(0) || (w.is_none() && !c.is_control()) {
             // Attach to the cell just before the current cursor position
             let cursor = *self.screen.cursor();
             let (row, col) = if cursor.col > 0 {

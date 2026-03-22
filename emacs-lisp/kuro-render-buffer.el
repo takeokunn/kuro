@@ -116,8 +116,10 @@ single-pass when N rows are dirty.
 Critical: `line-end' is recomputed with `(line-end-position)' AFTER the
 delete+insert so face ranges use the new content offsets, not cached old ones."
   (when (and (integerp row) (stringp text))
-    (when (vectorp col-to-buf)
-      (puthash row col-to-buf kuro--col-to-buf-map))
+    (if (vectorp col-to-buf)
+        (puthash row col-to-buf kuro--col-to-buf-map)
+      (when (and (integerp row) (null col-to-buf))
+        (remhash row kuro--col-to-buf-map)))
     ;; Image overlay clearing: guard with nil-check so the separate O(row)
     ;; navigation is skipped entirely when no Kitty Graphics images are present.
     ;; Without this guard, kuro--clear-row-image-overlays would re-introduce an

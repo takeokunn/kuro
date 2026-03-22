@@ -127,9 +127,7 @@ impl Screen {
                 let count = count.min(cols - cursor_col);
                 line.cells[cursor_col..].rotate_right(count);
                 // Fill the inserted positions with blanks
-                for cell in &mut line.cells[cursor_col..cursor_col + count] {
-                    *cell = blank.clone();
-                }
+                line.cells[cursor_col..cursor_col + count].fill(blank);
             }
 
             line.is_dirty = true;
@@ -211,9 +209,7 @@ impl Screen {
 
             let mut blank = Cell::default();
             blank.attrs.background = attrs.background;
-            for col in erase_start..erase_end {
-                line.cells[col] = blank.clone();
-            }
+            line.cells[erase_start..erase_end].fill(blank);
             line.is_dirty = true;
             screen.mark_dirty_range(cursor_row, cursor_row + 1);
         }

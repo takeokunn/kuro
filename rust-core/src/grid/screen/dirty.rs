@@ -47,6 +47,35 @@ impl Screen {
         }
     }
 
+    /// Check whether all lines are marked dirty (full repaint pending)
+    #[inline]
+    #[must_use]
+    pub fn is_full_dirty(&self) -> bool {
+        if self.is_alternate_active {
+            self.alternate_screen
+                .as_ref()
+                .is_some_and(|alt| alt.full_dirty)
+        } else {
+            self.full_dirty
+        }
+    }
+
+    /// Clear all dirty state without allocating.
+    ///
+    /// Use this instead of `take_dirty_lines()` when the caller intends to
+    /// discard the dirty indices (e.g. suppressed render paths).
+    pub fn clear_dirty(&mut self) {
+        if self.is_alternate_active {
+            if let Some(alt) = self.alternate_screen.as_mut() {
+                alt.full_dirty = false;
+                alt.dirty_set.clear();
+            }
+        } else {
+            self.full_dirty = false;
+            self.dirty_set.clear();
+        }
+    }
+
     /// Get dirty lines and clear the dirty set
     pub fn take_dirty_lines(&mut self) -> Vec<usize> {
         if self.is_alternate_active {

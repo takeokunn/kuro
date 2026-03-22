@@ -8,8 +8,10 @@ use crate::{
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::wait::waitpid;
 use nix::unistd::{fork, ForkResult, Pid};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -41,9 +43,39 @@ impl Pty {
     ///
     /// Ensures only allowed shells can be spawned to prevent command injection.
     /// Resolves the command to an absolute path and checks the basename.
+    ///
+    /// For absolute paths (e.g. NixOS Nix store paths like `/nix/store/…/bin/fish`),
+    /// validates existence and executability directly without a PATH lookup.
+    /// For short names, resolves via `which` as before.
     fn validate_shell(command: &str) -> Result<PathBuf> {
-        let path = which::which(command)
-            .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {e}")))?;
+        let path = if Path::new(command).is_absolute() {
+            // Absolute path: validate directly without PATH lookup.
+            // This handles NixOS Nix store paths where the Rust process inherits
+            // Emacs's restricted PATH and `which::which` cannot locate the binary.
+            //
+            // Single `metadata()` call — existence is inferred from `Err`, avoiding
+            // a separate `Path::exists()` call (one `stat(2)` instead of two).
+            let p = PathBuf::from(command);
+            let meta = std::fs::metadata(&p).map_err(|_| {
+                invalid_parameter_error("command", "Shell path does not exist or is inaccessible")
+            })?;
+            // Check any execute bit (owner, group, or world).
+            // Note: raw mode bits may differ from effective kernel access for non-owner
+            // users. The kernel provides final enforcement at `execv(2)` time (EACCES).
+            // Nix store paths are world-executable, making this reliable in practice.
+            //
+            // Symlink note: `metadata()` follows symlinks (uses `stat`, not `lstat`),
+            // so this check operates on the final target's permissions. The returned
+            // `PathBuf` is still the original input (symlink or real path), which is
+            // correct — `execv(2)` resolves symlinks itself at execution time.
+            if meta.permissions().mode() & 0o111 == 0 {
+                return Err(invalid_parameter_error("command", "Shell is not executable"));
+            }
+            p
+        } else {
+            which::which(command)
+                .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {e}")))?
+        };
 
         let basename = path
             .file_name()

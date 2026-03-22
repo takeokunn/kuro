@@ -69,6 +69,100 @@ fn test_validate_shell_rejects_python() {
     );
 }
 
+// --- Absolute-path handling tests (NixOS / Nix store compatibility) ---
+
+#[test]
+fn test_validate_shell_absolute_nix_store() {
+    // Use $SHELL to test with the actual shell path on this system.
+    // On NixOS this is a Nix store path like /nix/store/…/bin/fish.
+    // Skip gracefully if $SHELL is unset or points to a non-whitelisted shell.
+    if let Ok(shell) = std::env::var("SHELL") {
+        let p = std::path::Path::new(&shell);
+        if p.is_absolute() && p.exists() {
+            let basename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if ["bash", "zsh", "sh", "fish"].contains(&basename) {
+                let result = Pty::validate_shell(&shell);
+                assert!(
+                    result.is_ok(),
+                    "absolute path from $SHELL should be accepted: {shell}. Error: {:?}",
+                    result.err()
+                );
+                assert_eq!(
+                    result.unwrap(),
+                    std::path::PathBuf::from(&shell),
+                    "returned PathBuf must equal the input path exactly"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_validate_shell_absolute_nonexistent() {
+    // A non-existent absolute path must be rejected.
+    let result = Pty::validate_shell("/nonexistent/path/to/bash");
+    assert!(
+        result.is_err(),
+        "nonexistent absolute path must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_shell_absolute_not_executable() {
+    // An absolute path with a whitelisted basename but no execute bit must be rejected.
+    // Use a PID-suffixed name to avoid collisions with parallel test runs.
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = std::env::temp_dir().join(format!("fish_{}", std::process::id()));
+    std::fs::write(&path, b"#!/bin/sh").unwrap();
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    perms.set_mode(0o644); // rw-r--r-- : no execute bit
+    std::fs::set_permissions(&path, perms).unwrap();
+    let result = Pty::validate_shell(path.to_str().unwrap());
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        result.is_err(),
+        "absolute path without execute bit must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_shell_absolute_not_in_whitelist() {
+    // An executable absolute path whose basename is not in ALLOWED_SHELLS must be rejected.
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = std::env::temp_dir().join(format!("curio_{}", std::process::id()));
+    std::fs::write(&path, b"#!/bin/sh").unwrap();
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&path, perms).unwrap();
+    let result = Pty::validate_shell(path.to_str().unwrap());
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        result.is_err(),
+        "absolute path with non-whitelisted basename must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_shell_absolute_bin_sh() {
+    // /bin/sh exists on all POSIX systems (typically a symlink to bash or dash).
+    // Its basename "sh" is in ALLOWED_SHELLS. On NixOS it is a symlink into the
+    // Nix store, so this test exercises the absolute-path branch on NixOS.
+    let bin_sh = std::path::Path::new("/bin/sh");
+    if bin_sh.exists() {
+        let result = Pty::validate_shell("/bin/sh");
+        assert!(
+            result.is_ok(),
+            "/bin/sh must be accepted when it exists. Error: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            result.unwrap(),
+            std::path::PathBuf::from("/bin/sh"),
+            "returned PathBuf must equal /bin/sh"
+        );
+    }
+}
+
 // --- Regression tests: readline visual mode requires non-zero PTY dimensions ---
 //
 // Root cause of the C-b/C-f/C-e bug:

@@ -43,6 +43,11 @@ impl PtyReader {
                         break;
                     }
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    // EINTR: the blocking read was interrupted by a signal
+                    // (e.g. SIGCHLD, SIGWINCH). This is transient — retry.
+                    continue;
+                }
                 Err(e) => {
                     // Treat persistent read errors (e.g. EIO on Linux after child
                     // exit) the same as EOF: mark the process as exited so Emacs

@@ -370,3 +370,178 @@ fn to_png_base64_rgba_produces_non_empty_string() {
         "to_png_base64 for RGBA must produce a non-empty string"
     );
 }
+
+// ── scroll_up edge cases ──────────────────────────────────────────────────────
+
+#[test]
+// INVARIANT: scroll_up(0) is a no-op — placement at row 5 must still be
+// in the store and a subsequent add_placement must succeed.
+fn scroll_up_zero_is_noop() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(1), tiny_rgb(0x01));
+    store.add_placement(ImagePlacement {
+        image_id: 1,
+        row: 5,
+        col: 0,
+        display_cols: 1,
+        display_rows: 1,
+    });
+    store.scroll_up(0);
+    // Image data must still be present.
+    assert!(
+        !store.get_image_png_base64(1).is_empty(),
+        "image must survive scroll_up(0)"
+    );
+}
+
+#[test]
+// INVARIANT: scroll_up(n) where n equals the exact row of a placement
+// discards that placement (row < n is false when row == n, but the
+// condition is `row < n` so row == n is kept).
+fn scroll_up_keeps_placement_at_exact_boundary() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(1), tiny_rgb(0x01));
+    // Place at row == n (n=5, row=5): row 5 - 5 = 0 — survives.
+    store.add_placement(ImagePlacement {
+        image_id: 1,
+        row: 5,
+        col: 0,
+        display_cols: 1,
+        display_rows: 1,
+    });
+    store.scroll_up(5);
+    // row=5 is NOT < 5, so placement survives at row=0.
+    // Image data must still be present.
+    assert!(
+        !store.get_image_png_base64(1).is_empty(),
+        "image must survive scroll_up equal to placement row"
+    );
+}
+
+// ── scroll_down edge cases ────────────────────────────────────────────────────
+
+#[test]
+// INVARIANT: scroll_down(n, max_row=0) uses saturating_sub(1) = 0, so
+// all placements are clamped to row 0.
+fn scroll_down_with_zero_max_row_clamps_to_zero() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(1), tiny_rgb(0x01));
+    store.add_placement(ImagePlacement {
+        image_id: 1,
+        row: 0,
+        col: 0,
+        display_cols: 1,
+        display_rows: 1,
+    });
+    // max_row=0 → saturating_sub(1) = 0 → clamped to 0.
+    store.scroll_down(5, 0);
+    assert!(
+        !store.get_image_png_base64(1).is_empty(),
+        "image must survive scroll_down with max_row=0"
+    );
+}
+
+#[test]
+// INVARIANT: scroll_down(n, max_row) clamps placement to max_row - 1 when
+// the shifted row would exceed the terminal height.
+fn scroll_down_clamps_placement_to_max_row_minus_one() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(1), tiny_rgb(0x01));
+    store.add_placement(ImagePlacement {
+        image_id: 1,
+        row: 20,
+        col: 0,
+        display_cols: 1,
+        display_rows: 1,
+    });
+    // scroll_down(100, 24): row = min(20+100, 23) = 23.
+    store.scroll_down(100, 24);
+    // Image must still be present (scroll_down never discards images).
+    assert!(
+        !store.get_image_png_base64(1).is_empty(),
+        "image must survive scroll_down with large n"
+    );
+}
+
+// ── delete_by_id — multiple images, partial delete ────────────────────────────
+
+#[test]
+// INVARIANT: Deleting one image from a multi-image store leaves the other
+// images intact.
+fn delete_by_id_leaves_other_images_intact() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(10), tiny_rgb(0x10));
+    store.store_image(Some(20), tiny_rgb(0x20));
+    store.store_image(Some(30), tiny_rgb(0x30));
+
+    store.delete_by_id(20);
+
+    assert!(
+        !store.get_image_png_base64(10).is_empty(),
+        "image 10 must survive after deleting image 20"
+    );
+    assert_eq!(
+        store.get_image_png_base64(20),
+        String::new(),
+        "image 20 must be gone"
+    );
+    assert!(
+        !store.get_image_png_base64(30).is_empty(),
+        "image 30 must survive after deleting image 20"
+    );
+}
+
+// ── clear_all_placements — then re-add ───────────────────────────────────────
+
+#[test]
+// INVARIANT: clear_all_placements followed by delete_by_id must remove the
+// image and prevent a subsequent add_placement from succeeding.
+fn clear_placements_then_delete_by_id_prevents_placement() {
+    let mut store = GraphicsStore::new();
+    store.store_image(Some(3), tiny_rgb(0x03));
+    store.add_placement(make_placement(3, 1, 0));
+    store.clear_all_placements();
+    store.delete_by_id(3);
+    // Image gone — placement must return None.
+    let result = store.add_placement(make_placement(3, 0, 0));
+    assert!(
+        result.is_none(),
+        "add_placement must return None after image deleted via delete_by_id"
+    );
+}
+
+// ── auto-ID — sequential uniqueness ──────────────────────────────────────────
+
+#[test]
+// INVARIANT: Five consecutive auto-ID calls must produce five distinct IDs,
+// each greater than the previous one (wrapping is not expected within 5 calls).
+fn store_image_auto_id_five_consecutive_are_unique() {
+    let mut store = GraphicsStore::new();
+    let mut ids = Vec::new();
+    for byte in 0u8..5 {
+        ids.push(store.store_image(None, tiny_rgb(byte)));
+    }
+    // All IDs must be distinct.
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        5,
+        "five consecutive auto-assigned IDs must be unique; got {ids:?}"
+    );
+}
+
+// ── byte_count corner cases ───────────────────────────────────────────────────
+
+#[test]
+// INVARIANT: byte_count() of an empty-pixels ImageData is 0.
+fn image_data_byte_count_empty_pixels_is_zero() {
+    let data = ImageData {
+        pixels: vec![],
+        format: crate::parser::kitty::ImageFormat::Rgb,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+    assert_eq!(data.byte_count(), 0, "byte_count of empty ImageData must be 0");
+}

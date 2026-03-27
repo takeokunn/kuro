@@ -515,5 +515,127 @@ The wrap sequences ESC[200~/ESC[201~ are intact; the user ESC is gone."
   (with-temp-buffer
     (should (= kuro--keyboard-flags 0))))
 
+;;; Group 12: kuro--paste-text, bracketed sequences, and dispatch invariants
+
+(defmacro kuro-paste-test--capture-sent-in-buffer (&rest body)
+  "Execute BODY in a fresh temp buffer with send stubbed; return sent list."
+  `(with-temp-buffer
+     (let ((sent nil))
+       (cl-letf (((symbol-function 'kuro--send-key)
+                  (lambda (s) (push s sent)))
+                 ((symbol-function 'kuro--schedule-immediate-render)
+                  (lambda () nil)))
+         ,@body)
+       (nreverse sent))))
+
+(ert-deftest kuro-input-paste--bracketed-sequence-open-close-structure ()
+  "Bracketed paste sequence has open=ESC[200~ and close=ESC[201~ structure."
+  ;; Verify constants themselves form the expected VT sequences.
+  (should (equal kuro--paste-open  "\e[200~"))
+  (should (equal kuro--paste-close "\e[201~"))
+  (should (string-prefix-p "\e[" kuro--paste-open))
+  (should (string-suffix-p "~" kuro--paste-open))
+  (should (string-prefix-p "\e[" kuro--paste-close))
+  (should (string-suffix-p "~" kuro--paste-close)))
+
+(ert-deftest kuro-input-paste--paste-newlines-sent-verbatim ()
+  "kuro--send-paste-or-raw sends newlines verbatim in plain mode (no \\r substitution)."
+  (let ((sent (kuro-paste-test--capture-sent-in-buffer
+               (setq-local kuro--bracketed-paste-mode nil)
+               (kuro--send-paste-or-raw "line1\nline2\nline3"))))
+    (should (equal sent '("line1\nline2\nline3")))))
+
+(ert-deftest kuro-input-paste--paste-bracketed-wraps-multiline ()
+  "kuro--send-paste-or-raw in bracketed mode wraps multi-line text correctly."
+  (let ((sent (kuro-paste-test--capture-sent-in-buffer
+               (setq-local kuro--bracketed-paste-mode t)
+               (kuro--send-paste-or-raw "line1\nline2"))))
+    (should (= (length sent) 1))
+    (let ((payload (car sent)))
+      (should (string-prefix-p kuro--paste-open payload))
+      (should (string-suffix-p kuro--paste-close payload))
+      (should (string-match-p "line1\nline2" payload)))))
+
+(ert-deftest kuro-input-paste--paste-nul-byte-preserved-in-plain-mode ()
+  "NUL (\\x00) bytes pass through kuro--send-paste-or-raw in plain mode unchanged."
+  (let* ((nul (string 0))
+         (text (concat "a" nul "b"))
+         (sent (kuro-paste-test--capture-sent-in-buffer
+                (setq-local kuro--bracketed-paste-mode nil)
+                (kuro--send-paste-or-raw text))))
+    (should (equal (car sent) text))))
+
+(ert-deftest kuro-input-paste--paste-esc-stripped-in-bracketed-mode ()
+  "ESC bytes are stripped from content inside the bracketed paste wrapper."
+  (let* ((esc (string #x1b))
+         (sent (kuro-paste-test--capture-sent-in-buffer
+                (setq-local kuro--bracketed-paste-mode t)
+                (kuro--send-paste-or-raw (concat "a" esc "b"))))
+         (payload (car sent))
+         (inner-start (length kuro--paste-open))
+         (inner-end (- (length payload) (length kuro--paste-close)))
+         (inner (substring payload inner-start inner-end)))
+    (should-not (string-match-p (regexp-quote esc) inner))))
+
+(ert-deftest kuro-input-paste--paste-unicode-preserved-in-bracketed-mode ()
+  "Unicode characters survive kuro--sanitize-paste and bracketed wrapping."
+  (let ((sent (kuro-paste-test--capture-sent-in-buffer
+               (setq-local kuro--bracketed-paste-mode t)
+               (kuro--send-paste-or-raw "日本語テスト"))))
+    (should (string-match-p "日本語テスト" (car sent)))))
+
+(ert-deftest kuro-input-paste--yank-dispatches-to-send-paste-or-raw ()
+  "kuro--yank ends up calling kuro--send-key exactly once per call."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "dispatch-check")
+      (let ((kuro--bracketed-paste-mode nil)
+            (count 0))
+        (cl-letf (((symbol-function 'kuro--send-key)
+                   (lambda (_s) (cl-incf count)))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () nil)))
+          (kuro--yank))
+        (should (= count 1))))))
+
+(ert-deftest kuro-input-paste--yank-empty-string-sends-empty-brackets ()
+  "kuro--yank with empty kill-ring entry sends just the open+close sequences."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "")
+      (let* ((kuro--bracketed-paste-mode t)
+             (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (equal (car sent)
+                       (concat kuro--paste-open kuro--paste-close)))))))
+
+(ert-deftest kuro-input-paste--yank-multiline-correct-wrapping ()
+  "kuro--yank with multi-line kill content wraps exactly once with open+close."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "first\nsecond\nthird")
+      (let* ((kuro--bracketed-paste-mode t)
+             (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (= (length sent) 1))
+        (should (string-prefix-p kuro--paste-open (car sent)))
+        (should (string-suffix-p kuro--paste-close (car sent)))))))
+
+(ert-deftest kuro-input-paste--yank-pop-uses-current-kill-text ()
+  "kuro--yank-pop retrieves text from the kill ring and sends it."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "kill-pop-text")
+      (let ((last-command 'kuro--yank)
+            (kuro--bracketed-paste-mode nil))
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (equal (car sent) "kill-pop-text")))))))
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-empty-bracketed ()
+  "kuro--send-paste-or-raw with empty string in bracketed mode sends open+close."
+  (let ((sent (kuro-paste-test--capture-sent-in-buffer
+               (setq-local kuro--bracketed-paste-mode t)
+               (kuro--send-paste-or-raw ""))))
+    (should (equal (car sent)
+                   (concat kuro--paste-open kuro--paste-close)))))
+
 (provide 'kuro-input-paste-test)
 ;;; kuro-input-paste-test.el ends here

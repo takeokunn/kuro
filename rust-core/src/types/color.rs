@@ -228,4 +228,62 @@ mod tests {
         let (r255, _, _) = Color::Indexed(255).to_rgb();
         assert_eq!(r255, 238);
     }
+
+    #[test]
+    fn test_color_default_is_default_variant() {
+        assert_eq!(Color::default(), Color::Default);
+        assert_eq!(Color::Default, Color::Default);
+    }
+
+    #[test]
+    fn test_color_rgb_stores_components() {
+        let c = Color::Rgb(10, 20, 30);
+        assert_eq!(c, Color::Rgb(10, 20, 30));
+        if let Color::Rgb(r, g, b) = c {
+            assert_eq!(r, 10);
+            assert_eq!(g, 20);
+            assert_eq!(b, 30);
+        } else {
+            panic!("expected Color::Rgb");
+        }
+    }
+
+    #[test]
+    fn test_color_named_stores_variant() {
+        let c = Color::Named(NamedColor::Red);
+        assert_eq!(c, Color::Named(NamedColor::Red));
+        assert_ne!(c, Color::Named(NamedColor::Blue));
+    }
+
+    #[test]
+    fn test_color_indexed_stores_index() {
+        let c = Color::Indexed(42);
+        assert_eq!(c, Color::Indexed(42));
+        assert_ne!(c, Color::Indexed(43));
+    }
+
+    #[test]
+    fn test_color_rgb_white_roundtrip() {
+        let white = Color::Rgb(255, 255, 255);
+        assert_eq!(white.to_rgb(), (255, 255, 255));
+    }
+
+    #[test]
+    fn test_color_rgb_black_roundtrip() {
+        let black = Color::Rgb(0, 0, 0);
+        assert_eq!(black.to_rgb(), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_color_named_black_vs_red_unequal() {
+        // NamedColor::Black = 0, NamedColor::Red = 1
+        assert_ne!(Color::Named(NamedColor::Black), Color::Named(NamedColor::Red));
+    }
+
+    #[test]
+    fn test_color_default_equals_itself() {
+        let a = Color::Default;
+        let b = Color::Default;
+        assert_eq!(a, b);
+    }
 }

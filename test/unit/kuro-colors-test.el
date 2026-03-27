@@ -493,6 +493,74 @@ The guard (when (fboundp 'kuro--clear-face-cache)) protects the call."
   (let ((key (copy-sequence "black")))
     (should (gethash key kuro--named-colors))))
 
+;;; Group 15: kuro--named-colors — per-index slot verification and override behavior
+
+(defmacro kuro-colors-test--check-named-color (key expected-var)
+  "Assert that kuro--named-colors[KEY] equals the value of EXPECTED-VAR."
+  `(progn
+     (kuro--rebuild-named-colors)
+     (should (equal (gethash ,key kuro--named-colors) ,expected-var))))
+
+(ert-deftest kuro-colors--named-colors-index-0-black ()
+  "kuro--named-colors[\"black\"] equals kuro-color-black (palette index 0)."
+  (kuro-colors-test--check-named-color "black" kuro-color-black))
+
+(ert-deftest kuro-colors--named-colors-index-7-white ()
+  "kuro--named-colors[\"white\"] equals kuro-color-white (palette index 7)."
+  (kuro-colors-test--check-named-color "white" kuro-color-white))
+
+(ert-deftest kuro-colors--named-colors-index-8-bright-black ()
+  "kuro--named-colors[\"bright-black\"] equals kuro-color-bright-black (index 8)."
+  (kuro-colors-test--check-named-color "bright-black" kuro-color-bright-black))
+
+(ert-deftest kuro-colors--named-colors-index-14-bright-cyan ()
+  "kuro--named-colors[\"bright-cyan\"] equals kuro-color-bright-cyan (index 14)."
+  (kuro-colors-test--check-named-color "bright-cyan" kuro-color-bright-cyan))
+
+(ert-deftest kuro-colors--named-colors-index-15-bright-white ()
+  "kuro--named-colors[\"bright-white\"] equals kuro-color-bright-white (index 15)."
+  (kuro-colors-test--check-named-color "bright-white" kuro-color-bright-white))
+
+(ert-deftest kuro-colors--named-colors-puthash-override-visible-before-rebuild ()
+  "Manually puthash-ing a key into kuro--named-colors is visible immediately.
+This models how OSC 4 palette updates inject colors without a full rebuild."
+  (let ((original (gethash "red" kuro--named-colors)))
+    (unwind-protect
+        (progn
+          (puthash "red" "#ff1234" kuro--named-colors)
+          (should (equal (gethash "red" kuro--named-colors) "#ff1234")))
+      (kuro--rebuild-named-colors)
+      (should (equal (gethash "red" kuro--named-colors) original)))))
+
+(ert-deftest kuro-colors--named-colors-override-cleared-by-rebuild ()
+  "kuro--rebuild-named-colors clears a manually injected override.
+OSC 4 overrides are volatile; a rebuild restores defcustom values."
+  (puthash "green" "#aabbcc" kuro--named-colors)
+  (kuro--rebuild-named-colors)
+  (should (equal (gethash "green" kuro--named-colors) kuro-color-green)))
+
+(ert-deftest kuro-colors--named-colors-all-values-start-with-hash ()
+  "Every value in kuro--named-colors after rebuild starts with '#'."
+  (kuro--rebuild-named-colors)
+  (maphash (lambda (_k v)
+             (should (string-prefix-p "#" v)))
+           kuro--named-colors))
+
+(ert-deftest kuro-colors--named-colors-all-values-are-7-chars ()
+  "Every value in kuro--named-colors is exactly 7 characters long (#rrggbb)."
+  (kuro--rebuild-named-colors)
+  (maphash (lambda (_k v)
+             (should (= (length v) 7)))
+           kuro--named-colors))
+
+(ert-deftest kuro-colors--set-color-double-update-reflects-latest ()
+  "Calling kuro--set-color twice on the same symbol retains the last value."
+  (kuro-colors-test--with-saved-color kuro-color-yellow
+    (kuro--set-color 'kuro-color-yellow "#111111")
+    (kuro--set-color 'kuro-color-yellow "#222222")
+    (should (equal kuro-color-yellow "#222222"))
+    (should (equal (gethash "yellow" kuro--named-colors) "#222222"))))
+
 (provide 'kuro-colors-test)
 
 ;;; kuro-colors-test.el ends here

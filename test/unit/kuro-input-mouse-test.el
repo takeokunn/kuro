@@ -910,5 +910,155 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
       ;; Meta+right = button=10 (2+8); col=120, row=80
       (should (equal (kuro--encode-mouse 'fake-event 10 t) "\e[<10;120;80M")))))
 
+;;; Group 22: kuro--mouse-button-to-code, col-row extraction, clamping
+
+(defmacro kuro-mouse-test--full-stub (col row btn-type &rest body)
+  "Stub all event functions and run BODY with COL/ROW position and BTN-TYPE basic type."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'event-start)
+               (lambda (_ev) 'fake-pos))
+              ((symbol-function 'event-basic-type)
+               (lambda (_ev) ,btn-type))
+              ((symbol-function 'posn-col-row)
+               (lambda (_pos) (cons ,col ,row)))
+              ((symbol-function 'posn-x-y)
+               (lambda (_pos) (cons ,col ,row))))
+     ,@body))
+
+(ert-deftest kuro-input-mouse-button-code-mouse1-is-zero ()
+  "mouse-1 event basic type maps to button code 0 (left button)."
+  ;; kuro--def-mouse-cmd uses pcase over event-basic-type: mouse-1 → 0
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
+        (kuro-mouse-test--full-stub 0 0 'mouse-1
+          (kuro--mouse-press)))
+      ;; SGR button=0, col1=1, row1=1 → ESC[<0;1;1M
+      (should (equal sent "\e[<0;1;1M")))))
+
+(ert-deftest kuro-input-mouse-button-code-mouse3-is-two ()
+  "mouse-3 event basic type maps to button code 2 (right button)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
+        (kuro-mouse-test--full-stub 0 0 'mouse-3
+          (kuro--mouse-press)))
+      ;; SGR button=2, col1=1, row1=1 → ESC[<2;1;1M
+      (should (equal sent "\e[<2;1;1M")))))
+
+(ert-deftest kuro-input-mouse-scroll-up-button-code-is-64 ()
+  "kuro--mouse-scroll-up encodes as button 64 (scroll-up) in X10 format."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s)))
+                ((symbol-function 'event-start) (lambda (_ev) 'fake-pos))
+                ((symbol-function 'posn-col-row) (lambda (_pos) (cons 0 0)))
+                ((symbol-function 'posn-x-y) (lambda (_pos) (cons 0 0))))
+        (kuro--mouse-scroll-up))
+      ;; X10: btn-byte = 64+32 = 96
+      (should (= (aref sent 3) 96)))))
+
+(ert-deftest kuro-input-mouse-scroll-down-button-code-is-65 ()
+  "kuro--mouse-scroll-down encodes as button 65 (scroll-down) in X10 format."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s)))
+                ((symbol-function 'event-start) (lambda (_ev) 'fake-pos))
+                ((symbol-function 'posn-col-row) (lambda (_pos) (cons 0 0)))
+                ((symbol-function 'posn-x-y) (lambda (_pos) (cons 0 0))))
+        (kuro--mouse-scroll-down))
+      ;; X10: btn-byte = 65+32 = 97
+      (should (= (aref sent 3) 97)))))
+
+(ert-deftest kuro-input-mouse-x10-format-is-esclm-bxy ()
+  "X10 encoding produces ESC[M followed by three bytes (btn, col, row)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 2 5
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        ;; Prefix is ESC[M (3 chars) + 3 byte values = 6 chars total
+        (should (string-prefix-p "\e[M" result))
+        (should (= (length result) 6))))))
+
+(ert-deftest kuro-input-mouse-sgr-press-format-is-esclangle ()
+  "SGR format for press uses ESC[< prefix and uppercase M terminator."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (string-prefix-p "\e[<" result))
+        (should (string-suffix-p "M" result))))))
+
+(ert-deftest kuro-input-mouse-sgr-release-format-uses-lowercase-m ()
+  "SGR format for release uses lowercase m terminator, not uppercase M."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (let ((press-result   (kuro--encode-mouse 'fake-event 0 t))
+            (release-result (kuro--encode-mouse 'fake-event 0 nil)))
+        (should (string-suffix-p "M" press-result))
+        (should (string-suffix-p "m" release-result))
+        (should-not (string-suffix-p "m" press-result))))))
+
+(ert-deftest kuro-input-mouse-pixel-sends-pixel-coords ()
+  "Pixel mode reports posn-x-y coordinates (not col+1/row+1)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode t)
+    ;; posn-x-y stub returns (42 . 99); pixel mode uses these directly
+    (kuro-mouse-test--with-event 42 99
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (equal result "\e[<0;42;99M"))))))
+
+(ert-deftest kuro-input-mouse-col-row-extraction-cell-mode ()
+  "kuro--mouse-coords extracts posn-col-row and adds 1 to each coordinate."
+  (with-temp-buffer
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 7 13
+      (let ((coords (kuro--mouse-coords 'fake-event)))
+        ;; 0-based (7,13) → 1-based (8,14)
+        (should (= (car coords) 8))
+        (should (= (cdr coords) 14))))))
+
+(ert-deftest kuro-input-mouse-x10-overflow-past-terminal-width-returns-nil ()
+  "X10 mode returns nil when column exceeds the 223-cell limit (past terminal width)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    ;; col=300 → col1=301, overflows the (< col1 224) guard → returns nil
+    (kuro-mouse-test--with-event 300 0
+      (should-not (kuro--encode-mouse 'fake-event 0 t)))))
+
+(ert-deftest kuro-input-mouse-sgr-large-coords-not-clamped ()
+  "SGR mode does not clamp large coordinates; values above 223 pass through."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    ;; col=500 → col1=501, should appear verbatim in SGR sequence
+    (kuro-mouse-test--with-event 500 300
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (equal result "\e[<0;501;301M"))))))
+
 (provide 'kuro-input-mouse-test)
 ;;; kuro-input-mouse-test.el ends here

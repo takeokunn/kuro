@@ -561,6 +561,95 @@ With three palette entries the cache must be flushed once, not three times."
         (face-with-bold (kuro--get-cached-face-raw 0 0 1 0)))
     (should-not (eq face-no-bold face-with-bold))))
 
+;;; Group 15: Color variables, named-color table, and face uniqueness
+
+(ert-deftest kuro-faces-color-black-is-hex-string ()
+  "kuro-color-black is a 6-digit hex color string."
+  (should (stringp kuro-color-black))
+  (should (string-match-p kuro--hex-color-regexp kuro-color-black)))
+
+(ert-deftest kuro-faces-color-white-is-hex-string ()
+  "kuro-color-white is a 6-digit hex color string."
+  (should (stringp kuro-color-white))
+  (should (string-match-p kuro--hex-color-regexp kuro-color-white)))
+
+(ert-deftest kuro-faces-all-16-color-vars-are-hex-strings ()
+  "All 16 kuro-color-* defcustom variables hold valid hex color strings."
+  (dolist (sym '(kuro-color-black kuro-color-red kuro-color-green
+                 kuro-color-yellow kuro-color-blue kuro-color-magenta
+                 kuro-color-cyan kuro-color-white
+                 kuro-color-bright-black kuro-color-bright-red
+                 kuro-color-bright-green kuro-color-bright-yellow
+                 kuro-color-bright-blue kuro-color-bright-magenta
+                 kuro-color-bright-cyan kuro-color-bright-white))
+    (let ((val (symbol-value sym)))
+      (should (stringp val))
+      (should (string-match-p kuro--hex-color-regexp val)))))
+
+(ert-deftest kuro-faces-named-colors-hash-has-16-entries ()
+  "kuro--named-colors contains exactly 16 entries after rebuild."
+  (kuro--rebuild-named-colors)
+  (should (= (hash-table-count kuro--named-colors) 16)))
+
+(ert-deftest kuro-faces-named-colors-hash-contains-standard-names ()
+  "kuro--named-colors has entries for all standard ANSI color names."
+  (kuro--rebuild-named-colors)
+  (dolist (name '("black" "red" "green" "yellow"
+                  "blue" "magenta" "cyan" "white"
+                  "bright-black" "bright-red" "bright-green" "bright-yellow"
+                  "bright-blue" "bright-magenta" "bright-cyan" "bright-white"))
+    (should (gethash name kuro--named-colors))))
+
+(ert-deftest kuro-faces-cache-miss-returns-nil-on-gethash ()
+  "A fresh cache has no entry for an unusual key — gethash returns nil."
+  (kuro--clear-face-cache)
+  ;; Use a key that we know has never been inserted.
+  (let ((key (vector #xDEADBEEF #xDEADBEEF 0 0)))
+    (should-not (gethash key kuro--face-cache))))
+
+(ert-deftest kuro-faces-cache-hit-returns-eq-object ()
+  "After one cache-miss lookup, a second lookup for the same args returns eq."
+  (kuro--clear-face-cache)
+  (let ((face1 (kuro--get-cached-face-raw #x80000002 0 0 0))
+        (face2 (kuro--get-cached-face-raw #x80000002 0 0 0)))
+    (should (eq face1 face2))))
+
+(ert-deftest kuro-faces-unique-attrs-produce-distinct-faces ()
+  "Four different attribute flag combinations produce four distinct cache entries.
+This exercises the key-uniqueness property that kuro--make-face-name would provide
+for named face registration: bold, italic, dim, and strikethrough must not alias."
+  (kuro--clear-face-cache)
+  (let ((f-bold   (kuro--get-cached-face-raw 0 0 #x01 0))   ; bold
+        (f-italic (kuro--get-cached-face-raw 0 0 #x04 0))   ; italic
+        (f-dim    (kuro--get-cached-face-raw 0 0 #x02 0))   ; dim
+        (f-strike (kuro--get-cached-face-raw 0 0 #x100 0))) ; strikethrough
+    (should-not (eq f-bold f-italic))
+    (should-not (eq f-bold f-dim))
+    (should-not (eq f-bold f-strike))
+    (should-not (eq f-italic f-dim))
+    (should-not (eq f-italic f-strike))
+    (should-not (eq f-dim f-strike))))
+
+(ert-deftest kuro-faces-ansi-color-names-vector-length-16 ()
+  "kuro--ansi-color-names is a vector of exactly 16 elements."
+  (should (vectorp kuro--ansi-color-names))
+  (should (= (length kuro--ansi-color-names) 16)))
+
+(ert-deftest kuro-faces-ansi-color-names-all-strings ()
+  "Every element of kuro--ansi-color-names is a non-empty string."
+  (dotimes (i 16)
+    (let ((name (aref kuro--ansi-color-names i)))
+      (should (stringp name))
+      (should (< 0 (length name))))))
+
+(ert-deftest kuro-faces-named-colors-all-values-are-hex ()
+  "Every value in kuro--named-colors is a 6-digit hex color string."
+  (kuro--rebuild-named-colors)
+  (maphash (lambda (_k v)
+             (should (stringp v))
+             (should (string-match-p kuro--hex-color-regexp v)))
+           kuro--named-colors))
+
 (provide 'kuro-faces-test)
 
 ;;; kuro-faces-test.el ends here

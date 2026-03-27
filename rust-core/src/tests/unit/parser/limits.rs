@@ -162,3 +162,75 @@ proptest! {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Additional arithmetic and representational invariants
+// ---------------------------------------------------------------------------
+
+#[test]
+// VALUE: MAX_APC_PAYLOAD_BYTES is exactly 4_194_304 (4 * 1024 * 1024).
+// Verify as a compile-time constant to catch accidental edits.
+fn test_max_apc_payload_bytes_exact_decimal() {
+    const { assert!(MAX_APC_PAYLOAD_BYTES == 4_194_304) };
+}
+
+#[test]
+// VALUE: MAX_TITLE_BYTES is a power of two (2^10 = 1024).
+// Power-of-two limits play well with allocators.
+fn test_max_title_bytes_is_power_of_two() {
+    const { assert!(MAX_TITLE_BYTES.count_ones() == 1) };
+}
+
+#[test]
+// RATIO: MAX_APC_PAYLOAD_BYTES / MAX_TITLE_BYTES must be exactly 4096.
+// Confirms the relative sizing between the title cap and the APC budget.
+fn test_apc_to_title_ratio_is_4096() {
+    const { assert!(MAX_APC_PAYLOAD_BYTES / MAX_TITLE_BYTES == 4096) };
+}
+
+#[test]
+// RATIO: OSC7_MAX_PATH_BYTES / MAX_TITLE_BYTES == 4.
+// A filesystem path cap is four times the title cap.
+fn test_osc7_to_title_ratio_is_4() {
+    const { assert!(OSC7_MAX_PATH_BYTES / MAX_TITLE_BYTES == 4) };
+}
+
+#[test]
+// RATIO: OSC8_MAX_URI_BYTES / OSC7_MAX_PATH_BYTES == 2.
+// A hyperlink URI cap is exactly twice the path cap.
+fn test_osc8_to_osc7_ratio_is_2() {
+    const { assert!(OSC8_MAX_URI_BYTES / OSC7_MAX_PATH_BYTES == 2) };
+}
+
+#[test]
+// VALUE: MAX_CHUNK_DATA_BYTES is non-zero — the codec must always accept
+// at least one byte of chunk data.
+fn test_max_chunk_data_bytes_is_non_zero() {
+    const { assert!(MAX_CHUNK_DATA_BYTES > 0) };
+}
+
+#[test]
+// VALUE: All limits fit within usize (no truncation on 32-bit targets).
+// OSC8_MAX_URI_BYTES = 8192 < 65536 = 2^16; safe on any platform.
+fn test_all_limits_fit_in_usize_comfortably() {
+    // The smallest plausible usize is 16 bits (2^16 = 65536).
+    // OSC8_MAX_URI_BYTES = 8192 < 65536.
+    const { assert!(OSC8_MAX_URI_BYTES < 65536) };
+    // MAX_TITLE_BYTES = 1024 < 65536.
+    const { assert!(MAX_TITLE_BYTES < 65536) };
+    // OSC7_MAX_PATH_BYTES = 4096 < 65536.
+    const { assert!(OSC7_MAX_PATH_BYTES < 65536) };
+}
+
+#[test]
+// ORDERING: MAX_APC_PAYLOAD_BYTES > OSC8_MAX_URI_BYTES > OSC7_MAX_PATH_BYTES
+// > MAX_TITLE_BYTES. The full ordering chain must hold in a single assertion.
+fn test_full_ordering_chain() {
+    const {
+        assert!(
+            MAX_APC_PAYLOAD_BYTES > OSC8_MAX_URI_BYTES
+            && OSC8_MAX_URI_BYTES > OSC7_MAX_PATH_BYTES
+            && OSC7_MAX_PATH_BYTES > MAX_TITLE_BYTES
+        )
+    };
+}

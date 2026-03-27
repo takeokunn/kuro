@@ -1084,6 +1084,79 @@ Stage 2, but Stage 3 must still execute unconditionally on every timer tick."
           (setq kuro--timer nil))
         (should stream-started)))))
 
+;;; Group 28: kuro--sanitize-title, kuro--stop-render-loop, and additional pipeline edge cases
+
+(defmacro kuro-renderer-pipeline-test--check-sanitize (input expected)
+  "Assert that (kuro--sanitize-title INPUT) equals EXPECTED."
+  `(should (equal (kuro--sanitize-title ,input) ,expected)))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-strips-null-byte ()
+  "kuro--sanitize-title removes null bytes (U+0000)."
+  (kuro-renderer-pipeline-test--check-sanitize
+   (concat "bash" (string 0) "name")
+   "bashname"))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-strips-escape-char ()
+  "kuro--sanitize-title removes ESC (U+001B) and other C0 controls."
+  (kuro-renderer-pipeline-test--check-sanitize
+   (concat "vim" (string #x1b) "[31m")
+   "vim[31m"))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-preserves-normal-ascii ()
+  "kuro--sanitize-title leaves regular ASCII text unchanged."
+  (kuro-renderer-pipeline-test--check-sanitize "bash" "bash"))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-strips-bidi-override ()
+  "kuro--sanitize-title removes Unicode bidi-override codepoints (U+202A-U+202E)."
+  (kuro-renderer-pipeline-test--check-sanitize
+   (concat "safe" (string #x202e) "text")
+   "safetext"))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-strips-del-char ()
+  "kuro--sanitize-title removes DEL (U+007F)."
+  (kuro-renderer-pipeline-test--check-sanitize
+   (concat "abc" (string #x7f) "def")
+   "abcdef"))
+
+(ert-deftest kuro-renderer-pipeline-sanitize-title-empty-string-stays-empty ()
+  "kuro--sanitize-title returns an empty string when given an empty string."
+  (kuro-renderer-pipeline-test--check-sanitize "" ""))
+
+(ert-deftest kuro-renderer-pipeline-stop-render-loop-cancels-timer ()
+  "kuro--stop-render-loop cancels the render timer and sets kuro--timer to nil."
+  (kuro-renderer-pipeline-test--with-buffer
+    (setq kuro--timer (run-with-timer 9999 nil #'ignore))
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) #'ignore))
+      (kuro--stop-render-loop))
+    (should (null kuro--timer))))
+
+(ert-deftest kuro-renderer-pipeline-stop-render-loop-calls-stop-stream-idle-timer ()
+  "kuro--stop-render-loop calls kuro--stop-stream-idle-timer."
+  (kuro-renderer-pipeline-test--with-buffer
+    (let ((idle-stopped nil))
+      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
+                 (lambda () (setq idle-stopped t))))
+        (kuro--stop-render-loop))
+      (should idle-stopped))))
+
+(ert-deftest kuro-renderer-pipeline-finalize-dirty-updates-sets-count ()
+  "kuro--finalize-dirty-updates sets kuro--last-dirty-count to (length updates)."
+  (kuro-renderer-pipeline-test--with-buffer
+    (setq kuro--last-dirty-count 0)
+    (cl-letf (((symbol-function 'kuro--evict-stale-col-to-buf-entries) #'ignore))
+      (kuro--finalize-dirty-updates '(a b c))
+      (should (= kuro--last-dirty-count 3)))))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-single-row-calls-update-once ()
+  "kuro--apply-dirty-lines calls kuro--update-line-full exactly once for a 1-entry list."
+  (kuro-renderer-pipeline-test--with-buffer
+    (insert "row\n")
+    (let ((call-count 0))
+      (cl-letf (((symbol-function 'kuro--update-line-full)
+                 (lambda (_row _text _faces _c2b) (cl-incf call-count))))
+        (kuro--apply-dirty-lines '((((0 . "hello") . nil) . nil)))
+        (should (= call-count 1))))))
+
 (provide 'kuro-renderer-pipeline-test)
 
 ;;; kuro-renderer-pipeline-test.el ends here

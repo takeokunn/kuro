@@ -256,6 +256,154 @@ fn active_graphics_mut_add_placement_returns_notification_for_known_image() {
     assert_eq!(n.cell_height, 3);
 }
 
+// ── store_image duplicate-id replacement ─────────────────────────────────────
+
+#[test]
+fn store_image_duplicate_id_replaces_existing() {
+    // Storing a second image under the same explicit ID must replace the first.
+    // The image is still retrievable (not deleted) after the replacement.
+    let mut s = make_screen();
+    let data1 = tiny_rgb_image(0xAA);
+    let data2 = tiny_rgb_image(0xBB);
+    s.active_graphics_mut().store_image(Some(10), data1);
+    s.active_graphics_mut().store_image(Some(10), data2);
+    // Image id=10 must still be retrievable (replaced, not deleted).
+    let b64 = s.active_graphics().get_image_png_base64(10);
+    assert!(
+        !b64.is_empty(),
+        "overwritten image id=10 must still be retrievable after replacement"
+    );
+    // Id=11 was never stored; must return empty.
+    assert_eq!(
+        s.active_graphics().get_image_png_base64(11),
+        String::new(),
+        "image id=11 was never stored; must return empty string"
+    );
+}
+
+// ── delete_by_id removes image and prevents placement ────────────────────────
+
+#[test]
+fn delete_by_id_removes_image_and_placement() {
+    let mut s = make_screen();
+    s.active_graphics_mut()
+        .store_image(Some(5), tiny_rgb_image(0x55));
+
+    // add_placement succeeds while the image exists.
+    let placement = ImagePlacement {
+        image_id: 5,
+        row: 0,
+        col: 0,
+        display_cols: 4,
+        display_rows: 2,
+    };
+    let notif = s.active_graphics_mut().add_placement(placement);
+    assert!(notif.is_some(), "add_placement must succeed for stored id=5");
+
+    // delete_by_id removes the image.
+    s.active_graphics_mut().delete_by_id(5);
+
+    // Image must no longer be retrievable.
+    assert_eq!(
+        s.active_graphics().get_image_png_base64(5),
+        String::new(),
+        "image id=5 must not be retrievable after delete_by_id"
+    );
+    // add_placement must also return None after deletion (image gone).
+    let placement2 = ImagePlacement {
+        image_id: 5,
+        row: 1,
+        col: 1,
+        display_cols: 2,
+        display_rows: 1,
+    };
+    let notif2 = s.active_graphics_mut().add_placement(placement2);
+    assert!(
+        notif2.is_none(),
+        "add_placement must return None after delete_by_id"
+    );
+}
+
+// ── clear_all_placements removes placements but keeps images ─────────────────
+
+#[test]
+fn clear_all_placements_removes_placements_images_survive() {
+    let mut s = make_screen();
+    s.active_graphics_mut()
+        .store_image(Some(1), tiny_rgb_image(0x11));
+    s.active_graphics_mut()
+        .store_image(Some(2), tiny_rgb_image(0x22));
+
+    let p1 = ImagePlacement {
+        image_id: 1,
+        row: 0,
+        col: 0,
+        display_cols: 2,
+        display_rows: 1,
+    };
+    let p2 = ImagePlacement {
+        image_id: 2,
+        row: 1,
+        col: 0,
+        display_cols: 3,
+        display_rows: 2,
+    };
+    s.active_graphics_mut().add_placement(p1);
+    s.active_graphics_mut().add_placement(p2);
+
+    // clear_all_placements must remove placement records but keep images.
+    s.active_graphics_mut().clear_all_placements();
+
+    // Images must still be retrievable after placement clear.
+    assert!(
+        !s.active_graphics().get_image_png_base64(1).is_empty(),
+        "image id=1 must still be retrievable after clear_all_placements"
+    );
+    assert!(
+        !s.active_graphics().get_image_png_base64(2).is_empty(),
+        "image id=2 must still be retrievable after clear_all_placements"
+    );
+
+    // A subsequent add_placement must succeed (images are still in store).
+    let p3 = ImagePlacement {
+        image_id: 1,
+        row: 5,
+        col: 5,
+        display_cols: 1,
+        display_rows: 1,
+    };
+    let notif = s.active_graphics_mut().add_placement(p3);
+    assert!(
+        notif.is_some(),
+        "add_placement must succeed after clear_all_placements (images intact)"
+    );
+}
+
+// ── active_graphics count matches store_image calls ──────────────────────────
+
+#[test]
+fn active_graphics_count_matches_store_image_calls() {
+    // After storing N distinct images, all N must be individually accessible.
+    let mut s = make_screen();
+    let ids: [u32; 3] = [10, 20, 30];
+    for &id in &ids {
+        s.active_graphics_mut()
+            .store_image(Some(id), tiny_rgb_image(id as u8));
+    }
+    for &id in &ids {
+        assert!(
+            !s.active_graphics().get_image_png_base64(id).is_empty(),
+            "image id={id} must be retrievable after store_image"
+        );
+    }
+    // An id that was never stored must still be absent.
+    assert_eq!(
+        s.active_graphics().get_image_png_base64(99),
+        String::new(),
+        "image id=99 was never stored; must return empty string"
+    );
+}
+
 // ── PBT — T2 tier (128 cases) ────────────────────────────────────────────────
 
 proptest! {

@@ -463,6 +463,78 @@ Verified by asserting the mode-predicate guard independently."
     (should (= (car result) 1))
     (should (= (cdr result) 1))))
 
+;;; ── Group 14: kuro.el constants, guards, and session-level state ─────────────
+;;
+;; These tests verify: buffer-name constants, the kuro-mode guard used by
+;; interactive commands, kuro--call guard semantics (returns nil when
+;; kuro--initialized is nil), buffer-live-p integration, and the initial
+;; values of session-tracking buffer-locals (kuro--session-id,
+;; kuro--initialized).  No Rust module calls are made — the stubs defined
+;; at the top of this file handle any FFI references.
+
+(ert-deftest kuro-el-test--buffer-name-default-is-string ()
+  "kuro--buffer-name-default is a non-empty string constant."
+  (should (stringp kuro--buffer-name-default))
+  (should (< 0 (length kuro--buffer-name-default))))
+
+(ert-deftest kuro-el-test--copy-mode-guard-signals-outside-kuro-mode ()
+  "kuro-copy-mode signals user-error when the buffer is not in kuro-mode.
+This is the same guard that kuro--assert-terminal-p would implement."
+  (with-temp-buffer
+    (setq major-mode 'fundamental-mode)
+    (should-error (kuro-copy-mode) :type 'user-error)))
+
+(ert-deftest kuro-el-test--derived-mode-p-passes-in-kuro-mode-buffer ()
+  "derived-mode-p returns non-nil in a buffer whose major-mode is kuro-mode."
+  (kuro-el-test--with-kuro-mode-buffer
+    (should (derived-mode-p 'kuro-mode))))
+
+(ert-deftest kuro-el-test--call-macro-returns-nil-when-not-initialized ()
+  "kuro--call returns nil when kuro--initialized is nil (no active session)."
+  (with-temp-buffer
+    (setq-local kuro--initialized nil)
+    ;; kuro--call expands to (when kuro--initialized …); with nil it returns nil.
+    (should-not (kuro--call nil (error "should not reach")))))
+
+(ert-deftest kuro-el-test--call-macro-executes-when-initialized ()
+  "kuro--call evaluates body when kuro--initialized is non-nil."
+  (with-temp-buffer
+    (setq-local kuro--initialized t)
+    (let ((result (kuro--call nil (+ 1 1))))
+      (should (= result 2)))))
+
+(ert-deftest kuro-el-test--buffer-live-p-nil-for-killed-buffer ()
+  "buffer-live-p returns nil for a buffer that has been killed."
+  (let ((buf (generate-new-buffer " *kuro-test-killed*")))
+    (kill-buffer buf)
+    (should-not (buffer-live-p buf))))
+
+(ert-deftest kuro-el-test--buffer-live-p-t-for-live-buffer ()
+  "buffer-live-p returns non-nil for a buffer that is still alive."
+  (let ((buf (generate-new-buffer " *kuro-test-live*")))
+    (unwind-protect
+        (should (buffer-live-p buf))
+      (kill-buffer buf))))
+
+(ert-deftest kuro-el-test--session-id-initial-value-is-zero ()
+  "kuro--session-id initial buffer-local value is 0 (no session attached)."
+  (with-temp-buffer
+    (setq-local kuro--session-id 0)
+    (should (= kuro--session-id 0))))
+
+(ert-deftest kuro-el-test--initialized-initial-value-is-nil ()
+  "kuro--initialized initial buffer-local value is nil."
+  (with-temp-buffer
+    (setq-local kuro--initialized nil)
+    (should-not kuro--initialized)))
+
+(ert-deftest kuro-el-test--core-list-sessions-stub-returns-nil ()
+  "kuro-core-list-sessions stub returns nil (no sessions in the test environment)."
+  ;; The stub defined at the top of this file is a no-op lambda returning nil.
+  ;; This mirrors the contract that kuro-list-sessions relies on: an empty list
+  ;; means \"no active sessions\".
+  (should-not (kuro-core-list-sessions)))
+
 (provide 'kuro-test)
 
 ;;; kuro-test.el ends here

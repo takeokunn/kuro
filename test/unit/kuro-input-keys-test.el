@@ -562,5 +562,66 @@ These keys do not change between normal and application cursor mode."
     (kuro--alt-modified ?\x7f)
     (should (equal (car kuro-input-keys-test--sent) (string ?\e ?\x7f)))))
 
+;;; Group 20 — sequence value spot-checks and mode invariants
+
+(defmacro kuro-input-keys-test--assert-sequence (fn mode expected)
+  "Assert that FN sends EXPECTED when kuro--application-cursor-keys-mode is MODE."
+  `(let ((kuro--application-cursor-keys-mode ,mode))
+     (kuro-input-keys-test--with-capture
+       (funcall ,fn)
+       (should (equal (car kuro-input-keys-test--sent) ,expected)))))
+
+(ert-deftest kuro-input-keys--g20-f1-sends-ss3-p-normal ()
+  "F1 sends ESC O P (SS3 P) in normal cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--F1 nil "\eOP"))
+
+(ert-deftest kuro-input-keys--g20-f1-sends-ss3-p-app ()
+  "F1 sends ESC O P (SS3 P) in application cursor mode — same sequence."
+  (kuro-input-keys-test--assert-sequence #'kuro--F1 t "\eOP"))
+
+(ert-deftest kuro-input-keys--g20-f12-sends-csi-24-tilde-normal ()
+  "F12 sends ESC [ 24 ~ in normal cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--F12 nil "\e[24~"))
+
+(ert-deftest kuro-input-keys--g20-f12-sends-csi-24-tilde-app ()
+  "F12 sends ESC [ 24 ~ in application cursor mode — same sequence."
+  (kuro-input-keys-test--assert-sequence #'kuro--F12 t "\e[24~"))
+
+(ert-deftest kuro-input-keys--g20-home-csi-H-normal ()
+  "HOME sends ESC [ H in normal cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--HOME nil "\e[H"))
+
+(ert-deftest kuro-input-keys--g20-home-csi-1-tilde-app ()
+  "HOME sends ESC [ 1 ~ in application cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--HOME t "\e[1~"))
+
+(ert-deftest kuro-input-keys--g20-end-csi-F-normal ()
+  "END sends ESC [ F in normal cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--END nil "\e[F"))
+
+(ert-deftest kuro-input-keys--g20-end-csi-4-tilde-app ()
+  "END sends ESC [ 4 ~ in application cursor mode."
+  (kuro-input-keys-test--assert-sequence #'kuro--END t "\e[4~"))
+
+(ert-deftest kuro-input-keys--g20-page-up-both-modes ()
+  "PAGE-UP sends ESC [ 5 ~ in both cursor modes."
+  (dolist (mode '(nil t))
+    (kuro-input-keys-test--assert-sequence #'kuro--PAGE-UP mode "\e[5~")))
+
+(ert-deftest kuro-input-keys--g20-page-down-both-modes ()
+  "PAGE-DOWN sends ESC [ 6 ~ in both cursor modes."
+  (dolist (mode '(nil t))
+    (kuro-input-keys-test--assert-sequence #'kuro--PAGE-DOWN mode "\e[6~")))
+
+(ert-deftest kuro-input-keys--g20-insert-both-modes ()
+  "INSERT sends ESC [ 2 ~ in both cursor modes."
+  (dolist (mode '(nil t))
+    (kuro-input-keys-test--assert-sequence #'kuro--INSERT mode "\e[2~")))
+
+(ert-deftest kuro-input-keys--g20-delete-both-modes ()
+  "DELETE sends ESC [ 3 ~ in both cursor modes."
+  (dolist (mode '(nil t))
+    (kuro-input-keys-test--assert-sequence #'kuro--DELETE mode "\e[3~")))
+
 (provide 'kuro-input-keys-test)
 ;;; kuro-input-keys-test.el ends here

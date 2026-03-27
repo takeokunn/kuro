@@ -1373,6 +1373,137 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
     );
 }
 
+// -------------------------------------------------------------------------
+// Additional encode_color tests (Round 35) — named, indexed, RGB, default
+// -------------------------------------------------------------------------
+
+// Named color 8: BrightBlack — first bright variant (index 8).
+test_encode_color!(
+    test_encode_color_named_bright_black_is_8,
+    Color::Named(NamedColor::BrightBlack),
+    COLOR_NAMED_MARKER | 8u32
+);
+
+// Named color 14: BrightCyan (index 14).
+test_encode_color!(
+    test_encode_color_named_bright_cyan_is_14,
+    Color::Named(NamedColor::BrightCyan),
+    COLOR_NAMED_MARKER | 14u32
+);
+
+// Named color 15: BrightWhite (index 15, the highest named index).
+test_encode_color!(
+    test_encode_color_named_bright_white_is_15,
+    Color::Named(NamedColor::BrightWhite),
+    COLOR_NAMED_MARKER | 15u32
+);
+
+// Indexed color 127: mid-range indexed color.
+test_encode_color!(
+    test_encode_color_indexed_127,
+    Color::Indexed(127),
+    COLOR_INDEXED_MARKER | 127u32
+);
+
+// Indexed color 128: one past mid-point — must not collide with 127.
+test_encode_color!(
+    test_encode_color_indexed_128,
+    Color::Indexed(128),
+    COLOR_INDEXED_MARKER | 128u32
+);
+
+// RGB (0, 0, 0): true black — lower 24 bits all zero, no marker bits.
+test_encode_color!(
+    test_encode_color_rgb_black_is_zero,
+    Color::Rgb(0, 0, 0),
+    0u32
+);
+
+// RGB (255, 255, 255): true white — lower 24 bits all one, no marker bits.
+test_encode_color!(
+    test_encode_color_rgb_white_is_0x00ffffff,
+    Color::Rgb(255, 255, 255),
+    0x00FF_FFFFu32
+);
+
+// Color::Default sentinel value via macro.
+test_encode_color!(
+    test_encode_color_default_sentinel_via_macro,
+    Color::Default,
+    COLOR_DEFAULT_SENTINEL
+);
+
+// -------------------------------------------------------------------------
+// Additional encode_attrs tests (Round 35) — individual flags + combined
+// -------------------------------------------------------------------------
+
+// Italic only: SgrFlags::ITALIC is raw bit 2; maps directly to encode bit 2 (0x4).
+test_encode_attrs!(
+    encode_attrs_italic_only_sets_bit_2,
+    attrs_flags!(SgrFlags::ITALIC),
+    shift 2,
+    mask 0x1,
+    eq 1u64
+);
+
+// Underline only (Straight style): sets ATTRS_UNDERLINE_BIT (bit 3 = 0x8).
+test_encode_attrs!(
+    encode_attrs_underline_straight_sets_underline_bit,
+    attrs_underline!(UnderlineStyle::Straight),
+    shift 3,
+    mask 0x1,
+    eq 1u64
+);
+
+// Blink (slow) only: SgrFlags::BLINK_SLOW is raw bit 3; maps to encode bit 4 (0x10).
+test_encode_attrs!(
+    encode_attrs_blink_slow_sets_bit_4,
+    attrs_flags!(SgrFlags::BLINK_SLOW),
+    shift 4,
+    mask 0x1,
+    eq 1u64
+);
+
+// Blink (rapid/fast) only: SgrFlags::BLINK_FAST is raw bit 4; maps to encode bit 5 (0x20).
+test_encode_attrs!(
+    encode_attrs_blink_fast_sets_bit_5,
+    attrs_flags!(SgrFlags::BLINK_FAST),
+    shift 5,
+    mask 0x1,
+    eq 1u64
+);
+
+// Crossed-out (strikethrough) only: SgrFlags::STRIKETHROUGH is raw bit 7; maps to encode bit 8 (0x100).
+test_encode_attrs!(
+    encode_attrs_strikethrough_sets_bit_8,
+    attrs_flags!(SgrFlags::STRIKETHROUGH),
+    shift 8,
+    mask 0x1,
+    eq 1u64
+);
+
+// Inverse only: SgrFlags::INVERSE is raw bit 5; maps to encode bit 6 (0x40).
+test_encode_attrs!(
+    encode_attrs_inverse_sets_bit_6,
+    attrs_flags!(SgrFlags::INVERSE),
+    shift 6,
+    mask 0x1,
+    eq 1u64
+);
+
+// Bold + italic + underline (Straight) combined: bits 0 (bold), 2 (italic), 3 (underline) → 0xD.
+test_encode_attrs!(
+    encode_attrs_bold_italic_underline_combined,
+    SgrAttributes {
+        flags: SgrFlags::BOLD | SgrFlags::ITALIC,
+        underline_style: UnderlineStyle::Straight,
+        ..Default::default()
+    },
+    shift 0,
+    mask 0xF,
+    eq 0xDu64
+);
+
 /// `encode_color` for `Color::Rgb(255, 255, 255)` (true white) must produce
 /// `0x00FFFFFF` with no marker bits set — this is the maximum RGB value and
 /// must not be confused with any sentinel or named-color encoding.

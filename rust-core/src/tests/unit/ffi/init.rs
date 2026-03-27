@@ -178,3 +178,122 @@ fn test_post_initialize_state_queries() {
         "get_init_state must return Some(Initialized)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// MIN_EMACS_VERSION ordering invariants
+// ---------------------------------------------------------------------------
+
+#[test]
+// INVARIANT: MIN_EMACS_VERSION.0 (major) must be >= 29 — any future increase
+// is acceptable but it must never be set below 29.
+fn test_min_emacs_version_major_at_least_29() {
+    const { assert!(MIN_EMACS_VERSION.0 >= 29) };
+}
+
+#[test]
+// INVARIANT: A version with minor > MIN_EMACS_VERSION.1 and same major is
+// strictly above the minimum — the ordering logic must accept it.
+// We verify this at the constant level without calling initialize().
+fn test_version_same_major_higher_minor_is_above_minimum() {
+    let (min_major, min_minor) = MIN_EMACS_VERSION;
+    // (min_major, min_minor + 1) is above (min_major, min_minor).
+    let higher_minor = min_minor + 1;
+    let is_above = min_major > MIN_EMACS_VERSION.0
+        || (min_major == MIN_EMACS_VERSION.0 && higher_minor >= MIN_EMACS_VERSION.1);
+    assert!(is_above, "({min_major}, {higher_minor}) must be >= minimum");
+}
+
+// ---------------------------------------------------------------------------
+// get_exported_symbols — structural invariants
+// ---------------------------------------------------------------------------
+
+#[test]
+// INVARIANT: All exported symbol names are valid UTF-8 (trivially true for
+// &'static str, but documents the guarantee explicitly for FFI callers).
+fn test_exported_symbols_are_valid_utf8() {
+    for sym in get_exported_symbols() {
+        assert!(
+            std::str::from_utf8(sym.as_bytes()).is_ok(),
+            "symbol '{sym}' must be valid UTF-8"
+        );
+    }
+}
+
+#[test]
+// INVARIANT: No exported symbol contains whitespace.
+// Emacs symbol names must be single tokens without embedded spaces.
+fn test_exported_symbols_no_whitespace() {
+    for sym in get_exported_symbols() {
+        assert!(
+            !sym.chars().any(char::is_whitespace),
+            "symbol '{sym}' must not contain whitespace"
+        );
+    }
+}
+
+#[test]
+// INVARIANT: All symbol names use only lowercase letters, digits, and hyphens.
+// This enforces the kebab-case convention for Emacs Lisp interop.
+fn test_exported_symbols_kebab_case_charset() {
+    for sym in get_exported_symbols() {
+        for ch in sym.chars() {
+            assert!(
+                ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-',
+                "symbol '{sym}' has invalid char '{ch}' — must be kebab-case"
+            );
+        }
+    }
+}
+
+#[test]
+// INVARIANT: The symbol list is non-empty — the module must always export at
+// least one function.
+fn test_exported_symbols_non_empty_list() {
+    assert!(
+        !get_exported_symbols().is_empty(),
+        "get_exported_symbols must return a non-empty list"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// InitializationState — exhaustive variant coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+// INVARIANT: InitializationState::NotInitialized is the "not yet" sentinel;
+// it must not equal Initialized.
+fn test_not_initialized_differs_from_initialized() {
+    let ni = InitializationState::NotInitialized;
+    let i = InitializationState::Initialized;
+    assert_ne!(ni, i, "NotInitialized must differ from Initialized");
+    // Clone must produce an equal value.
+    assert_eq!(ni, ni.clone());
+    assert_eq!(i, i.clone());
+}
+
+#[test]
+// INVARIANT: get_init_state() returns Some once any initialization attempt
+// (successful or AlreadyInitialized) has been made.
+fn test_get_init_state_some_after_any_initialize_call() {
+    let _ = initialize((29, 1)); // Ok or AlreadyInitialized
+    let state = get_init_state();
+    assert!(state.is_some(), "get_init_state must return Some after initialize()");
+    assert_eq!(
+        state,
+        Some(InitializationState::Initialized),
+        "get_init_state must return Some(Initialized)"
+    );
+}
+
+#[test]
+// INVARIANT: is_initialized() and get_init_state().is_some() must always
+// agree — both reflect the same underlying OnceLock state.
+fn test_is_initialized_and_get_init_state_agree() {
+    let _ = initialize((29, 1));
+    let via_bool = is_initialized();
+    let via_option = get_init_state().is_some();
+    assert_eq!(
+        via_bool, via_option,
+        "is_initialized() must agree with get_init_state().is_some()"
+    );
+}

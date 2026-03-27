@@ -584,7 +584,98 @@ fn test_get_scrollback_viewport_line_at_full_offset_bottom_row() {
     );
 }
 
-// ── clear_scrollback does not reset scroll_offset ────────────────────────────
+// ── scrollback empty on new screen (explicit) ─────────────────────────────────
+
+#[test]
+fn test_scrollback_empty_on_new_screen() {
+    let s = make_screen();
+    assert_eq!(
+        s.scrollback_line_count, 0,
+        "scrollback_line_count must be 0 on a fresh screen"
+    );
+    assert!(
+        s.scrollback_buffer.is_empty(),
+        "scrollback_buffer must be empty on a fresh screen"
+    );
+}
+
+// ── push one line: count becomes 1 ───────────────────────────────────────────
+
+#[test]
+fn test_push_one_line_count_is_one() {
+    let mut s = make_screen();
+    s.scroll_up(1, Color::Default);
+    assert_eq!(
+        s.scrollback_line_count, 1,
+        "scrollback_line_count must be 1 after one scroll_up"
+    );
+    assert_eq!(
+        s.scrollback_buffer.len(),
+        1,
+        "scrollback_buffer.len() must be 1 after one scroll_up"
+    );
+}
+
+// ── push lines up to max: count equals max ────────────────────────────────────
+
+#[test]
+fn test_push_up_to_max_count_equals_max() {
+    let mut s = Screen::new(5, 10);
+    s.set_scrollback_max_lines(4);
+    for _ in 0..4 {
+        s.scroll_up(1, Color::Default);
+    }
+    assert_eq!(
+        s.scrollback_line_count, 4,
+        "scrollback_line_count must equal max_lines when filled to capacity"
+    );
+    assert_eq!(s.scrollback_buffer.len(), 4);
+}
+
+// ── get_scrollback_lines(0) is the oldest; get_scrollback_lines(n-1) is newest
+
+#[test]
+fn test_get_scrollback_lines_oldest_and_newest_order() {
+    // get_scrollback_lines returns most-recent first (index 0 = newest).
+    // Push '1', '2', '3' — newest is '3' (index 0), oldest is '1' (index 2).
+    let mut s = Screen::new(5, 80);
+    let attrs = crate::types::cell::SgrAttributes::default();
+    for ch in ['1', '2', '3'] {
+        s.move_cursor(0, 0);
+        s.print(ch, attrs, false);
+        s.scroll_up(1, Color::Default);
+    }
+    let lines = s.get_scrollback_lines(3);
+    assert_eq!(lines.len(), 3);
+    // Index 0 = newest ('3').
+    assert_eq!(
+        lines[0].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('3'),
+        "index 0 of get_scrollback_lines must be the newest line"
+    );
+    // Index count-1 = oldest ('1').
+    assert_eq!(
+        lines[2].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('1'),
+        "index count-1 of get_scrollback_lines must be the oldest line"
+    );
+}
+
+// ── get_scrollback_lines(count) out-of-bounds returns only count items ────────
+
+#[test]
+fn test_get_scrollback_lines_request_more_than_available() {
+    // Requesting more lines than are in the buffer must return only what exists.
+    let s = screen_with_scrollback(5);
+    let lines = s.get_scrollback_lines(999);
+    assert_eq!(
+        lines.len(),
+        5,
+        "get_scrollback_lines(999) must return only the 5 available lines"
+    );
+}
+
+// ── clear scrollback does not reset scroll_offset ────────────────────────────
 
 #[test]
 fn test_clear_scrollback_does_not_reset_scroll_offset() {

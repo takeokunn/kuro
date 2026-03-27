@@ -887,6 +887,86 @@ If the buffer is killed between timer creation and the tick, the
       (should (equal kuro--typewriter-current-text ""))
       (should (= kuro--typewriter-written-len 0)))))
 
+;;; Group 16 — special key byte sequences (RET, TAB, DEL, Ctrl codes)
+
+;; These tests verify the byte values that kuro--RET, kuro--TAB, kuro--DEL,
+;; and kuro--send-special send to the PTY.  kuro--send-special is loaded as
+;; a transitive dependency (kuro-typewriter -> kuro-renderer -> kuro-input).
+;; We stub kuro--send-key and kuro--schedule-immediate-render to capture output.
+
+(defmacro kuro-typewriter-test--with-key-capture (var &rest body)
+  "Run BODY with `kuro--send-key' captured into VAR (most recent first).
+`kuro--schedule-immediate-render' is stubbed as a no-op."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'kuro--send-key)
+                (lambda (data) (push data ,var)))
+               ((symbol-function 'kuro--schedule-immediate-render)
+                (lambda () nil)))
+       ,@body)))
+
+(ert-deftest kuro-typewriter-ret-sends-carriage-return ()
+  "kuro--RET sends the carriage-return byte \\x0d (ASCII 13)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--RET)
+    (should (equal (car sent) (string ?\r)))))
+
+(ert-deftest kuro-typewriter-tab-sends-horizontal-tab ()
+  "kuro--TAB sends the horizontal-tab byte \\x09 (ASCII 9)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--TAB)
+    (should (equal (car sent) (string ?\t)))))
+
+(ert-deftest kuro-typewriter-del-sends-rubout-byte ()
+  "kuro--DEL sends the DEL byte \\x7f (ASCII 127), the modern backspace."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--DEL)
+    (should (equal (car sent) (string ?\x7f)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-a ()
+  "kuro--send-special 1 sends \\x01 (Ctrl+A / SOH)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 1)
+    (should (equal (car sent) (string 1)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-c ()
+  "kuro--send-special 3 sends \\x03 (Ctrl+C / ETX)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 3)
+    (should (equal (car sent) (string 3)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-z ()
+  "kuro--send-special 26 sends \\x1a (Ctrl+Z / SUB)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 26)
+    (should (equal (car sent) (string 26)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-bracket ()
+  "kuro--send-special 27 sends \\x1b (ESC / Ctrl+[)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 27)
+    (should (equal (car sent) (string 27)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-backslash ()
+  "kuro--send-special 28 sends \\x1c (Ctrl+\\\\)."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 28)
+    (should (equal (car sent) (string 28)))))
+
+(ert-deftest kuro-typewriter-send-special-ctrl-right-bracket ()
+  "kuro--send-special 29 sends \\x1d (Ctrl+])."
+  (kuro-typewriter-test--with-key-capture sent
+    (kuro--send-special 29)
+    (should (equal (car sent) (string 29)))))
+
+(ert-deftest kuro-typewriter-send-special-sends-exactly-one-byte-string ()
+  "kuro--send-special always sends a single-byte string to the PTY."
+  (dolist (byte '(1 3 9 13 26 27 28 29 127))
+    (kuro-typewriter-test--with-key-capture sent
+      (kuro--send-special byte)
+      (should (= (length sent) 1))
+      (should (= (length (car sent)) 1)))))
+
 (provide 'kuro-typewriter-test)
 
 ;;; kuro-typewriter-test.el ends here

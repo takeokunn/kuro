@@ -551,6 +551,126 @@ the \"red\" entry in kuro--named-colors."
     (let ((errors (kuro--validate-config)))
       (should-not (cl-some (lambda (e) (string-match-p "shell" e)) errors)))))
 
+;;; Group 19: kuro--validate-config — color string edge cases
+
+(ert-deftest test-kuro-validate-config-color-no-hash-prefix ()
+  "A hex color without the # prefix is rejected."
+  (let ((kuro-color-green "00ff00"))
+    (let ((errors (kuro--validate-config)))
+      (should (cl-some (lambda (e) (string-match-p "kuro-color-green" e)) errors)))))
+
+(ert-deftest test-kuro-validate-config-color-too-short ()
+  "A 5-digit hex color is rejected."
+  (let ((kuro-color-yellow "#abcde"))
+    (let ((errors (kuro--validate-config)))
+      (should (cl-some (lambda (e) (string-match-p "kuro-color-yellow" e)) errors)))))
+
+(ert-deftest test-kuro-validate-config-color-too-long ()
+  "An 8-digit hex color (RGBA) is rejected — must be exactly 6 digits."
+  (let ((kuro-color-cyan "#aabbccdd"))
+    (let ((errors (kuro--validate-config)))
+      (should (cl-some (lambda (e) (string-match-p "kuro-color-cyan" e)) errors)))))
+
+(ert-deftest test-kuro-validate-config-color-nil-rejected ()
+  "nil as a color value is rejected."
+  (let ((kuro-color-magenta nil))
+    (let ((errors (kuro--validate-config)))
+      (should (cl-some (lambda (e) (string-match-p "kuro-color-magenta" e)) errors)))))
+
+(ert-deftest test-kuro-validate-config-shell-empty-string-is-valid ()
+  "An empty string kuro-shell is valid (no shell error)."
+  (let ((kuro-shell ""))
+    (let ((errors (kuro--validate-config)))
+      (should-not (cl-some (lambda (e) (string-match-p "shell" e)) errors)))))
+
+(ert-deftest test-kuro-validate-config-negative-frame-rate-errors ()
+  "A negative frame-rate produces an error mentioning frame-rate."
+  (let ((kuro-frame-rate -10))
+    (let ((errors (kuro--validate-config)))
+      (should (cl-some (lambda (e) (string-match-p "frame-rate" e)) errors)))))
+
+;;; Group 20: kuro-validate-config interactive wrapper — error message branch
+
+(ert-deftest test-kuro-validate-config-interactive-error-branch ()
+  "kuro-validate-config prints error count in message when errors exist."
+  (let ((msgs nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) msgs))))
+      (let ((kuro-scrollback-size -1)
+            (kuro-frame-rate 0))
+        (kuro-validate-config)))
+    (should (cl-some (lambda (m) (string-match-p "error" m)) msgs))))
+
+(ert-deftest test-kuro-validate-config-interactive-ok-branch ()
+  "kuro-validate-config prints 'valid' message when all settings are correct."
+  (let ((msgs nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) msgs))))
+      (kuro-validate-config))
+    (should (cl-some (lambda (m) (string-match-p "valid" m)) msgs))))
+
+;;; Group 21: defcustom default values and constants
+
+(ert-deftest test-kuro-default-rows-constant ()
+  "kuro--default-rows is 24."
+  (should (= kuro--default-rows 24)))
+
+(ert-deftest test-kuro-default-cols-constant ()
+  "kuro--default-cols is 80."
+  (should (= kuro--default-cols 80)))
+
+(ert-deftest test-kuro-scrollback-size-default ()
+  "kuro-scrollback-size defaults to 10000."
+  (should (= (default-value 'kuro-scrollback-size) 10000)))
+
+(ert-deftest test-kuro-frame-rate-default ()
+  "kuro-frame-rate defaults to 120."
+  (should (= (default-value 'kuro-frame-rate) 120)))
+
+(ert-deftest test-kuro-tui-frame-rate-default ()
+  "kuro-tui-frame-rate defaults to 5."
+  (should (= (default-value 'kuro-tui-frame-rate) 5)))
+
+(ert-deftest test-kuro-input-echo-delay-default ()
+  "kuro-input-echo-delay defaults to 0.01."
+  (should (= (default-value 'kuro-input-echo-delay) 0.01)))
+
+;;; Group 22: kuro--check-positive-integer — nil and multi-accumulation
+
+(ert-deftest test-kuro-check-positive-integer-nil-is-invalid ()
+  "kuro--check-positive-integer treats nil as invalid."
+  (let ((errors nil)
+        (kuro-scrollback-size nil))
+    (kuro--check-positive-integer kuro-scrollback-size errors)
+    (should (consp errors))))
+
+(ert-deftest test-kuro-check-positive-integer-accumulates-multiple ()
+  "kuro--check-positive-integer pushes onto an existing error list (now 2 items)."
+  (let ((errors '("pre-existing error"))
+        (kuro-frame-rate 0))
+    (kuro--check-positive-integer kuro-frame-rate errors)
+    ;; push prepends: new error is at car, pre-existing is at cadr.
+    (should (= (length errors) 2))
+    (should (string-match-p "kuro-frame-rate" (car errors)))
+    (should (string= (cadr errors) "pre-existing error"))))
+
+(ert-deftest test-kuro-check-positive-integer-string-value ()
+  "kuro--check-positive-integer treats a string value as invalid."
+  (let ((errors nil)
+        (kuro-tui-frame-rate "5"))
+    (kuro--check-positive-integer kuro-tui-frame-rate errors)
+    (should (consp errors))
+    (should (string-match-p "kuro-tui-frame-rate" (car errors)))))
+
+(ert-deftest test-kuro-check-positive-integer-large-value-valid ()
+  "kuro--check-positive-integer treats a large positive integer as valid."
+  (let ((errors nil)
+        (kuro-scrollback-size 1000000))
+    (kuro--check-positive-integer kuro-scrollback-size errors)
+    (should (null errors))))
+
 (provide 'kuro-config-test)
 
 ;;; kuro-config-test.el ends here

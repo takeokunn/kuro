@@ -1033,6 +1033,131 @@ all cond branches and produce nil."
     (let ((sent (kuro-input-test--capture-sent (kuro--END))))
       (should (equal sent '("\e[4~"))))))
 
+;;; Group 26: kuro-send-next-key — dispatch via kuro--encode-key-event
+
+(ert-deftest kuro-input-send-next-key-dispatches-supported-event ()
+  "kuro-send-next-key sends the encoded string when the key is supported."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'read-event)
+               (lambda () ?a))
+              ((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil))
+              ((symbol-function 'message) #'ignore))
+      (kuro-send-next-key)
+      ;; Plain 'a' with no modifiers encodes as "a"
+      (should (equal sent (list "a"))))))
+
+(ert-deftest kuro-input-send-next-key-shows-message-for-unsupported-event ()
+  "kuro-send-next-key shows a message and does not call kuro--send-key for unsupported keys."
+  (let ((sent nil)
+        (msg nil))
+    (cl-letf (((symbol-function 'read-event)
+               ;; Return a synthetic event whose basic-type is an unknown symbol
+               (lambda () 'f99))
+              ((symbol-function 'kuro--encode-key-event)
+               (lambda (_ev) nil))
+              ((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'message)
+               (lambda (fmt &rest _args)
+                 (setq msg fmt)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
+      (kuro-send-next-key)
+      (should (null sent))
+      (should (stringp msg)))))
+
+(ert-deftest kuro-input-send-next-key-ctrl-char-encodes-control-byte ()
+  "kuro-send-next-key with a Ctrl+letter event sends the control byte."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'read-event)
+               (lambda () ?\C-c))
+              ((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil))
+              ((symbol-function 'message) #'ignore))
+      (kuro-send-next-key)
+      ;; ?\C-c = 3; encoded as (string (logand ?c 31)) = (string 3)
+      (should (equal sent (list (string (logand ?c 31))))))))
+
+;;; Group 27: kuro--app-keypad-mode and kuro--pending-render-timer — buffer-local vars
+
+(ert-deftest kuro-input-app-keypad-mode-is-buffer-local ()
+  "kuro--app-keypad-mode is buffer-local (each kuro buffer manages its own state)."
+  (let ((buf1 (get-buffer-create " *kuro-input-kpd-1*"))
+        (buf2 (get-buffer-create " *kuro-input-kpd-2*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf1 (setq kuro--app-keypad-mode t))
+          (with-current-buffer buf2 (setq kuro--app-keypad-mode nil))
+          (should (with-current-buffer buf1 kuro--app-keypad-mode))
+          (should-not (with-current-buffer buf2 kuro--app-keypad-mode)))
+      (kill-buffer buf1)
+      (kill-buffer buf2))))
+
+(ert-deftest kuro-input-pending-render-timer-is-buffer-local ()
+  "kuro--pending-render-timer is buffer-local."
+  (let ((buf1 (get-buffer-create " *kuro-input-timer-1*"))
+        (buf2 (get-buffer-create " *kuro-input-timer-2*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf1 (setq kuro--pending-render-timer 'fake-timer))
+          (with-current-buffer buf2 (setq kuro--pending-render-timer nil))
+          (should (eq (with-current-buffer buf1 kuro--pending-render-timer) 'fake-timer))
+          (should (null (with-current-buffer buf2 kuro--pending-render-timer))))
+      (kill-buffer buf1)
+      (kill-buffer buf2))))
+
+(ert-deftest kuro-input-application-cursor-keys-mode-is-buffer-local ()
+  "kuro--application-cursor-keys-mode is buffer-local."
+  (let ((buf1 (get-buffer-create " *kuro-input-ackm-1*"))
+        (buf2 (get-buffer-create " *kuro-input-ackm-2*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf1 (setq kuro--application-cursor-keys-mode t))
+          (with-current-buffer buf2 (setq kuro--application-cursor-keys-mode nil))
+          (should (with-current-buffer buf1 kuro--application-cursor-keys-mode))
+          (should-not (with-current-buffer buf2 kuro--application-cursor-keys-mode)))
+      (kill-buffer buf1)
+      (kill-buffer buf2))))
+
+;;; Group 28: kuro--encode-kitty-key — extended modifier bitmasks
+
+(ert-deftest kuro-input-encode-kitty-key-super-modifier ()
+  "kuro--encode-kitty-key with super (bitmask 8) produces modifier param 9."
+  ;; super=8 → wire = 8 + kuro--kitty-modifier-offset (1) = 9
+  (should (equal (kuro--encode-kitty-key 65 8) "\e[65;9u")))
+
+(ert-deftest kuro-input-encode-kitty-key-hyper-modifier ()
+  "kuro--encode-kitty-key with hyper (bitmask 16) produces modifier param 17."
+  (should (equal (kuro--encode-kitty-key 65 16) "\e[65;17u")))
+
+(ert-deftest kuro-input-encode-kitty-key-meta-modifier ()
+  "kuro--encode-kitty-key with meta (bitmask 32) produces modifier param 33."
+  (should (equal (kuro--encode-kitty-key 65 32) "\e[65;33u")))
+
+(ert-deftest kuro-input-encode-kitty-key-shift-ctrl-combination ()
+  "kuro--encode-kitty-key with shift+ctrl (bitmask 5) produces modifier param 6."
+  ;; shift=1, ctrl=4 → bitmask=5 → wire = 5 + 1 = 6
+  (should (equal (kuro--encode-kitty-key 65 5) "\e[65;6u")))
+
+(ert-deftest kuro-input-encode-kitty-key-unicode-codepoint ()
+  "kuro--encode-kitty-key encodes a non-ASCII Unicode codepoint correctly."
+  ;; U+3042 (HIRAGANA LETTER A) with no modifiers
+  (should (equal (kuro--encode-kitty-key #x3042 0) "\e[12354u")))
+
+(ert-deftest kuro-input-encode-kitty-key-space-codepoint ()
+  "kuro--encode-kitty-key with space codepoint (32) and no modifiers."
+  (should (equal (kuro--encode-kitty-key 32 0) "\e[32u")))
+
+(ert-deftest kuro-input-encode-kitty-key-all-modifiers-combined ()
+  "kuro--encode-kitty-key with all common modifiers (shift+alt+ctrl = 7) produces param 8."
+  ;; shift=1, alt=2, ctrl=4 → bitmask=7 → wire = 7 + 1 = 8
+  (should (equal (kuro--encode-kitty-key 65 7) "\e[65;8u")))
+
 (provide 'kuro-input-test)
 
 ;;; kuro-input-test.el ends here

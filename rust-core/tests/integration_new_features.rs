@@ -414,3 +414,194 @@ fn test_decrc_without_prior_decsc_is_noop() {
         "DECRC without prior DECSC must not change col"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECTCEM — cursor visibility toggle
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?25l hides the cursor; ?25h shows it again.
+#[test]
+fn test_dectcem_hide_show_toggle() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(t.cursor_visible(), "cursor must be visible by default");
+    t.advance(b"\x1b[?25l"); // DECTCEM off — hide cursor
+    assert!(!t.cursor_visible(), "cursor must be hidden after ?25l");
+    t.advance(b"\x1b[?25h"); // DECTCEM on — show cursor
+    assert!(t.cursor_visible(), "cursor must be visible after ?25h");
+}
+
+/// RIS (ESC c) must restore cursor visibility to true even if it was hidden.
+#[test]
+fn test_dectcem_restored_by_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?25l"); // hide
+    assert!(!t.cursor_visible());
+    t.advance(b"\x1bc"); // RIS
+    assert!(
+        t.cursor_visible(),
+        "RIS must restore cursor visibility to true"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Focus events (?1004)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?1004h enables focus events; ?1004l disables them.
+#[test]
+fn test_focus_events_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.dec_modes().focus_events,
+        "focus_events must default to false"
+    );
+    t.advance(b"\x1b[?1004h"); // enable
+    assert!(
+        t.dec_modes().focus_events,
+        "focus_events must be true after ?1004h"
+    );
+    t.advance(b"\x1b[?1004l"); // disable
+    assert!(
+        !t.dec_modes().focus_events,
+        "focus_events must be false after ?1004l"
+    );
+}
+
+/// RIS must reset focus_events to false.
+#[test]
+fn test_focus_events_cleared_by_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1004h");
+    assert!(t.dec_modes().focus_events);
+    t.advance(b"\x1bc"); // RIS
+    assert!(
+        !t.dec_modes().focus_events,
+        "RIS must reset focus_events to false"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mouse tracking modes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?1000h enables normal mouse tracking; ?1000l disables it.
+#[test]
+fn test_mouse_mode_1000_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert_eq!(t.dec_modes().mouse_mode, 0, "mouse_mode must default to 0");
+    t.advance(b"\x1b[?1000h");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1000,
+        "mouse_mode must be 1000 after ?1000h"
+    );
+    t.advance(b"\x1b[?1000l");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        0,
+        "mouse_mode must be 0 after ?1000l"
+    );
+}
+
+/// SGR mouse (?1006h) must set mouse_sgr; ?1006l clears it.
+#[test]
+fn test_mouse_sgr_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.dec_modes().mouse_sgr,
+        "mouse_sgr must default to false"
+    );
+    t.advance(b"\x1b[?1006h");
+    assert!(
+        t.dec_modes().mouse_sgr,
+        "mouse_sgr must be true after ?1006h"
+    );
+    t.advance(b"\x1b[?1006l");
+    assert!(
+        !t.dec_modes().mouse_sgr,
+        "mouse_sgr must be false after ?1006l"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// palette_dirty / default_colors_dirty flags
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OSC 4 sets palette_dirty; reset() clears it.
+#[test]
+fn test_palette_dirty_set_and_cleared_by_reset() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(!t.palette_dirty(), "palette_dirty must start false");
+    t.advance(b"\x1b]4;2;rgb:00/ff/00\x07"); // set palette index 2 to green
+    assert!(
+        t.palette_dirty(),
+        "palette_dirty must be true after OSC 4"
+    );
+    t.reset();
+    assert!(
+        !t.palette_dirty(),
+        "palette_dirty must be false after reset()"
+    );
+}
+
+/// OSC 10 sets default_colors_dirty; reset() clears it.
+#[test]
+fn test_default_colors_dirty_set_and_cleared_by_reset() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.default_colors_dirty(),
+        "default_colors_dirty must start false"
+    );
+    t.advance(b"\x1b]10;rgb:ff/ff/ff\x07"); // set default fg
+    assert!(
+        t.default_colors_dirty(),
+        "default_colors_dirty must be true after OSC 10"
+    );
+    t.reset();
+    assert!(
+        !t.default_colors_dirty(),
+        "default_colors_dirty must be false after reset()"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OSC 1 — icon title (alias for window title in many terminals)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OSC 1 sets the icon name; must not panic and cursor must remain in bounds.
+#[test]
+fn test_osc1_icon_title_does_not_panic() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b]1;my-icon\x07"); // OSC 1: icon title
+    assert!(t.cursor_row() < 24);
+    assert!(t.cursor_col() < 80);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// soft_reset keyboard stack
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// soft_reset (DECSTR) must also clear keyboard_flags_stack.
+#[test]
+fn test_soft_reset_clears_keyboard_flags_stack() {
+    let mut t = TerminalCore::new(24, 80);
+    // Push two flag sets onto the stack
+    t.advance(b"\x1b[>1u");
+    t.advance(b"\x1b[>2u");
+    assert_eq!(
+        t.dec_modes().keyboard_flags_stack.len(),
+        2,
+        "stack must have 2 entries after 2 pushes"
+    );
+    t.soft_reset();
+    assert_eq!(
+        t.dec_modes().keyboard_flags_stack.len(),
+        0,
+        "soft_reset must clear keyboard_flags_stack"
+    );
+    assert_eq!(
+        t.dec_modes().keyboard_flags,
+        0,
+        "soft_reset must reset keyboard_flags to 0"
+    );
+}

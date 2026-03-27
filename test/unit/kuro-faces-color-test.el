@@ -514,6 +514,85 @@ The sentinel check precedes the tag-bit check in kuro--decode-ffi-color."
   (kuro-faces-color-test--with-named-colors '()
     (should (null (kuro--color-to-emacs '(indexed . 256))))))
 
+;;; Group 14: named color full-range, cube/grayscale boundary verification,
+;;;           and kuro--color-to-emacs default fg/bg handling
+
+;; Macro: iterate named-color indices and verify decoded name
+(defmacro kuro-faces-color-test--assert-named-color (index expected-name)
+  "Assert that FFI encoding of named color at INDEX decodes to EXPECTED-NAME."
+  `(let ((result (kuro--decode-ffi-color (logior kuro--color-tag-named ,index))))
+     (should (consp result))
+     (should (eq (car result) 'named))
+     (should (string= (cdr result) ,expected-name))))
+
+(ert-deftest kuro-faces-color--named-colors-indices-2-and-3 ()
+  "Named color indices 2 (green) and 3 (yellow) decode correctly."
+  (kuro-faces-color-test--assert-named-color 2 "green")
+  (kuro-faces-color-test--assert-named-color 3 "yellow"))
+
+(ert-deftest kuro-faces-color--named-colors-indices-4-and-6 ()
+  "Named color indices 4 (blue) and 6 (cyan) decode correctly."
+  (kuro-faces-color-test--assert-named-color 4 "blue")
+  (kuro-faces-color-test--assert-named-color 6 "cyan"))
+
+(ert-deftest kuro-faces-color--named-colors-indices-9-10-11 ()
+  "Named color indices 9/10/11 decode to bright-red/bright-green/bright-yellow."
+  (kuro-faces-color-test--assert-named-color 9  "bright-red")
+  (kuro-faces-color-test--assert-named-color 10 "bright-green")
+  (kuro-faces-color-test--assert-named-color 11 "bright-yellow"))
+
+(ert-deftest kuro-faces-color--named-colors-indices-12-13 ()
+  "Named color indices 12/13 decode to bright-blue/bright-magenta."
+  (kuro-faces-color-test--assert-named-color 12 "bright-blue")
+  (kuro-faces-color-test--assert-named-color 13 "bright-magenta"))
+
+(ert-deftest kuro-faces-color--color-cube-table-entry-16-exact ()
+  "Index 16 (cube offset 0): r=0,g=0,b=0 → #000000."
+  ;; offset = 16-16 = 0; r=0*51=0, g=0*51=0, b=0*51=0
+  (should (equal (aref kuro--color-cube-table 0) "#000000")))
+
+(ert-deftest kuro-faces-color--indexed-to-emacs-index-16-exact ()
+  "kuro--indexed-to-emacs 16 returns #000000 (start of cube)."
+  (should (equal (kuro--indexed-to-emacs 16) "#000000")))
+
+(ert-deftest kuro-faces-color--indexed-to-emacs-index-232-exact ()
+  "kuro--indexed-to-emacs 232 returns #080808 (start of grayscale ramp).
+offset=0, val=0*10+8=8=0x08 → #080808."
+  (should (equal (kuro--indexed-to-emacs 232) "#080808")))
+
+(ert-deftest kuro-faces-color--indexed-to-emacs-index-255-exact ()
+  "kuro--indexed-to-emacs 255 returns #eeeeee (last grayscale ramp entry).
+offset=23, val=23*10+8=238=0xee → #eeeeee."
+  (should (equal (kuro--indexed-to-emacs 255) "#eeeeee")))
+
+(ert-deftest kuro-faces-color--color-to-emacs-default-fg-and-bg ()
+  "kuro--color-to-emacs returns nil for both :default (fg) and :default (bg).
+This models the no-color fast-path where both fg and bg use terminal default."
+  (kuro-faces-color-test--with-named-colors '()
+    (should (null (kuro--color-to-emacs :default)))
+    ;; Simulate a second call for bg — must also be nil.
+    (should (null (kuro--color-to-emacs :default)))))
+
+(ert-deftest kuro-faces-color--color-to-emacs-rgb-full-coverage ()
+  "kuro--color-to-emacs handles (rgb . N) for low, mid, and max N values."
+  (kuro-faces-color-test--with-named-colors '()
+    (should (equal (kuro--color-to-emacs '(rgb . 0))        "#000000"))
+    (should (equal (kuro--color-to-emacs '(rgb . #x808080)) "#808080"))
+    (should (equal (kuro--color-to-emacs '(rgb . #xFFFFFF)) "#ffffff"))))
+
+(ert-deftest kuro-faces-color--color-cube-table-index-108-exact ()
+  "kuro--color-cube-table entry at offset 108 (index 124): r=3,g=0,b=0 → #990000."
+  ;; offset = 108; r=(108/36)*51=3*51=153=0x99; g=((108 mod 36)/6)*51=0*51=0; b=(108 mod 6)*51=0
+  (should (equal (aref kuro--color-cube-table 108) "#990000")))
+
+(ert-deftest kuro-faces-color--grayscale-table-entry-0-exact ()
+  "kuro--grayscale-table entry 0 (index 232): val=0*10+8=8=0x08 → #080808."
+  (should (equal (aref kuro--grayscale-table 0) "#080808")))
+
+(ert-deftest kuro-faces-color--grayscale-table-entry-23-exact ()
+  "kuro--grayscale-table entry 23 (index 255): val=23*10+8=238=0xee → #eeeeee."
+  (should (equal (aref kuro--grayscale-table 23) "#eeeeee")))
+
 (provide 'kuro-faces-color-test)
 
 ;;; kuro-faces-color-test.el ends here

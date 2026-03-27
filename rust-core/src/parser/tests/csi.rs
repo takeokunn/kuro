@@ -148,6 +148,42 @@ fn test_hvp_bounds() {
     assert_eq!(term.screen.cursor.col, 49); // 50 cols max
 }
 
+// ── Cursor-direction default-parameter macro ──────────────────────────────────
+
+/// Table-driven macro for testing that CSI cursor-movement functions treat an
+/// absent parameter identically to an explicit 1.
+///
+/// Pattern: `test_name : fn_under_test , start (row, col) => expected (row, col)`
+macro_rules! test_cursor_default {
+    (
+        $(
+            $name:ident : $fn:ident , ($sr:expr, $sc:expr) => ($er:expr, $ec:expr)
+        ),+ $(,)?
+    ) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut term = term!(24, 80);
+                term.screen.move_cursor($sr, $sc);
+                let params = vte::Params::default();
+                $fn(&mut term, &params);
+                assert_cursor!(term, $er, $ec);
+            }
+        )+
+    };
+}
+
+test_cursor_default! {
+    // CUU default (no param) moves up 1
+    test_cuu_default: csi_cuu, (4, 0)  => (3, 0),
+    // CUD default (no param) moves down 1
+    test_cud_default: csi_cud, (3, 0)  => (4, 0),
+    // CUF default (no param) moves right 1
+    test_cuf_default: csi_cuf, (0, 5)  => (0, 6),
+    // CUB default (no param) moves left 1
+    test_cub_default: csi_cub, (0, 10) => (0, 9),
+}
+
 // --- CUU (Cursor Up) tests ---
 
 #[test]
@@ -168,23 +204,6 @@ fn test_cuu_move_cursor_up() {
 }
 
 #[test]
-fn test_cuu_default() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Move cursor to row 4 (0-indexed)
-    term.screen.move_cursor(4, 0);
-    assert_eq!(term.screen.cursor.row, 4);
-
-    // CUU with no parameter defaults to 1: CSI A
-    let params = vte::Params::default();
-    csi_cuu(&mut term, &params);
-
-    // Should move up 1 row to row 3
-    assert_eq!(term.screen.cursor.row, 3);
-    assert_eq!(term.screen.cursor.col, 0);
-}
-
-#[test]
 fn test_cuu_clamps_at_top() {
     let mut term = crate::TerminalCore::new(24, 80);
 
@@ -198,23 +217,6 @@ fn test_cuu_clamps_at_top() {
 }
 
 // --- CUD (Cursor Down) tests ---
-
-#[test]
-fn test_cud_default() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Move cursor to row 3 (0-indexed)
-    term.screen.move_cursor(3, 0);
-    assert_eq!(term.screen.cursor.row, 3);
-
-    // CUD with no parameter defaults to 1: CSI B
-    let params = vte::Params::default();
-    csi_cud(&mut term, &params);
-
-    // Should move down 1 row to row 4
-    assert_eq!(term.screen.cursor.row, 4);
-    assert_eq!(term.screen.cursor.col, 0);
-}
 
 #[test]
 fn test_cud_clamps_at_bottom() {
@@ -231,23 +233,6 @@ fn test_cud_clamps_at_bottom() {
 }
 
 // --- CUF (Cursor Forward / Right) tests ---
-
-#[test]
-fn test_cuf_default() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Move cursor to col 5 (0-indexed)
-    term.screen.move_cursor(0, 5);
-    assert_eq!(term.screen.cursor.col, 5);
-
-    // CUF with no parameter defaults to 1: CSI C
-    let params = vte::Params::default();
-    csi_cuf(&mut term, &params);
-
-    // Should move right 1 column to col 6
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 6);
-}
 
 #[test]
 fn test_cuf_clamps_at_right_margin() {
@@ -279,23 +264,6 @@ fn test_cub_move_cursor_left() {
     // Should land at col 8 (0-indexed)
     assert_eq!(term.screen.cursor.row, 0);
     assert_eq!(term.screen.cursor.col, 8);
-}
-
-#[test]
-fn test_cub_default() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Move cursor to col 10 (0-indexed)
-    term.screen.move_cursor(0, 10);
-    assert_eq!(term.screen.cursor.col, 10);
-
-    // CUB with no parameter defaults to 1: CSI D
-    let params = vte::Params::default();
-    csi_cub(&mut term, &params);
-
-    // Should move left 1 column to col 9
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 9);
 }
 
 #[test]
@@ -467,108 +435,58 @@ fn test_cpl_zero_param_treated_as_1() {
 
 // ── DECSCUSR (Set Cursor Style) tests ────────────────────────────────
 
-#[test]
-fn test_decscusr_blinking_block_param0() {
-    // CSI 0 SP q → BlinkingBlock
-    let mut term = crate::TerminalCore::new(24, 80);
-    // First set a non-default shape so the assertion is meaningful
-    term.advance(b"\x1b[6 q"); // SteadyBar
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::SteadyBar
-    );
-    term.advance(b"\x1b[0 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::BlinkingBlock,
-        "DECSCUSR 0 should set BlinkingBlock"
-    );
+/// Table-driven macro for DECSCUSR (CSI Ps SP q) shape tests.
+///
+/// Pattern: `test_name : b"setup_seq" , b"target_seq" => ShapeVariant , "msg"`
+/// The setup sequence moves away from the target so the assertion is meaningful.
+macro_rules! test_decscusr {
+    (
+        $(
+            $name:ident : $setup:expr , $target:expr => $shape:ident , $msg:expr
+        ),+ $(,)?
+    ) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut term = crate::TerminalCore::new(24, 80);
+                term.advance($setup);
+                term.advance($target);
+                assert_eq!(
+                    term.dec_modes.cursor_shape,
+                    crate::types::cursor::CursorShape::$shape,
+                    $msg
+                );
+            }
+        )+
+    };
 }
 
-#[test]
-fn test_decscusr_blinking_block_param1() {
-    // CSI 1 SP q → BlinkingBlock
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[4 q"); // SteadyUnderline first
-    term.advance(b"\x1b[1 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::BlinkingBlock,
-        "DECSCUSR 1 should set BlinkingBlock"
-    );
-}
-
-#[test]
-fn test_decscusr_steady_block() {
-    // CSI 2 SP q → SteadyBlock
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[2 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::SteadyBlock,
-        "DECSCUSR 2 should set SteadyBlock"
-    );
-}
-
-#[test]
-fn test_decscusr_blinking_underline() {
-    // CSI 3 SP q → BlinkingUnderline
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[3 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::BlinkingUnderline,
-        "DECSCUSR 3 should set BlinkingUnderline"
-    );
-}
-
-#[test]
-fn test_decscusr_steady_underline() {
-    // CSI 4 SP q → SteadyUnderline
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[4 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::SteadyUnderline,
-        "DECSCUSR 4 should set SteadyUnderline"
-    );
-}
-
-#[test]
-fn test_decscusr_blinking_bar() {
-    // CSI 5 SP q → BlinkingBar
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[5 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::BlinkingBar,
-        "DECSCUSR 5 should set BlinkingBar"
-    );
-}
-
-#[test]
-fn test_decscusr_steady_bar() {
-    // CSI 6 SP q → SteadyBar
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[6 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::SteadyBar,
-        "DECSCUSR 6 should set SteadyBar"
-    );
-}
-
-#[test]
-fn test_decscusr_unknown_param_defaults_to_blinking_block() {
-    // CSI 99 SP q → BlinkingBlock (fallback for unrecognised values)
-    let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[6 q"); // set non-default first
-    term.advance(b"\x1b[99 q");
-    assert_eq!(
-        term.dec_modes.cursor_shape,
-        crate::types::cursor::CursorShape::BlinkingBlock,
-        "DECSCUSR with unrecognised param should fall back to BlinkingBlock"
-    );
+test_decscusr! {
+    // param 0 → BlinkingBlock (0 is alias for 1/default)
+    test_decscusr_blinking_block_param0:
+        b"\x1b[6 q", b"\x1b[0 q" => BlinkingBlock, "DECSCUSR 0 should set BlinkingBlock",
+    // param 1 → BlinkingBlock
+    test_decscusr_blinking_block_param1:
+        b"\x1b[4 q", b"\x1b[1 q" => BlinkingBlock, "DECSCUSR 1 should set BlinkingBlock",
+    // param 2 → SteadyBlock
+    test_decscusr_steady_block:
+        b"\x1b[5 q", b"\x1b[2 q" => SteadyBlock, "DECSCUSR 2 should set SteadyBlock",
+    // param 3 → BlinkingUnderline
+    test_decscusr_blinking_underline:
+        b"\x1b[2 q", b"\x1b[3 q" => BlinkingUnderline, "DECSCUSR 3 should set BlinkingUnderline",
+    // param 4 → SteadyUnderline
+    test_decscusr_steady_underline:
+        b"\x1b[1 q", b"\x1b[4 q" => SteadyUnderline, "DECSCUSR 4 should set SteadyUnderline",
+    // param 5 → BlinkingBar
+    test_decscusr_blinking_bar:
+        b"\x1b[2 q", b"\x1b[5 q" => BlinkingBar, "DECSCUSR 5 should set BlinkingBar",
+    // param 6 → SteadyBar
+    test_decscusr_steady_bar:
+        b"\x1b[1 q", b"\x1b[6 q" => SteadyBar, "DECSCUSR 6 should set SteadyBar",
+    // unknown param → BlinkingBlock fallback
+    test_decscusr_unknown_param_defaults_to_blinking_block:
+        b"\x1b[6 q", b"\x1b[99 q" => BlinkingBlock,
+        "DECSCUSR with unrecognised param should fall back to BlinkingBlock",
 }
 
 #[test]
@@ -732,6 +650,140 @@ fn test_csi_rep_does_not_panic() {
     term.advance(b"\x1b[3b"); // REP 3 — silently ignored
                               // The cursor must not have moved back or wrapped in an unexpected way.
     assert_cursor!(term, row = 0);
+}
+
+// ── New edge-case tests ───────────────────────────────────────────────────────
+
+// DSR (Device Status Report) tests
+
+#[test]
+fn test_dsr_param6_enqueues_cpr_response() {
+    // CSI 6 n should push an ESC[row;colR response into pending_responses.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(4, 9); // row=5, col=10 in 1-indexed
+    term.advance(b"\x1b[6n");
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        1,
+        "DSR 6 must enqueue exactly one response"
+    );
+    assert_eq!(
+        term.meta.pending_responses[0],
+        b"\x1b[5;10R",
+        "DSR 6 response must be ESC[row;colR (1-indexed)"
+    );
+}
+
+#[test]
+fn test_dsr_param6_at_origin_is_1_1() {
+    // At (0,0) the 1-indexed response is ESC[1;1R.
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[6n");
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[1;1R");
+}
+
+#[test]
+fn test_dsr_non_6_param_is_silent_noop() {
+    // DSR with param 5 (operating status) is not implemented — must not enqueue anything.
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[5n");
+    assert!(
+        term.meta.pending_responses.is_empty(),
+        "DSR 5 is unimplemented and must not enqueue a response"
+    );
+}
+
+// Zero-parameter tests for CUU / CUD / CUF / CUB
+// VT standard: 0 is treated identically to 1 (csi_param1! uses .max(1)).
+
+#[test]
+fn test_cuu_zero_param_treated_as_1() {
+    // CSI 0 A — explicit zero must move up by 1
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(5, 10);
+    term.advance(b"\x1b[0A");
+    assert_cursor!(term, 4, 10);
+}
+
+#[test]
+fn test_cud_zero_param_treated_as_1() {
+    // CSI 0 B — explicit zero must move down by 1
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(5, 10);
+    term.advance(b"\x1b[0B");
+    assert_cursor!(term, 6, 10);
+}
+
+#[test]
+fn test_cuf_zero_param_treated_as_1() {
+    // CSI 0 C — explicit zero must move right by 1
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(3, 10);
+    term.advance(b"\x1b[0C");
+    assert_cursor!(term, 3, 11);
+}
+
+// Corner-case: cursor at bottom-right, movement in each direction
+
+#[test]
+fn test_cuu_from_bottom_right_corner() {
+    // CUU 3 from the bottom-right corner: row decreases, col stays at last col.
+    let mut term = term!(10, 40);
+    term.screen.move_cursor(9, 39);
+    term.advance(b"\x1b[3A");
+    assert_cursor!(term, 6, 39);
+}
+
+#[test]
+fn test_cub_from_bottom_right_corner_clamps() {
+    // CUB large-n from bottom-right: col clamps to 0, row unchanged.
+    let mut term = term!(10, 40);
+    term.screen.move_cursor(9, 39);
+    term.advance(b"\x1b[999D");
+    assert_cursor!(term, 9, 0);
+}
+
+// VPA / CHA zero-param behaviour
+
+#[test]
+fn test_vpa_zero_param_maps_to_first_row() {
+    // CSI 0 d — zero is treated as 1 (1-indexed) → row 0 (0-indexed).
+    // saturating_sub(1) on 0 yields 0.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(15, 5);
+    term.advance(b"\x1b[0d");
+    assert_cursor!(term, row = 0);
+}
+
+#[test]
+fn test_cha_zero_param_maps_to_first_col() {
+    // CSI 0 G — zero saturating_sub(1) = 0 → column 0.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(5, 30);
+    term.advance(b"\x1b[0G");
+    assert_cursor!(term, col = 0);
+}
+
+// Sequential movements
+
+#[test]
+fn test_sequential_cup_then_cuu() {
+    // CUP to (8,20) then CUU 3 → row 4, col 19 (0-indexed).
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[8;20H"); // → (7, 19)
+    term.advance(b"\x1b[3A");   // → (4, 19)
+    assert_cursor!(term, 4, 19);
+}
+
+#[test]
+fn test_sequential_cnl_then_cpl_returns_to_origin() {
+    // CNL 4 from row 3 → row 7 col 0; CPL 4 → row 3 col 0.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(3, 25);
+    term.advance(b"\x1b[4E"); // CNL 4 → row 7, col 0
+    assert_cursor!(term, 7, 0);
+    term.advance(b"\x1b[4F"); // CPL 4 → row 3, col 0
+    assert_cursor!(term, 3, 0);
 }
 
 use proptest::prelude::*;

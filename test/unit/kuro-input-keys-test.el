@@ -486,5 +486,81 @@ These keys do not change between normal and application cursor mode."
     (kuro--ctrl-modified ?_ 0)
     (should (equal (car kuro-input-keys-test--sent) (string 31)))))
 
+;;; Group 18: kuro--ctrl-modified — render scheduling and output length
+
+(ert-deftest kuro-input-keys--ctrl-modified-schedules-render ()
+  "kuro--ctrl-modified schedules an immediate render (via kuro--send-special)."
+  (let ((rendered nil))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (_data) nil))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () (setq rendered t))))
+      (kuro--ctrl-modified ?a 0)
+      (should rendered))))
+
+(ert-deftest kuro-input-keys--ctrl-modified-sends-exactly-one-string ()
+  "kuro--ctrl-modified sends exactly one string per invocation."
+  (kuro-input-keys-test--with-capture
+    (kuro--ctrl-modified ?a 0)
+    (should (= (length kuro-input-keys-test--sent) 1))))
+
+(ert-deftest kuro-input-keys--ctrl-modified-output-is-one-byte-string ()
+  "kuro--ctrl-modified output string has length 1 (single control byte)."
+  (kuro-input-keys-test--with-capture
+    (kuro--ctrl-modified ?a 0)
+    (should (= (length (car kuro-input-keys-test--sent)) 1))))
+
+(ert-deftest kuro-input-keys--ctrl-modified-uppercase-z ()
+  "Ctrl+Z uppercase (char=?Z=90) produces control byte 26 via AND 31."
+  (kuro-input-keys-test--with-capture
+    (kuro--ctrl-modified ?Z 0)
+    (should (= (aref (car kuro-input-keys-test--sent) 0) 26))))
+
+(ert-deftest kuro-input-keys--ctrl-modified-uppercase-c ()
+  "Ctrl+C uppercase (char=?C=67) produces control byte 3 via AND 31."
+  (kuro-input-keys-test--with-capture
+    (kuro--ctrl-modified ?C 0)
+    (should (= (aref (car kuro-input-keys-test--sent) 0) 3))))
+
+;;; Group 19: kuro--alt-modified — uppercase and output length invariants
+
+(ert-deftest kuro-input-keys--alt-modified-uppercase-a ()
+  "Alt+A (uppercase) sends ESC followed by uppercase A."
+  (kuro-input-keys-test--with-capture
+    (kuro--alt-modified ?A)
+    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?A)))))
+
+(ert-deftest kuro-input-keys--alt-modified-uppercase-z ()
+  "Alt+Z (uppercase) sends ESC followed by uppercase Z."
+  (kuro-input-keys-test--with-capture
+    (kuro--alt-modified ?Z)
+    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?Z)))))
+
+(ert-deftest kuro-input-keys--alt-modified-output-is-two-byte-string ()
+  "kuro--alt-modified output string has length 2 (ESC + char)."
+  (kuro-input-keys-test--with-capture
+    (kuro--alt-modified ?b)
+    (should (= (length (car kuro-input-keys-test--sent)) 2))))
+
+(ert-deftest kuro-input-keys--alt-modified-first-byte-is-esc ()
+  "kuro--alt-modified first byte is always ESC (0x1B) regardless of char."
+  (dolist (ch (list ?a ?z ?A ?Z ?0 ?9 ?.))
+    (kuro-input-keys-test--with-capture
+      (kuro--alt-modified ch)
+      (should (= (aref (car kuro-input-keys-test--sent) 0) ?\e)))))
+
+(ert-deftest kuro-input-keys--alt-modified-second-byte-is-char ()
+  "kuro--alt-modified second byte is the verbatim character argument."
+  (dolist (ch (list ?a ?b ?f ?r ?u ?l))
+    (kuro-input-keys-test--with-capture
+      (kuro--alt-modified ch)
+      (should (= (aref (car kuro-input-keys-test--sent) 1) ch)))))
+
+(ert-deftest kuro-input-keys--alt-modified-sends-esc-backspace ()
+  "Alt+Backspace (char=\\x7f) sends ESC followed by DEL byte."
+  (kuro-input-keys-test--with-capture
+    (kuro--alt-modified ?\x7f)
+    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?\x7f)))))
+
 (provide 'kuro-input-keys-test)
 ;;; kuro-input-keys-test.el ends here

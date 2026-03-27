@@ -1,6 +1,6 @@
 //! Integration tests for complex escape sequence interactions.
 
-use kuro_core::TerminalCore;
+use kuro_core::{types::cell::SgrFlags, TerminalCore};
 
 #[test]
 fn test_decsc_decrc_saves_and_restores_cursor_position() {
@@ -289,4 +289,180 @@ fn test_sgr_split_across_two_advance_calls_is_equivalent() {
             "split at byte {split}: italic must be set"
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New tests: DECAWM, cursor movement, EL, SGR extras, insert/delete lines
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DECAWM off (?7l) must suppress wrap: printing past column 9 on a 10-col
+/// terminal must not advance the cursor to row 1.
+#[test]
+fn test_decawm_off_suppresses_wrap() {
+    let mut term = TerminalCore::new(10, 10);
+    term.advance(b"\x1b[?7l"); // DECAWM off
+    // Print 15 characters; without wrap the cursor should stay on row 0
+    term.advance(b"AAAAABBBBBCCCCC");
+    assert_eq!(term.cursor_row(), 0, "DECAWM off: cursor must stay on row 0");
+}
+
+/// Re-enabling DECAWM (?7h) after it was disabled must restore wrap behaviour.
+#[test]
+fn test_decawm_on_restores_wrap() {
+    let mut term = TerminalCore::new(5, 5);
+    term.advance(b"\x1b[?7l"); // DECAWM off
+    term.advance(b"\x1b[?7h"); // DECAWM on
+    // 6 chars on a 5-col terminal: the 6th must wrap to row 1
+    term.advance(b"XXXXXY");
+    assert_eq!(term.cursor_row(), 1, "DECAWM on: cursor must wrap to row 1");
+    let cell = term.get_cell(1, 0).expect("cell (1,0) must exist after wrap");
+    assert_eq!(cell.char(), 'Y', "'Y' must land at row 1, col 0 after wrap");
+}
+
+/// CUB (CSI n D) moves the cursor left by n columns, clamping at column 0.
+#[test]
+fn test_cub_cursor_backward_clamp() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b[1;10H"); // col 9 (0-indexed)
+    assert_eq!(term.cursor_col(), 9);
+    term.advance(b"\x1b[3D"); // CUB 3 → col 6
+    assert_eq!(term.cursor_col(), 6, "CUB 3 from col 9 must land on col 6");
+    // CUB with a count larger than current col must clamp to 0
+    term.advance(b"\x1b[100D");
+    assert_eq!(term.cursor_col(), 0, "CUB 100 must clamp cursor to col 0");
+}
+
+/// CUF (CSI n C) moves the cursor right by n columns, clamping at the right margin.
+#[test]
+fn test_cuf_cursor_forward_clamp() {
+    let mut term = TerminalCore::new(24, 10);
+    term.advance(b"\x1b[1;1H"); // col 0
+    term.advance(b"\x1b[3C"); // CUF 3 → col 3
+    assert_eq!(term.cursor_col(), 3, "CUF 3 from col 0 must land on col 3");
+    // CUF with a large count must clamp at last column (9 on a 10-col terminal)
+    term.advance(b"\x1b[100C");
+    assert_eq!(
+        term.cursor_col(),
+        9,
+        "CUF 100 must clamp cursor to last col (9)"
+    );
+}
+
+/// CUD (CSI n B) moves the cursor down by n rows, clamping at the last row.
+#[test]
+fn test_cud_cursor_down_clamp() {
+    let mut term = TerminalCore::new(10, 80);
+    term.advance(b"\x1b[1;1H"); // row 0
+    term.advance(b"\x1b[3B"); // CUD 3 → row 3
+    assert_eq!(term.cursor_row(), 3, "CUD 3 from row 0 must land on row 3");
+    term.advance(b"\x1b[100B"); // CUD large → clamp at last row (9)
+    assert_eq!(
+        term.cursor_row(),
+        9,
+        "CUD 100 must clamp cursor to last row (9)"
+    );
+}
+
+/// EL 0 (CSI 0 K) erases from cursor to end of line.
+#[test]
+fn test_el0_erases_to_end_of_line() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"ABCDE");
+    term.advance(b"\x1b[1;3H"); // move to row 0, col 2 (1-indexed)
+    term.advance(b"\x1b[0K"); // EL 0: erase from cursor to EOL
+    // Cells 0 and 1 must still hold 'A' and 'B'; cells from col 2 onward must be erased
+    let a = term.get_cell(0, 0).expect("cell (0,0) must exist");
+    let b = term.get_cell(0, 1).expect("cell (0,1) must exist");
+    assert_eq!(a.char(), 'A', "cell (0,0) must be 'A' — not erased by EL 0");
+    assert_eq!(b.char(), 'B', "cell (0,1) must be 'B' — not erased by EL 0");
+    let c = term.get_cell(0, 2).expect("cell (0,2) must exist");
+    assert_eq!(c.char(), ' ', "cell (0,2) must be erased (space) by EL 0");
+}
+
+/// EL 1 (CSI 1 K) erases from beginning of line to cursor (inclusive).
+#[test]
+fn test_el1_erases_to_start_of_line() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"ABCDE");
+    term.advance(b"\x1b[1;4H"); // move to row 0, col 3 (1-indexed)
+    term.advance(b"\x1b[1K"); // EL 1: erase from BOL to cursor
+    // Cols 0–3 must be spaces; col 4 must still hold 'E'
+    for col in 0..=3 {
+        let cell = term.get_cell(0, col).expect("cell must exist");
+        assert_eq!(
+            cell.char(),
+            ' ',
+            "cell (0,{col}) must be erased (space) by EL 1"
+        );
+    }
+    let e = term.get_cell(0, 4).expect("cell (0,4) must exist");
+    assert_eq!(e.char(), 'E', "cell (0,4) must survive EL 1");
+}
+
+/// SGR strikethrough (9) and blink (5) must set the corresponding flags.
+#[test]
+fn test_sgr_strikethrough_and_blink() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b[9m"); // strikethrough on
+    let attrs = term.current_attrs();
+    assert!(
+        attrs.flags.contains(SgrFlags::STRIKETHROUGH),
+        "strikethrough must be set after SGR 9"
+    );
+    term.advance(b"\x1b[5m"); // blink-slow on
+    let attrs2 = term.current_attrs();
+    assert!(
+        attrs2.flags.contains(SgrFlags::BLINK_SLOW),
+        "blink must be set after SGR 5"
+    );
+    // SGR 0 must clear both
+    term.advance(b"\x1b[0m");
+    let attrs3 = term.current_attrs();
+    assert!(
+        !attrs3.flags.contains(SgrFlags::STRIKETHROUGH),
+        "strikethrough cleared by SGR 0"
+    );
+    assert!(
+        !attrs3.flags.contains(SgrFlags::BLINK_SLOW),
+        "blink cleared by SGR 0"
+    );
+}
+
+/// SGR reverse video (7) must set the INVERSE flag.
+#[test]
+fn test_sgr_reverse_video() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b[7m"); // reverse on
+    let attrs = term.current_attrs();
+    assert!(
+        attrs.flags.contains(SgrFlags::INVERSE),
+        "INVERSE must be set after SGR 7"
+    );
+    term.advance(b"\x1b[0m");
+    assert!(
+        !term.current_attrs().flags.contains(SgrFlags::INVERSE),
+        "INVERSE cleared by SGR 0"
+    );
+}
+
+/// IL (CSI n L) inserts n blank lines at the cursor row, scrolling down.
+/// The cursor must not leave the scroll region and no panic must occur.
+#[test]
+fn test_il_insert_lines_no_panic() {
+    let mut term = TerminalCore::new(10, 80);
+    term.advance(b"line0\nline1\nline2");
+    term.advance(b"\x1b[2;1H"); // move to row 1 (1-indexed)
+    term.advance(b"\x1b[2L"); // IL 2: insert 2 blank lines
+    assert!(term.cursor_row() < 10, "cursor row must remain in bounds after IL");
+}
+
+/// DL (CSI n M) deletes n lines at the cursor row, scrolling up within the region.
+/// No panic must occur and cursor must stay in bounds.
+#[test]
+fn test_dl_delete_lines_no_panic() {
+    let mut term = TerminalCore::new(10, 80);
+    term.advance(b"line0\nline1\nline2\nline3");
+    term.advance(b"\x1b[2;1H"); // move to row 1 (1-indexed)
+    term.advance(b"\x1b[2M"); // DL 2: delete 2 lines
+    assert!(term.cursor_row() < 10, "cursor row must remain in bounds after DL");
 }

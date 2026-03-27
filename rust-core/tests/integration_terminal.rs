@@ -958,3 +958,204 @@ fn test_decsc_decrc_cursor_position() {
         "DECRC must restore cursor to saved col 9"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alternate screen cursor preservation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Entering alternate screen (?1049h) saves the primary cursor; exiting (?1049l)
+/// restores it, so the cursor returns to the position it had before entering.
+#[test]
+fn test_alt_screen_saves_and_restores_cursor() {
+    let mut term = TerminalCore::new(24, 80);
+    // Position cursor on primary screen
+    term.advance(b"\x1b[6;15H"); // CUP → row 5, col 14 (0-indexed)
+    assert_eq!(term.cursor_row(), 5);
+    assert_eq!(term.cursor_col(), 14);
+
+    // Enter alt screen — cursor should reset on alt screen
+    term.advance(b"\x1b[?1049h");
+    assert!(
+        term.is_alternate_screen_active(),
+        "must be on alt screen after ?1049h"
+    );
+    // Move around on alt screen
+    term.advance(b"\x1b[3;3H");
+    assert_eq!(term.cursor_row(), 2);
+
+    // Exit alt screen — cursor must return to saved primary position
+    term.advance(b"\x1b[?1049l");
+    assert!(
+        !term.is_alternate_screen_active(),
+        "must be on primary screen after ?1049l"
+    );
+    assert_eq!(
+        term.cursor_row(),
+        5,
+        "primary cursor row must be restored after leaving alt screen"
+    );
+    assert_eq!(
+        term.cursor_col(),
+        14,
+        "primary cursor col must be restored after leaving alt screen"
+    );
+}
+
+/// Content printed on the alternate screen must not appear on the primary screen
+/// after returning.
+#[test]
+fn test_alt_screen_content_does_not_bleed_to_primary() {
+    let mut term = TerminalCore::new(24, 80);
+    // Put known content on primary screen
+    term.advance(b"\x1b[1;1H");
+    term.advance(b"PRIMARY");
+
+    // Enter alt screen and write different content
+    term.advance(b"\x1b[?1049h");
+    term.advance(b"\x1b[1;1H");
+    term.advance(b"ALTSCR");
+
+    // Return to primary screen
+    term.advance(b"\x1b[?1049l");
+
+    // Primary screen row 0 must still start with 'P'
+    let cell = term.get_cell(0, 0).expect("cell (0,0) must exist on primary");
+    assert_eq!(
+        cell.char(),
+        'P',
+        "primary screen must not be overwritten by alt-screen content"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Erase-in-display (ED) modes 0 and 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ED 0 (CSI 0 J) erases from cursor to end of display.
+#[test]
+fn test_ed0_erases_from_cursor_to_end() {
+    let mut term = TerminalCore::new(5, 10);
+    // Write something on row 0 and row 1
+    term.advance(b"AAAAAAAAAA"); // fills row 0
+    term.advance(b"\nBBBBBBBBBB"); // fills row 1
+    // Move cursor to row 0, col 5
+    term.advance(b"\x1b[1;6H"); // 1-indexed → row 0, col 5
+    term.advance(b"\x1b[0J"); // ED 0: erase from cursor to bottom
+    // col 0..4 on row 0 must still be 'A'
+    for col in 0..5 {
+        let cell = term.get_cell(0, col).expect("cell must exist");
+        assert_eq!(cell.char(), 'A', "cell (0,{col}) must survive ED 0");
+    }
+    // col 5 onward on row 0 must be erased
+    let erased = term.get_cell(0, 5).expect("cell (0,5) must exist");
+    assert_eq!(erased.char(), ' ', "cell (0,5) must be erased by ED 0");
+    // row 1 must be fully erased
+    let r1 = term.get_cell(1, 0).expect("cell (1,0) must exist");
+    assert_eq!(r1.char(), ' ', "row 1, col 0 must be erased by ED 0");
+}
+
+/// ED 1 (CSI 1 J) erases from beginning of display to cursor (inclusive).
+#[test]
+fn test_ed1_erases_from_start_to_cursor() {
+    let mut term = TerminalCore::new(5, 10);
+    // Write 'A' on row 0 and 'B' on row 1 (use CR+LF so 'B' starts at col 0)
+    term.advance(b"AAAAAAAAAA");
+    term.advance(b"\r\nBBBBBBBBBB");
+    // Move cursor to row 1, col 4
+    term.advance(b"\x1b[2;5H"); // 1-indexed → row 1, col 4
+    term.advance(b"\x1b[1J"); // ED 1: erase from top to cursor
+    // row 0 must be fully erased
+    let r0 = term.get_cell(0, 0).expect("cell (0,0) must exist");
+    assert_eq!(r0.char(), ' ', "row 0 must be erased by ED 1");
+    // row 1, cols 0–4 must be erased
+    for col in 0..=4 {
+        let cell = term.get_cell(1, col).expect("cell must exist");
+        assert_eq!(
+            cell.char(),
+            ' ',
+            "cell (1,{col}) must be erased by ED 1"
+        );
+    }
+    // row 1, cols 5–9 must still be 'B'
+    let surviving = term.get_cell(1, 5).expect("cell (1,5) must exist");
+    assert_eq!(surviving.char(), 'B', "cell (1,5) must survive ED 1");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backspace at column 0 is a no-op
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// BS (0x08) at column 0 must not move the cursor to a negative column.
+#[test]
+fn test_backspace_at_col_zero_is_noop() {
+    let mut term = TerminalCore::new(24, 80);
+    assert_eq!(term.cursor_col(), 0);
+    term.advance(b"\x08"); // BS at col 0
+    assert_eq!(
+        term.cursor_col(),
+        0,
+        "BS at col 0 must not underflow cursor"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab at the last tab stop clamps at end of line
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// On an 80-col terminal the last tab stop is col 72.  A HT from col 72
+/// must not advance the cursor past col 79.
+#[test]
+fn test_tab_at_last_stop_stays_in_bounds() {
+    let mut term = TerminalCore::new(24, 80);
+    // Move to col 72 (the last standard tab stop on an 80-col terminal)
+    term.advance(b"\x1b[1;73H"); // 1-indexed → row 0, col 72
+    assert_eq!(term.cursor_col(), 72);
+    term.advance(b"\t"); // HT: horizontal tab
+    assert!(
+        term.cursor_col() < 80,
+        "tab from last stop must not push cursor past col 79; got {}",
+        term.cursor_col()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resize: content on visible rows is preserved
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// After a resize that grows the terminal, content on the first row must
+/// still be readable via `get_cell`.
+#[test]
+fn test_resize_grow_preserves_visible_content() {
+    let mut term = TerminalCore::new(10, 40);
+    term.advance(b"\x1b[1;1H");
+    term.advance(b"HELLO");
+    term.resize(20, 80);
+    // Row 0 content must survive the resize
+    let h = term.get_cell(0, 0).expect("cell (0,0) must exist after resize");
+    assert_eq!(h.char(), 'H', "cell (0,0) must still be 'H' after resize grow");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRLF vs LF
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A bare LF (0x0a) advances the row but does NOT reset the column.
+#[test]
+fn test_lf_advances_row_but_not_col() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"ABCDE"); // cursor at col 5
+    assert_eq!(term.cursor_col(), 5);
+    term.advance(b"\n"); // LF — row advances, col unchanged
+    assert_eq!(term.cursor_row(), 1, "LF must advance row");
+    assert_eq!(term.cursor_col(), 5, "LF must not reset col");
+}
+
+/// A CRLF pair advances the row AND resets the column to 0.
+#[test]
+fn test_crlf_advances_row_and_resets_col() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"ABCDE"); // cursor at col 5
+    term.advance(b"\r\n"); // CR + LF
+    assert_eq!(term.cursor_row(), 1, "CRLF must advance row");
+    assert_eq!(term.cursor_col(), 0, "CRLF must reset col to 0");
+}

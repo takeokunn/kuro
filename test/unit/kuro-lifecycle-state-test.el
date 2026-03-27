@@ -606,6 +606,144 @@ Verifies the exact argument value rather than just presence of a call."
           (kuro--do-attach 4 18 72)
           (should (= prefill-rows 18)))))))
 
+;;; Group 21: kuro-attach — public API (error rollback, success message, buffer naming)
+;;
+;; kuro-attach creates a fresh buffer, enters kuro-mode, then calls kuro--do-attach.
+;; On error it calls kuro--rollback-attach; on success it prints a message.
+
+(ert-deftest kuro-lifecycle--attach-calls-rollback-on-do-attach-error ()
+  "kuro-attach calls kuro--rollback-attach when kuro--do-attach signals."
+  (let ((rollback-called-with-id nil)
+        (result nil))
+    (cl-letf (((symbol-function 'kuro--ensure-module-loaded) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--do-attach)
+               (lambda (_id _r _c) (error "attach failed")))
+              ((symbol-function 'kuro--rollback-attach)
+               (lambda (id _buf _err) (setq rollback-called-with-id id))))
+      (setq result (kuro-attach 7))
+      (when (buffer-live-p result) (kill-buffer result))
+      (should (= rollback-called-with-id 7)))))
+
+(ert-deftest kuro-lifecycle--attach-prints-success-message ()
+  "kuro-attach prints a message mentioning the session ID on success."
+  (let ((msgs nil)
+        (result nil))
+    (cl-letf (((symbol-function 'kuro--ensure-module-loaded) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--do-attach) #'ignore)
+              ((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) msgs))))
+      (setq result (kuro-attach 42))
+      (unwind-protect
+          (should (cl-some (lambda (m) (string-match-p "42" m)) msgs))
+        (when (buffer-live-p result) (kill-buffer result))))))
+
+(ert-deftest kuro-lifecycle--attach-buffer-name-includes-session-id ()
+  "kuro-attach creates a buffer whose name contains the session ID."
+  (let ((created-buf nil))
+    (cl-letf (((symbol-function 'kuro--ensure-module-loaded) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--do-attach) #'ignore)
+              ((symbol-function 'message)          #'ignore))
+      (setq created-buf (kuro-attach 99))
+      (unwind-protect
+          (should (string-match-p "99" (buffer-name created-buf)))
+        (when (buffer-live-p created-buf)
+          (kill-buffer created-buf))))))
+
+(ert-deftest kuro-lifecycle--attach-returns-buffer ()
+  "kuro-attach returns the newly created buffer."
+  (let ((result nil))
+    (cl-letf (((symbol-function 'kuro--ensure-module-loaded) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--do-attach) #'ignore)
+              ((symbol-function 'message)          #'ignore))
+      (setq result (kuro-attach 3))
+      (unwind-protect
+          (should (bufferp result))
+        (when (buffer-live-p result)
+          (kill-buffer result))))))
+
+;;; Group 22: kuro--schedule-initial-render — live-buffer path and timer lambda
+;;
+;; Supplements Group 14: verifies that when the buffer IS live, the timer lambda
+;; calls kuro--render-cycle.
+
+(ert-deftest kuro-lifecycle--schedule-initial-render-fires-render-when-live ()
+  "Timer lambda calls kuro--render-cycle when the buffer is still live."
+  (let ((render-called nil)
+        (captured-fn nil))
+    (cl-letf (((symbol-function 'run-with-idle-timer)
+               (lambda (_delay _repeat fn &rest _args)
+                 (setq captured-fn fn)))
+              ((symbol-function 'kuro--render-cycle)
+               (lambda () (setq render-called t))))
+      (with-temp-buffer
+        (let ((live-buf (current-buffer)))
+          (kuro--schedule-initial-render live-buf)
+          ;; Invoke the timer lambda directly while the buffer is still live.
+          (funcall captured-fn live-buf))))
+    (should render-called)))
+
+(ert-deftest kuro-lifecycle--schedule-initial-render-uses-startup-delay-constant ()
+  "kuro--schedule-initial-render uses kuro--startup-render-delay (0.05 s)."
+  (should (= kuro--startup-render-delay 0.05)))
+
+;;; Group 23: kuro--init-session-buffer — font/remap calls forwarded
+;;
+;; Verifies that kuro--init-session-buffer calls kuro--apply-font-to-buffer
+;; and kuro--remap-default-face, rather than just checking dimensions.
+
+(ert-deftest kuro-lifecycle--init-session-buffer-calls-apply-font ()
+  "kuro--init-session-buffer calls kuro--apply-font-to-buffer with the buffer."
+  (with-temp-buffer
+    (setq-local kuro--cursor-marker nil
+                kuro--last-rows     0
+                kuro--last-cols     0
+                kuro--scroll-offset 0)
+    (let ((font-called-with nil))
+      (kuro-lifecycle-test--with-init-stubs
+        (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
+                   (lambda (b) (setq font-called-with b))))
+          (kuro--init-session-buffer (current-buffer) 24 80)
+          (should (eq font-called-with (current-buffer))))))))
+
+(ert-deftest kuro-lifecycle--init-session-buffer-calls-remap-default-face ()
+  "kuro--init-session-buffer calls kuro--remap-default-face with fg/bg strings."
+  (with-temp-buffer
+    (setq-local kuro--cursor-marker nil
+                kuro--last-rows     0
+                kuro--last-cols     0
+                kuro--scroll-offset 0)
+    (let ((remap-args nil))
+      (kuro-lifecycle-test--with-init-stubs
+        (cl-letf (((symbol-function 'kuro--remap-default-face)
+                   (lambda (fg bg) (setq remap-args (list fg bg)))))
+          (kuro--init-session-buffer (current-buffer) 24 80)
+          (should (consp remap-args))
+          (should (stringp (car remap-args)))
+          (should (stringp (cadr remap-args))))))))
+
+(ert-deftest kuro-lifecycle--init-session-buffer-calls-setup-char-width ()
+  "kuro--init-session-buffer calls kuro--setup-char-width-table."
+  (with-temp-buffer
+    (setq-local kuro--cursor-marker nil
+                kuro--last-rows     0
+                kuro--last-cols     0
+                kuro--scroll-offset 0)
+    (let ((char-width-called nil))
+      (kuro-lifecycle-test--with-init-stubs
+        (cl-letf (((symbol-function 'kuro--setup-char-width-table)
+                   (lambda () (setq char-width-called t))))
+          (kuro--init-session-buffer (current-buffer) 24 80)
+          (should char-width-called))))))
+
 (provide 'kuro-lifecycle-state-test)
 
 ;;; kuro-lifecycle-state-test.el ends here

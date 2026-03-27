@@ -497,4 +497,140 @@ mod tests {
             assert!(!ds.contains(row), "row {row} must not be dirty after clear");
         }
     }
+
+    // ── Additional coverage ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_insert_single_row_then_shift_left_by_exact_amount() {
+        // Shifting left by exactly the row index moves it to position 0.
+        let mut ds = BitVecDirtySet::new(16);
+        ds.insert(5);
+        ds.shift_left(5);
+        assert!(ds.contains(0), "row 5 must land at 0 after shift_left(5)");
+        assert!(!ds.contains(5), "original row 5 must be clean after shift");
+        assert_eq!(ds.len(), 1);
+    }
+
+    #[test]
+    fn test_shift_left_then_shift_right_round_trip() {
+        // shift_left(n) followed by shift_right(n) is a round-trip only when
+        // none of the bits are near the boundaries (would be lost).
+        let mut ds = BitVecDirtySet::new(16);
+        ds.insert(4);
+        ds.insert(8);
+        ds.shift_left(2); // 4→2, 8→6
+        ds.shift_right(2); // 2→4, 6→8
+        assert!(ds.contains(4), "row 4 must survive left-then-right round-trip");
+        assert!(ds.contains(8), "row 8 must survive left-then-right round-trip");
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn test_insert_range_single_element() {
+        // insert_range(n, n+1) marks exactly one row.
+        let mut ds = BitVecDirtySet::new(16);
+        ds.insert_range(7, 8);
+        assert!(ds.contains(7));
+        assert!(!ds.contains(6));
+        assert!(!ds.contains(8));
+        assert_eq!(ds.len(), 1);
+    }
+
+    #[test]
+    fn test_iter_on_empty_set_yields_nothing() {
+        let ds = BitVecDirtySet::new(8);
+        let rows: Vec<usize> = ds.iter().collect();
+        assert!(rows.is_empty(), "trait iter on empty set must yield nothing");
+    }
+
+    #[test]
+    fn test_insert_first_and_last_row() {
+        // Insert the very first (0) and very last valid index.
+        let mut ds = BitVecDirtySet::new(10);
+        ds.insert(0);
+        ds.insert(9);
+        assert_eq!(ds.len(), 2);
+        let rows: Vec<usize> = ds.iter().collect();
+        assert_eq!(rows, vec![0, 9]);
+    }
+
+    #[test]
+    fn test_len_matches_count_of_iter_items() {
+        let mut ds = BitVecDirtySet::new(32);
+        for row in (0..32usize).step_by(3) {
+            ds.insert(row);
+        }
+        let iter_count = ds.iter().count();
+        assert_eq!(
+            ds.len(),
+            iter_count,
+            "len() must equal the number of items yielded by iter()"
+        );
+    }
+
+    #[test]
+    fn test_insert_range_does_not_clear_existing_bits_outside_range() {
+        // Rows outside the insert_range must remain as they were.
+        let mut ds = BitVecDirtySet::new(16);
+        ds.insert(0); // row outside the range
+        ds.insert(15); // row outside the range
+        ds.insert_range(5, 10); // marks rows 5..10
+        assert!(ds.contains(0), "row 0 must still be dirty after insert_range");
+        assert!(ds.contains(15), "row 15 must still be dirty after insert_range");
+        assert_eq!(ds.len(), 2 + 5, "total must be 2 pre-existing + 5 new");
+    }
+
+    #[test]
+    fn test_shift_left_all_ones() {
+        // When all rows are dirty, shift_left(1) must:
+        // - still leave rows 0..(len-1) dirty (shifted from 1..len)
+        // - clear the last row (shifted past end)
+        let mut ds = BitVecDirtySet::new(4);
+        ds.insert_range(0, 4); // all 4 dirty
+        ds.shift_left(1);
+        // rows 1→0, 2→1, 3→2; row 3 becomes clean
+        for row in 0..3 {
+            assert!(ds.contains(row), "row {row} must be dirty after shift_left(1)");
+        }
+        assert!(!ds.contains(3), "row 3 must be clean after shift_left(1)");
+        assert_eq!(ds.len(), 3);
+    }
+
+    #[test]
+    fn test_shift_right_all_ones() {
+        // When all rows are dirty, shift_right(1) must:
+        // - leave rows 1..len dirty (shifted from 0..len-1)
+        // - clear row 0
+        let mut ds = BitVecDirtySet::new(4);
+        ds.insert_range(0, 4); // all 4 dirty
+        ds.shift_right(1);
+        assert!(!ds.contains(0), "row 0 must be clean after shift_right(1)");
+        for row in 1..4 {
+            assert!(ds.contains(row), "row {row} must be dirty after shift_right(1)");
+        }
+        assert_eq!(ds.len(), 3);
+    }
+
+    #[test]
+    fn test_clone_after_insert_range() {
+        let mut original = BitVecDirtySet::new(16);
+        original.insert_range(3, 8);
+        let clone = original.clone();
+        assert_eq!(clone.len(), original.len());
+        let orig_rows: Vec<usize> = original.iter().collect();
+        let clone_rows: Vec<usize> = clone.iter().collect();
+        assert_eq!(orig_rows, clone_rows, "clone must match original after insert_range");
+    }
+
+    #[test]
+    fn test_insert_adjacent_rows_count_correct() {
+        // Inserting rows 0, 1, 2 individually must give len=3, not 1.
+        let mut ds = BitVecDirtySet::new(8);
+        ds.insert(0);
+        ds.insert(1);
+        ds.insert(2);
+        assert_eq!(ds.len(), 3);
+        let rows: Vec<usize> = ds.iter().collect();
+        assert_eq!(rows, vec![0, 1, 2]);
+    }
 }

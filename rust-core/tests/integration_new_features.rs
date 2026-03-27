@@ -241,3 +241,176 @@ fn test_kitty_stack_depth() {
         "stack must be empty after all pops"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Application keypad mode (DECKPAM / DECKPNM — ESC = / ESC >)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ESC = sets `app_keypad`; ESC > clears it.
+#[test]
+fn test_app_keypad_deckpam_deckpnm() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.dec_modes().app_keypad,
+        "app_keypad must default to false"
+    );
+    t.advance(b"\x1b="); // DECKPAM — application keypad on
+    assert!(
+        t.dec_modes().app_keypad,
+        "app_keypad must be true after ESC ="
+    );
+    t.advance(b"\x1b>"); // DECKPNM — normal keypad
+    assert!(
+        !t.dec_modes().app_keypad,
+        "app_keypad must be false after ESC >"
+    );
+}
+
+/// RIS (ESC c) must clear `app_keypad` back to false.
+#[test]
+fn test_app_keypad_reset_after_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b="); // enable
+    assert!(t.dec_modes().app_keypad);
+    t.advance(b"\x1bc"); // RIS
+    assert!(!t.dec_modes().app_keypad, "RIS must clear app_keypad");
+}
+
+/// Repeated DECKPAM/DECKPNM toggling must not corrupt state.
+#[test]
+fn test_app_keypad_toggle_idempotent() {
+    let mut t = TerminalCore::new(24, 80);
+    for _ in 0..5 {
+        t.advance(b"\x1b=");
+        assert!(t.dec_modes().app_keypad);
+        t.advance(b"\x1b>");
+        assert!(!t.dec_modes().app_keypad);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// current_foreground() — SGR 38;2 RGB color
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SGR 38;2;r;g;b sets a true-colour foreground visible via `current_foreground()`.
+#[test]
+fn test_current_foreground_sgr_rgb() {
+    let mut t = TerminalCore::new(24, 80);
+    // Set foreground to rgb(255, 128, 0) via SGR 38;2;255;128;0
+    t.advance(b"\x1b[38;2;255;128;0m");
+    let fg = t.current_foreground();
+    // The color must be a non-default RGB value
+    match fg {
+        kuro_core::Color::Rgb(r, g, b) => {
+            assert_eq!(*r, 255, "red channel must be 255");
+            assert_eq!(*g, 128, "green channel must be 128");
+            assert_eq!(*b, 0, "blue channel must be 0");
+        }
+        other => panic!("expected Color::Rgb, got {other:?}"),
+    }
+}
+
+/// SGR 0 (reset) after an RGB foreground restores `current_foreground()` to Default.
+#[test]
+fn test_current_foreground_reset_after_sgr_rgb() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[38;2;255;0;0m"); // red
+    t.advance(b"\x1b[0m"); // SGR reset
+    let fg = t.current_foreground();
+    assert!(
+        matches!(fg, kuro_core::Color::Default),
+        "current_foreground must be Default after SGR 0, got {fg:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// soft_reset() — mode interaction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `soft_reset` clears origin_mode but must NOT switch screens or clear scrollback.
+#[test]
+fn test_soft_reset_clears_origin_mode() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?6h"); // enable DECOM
+    assert!(
+        t.dec_modes().origin_mode,
+        "origin_mode set before soft_reset"
+    );
+    t.advance(b"\x1b[!p"); // DECSTR — soft reset
+    assert!(
+        !t.dec_modes().origin_mode,
+        "soft_reset must clear origin_mode"
+    );
+}
+
+/// `soft_reset` clears DECCKM (app_cursor_keys).
+#[test]
+fn test_soft_reset_clears_app_cursor_keys() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1h");
+    assert!(t.dec_modes().app_cursor_keys);
+    t.advance(b"\x1b[!p"); // DECSTR
+    assert!(
+        !t.dec_modes().app_cursor_keys,
+        "soft_reset must clear app_cursor_keys"
+    );
+}
+
+/// `soft_reset` preserves screen content written before the reset.
+#[test]
+fn test_soft_reset_preserves_screen_content() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"Hello");
+    t.advance(b"\x1b[!p"); // DECSTR
+    assert_eq!(
+        t.get_cell(0, 0).map(kuro_core::Cell::char),
+        Some('H'),
+        "soft_reset must not erase screen content"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECSC / DECRC via raw escape sequences (ESC 7 / ESC 8)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ESC 7 saves and ESC 8 restores cursor position when sent as byte sequences.
+#[test]
+fn test_decsc_decrc_via_escape_sequences() {
+    let mut t = TerminalCore::new(24, 80);
+    // Move cursor to row 3, col 5 via CUP
+    t.advance(b"\x1b[4;6H"); // CUP row 4, col 6 (1-indexed) → row 3, col 5 (0-indexed)
+    assert_eq!(t.cursor_row(), 3);
+    assert_eq!(t.cursor_col(), 5);
+
+    t.advance(b"\x1b7"); // DECSC — save cursor
+
+    // Move cursor away
+    t.advance(b"\x1b[1;1H");
+    assert_eq!(t.cursor_row(), 0);
+    assert_eq!(t.cursor_col(), 0);
+
+    t.advance(b"\x1b8"); // DECRC — restore cursor
+    assert_eq!(t.cursor_row(), 3, "DECRC must restore row");
+    assert_eq!(t.cursor_col(), 5, "DECRC must restore col");
+}
+
+/// ESC 8 without a prior ESC 7 is a no-op (cursor stays where it is).
+#[test]
+fn test_decrc_without_prior_decsc_is_noop() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[5;5H");
+    let row_before = t.cursor_row();
+    let col_before = t.cursor_col();
+    t.advance(b"\x1b8"); // DECRC with no saved state
+                         // Cursor must not move (no saved state to restore)
+    assert_eq!(
+        t.cursor_row(),
+        row_before,
+        "DECRC without prior DECSC must not change row"
+    );
+    assert_eq!(
+        t.cursor_col(),
+        col_before,
+        "DECRC without prior DECSC must not change col"
+    );
+}

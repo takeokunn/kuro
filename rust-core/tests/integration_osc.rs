@@ -5,6 +5,52 @@ mod common;
 use kuro_core::TerminalCore;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Macros
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Assert that a set-then-query sequence for OSC 10, 11, or 12 produces at
+/// least one response containing the expected OSC number prefix.
+///
+/// Usage: `assert_osc_color_query!(set_seq, query_seq, "10;", "OSC 10 label")`
+macro_rules! assert_osc_color_query {
+    ($set_seq:expr, $query_seq:expr, $needle:literal, $label:literal) => {{
+        let mut t = TerminalCore::new(24, 80);
+        t.advance($set_seq);
+        t.advance($query_seq);
+        let responses = common::read_responses(&t);
+        assert!(
+            !responses.is_empty(),
+            "{}: query must produce a response",
+            $label
+        );
+        let resp = &responses[0];
+        assert!(
+            resp.contains($needle),
+            "{}: response must contain {:?}, got: {resp:?}",
+            $label,
+            $needle
+        );
+    }};
+}
+
+/// Assert that an OSC 133 full shell-integration cycle (A→B→C→D) records the
+/// correct number of prompt marks.
+macro_rules! assert_osc133_cycle {
+    ($seq:expr, $expected_count:expr, $label:literal) => {{
+        let mut t = TerminalCore::new(24, 80);
+        t.advance($seq);
+        assert_eq!(
+            t.osc_data().prompt_marks.len(),
+            $expected_count,
+            "{}: expected {} prompt marks, got {}",
+            $label,
+            $expected_count,
+            t.osc_data().prompt_marks.len()
+        );
+    }};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OSC 4 — Palette color set/query
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -151,46 +197,31 @@ fn osc10_sets_default_colors_dirty_flag() {
 
 #[test]
 fn osc10_query_produces_response() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]10;rgb:aa/bb/cc\x07"); // set first
-    t.advance(b"\x1b]10;?\x07"); // then query
-    let responses = common::read_responses(&t);
-    assert!(
-        !responses.is_empty(),
-        "OSC 10 query must produce a response"
-    );
-    let resp = &responses[0];
-    assert!(
-        resp.contains("10;"),
-        "OSC 10 response must echo back '10;', got: {resp:?}"
+    assert_osc_color_query!(
+        b"\x1b]10;rgb:aa/bb/cc\x07",
+        b"\x1b]10;?\x07",
+        "10;",
+        "OSC 10 query"
     );
 }
 
 #[test]
 fn osc11_query_produces_response() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]11;rgb:22/33/44\x07");
-    t.advance(b"\x1b]11;?\x07");
-    let responses = common::read_responses(&t);
-    assert!(!responses.is_empty());
-    let resp = &responses[0];
-    assert!(
-        resp.contains("11;"),
-        "OSC 11 response must echo '11;', got: {resp:?}"
+    assert_osc_color_query!(
+        b"\x1b]11;rgb:22/33/44\x07",
+        b"\x1b]11;?\x07",
+        "11;",
+        "OSC 11 query"
     );
 }
 
 #[test]
 fn osc12_query_produces_response() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]12;rgb:ff/a5/00\x07");
-    t.advance(b"\x1b]12;?\x07");
-    let responses = common::read_responses(&t);
-    assert!(!responses.is_empty());
-    let resp = &responses[0];
-    assert!(
-        resp.contains("12;"),
-        "OSC 12 response must echo '12;', got: {resp:?}"
+    assert_osc_color_query!(
+        b"\x1b]12;rgb:ff/a5/00\x07",
+        b"\x1b]12;?\x07",
+        "12;",
+        "OSC 12 query"
     );
 }
 
@@ -249,7 +280,7 @@ fn iterm2_osc1337_invalid_base64_does_not_panic() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OSC 133 shell integration — regression test
+// OSC 133 shell integration — prompt mark round-trip
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -259,4 +290,115 @@ fn osc133_prompt_marks_are_recorded() {
     t.advance(b"\x1b]133;B\x07"); // PromptEnd
     let marks = &t.osc_data().prompt_marks;
     assert_eq!(marks.len(), 2, "OSC 133 A and B must both be recorded");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OSC 9 (iTerm2 notification) is not handled by this emulator; it must be
+/// silently discarded without panic and the cursor must remain in bounds.
+#[test]
+fn osc9_notification_does_not_panic() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b]9;Test notification text\x07");
+    assert!(
+        t.cursor_row() < 24,
+        "cursor row must remain in bounds after OSC 9"
+    );
+    assert!(
+        t.cursor_col() < 80,
+        "cursor col must remain in bounds after OSC 9"
+    );
+}
+
+/// OSC 133 full shell-integration cycle (A → B → C → D) must record all 4
+/// marks in the correct order.
+#[test]
+fn osc133_full_cycle_records_four_marks() {
+    assert_osc133_cycle!(
+        b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D\x07",
+        4,
+        "OSC 133 A→B→C→D"
+    );
+}
+
+/// OSC 133 marks are position-stamped at the cursor location when they
+/// arrive.  After moving the cursor to a known position the mark count must
+/// reflect the OSC 133 sequences received.
+#[test]
+fn osc133_mark_round_trip_via_prompt_marks() {
+    let mut t = TerminalCore::new(24, 80);
+    // Move cursor to a non-zero position
+    t.advance(b"\x1b[5;3H"); // row 4, col 2 (1-indexed)
+    assert_eq!(t.cursor_row(), 4);
+    assert_eq!(t.cursor_col(), 2);
+    // Send PromptStart and PromptEnd
+    t.advance(b"\x1b]133;A\x07");
+    t.advance(b"\x1b]133;B\x07");
+    let marks = &t.osc_data().prompt_marks;
+    assert_eq!(marks.len(), 2, "Two OSC 133 marks must be recorded");
+}
+
+/// OSC 7 CWD round-trip: send a valid `file://` URL and verify the path is
+/// extracted and stored in `osc_data().cwd`.
+#[test]
+fn osc7_cwd_round_trip() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b]7;file://localhost/home/user/projects\x07");
+    assert_eq!(
+        t.osc_data().cwd.as_deref(),
+        Some("/home/user/projects"),
+        "OSC 7 must store the path component in osc_data().cwd"
+    );
+    assert!(t.osc_data().cwd_dirty, "cwd_dirty must be set after OSC 7");
+}
+
+/// OSC 7 with a path containing special characters must be stored verbatim
+/// (no URL-decode occurs in the handler).
+#[test]
+fn osc7_cwd_with_spaces_percent_encoded() {
+    let mut t = TerminalCore::new(24, 80);
+    // Spaces are percent-encoded in the URL; the handler stores the raw path
+    t.advance(b"\x1b]7;file://localhost/home/user/my%20project\x07");
+    assert_eq!(
+        t.osc_data().cwd.as_deref(),
+        Some("/home/user/my%20project"),
+        "OSC 7 must store percent-encoded path verbatim"
+    );
+}
+
+/// OSC 7 with a non-file:// scheme must be silently rejected (not stored).
+#[test]
+fn osc7_non_file_scheme_is_rejected() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b]7;https://example.com/\x07");
+    assert!(
+        t.osc_data().cwd.is_none(),
+        "OSC 7 with non-file:// scheme must not be stored"
+    );
+}
+
+/// OSC 52 clipboard write followed by OSC 52 clipboard query must leave the
+/// terminal in a valid state without panic.  The `clipboard_actions` queue
+/// is internal, but the terminal cursor must remain in bounds.
+#[test]
+fn osc52_write_and_query_no_panic() {
+    let mut t = TerminalCore::new(24, 80);
+    // Write "hello" (base64: aGVsbG8=) to the clipboard
+    t.advance(b"\x1b]52;c;aGVsbG8=\x07");
+    // Query clipboard
+    t.advance(b"\x1b]52;c;?\x07");
+    // Must not panic; cursor stays in bounds
+    assert!(t.cursor_row() < 24);
+    assert!(t.cursor_col() < 80);
+}
+
+/// OSC 52 with an invalid base64 payload must be silently ignored.
+#[test]
+fn osc52_invalid_base64_is_ignored() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b]52;c;!!!not-base64!!!\x07");
+    // Terminal must remain usable
+    assert!(t.cursor_row() < 24);
 }

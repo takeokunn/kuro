@@ -66,15 +66,40 @@ impl TerminalSession {
             return vec![];
         }
 
-        // Fast path: full_dirty → iterate 0..rows directly without allocating a Vec
+        // Check if the 256-color palette changed since the last render and bump
+        // palette_epoch so every cached row hash is implicitly invalidated.
+        if self.core.osc_data.palette_dirty {
+            self.core.osc_data.palette_dirty = false;
+            self.palette_epoch = self.palette_epoch.wrapping_add(1);
+        }
+
+        // Check if alternate screen was toggled since the last render and clear
+        // row_hashes to force a full re-render of all rows.
+        let now_alt = self.core.screen.is_alternate_screen_active();
+        if now_alt != self.was_alt_screen {
+            self.was_alt_screen = now_alt;
+            self.row_hashes.clear();
+        }
+
+        // Fast path: full_dirty → iterate 0..rows directly without allocating a Vec.
+        // Also update row_hashes for each encoded row so subsequent partial-dirty
+        // frames can skip rows that haven't changed.
+        // NOTE: The hash-skip optimisation (below) only applies in the partial-dirty
+        // path.  Full-dirty frames — triggered by scrolling, resize, alt-screen switch,
+        // or programs that dirty more rows than the dirty threshold — always return all
+        // rows.  This is intentional: `full_dirty` is a conservative "repaint everything"
+        // signal where correctness requires sending every row to the Elisp renderer.
         if self.core.screen.is_full_dirty() {
             let rows = self.core.screen.rows() as usize;
             self.core.screen.clear_dirty();
             let mut result = Vec::with_capacity(rows);
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
-                    let encoded = Self::encode_line_faces(row, &line.cells);
-                    result.push(encoded);
+                    let (text, face_ranges, col_to_buf) =
+                        crate::ffi::codec::encode_line(&line.cells);
+                    let hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
+                    self.row_hashes.insert(row, (hash, self.palette_epoch));
+                    result.push((row, text, face_ranges, col_to_buf));
                 }
             }
             return result;
@@ -82,11 +107,23 @@ impl TerminalSession {
 
         let dirty_indices = self.core.screen.take_dirty_lines();
         let mut result = Vec::with_capacity(dirty_indices.len());
+        let epoch = self.palette_epoch;
 
         for row in dirty_indices {
             if let Some(line) = self.core.screen.get_line(row) {
-                let encoded = Self::encode_line_faces(row, &line.cells);
-                result.push(encoded);
+                let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(&line.cells);
+                let new_hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
+
+                // Skip this row if both content hash and palette epoch match.
+                if let Some(&(stored_hash, stored_epoch)) = self.row_hashes.get(&row) {
+                    if stored_hash == new_hash && stored_epoch == epoch {
+                        // Unchanged row — do not include in output.
+                        continue;
+                    }
+                }
+
+                self.row_hashes.insert(row, (new_hash, epoch));
+                result.push((row, text, face_ranges, col_to_buf));
             }
         }
 

@@ -125,4 +125,77 @@ mod tests {
         screen.mark_dirty_range(5, 5); // empty range
         assert!(screen.dirty_set.is_empty());
     }
+
+    #[test]
+    fn mark_all_dirty_sets_full_dirty_flag() {
+        let mut screen = Screen::new(24, 80);
+        assert!(!screen.is_full_dirty());
+        screen.mark_all_dirty();
+        assert!(screen.is_full_dirty());
+    }
+
+    #[test]
+    fn take_dirty_lines_full_dirty_returns_all_rows_and_clears() {
+        let mut screen = Screen::new(6, 80);
+        screen.mark_all_dirty();
+        let dirty = screen.take_dirty_lines();
+        assert_eq!(dirty, vec![0, 1, 2, 3, 4, 5]);
+        // After take, full_dirty must be cleared and dirty_set empty.
+        assert!(!screen.is_full_dirty());
+        assert!(screen.dirty_set.is_empty());
+    }
+
+    #[test]
+    fn take_dirty_lines_partial_drains_and_clears() {
+        let mut screen = Screen::new(24, 80);
+        screen.dirty_set.insert(2);
+        screen.dirty_set.insert(7);
+        let dirty = screen.take_dirty_lines();
+        assert_eq!(dirty, vec![2, 7]);
+        // Dirty set must be empty after drain.
+        assert!(screen.dirty_set.is_empty());
+    }
+
+    #[test]
+    fn clear_dirty_resets_both_full_dirty_and_set() {
+        let mut screen = Screen::new(24, 80);
+        screen.mark_all_dirty();
+        screen.dirty_set.insert(5);
+        screen.clear_dirty();
+        assert!(!screen.is_full_dirty());
+        assert!(screen.dirty_set.is_empty());
+    }
+
+    #[test]
+    fn mark_line_dirty_sets_both_set_and_line_flag() {
+        let mut screen = Screen::new(24, 80);
+        screen.mark_line_dirty(3);
+        assert!(screen.dirty_set.contains(3));
+        assert!(screen.lines[3].is_dirty);
+        // Other rows must not be affected.
+        assert!(!screen.dirty_set.contains(4));
+        assert!(!screen.lines[4].is_dirty);
+    }
+
+    #[test]
+    fn is_full_dirty_reflects_alternate_screen_when_active() {
+        let mut screen = Screen::new(24, 80);
+        // Primary screen starts clean.
+        assert!(!screen.is_full_dirty());
+        // Switching to alternate clears primary full_dirty flag visibility and sets
+        // alt full_dirty (switch_to_alternate always marks alt dirty for repaint).
+        screen.switch_to_alternate();
+        assert!(screen.is_alternate_screen_active());
+        assert!(screen.is_full_dirty()); // alternate was marked full-dirty on entry
+                                         // Consume the full-dirty via take_dirty_lines.
+        let _ = screen.take_dirty_lines();
+        assert!(!screen.is_full_dirty());
+        // Re-mark and verify we can set it explicitly.
+        screen.mark_all_dirty();
+        assert!(screen.is_full_dirty());
+        // Switching back to primary sets primary full_dirty (not alternate's).
+        screen.switch_to_primary();
+        assert!(!screen.is_alternate_screen_active());
+        assert!(screen.is_full_dirty()); // primary is now full-dirty on return
+    }
 }

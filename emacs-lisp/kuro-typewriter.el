@@ -39,28 +39,23 @@
 
 ;;; Internal state
 
-(defvar-local kuro--typewriter-queue nil
+(kuro--defvar-permanent-local kuro--typewriter-queue nil
   "Queue of (ROW . TEXT) pairs waiting to be displayed by the typewriter effect.
 Each entry is a cons cell (row . text) from `kuro--poll-updates-with-faces'.
 The typewriter timer drains this queue character-by-character.")
-(put 'kuro--typewriter-queue 'permanent-local t)
 
-(defvar-local kuro--typewriter-timer nil
+(kuro--defvar-permanent-local kuro--typewriter-timer nil
   "Repeating timer for the typewriter character-drip effect.
 Fires at `kuro-typewriter-chars-per-second' Hz when `kuro-typewriter-effect' is t.")
-(put 'kuro--typewriter-timer 'permanent-local t)
 
-(defvar-local kuro--typewriter-current-row nil
+(kuro--defvar-permanent-local kuro--typewriter-current-row nil
   "Row currently being written by the typewriter effect.")
-(put 'kuro--typewriter-current-row 'permanent-local t)
 
-(defvar-local kuro--typewriter-current-text nil
+(kuro--defvar-permanent-local kuro--typewriter-current-text nil
   "Full text for the current typewriter row (not consumed during animation).")
-(put 'kuro--typewriter-current-text 'permanent-local t)
 
-(defvar-local kuro--typewriter-written-len 0
+(kuro--defvar-permanent-local kuro--typewriter-written-len 0
   "Number of characters already written for the current typewriter row.")
-(put 'kuro--typewriter-written-len 'permanent-local t)
 
 ;;; Typewriter timer
 

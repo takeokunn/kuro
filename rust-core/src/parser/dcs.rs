@@ -71,6 +71,47 @@ pub fn dcs_unhook(core: &mut TerminalCore) {
     }
 }
 
+/// Look up a single XTGETTCAP capability by its decoded name and build the
+/// DCS response string.
+///
+/// Returns `DCS 1 + r <hex-name>=<hex-value> ST` for known capabilities and
+/// `DCS 0 + r <hex-name> ST` for unknown ones.
+///
+/// `cap_hex` is the raw hex-encoded form of `cap_name` as received from the
+/// client; it is echoed back verbatim so the caller can match the response to
+/// the request without re-encoding.
+#[inline]
+fn build_xtgettcap_response(cap_name: &str, cap_hex: &str) -> String {
+    match cap_name {
+        "TN" | "name" => {
+            let name_hex = hex_encode(&b"kuro"[..]);
+            format!("\x1bP1+r{cap_hex}={name_hex}\x1b\\")
+        }
+        "RGB" => {
+            let val_hex = hex_encode(&b"8:8:8"[..]);
+            format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
+        }
+        "Tc" => {
+            // True color flag (empty value = supported)
+            format!("\x1bP1+r{cap_hex}=\x1b\\")
+        }
+        "Ms" => {
+            // Clipboard set/get format for tmux/screen compatibility
+            let val: &[u8] = &b"\x1b]52;%p1%s;%p2%s\x07"[..];
+            let val_hex = hex_encode(val);
+            format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
+        }
+        "colors" | "Co" => {
+            let val_hex = hex_encode(&b"256"[..]);
+            format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
+        }
+        _ => {
+            // Unknown capability
+            format!("\x1bP0+r{cap_hex}\x1b\\")
+        }
+    }
+}
+
 /// Handle XTGETTCAP response.
 fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
     // buf contains hex-encoded capability name(s), semicolon separated.
@@ -86,40 +127,10 @@ fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
         if cap_hex.is_empty() {
             continue;
         }
-
         let Some(cap_name) = hex_decode(cap_hex) else {
             continue;
         };
-
-        let response = match cap_name.as_str() {
-            "TN" | "name" => {
-                let name_hex = hex_encode(&b"kuro"[..]);
-                format!("\x1bP1+r{cap_hex}={name_hex}\x1b\\")
-            }
-            "RGB" => {
-                let val_hex = hex_encode(&b"8:8:8"[..]);
-                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
-            }
-            "Tc" => {
-                // True color flag (empty value = supported)
-                format!("\x1bP1+r{cap_hex}=\x1b\\")
-            }
-            "Ms" => {
-                // Clipboard set/get format for tmux/screen compatibility
-                let val: &[u8] = &b"\x1b]52;%p1%s;%p2%s\x07"[..];
-                let val_hex = hex_encode(val);
-                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
-            }
-            "colors" | "Co" => {
-                let val_hex = hex_encode(&b"256"[..]);
-                format!("\x1bP1+r{cap_hex}={val_hex}\x1b\\")
-            }
-            _ => {
-                // Unknown capability
-                format!("\x1bP0+r{cap_hex}\x1b\\")
-            }
-        };
-
+        let response = build_xtgettcap_response(&cap_name, cap_hex);
         core.meta.pending_responses.push(response.into_bytes());
     }
 }

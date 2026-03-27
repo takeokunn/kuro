@@ -5,63 +5,200 @@ mod common;
 use kuro_core::TerminalCore;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Synchronized Output mode (?2026) — regression tests for claude-code rendering
-//
-// Background: claude-code (and other TUI apps) use DEC ?2026 to batch-update
-// the terminal screen atomically.  Kuro's 60fps render timer must NOT flush
-// partial frames while a sync batch is open; doing so produces garbled output
-// like "⏺─Hello! How can─I─help─you─today?─" (separator chars leaking into text).
-//
-// These tests cover:
-//   1. Basic state toggling (?2026h / ?2026l)
-//   2. Grid content preserved during sync
-//   3. mark_all_dirty triggered on ?2026l (tested via abstraction layer unit tests)
-//   4. The claude-code startup sequence pattern
+// Macros — extract repeated set / reset / RIS patterns
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_decckm_enable() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?1h"); // enable DECCKM (application cursor keys)
-    assert!(term.app_cursor_keys(), "DECCKM should be enabled");
+/// Assert that CSI ?{mode}h sets `$field` on `dec_modes()` and
+/// CSI ?{mode}l clears it.  `$enable_seq` / `$disable_seq` are byte literals.
+macro_rules! assert_dec_mode_enable_disable {
+    ($name_en:ident, $name_dis:ident, $enable_seq:expr, $disable_seq:expr, $field:ident, $label:expr) => {
+        #[test]
+        fn $name_en() {
+            let mut term = TerminalCore::new(24, 80);
+            term.advance($enable_seq);
+            assert!(
+                term.dec_modes().$field,
+                concat!($label, " should be enabled after h")
+            );
+        }
+
+        #[test]
+        fn $name_dis() {
+            let mut term = TerminalCore::new(24, 80);
+            term.advance($enable_seq);
+            term.advance($disable_seq);
+            assert!(
+                !term.dec_modes().$field,
+                concat!($label, " should be disabled after l")
+            );
+        }
+    };
 }
 
-#[test]
-fn test_decckm_disable() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?1h");
-    term.advance(b"\x1b[?1l"); // disable DECCKM
-    assert!(!term.app_cursor_keys(), "DECCKM should be disabled");
+/// Assert that RIS (ESC c) resets `$field` to `false` after it was set.
+macro_rules! assert_dec_mode_reset_after_ris {
+    ($name:ident, $enable_seq:expr, $field:ident, $label:expr) => {
+        #[test]
+        fn $name() {
+            let mut term = TerminalCore::new(24, 80);
+            term.advance($enable_seq);
+            assert!(
+                term.dec_modes().$field,
+                concat!($label, " should be set before RIS")
+            );
+            term.advance(b"\x1bc"); // RIS
+            assert!(
+                !term.dec_modes().$field,
+                concat!($label, " should be reset after RIS")
+            );
+        }
+    };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECCKM (?1) — application cursor keys
+// ─────────────────────────────────────────────────────────────────────────────
+
+assert_dec_mode_enable_disable!(
+    test_decckm_enable,
+    test_decckm_disable,
+    b"\x1b[?1h",
+    b"\x1b[?1l",
+    app_cursor_keys,
+    "DECCKM"
+);
+
+assert_dec_mode_reset_after_ris!(
+    test_decckm_reset_after_ris,
+    b"\x1b[?1h",
+    app_cursor_keys,
+    "DECCKM"
+);
 
 #[test]
 fn test_decckm_toggle_multiple_times() {
     let mut term = TerminalCore::new(24, 80);
     for _ in 0..5 {
         term.advance(b"\x1b[?1h");
-        assert!(term.app_cursor_keys());
+        assert!(term.dec_modes().app_cursor_keys);
         term.advance(b"\x1b[?1l");
-        assert!(!term.app_cursor_keys());
+        assert!(!term.dec_modes().app_cursor_keys);
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bracketed paste (?2004)
+// ─────────────────────────────────────────────────────────────────────────────
+
+assert_dec_mode_enable_disable!(
+    test_bracketed_paste_mode_enable,
+    test_bracketed_paste_mode_disable,
+    b"\x1b[?2004h",
+    b"\x1b[?2004l",
+    bracketed_paste,
+    "Bracketed paste"
+);
+
+assert_dec_mode_reset_after_ris!(
+    test_bracketed_paste_reset_after_ris,
+    b"\x1b[?2004h",
+    bracketed_paste,
+    "Bracketed paste"
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Focus events (?1004)
+// ─────────────────────────────────────────────────────────────────────────────
+
+assert_dec_mode_enable_disable!(
+    test_focus_events_enable,
+    test_focus_events_disable,
+    b"\x1b[?1004h",
+    b"\x1b[?1004l",
+    focus_events,
+    "Focus events"
+);
+
+assert_dec_mode_reset_after_ris!(
+    test_focus_events_reset_after_ris,
+    b"\x1b[?1004h",
+    focus_events,
+    "Focus events"
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mouse SGR (?1006)
+// ─────────────────────────────────────────────────────────────────────────────
+
+assert_dec_mode_enable_disable!(
+    test_mouse_sgr_enable,
+    test_mouse_sgr_disable,
+    b"\x1b[?1006h",
+    b"\x1b[?1006l",
+    mouse_sgr,
+    "Mouse SGR"
+);
+
+assert_dec_mode_reset_after_ris!(
+    test_mouse_sgr_reset_after_ris,
+    b"\x1b[?1006h",
+    mouse_sgr,
+    "Mouse SGR"
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mouse pixel (?1016)
+// ─────────────────────────────────────────────────────────────────────────────
+
+assert_dec_mode_enable_disable!(
+    test_mouse_pixel_enable,
+    test_mouse_pixel_disable,
+    b"\x1b[?1016h",
+    b"\x1b[?1016l",
+    mouse_pixel,
+    "Mouse pixel"
+);
+
+assert_dec_mode_reset_after_ris!(
+    test_mouse_pixel_reset_after_ris,
+    b"\x1b[?1016h",
+    mouse_pixel,
+    "Mouse pixel"
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECTCEM (?25) — cursor visibility
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[test]
-fn test_bracketed_paste_mode_enable() {
+fn test_dectcem_cursor_hide() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?2004h");
-    assert!(term.bracketed_paste(), "Bracketed paste should be enabled");
+    term.advance(b"\x1b[?25l"); // hide cursor
+    assert!(!term.cursor_visible(), "Cursor should be hidden");
 }
 
 #[test]
-fn test_bracketed_paste_mode_disable() {
+fn test_dectcem_cursor_show() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?2004h");
-    term.advance(b"\x1b[?2004l");
-    assert!(
-        !term.bracketed_paste(),
-        "Bracketed paste should be disabled"
-    );
+    term.advance(b"\x1b[?25l");
+    term.advance(b"\x1b[?25h"); // show cursor
+    assert!(term.cursor_visible(), "Cursor should be visible");
 }
+
+#[test]
+fn test_dectcem_after_ris() {
+    let mut term = TerminalCore::new(24, 80);
+    // Hide cursor
+    term.advance(b"\x1b[?25l");
+    assert!(!term.cursor_visible());
+    // Full reset (RIS) should restore cursor visibility
+    term.advance(b"\x1bc");
+    assert!(term.cursor_visible(), "Cursor should be visible after RIS");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alternate screen (?1049)
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_alternate_screen_activate() {
@@ -107,19 +244,20 @@ fn test_alternate_screen_isolates_cursor() {
 }
 
 #[test]
-fn test_dectcem_cursor_hide() {
+fn test_alternate_screen_deactivated_after_ris() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?25l"); // hide cursor
-    assert!(!term.cursor_visible(), "Cursor should be hidden");
+    term.advance(b"\x1b[?1049h");
+    assert!(term.is_alternate_screen_active());
+    term.advance(b"\x1bc"); // RIS
+    assert!(
+        !term.is_alternate_screen_active(),
+        "Alt screen should be deactivated after RIS"
+    );
 }
 
-#[test]
-fn test_dectcem_cursor_show() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?25l");
-    term.advance(b"\x1b[?25h"); // show cursor
-    assert!(term.cursor_visible(), "Cursor should be visible");
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Default state
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_dec_modes_default_state() {
@@ -131,50 +269,17 @@ fn test_dec_modes_default_state() {
     assert!(term.cursor_visible());
     // Default: alternate screen not active
     assert!(!term.is_alternate_screen_active());
-}
-
-#[test]
-fn test_dectcem_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
-    // Hide cursor
-    term.advance(b"\x1b[?25l");
-    assert!(!term.cursor_visible());
-    // Full reset (RIS) should restore cursor visibility
-    term.advance(b"\x1bc");
-    assert!(term.cursor_visible(), "Cursor should be visible after RIS");
-}
-
-#[test]
-fn test_decckm_reset_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?1h");
-    assert!(term.app_cursor_keys());
-    term.advance(b"\x1bc"); // RIS
-    assert!(!term.app_cursor_keys(), "DECCKM should be reset after RIS");
-}
-
-#[test]
-fn test_bracketed_paste_reset_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?2004h");
-    assert!(term.bracketed_paste());
-    term.advance(b"\x1bc"); // RIS
+    // Default: auto_wrap on
     assert!(
-        !term.bracketed_paste(),
-        "Bracketed paste should be reset after RIS"
+        term.dec_modes().auto_wrap,
+        "auto_wrap should default to true"
     );
-}
-
-#[test]
-fn test_alternate_screen_deactivated_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[?1049h");
-    assert!(term.is_alternate_screen_active());
-    term.advance(b"\x1bc"); // RIS
-    assert!(
-        !term.is_alternate_screen_active(),
-        "Alt screen should be deactivated after RIS"
-    );
+    // Default: origin_mode off
+    assert!(!term.dec_modes().origin_mode);
+    // Default: mouse modes off
+    assert_eq!(term.dec_modes().mouse_mode, 0);
+    assert!(!term.dec_modes().mouse_sgr);
+    assert!(!term.dec_modes().mouse_pixel);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,4 +866,315 @@ fn kitty_keyboard_push_pop_query() {
         0,
         "Flags should revert after pop"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECAWM (?7) — auto-wrap mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?7h enables auto-wrap (re-enables after explicit disable).
+#[test]
+fn test_decawm_enable() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?7l"); // disable first
+    assert!(
+        !t.dec_modes().auto_wrap,
+        "auto_wrap should be off after ?7l"
+    );
+    t.advance(b"\x1b[?7h"); // re-enable
+    assert!(t.dec_modes().auto_wrap, "auto_wrap should be on after ?7h");
+}
+
+/// ?7l disables auto-wrap; cursor must stay at right margin on overflow.
+#[test]
+fn test_decawm_disable_cursor_stays_at_margin() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?7l"); // disable auto-wrap
+                            // Write exactly 80 chars → cursor is at col 79 (last col, 0-indexed)
+    t.advance(&[b'A'; 80]);
+    assert_eq!(
+        t.cursor_col(),
+        79,
+        "cursor must stop at col 79 (right margin) when auto_wrap is off"
+    );
+    // Write one more char — cursor must NOT advance past col 79
+    t.advance(b"X");
+    assert_eq!(
+        t.cursor_col(),
+        79,
+        "cursor must remain at col 79 after overflow with auto_wrap disabled"
+    );
+}
+
+/// RIS restores auto_wrap to true (its default-on value).
+#[test]
+fn test_decawm_restored_after_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?7l");
+    assert!(!t.dec_modes().auto_wrap);
+    t.advance(b"\x1bc"); // RIS
+    assert!(
+        t.dec_modes().auto_wrap,
+        "RIS must restore auto_wrap to true"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECOM (?6) — origin mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?6h sets origin_mode; cursor moves to top of scroll region on activation.
+#[test]
+fn test_decom_enable_sets_flag_and_homes_cursor() {
+    let mut t = TerminalCore::new(24, 80);
+    // Move cursor away from home first
+    t.advance(b"\x1b[5;10H"); // CUP row 5, col 10 (1-indexed)
+    assert_eq!(t.cursor_row(), 4);
+    assert_eq!(t.cursor_col(), 9);
+
+    t.advance(b"\x1b[?6h"); // enable DECOM
+    assert!(
+        t.dec_modes().origin_mode,
+        "origin_mode must be set after ?6h"
+    );
+    // Cursor must return to top-of-scroll-region (row 0, col 0)
+    assert_eq!(
+        t.cursor_row(),
+        0,
+        "DECOM enable must move cursor to top of scroll region"
+    );
+    assert_eq!(t.cursor_col(), 0, "DECOM enable must move cursor to col 0");
+}
+
+/// ?6l clears origin_mode; cursor returns to absolute home on deactivation.
+#[test]
+fn test_decom_disable_clears_flag_and_homes_cursor() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?6h"); // enable
+    assert!(t.dec_modes().origin_mode);
+
+    t.advance(b"\x1b[?6l"); // disable
+    assert!(
+        !t.dec_modes().origin_mode,
+        "origin_mode must be clear after ?6l"
+    );
+    // Cursor must be at absolute home (row 0, col 0)
+    assert_eq!(
+        t.cursor_row(),
+        0,
+        "DECOM disable must move cursor to absolute row 0"
+    );
+    assert_eq!(
+        t.cursor_col(),
+        0,
+        "DECOM disable must move cursor to absolute col 0"
+    );
+}
+
+/// RIS resets origin_mode to false.
+#[test]
+fn test_decom_reset_after_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?6h");
+    assert!(t.dec_modes().origin_mode);
+    t.advance(b"\x1bc"); // RIS
+    assert!(!t.dec_modes().origin_mode, "RIS must clear origin_mode");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mouse tracking modes (?1000 / ?1002 / ?1003)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ?1000h enables normal-button mouse tracking; ?1000l disables it.
+#[test]
+fn test_mouse_mode_1000_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    assert_eq!(t.dec_modes().mouse_mode, 0, "mouse_mode defaults to 0");
+    t.advance(b"\x1b[?1000h");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1000,
+        "?1000h must set mouse_mode to 1000"
+    );
+    t.advance(b"\x1b[?1000l");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        0,
+        "?1000l must clear mouse_mode to 0"
+    );
+}
+
+/// ?1002h enables button-event mouse tracking; ?1002l disables it.
+#[test]
+fn test_mouse_mode_1002_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1002h");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1002,
+        "?1002h must set mouse_mode to 1002"
+    );
+    t.advance(b"\x1b[?1002l");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        0,
+        "?1002l must clear mouse_mode to 0"
+    );
+}
+
+/// ?1003h enables any-event mouse tracking; ?1003l disables it.
+#[test]
+fn test_mouse_mode_1003_enable_disable() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1003h");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1003,
+        "?1003h must set mouse_mode to 1003"
+    );
+    t.advance(b"\x1b[?1003l");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        0,
+        "?1003l must clear mouse_mode to 0"
+    );
+}
+
+/// Switching from one mouse mode to another replaces the stored value.
+#[test]
+fn test_mouse_mode_switch_replaces_previous() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1000h"); // normal tracking
+    assert_eq!(t.dec_modes().mouse_mode, 1000);
+    t.advance(b"\x1b[?1003h"); // upgrade to any-event
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1003,
+        "?1003h must replace ?1000h value"
+    );
+}
+
+/// RIS clears mouse_mode to 0.
+#[test]
+fn test_mouse_mode_cleared_after_ris() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1000h");
+    assert_eq!(t.dec_modes().mouse_mode, 1000);
+    t.advance(b"\x1bc"); // RIS
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        0,
+        "RIS must clear mouse_mode to 0"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mode persistence across resize
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DEC modes must survive a terminal resize without being cleared.
+#[test]
+fn test_dec_modes_persist_across_resize() {
+    let mut t = TerminalCore::new(24, 80);
+
+    // Set several modes before resize
+    t.advance(b"\x1b[?1h"); // DECCKM
+    t.advance(b"\x1b[?2004h"); // bracketed paste
+    t.advance(b"\x1b[?1006h"); // mouse SGR
+    t.advance(b"\x1b[?25l"); // hide cursor
+
+    // Resize: shrink and grow
+    t.resize(10, 40);
+    t.resize(24, 80);
+
+    assert!(
+        t.dec_modes().app_cursor_keys,
+        "app_cursor_keys must persist across resize"
+    );
+    assert!(
+        t.dec_modes().bracketed_paste,
+        "bracketed_paste must persist across resize"
+    );
+    assert!(
+        t.dec_modes().mouse_sgr,
+        "mouse_sgr must persist across resize"
+    );
+    assert!(
+        !t.cursor_visible(),
+        "cursor_visible=false must persist across resize"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mode interaction: alternate screen + mouse tracking
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mouse tracking mode is independent of alternate screen: enabling one does
+/// not clear the other, and switching screens does not affect mouse state.
+#[test]
+fn test_alt_screen_and_mouse_mode_are_independent() {
+    let mut t = TerminalCore::new(24, 80);
+
+    // Enable mouse tracking
+    t.advance(b"\x1b[?1000h");
+    assert_eq!(t.dec_modes().mouse_mode, 1000);
+    assert!(!t.is_alternate_screen_active());
+
+    // Switch to alt screen — mouse mode must stay
+    t.advance(b"\x1b[?1049h");
+    assert!(t.is_alternate_screen_active(), "alt screen must be active");
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1000,
+        "mouse_mode must be preserved when entering alt screen"
+    );
+
+    // Disable mouse while on alt screen
+    t.advance(b"\x1b[?1000l");
+    assert_eq!(t.dec_modes().mouse_mode, 0, "mouse disabled on alt screen");
+    assert!(t.is_alternate_screen_active(), "alt screen still active");
+
+    // Re-enable mouse, then return to primary — mouse mode must survive
+    t.advance(b"\x1b[?1002h");
+    t.advance(b"\x1b[?1049l");
+    assert!(
+        !t.is_alternate_screen_active(),
+        "primary screen must be active"
+    );
+    assert_eq!(
+        t.dec_modes().mouse_mode,
+        1002,
+        "mouse_mode must persist when leaving alt screen"
+    );
+}
+
+/// Synchronized output and alt screen can both be active; each can be
+/// cleared independently without affecting the other.
+#[test]
+fn test_sync_and_alt_screen_clear_independently() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?1049h"); // alt screen on
+    t.advance(b"\x1b[?2026h"); // sync on
+
+    assert!(t.is_alternate_screen_active());
+    assert!(t.dec_modes().synchronized_output);
+
+    // Clear sync — alt screen unchanged
+    t.advance(b"\x1b[?2026l");
+    assert!(
+        !t.dec_modes().synchronized_output,
+        "sync must be off after ?2026l"
+    );
+    assert!(
+        t.is_alternate_screen_active(),
+        "alt screen must remain active after clearing sync"
+    );
+
+    // Clear alt screen — sync unchanged (already off)
+    t.advance(b"\x1b[?1049l");
+    assert!(
+        !t.is_alternate_screen_active(),
+        "alt screen must be off after ?1049l"
+    );
+    assert!(!t.dec_modes().synchronized_output, "sync must still be off");
 }

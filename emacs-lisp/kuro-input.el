@@ -33,11 +33,10 @@
   "Send printable character as UTF-8 to PTY."
   (kuro--send-key (string char)))
 
-(defvar-local kuro--pending-render-timer nil
+(kuro--defvar-permanent-local kuro--pending-render-timer nil
   "One-shot idle timer that fires an immediate render cycle after input.
 Buffer-local so that multiple kuro buffers each manage their own timer
 independently and cannot cancel or interfere with each other.")
-(put 'kuro--pending-render-timer 'permanent-local t)
 
 (defvar kuro-input-echo-delay nil
   "Forward reference; defined in kuro-config.el.")
@@ -83,40 +82,30 @@ events that were not caught by the explicit Ctrl+letter bindings."
   (kuro--send-key (string byte))
   (kuro--schedule-immediate-render))
 
-(defun kuro--RET ()
-  "Send Return key."
-  (interactive)
-  (kuro--send-key (string ?\r))
-  (kuro--schedule-immediate-render))
+(defmacro kuro--def-special-key (name byte doc)
+  "Define an interactive command NAME that sends special-key BYTE to the PTY.
+DOC is the function docstring."
+  `(defun ,name () ,doc
+     (interactive)
+     (kuro--send-special ,byte)))
 
-(defun kuro--TAB ()
-  "Send Tab key."
-  (interactive)
-  (kuro--send-key (string ?\t))
-  (kuro--schedule-immediate-render))
-
-(defun kuro--DEL ()
-  "Send Delete (backspace) key."
-  (interactive)
-  (kuro--send-key (string ?\x7f))
-  (kuro--schedule-immediate-render))
+(kuro--def-special-key kuro--RET ?\r "Send Return key.")
+(kuro--def-special-key kuro--TAB ?\t "Send Tab key.")
+(kuro--def-special-key kuro--DEL ?\x7f "Send Delete (backspace) key.")
 
 
 ;;; Helper Function for Key Sequences
 
-(defvar-local kuro--application-cursor-keys-mode nil
+(kuro--defvar-permanent-local kuro--application-cursor-keys-mode nil
   "Cached DECCKM (application cursor keys) mode state from Rust (?1), polled by render cycle.")
-(put 'kuro--application-cursor-keys-mode 'permanent-local t)
 
-(defvar-local kuro--scroll-offset 0
+(kuro--defvar-permanent-local kuro--scroll-offset 0
   "Current scrollback offset. 0 means live terminal view.")
-(put 'kuro--scroll-offset 'permanent-local t)
 
-(defvar-local kuro--app-keypad-mode nil
+(kuro--defvar-permanent-local kuro--app-keypad-mode nil
   "Cached application keypad mode (DECKPAM/DECKPNM) state from Rust, polled by render cycle.
 This is intentional P1 scaffolding: the variable is declared and polled now so that the
 numeric keypad bindings (kp-0 through kp-9, kp-enter, etc.) can read it when implemented.")
-(put 'kuro--app-keypad-mode 'permanent-local t)
 
 (defun kuro--send-key-sequence (normal-sequence application-sequence)
   "Send key sequence, switching between normal and application cursor modes.
@@ -185,15 +174,22 @@ Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#modifiers")
 
 ;;; Keymap Helpers (used by kuro-input-keymap.el)
 
-(defun kuro--send-ctrl (byte)
-  "Send a single control byte (0–31 or 127) to the PTY and schedule render."
-  (kuro--send-key (string byte))
-  (kuro--schedule-immediate-render))
+(defmacro kuro--def-key-sender (name encoder-form arg doc)
+  "Define function NAME that encodes ARG via ENCODER-FORM and sends it.
+The generated function calls `kuro--send-key' with the result of
+ENCODER-FORM (which may reference ARG), then schedules an immediate render.
+DOC is the docstring for the generated function."
+  `(defun ,name (,arg) ,doc
+     (kuro--send-key ,encoder-form)
+     (kuro--schedule-immediate-render)))
 
-(defun kuro--send-meta (char)
-  "Send ESC + CHAR to the PTY (readline Alt/Meta prefix) and schedule render."
-  (kuro--send-key (string ?\e char))
-  (kuro--schedule-immediate-render))
+(kuro--def-key-sender kuro--send-ctrl
+  (string byte) byte
+  "Send a single control byte (0–31 or 127) to the PTY and schedule render.")
+
+(kuro--def-key-sender kuro--send-meta
+  (string ?\e char) char
+  "Send ESC + CHAR to the PTY (readline Alt/Meta prefix) and schedule render.")
 
 ;;; Keymap Initialization
 
@@ -209,6 +205,36 @@ Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#modifiers")
 
 ;;; kuro-send-next-key — bypass keymap exceptions
 
+(defconst kuro--named-key-sequences
+  '((return    . "\r")
+    (tab       . "\t")
+    (backspace . "\x7f")
+    (escape    . "\e"))
+  "Alist mapping named key symbols to their PTY byte sequences.
+Used by `kuro--encode-key-event' to handle special keys in `kuro-send-next-key'.")
+
+(defun kuro--encode-key-event (event)
+  "Encode keyboard EVENT as a PTY byte sequence string, or nil if unsupported.
+Priority order:
+  1. Control+Meta → ESC + control byte  (C-M-x → ESC ^X)
+  2. Control      → raw control byte    (C-x   → ^X)
+  3. Meta         → ESC + base char     (M-x   → ESC x)
+  4. Plain char   → the character itself
+  5. Named key    → lookup in `kuro--named-key-sequences'"
+  (let* ((modifiers (event-modifiers event))
+         (base      (event-basic-type event)))
+    (cond
+     ((and (memq 'control modifiers) (memq 'meta modifiers) (characterp base))
+      (string ?\e (logand base 31)))
+     ((and (memq 'control modifiers) (characterp base))
+      (string (logand base 31)))
+     ((and (memq 'meta modifiers) (characterp base))
+      (string ?\e base))
+     ((characterp base)
+      (string base))
+     (t
+      (cdr (assq base kuro--named-key-sequences))))))
+
 ;;;###autoload
 (defun kuro-send-next-key ()
   "Read the next key event and send it directly to the PTY.
@@ -219,27 +245,7 @@ Bound to C-c C-q in `kuro-mode-map'."
   (interactive)
   (message "Send key to PTY: ")
   (let* ((event (read-event))
-         (modifiers (event-modifiers event))
-         (base (event-basic-type event))
-         (str (cond
-               ;; Control+Meta combined: send ESC + control byte (C-M-x → ESC ^X)
-               ((and (memq 'control modifiers) (memq 'meta modifiers) (characterp base))
-                (string ?\e (logand base 31)))
-               ;; Control modifier: send raw control byte
-               ((and (memq 'control modifiers) (characterp base))
-                (string (logand base 31)))
-               ;; Meta modifier: send ESC + base character
-               ((and (memq 'meta modifiers) (characterp base))
-                (string ?\e base))
-               ;; Plain character (incl. control chars already encoded)
-               ((characterp base)
-                (string base))
-               ;; Named special keys
-               ((eq base 'return)    (string ?\r))
-               ((eq base 'tab)       (string ?\t))
-               ((eq base 'backspace) (string ?\x7f))
-               ((eq base 'escape)    (string ?\e))
-               (t nil))))
+         (str   (kuro--encode-key-event event)))
     (if str
         (progn (kuro--send-key str)
                (kuro--schedule-immediate-render))

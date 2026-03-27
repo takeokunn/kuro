@@ -18,11 +18,10 @@
 
 ;;; Bracketed Paste State
 
-(defvar-local kuro--bracketed-paste-mode nil
+(kuro--defvar-permanent-local kuro--bracketed-paste-mode nil
   "Cached bracketed paste mode state from Rust (?2004), polled by render cycle.")
-(put 'kuro--bracketed-paste-mode 'permanent-local t)
 
-(defvar-local kuro--keyboard-flags 0
+(kuro--defvar-permanent-local kuro--keyboard-flags 0
   "Cached Kitty keyboard protocol flags, polled by render cycle.
 This is a bitmask integer:
   Bit 0 (1): Disambiguate escape codes
@@ -30,7 +29,15 @@ This is a bitmask integer:
   Bit 2 (4): Report alternate keys
   Bit 3 (8): Report all keys as escape codes
   Bit 4 (16): Report associated text")
-(put 'kuro--keyboard-flags 'permanent-local t)
+
+
+;;; Bracketed Paste Sequences
+
+(defconst kuro--paste-open "\e[200~"
+  "Opening sequence for bracketed paste mode (DEC mode 2004).")
+
+(defconst kuro--paste-close "\e[201~"
+  "Closing sequence for bracketed paste mode (DEC mode 2004).")
 
 
 ;;; Paste Functions
@@ -44,14 +51,20 @@ prematurely close the paste bracket and allow command injection."
     (replace-regexp-in-string "\x1b" "")
     (replace-regexp-in-string (regexp-quote (string #x9b)) "")))
 
+(defun kuro--send-paste-or-raw (text)
+  "Send TEXT to the PTY, bracketing it when `kuro--bracketed-paste-mode' is set.
+In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
+`kuro--paste-close'.  In plain mode it is sent verbatim."
+  (if kuro--bracketed-paste-mode
+      (kuro--send-key (concat kuro--paste-open (kuro--sanitize-paste text) kuro--paste-close))
+    (kuro--send-key text)))
+
 (defun kuro--yank (&optional arg)
   "Yank from kill ring, wrapping with bracketed paste sequences when active."
   (interactive "*P")
   (let* ((n (if (numberp arg) (1- arg) 0))
          (text (current-kill n)))
-    (if kuro--bracketed-paste-mode
-        (kuro--send-key (concat "\e[200~" (kuro--sanitize-paste text) "\e[201~"))
-      (kuro--send-key text)))
+    (kuro--send-paste-or-raw text))
   (kuro--schedule-immediate-render))
 
 (defun kuro--yank-pop (&optional arg)
@@ -61,9 +74,7 @@ Like `yank-pop', signals an error if the previous command was not a yank."
   (unless (memq last-command '(yank kuro--yank kuro--yank-pop))
     (user-error "Previous command was not a yank"))
   (let ((text (current-kill (or arg 1))))
-    (if kuro--bracketed-paste-mode
-        (kuro--send-key (concat "\e[200~" (kuro--sanitize-paste text) "\e[201~"))
-      (kuro--send-key text))))
+    (kuro--send-paste-or-raw text)))
 
 (provide 'kuro-input-paste)
 

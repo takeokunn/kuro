@@ -8,6 +8,13 @@ use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 
+/// Kitty Graphics Protocol format code for 24-bit RGB (3 bytes per pixel).
+const FORMAT_RGB: u32 = 24;
+/// Kitty Graphics Protocol format code for 32-bit RGBA (4 bytes per pixel).
+const FORMAT_RGBA: u32 = 32;
+/// Kitty Graphics Protocol format code for PNG (decoded on receipt).
+const FORMAT_PNG: u32 = 100;
+
 /// Post-decode image format (stored in `GraphicsStore`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -89,6 +96,7 @@ impl KittyParams {
     }
 }
 
+#[inline]
 fn parse_u32(bytes: &[u8]) -> Option<u32> {
     std::str::from_utf8(bytes).ok()?.parse().ok()
 }
@@ -224,29 +232,43 @@ pub fn process_apc_payload(
     build_command(final_params, final_data)
 }
 
+/// Decode raw payload bytes according to the Kitty format code.
+///
+/// Returns `(pixels, format, pixel_width, pixel_height)` or `None` on error.
+/// For raw formats (24/32), zero dimensions are treated as malformed.
+#[inline]
+fn decode_pixel_data(
+    raw_data: Vec<u8>,
+    params: &KittyParams,
+) -> Option<(Vec<u8>, ImageFormat, u32, u32)> {
+    let format_code = params.format.unwrap_or(FORMAT_RGBA);
+    let (pixels, format) = match format_code {
+        FORMAT_RGB => (raw_data, ImageFormat::Rgb),
+        FORMAT_RGBA => (raw_data, ImageFormat::Rgba),
+        FORMAT_PNG => match decode_png(&raw_data) {
+            Ok((p, fmt)) => (p, fmt),
+            Err(_) => return None, // corrupt PNG — silently discard
+        },
+        _ => return None, // unknown format — silently discard
+    };
+
+    let pixel_width = params.width.unwrap_or(0);
+    let pixel_height = params.height.unwrap_or(0);
+    // For raw pixel formats, zero dimensions indicate a malformed command
+    if format_code != FORMAT_PNG && (pixel_width == 0 || pixel_height == 0) {
+        return None;
+    }
+
+    Some((pixels, format, pixel_width, pixel_height))
+}
+
 /// Build a `KittyCommand` from finalized params and decoded (non-base64) payload.
 fn build_command(params: KittyParams, raw_data: Vec<u8>) -> Option<KittyCommand> {
     let action = params.action.unwrap_or('T');
 
     match action {
         't' | 'T' => {
-            let format_code = params.format.unwrap_or(32);
-            let (pixels, format) = match format_code {
-                24 => (raw_data, ImageFormat::Rgb),
-                32 => (raw_data, ImageFormat::Rgba),
-                100 => match decode_png(&raw_data) {
-                    Ok((pixels, fmt)) => (pixels, fmt),
-                    Err(_) => return None, // corrupt PNG — silently discard
-                },
-                _ => return None, // unknown format — silently discard
-            };
-
-            let pixel_width = params.width.unwrap_or(0);
-            let pixel_height = params.height.unwrap_or(0);
-            // For raw pixel formats, zero dimensions indicate a malformed command
-            if format_code != 100 && (pixel_width == 0 || pixel_height == 0) {
-                return None;
-            }
+            let (pixels, format, pixel_width, pixel_height) = decode_pixel_data(raw_data, &params)?;
 
             if action == 't' {
                 Some(KittyCommand::Transmit {

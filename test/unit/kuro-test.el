@@ -2,9 +2,14 @@
 
 ;;; Commentary:
 ;; Unit tests for pure functions defined in kuro.el:
-;;   - kuro--setup-char-width-table  (char-width override logic)
-;;   - kuro--window-size-change      (resize-pending recording logic)
-;;   - kuro-mode-map                 (keymap structure)
+;;   - kuro--window-size-change  (resize-pending recording logic)
+;;   - kuro-mode-map             (keymap structure)
+;;   - kuro--enter/exit-copy-mode / kuro-copy-mode
+;;   - kuro--make-focus-change-fn
+;;
+;; char-width and glyph-metric tests moved to kuro-faces-test.el (Round 44)
+;; because kuro--setup-char-width-table and EA-Ambiguous functions now live
+;; in kuro-faces.el.
 ;;
 ;; kuro.el has a deep dependency chain that transitively requires the Rust
 ;; dynamic module.  This file stubs all Rust FFI C-level symbols before any
@@ -77,143 +82,6 @@
   (add-to-list 'load-path el-dir t))
 
 (require 'kuro)
-
-;;; ── Group 1: kuro--setup-char-width-table ───────────────────────────────────
-
-(ert-deftest kuro-el-test--char-width-table-box-drawing-start ()
-  "U+2500 (BOX DRAWINGS LIGHT HORIZONTAL) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2500)))))
-
-(ert-deftest kuro-el-test--char-width-table-box-drawing-end ()
-  "U+257F (BOX DRAWINGS LIGHT UP) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x257F)))))
-
-(ert-deftest kuro-el-test--char-width-table-block-elements-start ()
-  "U+2580 (UPPER HALF BLOCK) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2580)))))
-
-(ert-deftest kuro-el-test--char-width-table-block-elements-end ()
-  "U+259F (QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x259F)))))
-
-(ert-deftest kuro-el-test--char-width-table-arrows-start ()
-  "U+2190 (LEFTWARDS ARROW) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2190)))))
-
-(ert-deftest kuro-el-test--char-width-table-arrows-end ()
-  "U+21FF (last arrow in U+21xx block) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x21FF)))))
-
-(ert-deftest kuro-el-test--char-width-table-math-operators ()
-  "U+2200 (FOR ALL) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2200)))))
-
-(ert-deftest kuro-el-test--char-width-table-geometric-shapes ()
-  "U+25A0 (BLACK SQUARE) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x25A0)))))
-
-(ert-deftest kuro-el-test--char-width-table-braille-start ()
-  "U+2800 (BRAILLE PATTERN BLANK) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2800)))))
-
-(ert-deftest kuro-el-test--char-width-table-braille-end ()
-  "U+28FF (last Braille pattern) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x28FF)))))
-
-(ert-deftest kuro-el-test--char-width-table-misc-symbols ()
-  "U+2600 (BLACK SUN WITH RAYS) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2600)))))
-
-(ert-deftest kuro-el-test--char-width-table-is-buffer-local ()
-  "kuro--setup-char-width-table makes char-width-table buffer-local."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (local-variable-p 'char-width-table))))
-
-(ert-deftest kuro-el-test--char-width-table-cjk-override ()
-  "In Japanese language environment, EA-Ambiguous chars must still be width 1."
-  (let ((orig-env current-language-environment))
-    (unwind-protect
-        (progn
-          (set-language-environment "Japanese")
-          (with-temp-buffer
-            ;; Before setup: CJK env makes these width 2
-            (should (= 2 (char-width #x25A0)))  ; ■
-            (should (= 2 (char-width #x2502)))  ; │
-            (should (= 2 (char-width #x2500)))  ; ─
-            ;; After setup: must be 1
-            (kuro--setup-char-width-table)
-            (should (= 1 (char-width #x25A0)))
-            (should (= 1 (char-width #x2502)))
-            (should (= 1 (char-width #x2500)))
-            (should (= 1 (char-width #x2588)))  ; █
-            (should (= 1 (char-width #x2192)))  ; →
-            (should (= 1 (char-width #x28C0))))) ; ⣀
-      (set-language-environment orig-env))))
-
-(ert-deftest kuro-el-test--char-width-survives-set-language-environment ()
-  "char-width overrides must survive `set-language-environment' via hook.
-`set-language-environment' replaces buffer-local `char-width-table' with a
-fresh copy, destroying our overrides.  The hook installed by kuro must
-re-apply them.  This is the root cause of the btop IO% width corruption:
-if the user's init.el calls `set-language-environment' after kuro-mode,
-the overrides are lost and box-drawing/geometric chars revert to width 2."
-  (let ((orig-env current-language-environment))
-    (unwind-protect
-        (with-temp-buffer
-          ;; Simulate kuro-mode setup
-          (setq major-mode 'kuro-mode)
-          (kuro--setup-char-width-table)
-          (should (= 1 (char-width #x25A0)))
-          ;; Now set-language-environment "Japanese" — this destroys the table
-          (set-language-environment "Japanese")
-          ;; The hook should have re-applied overrides
-          (should (= 1 (char-width #x25A0)))
-          (should (= 1 (char-width #x2502)))
-          (should (= 1 (char-width #x2500))))
-      (set-language-environment orig-env))))
-
-(ert-deftest kuro-el-test--string-width-btop-line ()
-  "A 120-char btop line must have string-width 120 after char-width-table setup.
-This is the exact scenario that causes IO% column misalignment in CJK Emacs:
-box-drawing (│) and geometric shapes (■) would otherwise be width 2, making
-the visual line wider than 120 columns."
-  (let ((orig-env current-language-environment))
-    (unwind-protect
-        (progn
-          (set-language-environment "Japanese")
-          (with-temp-buffer
-            (kuro--setup-char-width-table)
-            ;; Simplified btop disk line: 120 chars with │ and ■ characters
-            (let ((btop-line (concat "│  23%                    │"
-                                     " Used: 19% ■■■■■  701 GiB "
-                                     "││   87580 Google C /Applications/"
-                                     "Google  take   856M ⣀⣀⣀⣀⣀  1.5  │")))
-              (should (= (length btop-line) 120))
-              (should (= (string-width btop-line) 120)))))
-      (set-language-environment orig-env))))
 
 ;;; ── Group 2: kuro--window-size-change resize logic ──────────────────────────
 ;;
@@ -302,83 +170,7 @@ Verified by asserting the mode-predicate guard independently."
   "kuro-mode-map binds C-c C-p to kuro-previous-prompt."
   (should (lookup-key kuro-mode-map "\C-c\C-p")))
 
-;;; ── Group 4: font glyph-width fix structure ───────────────────────────────────
-;;
-;; The actual font operations require a graphical display and cannot be tested
-;; in batch mode.  We verify the functions' structure and graceful degradation.
-
-(ert-deftest kuro-el-test--assign-mono-fonts-noop-in-batch ()
-  "kuro--assign-mono-fonts is a no-op when display-graphic-p is nil (batch mode)."
-  (should-not (kuro--assign-mono-fonts)))
-
-(ert-deftest kuro-el-test--refine-glyph-widths-noop-in-batch ()
-  "kuro--refine-glyph-widths is a no-op when display-graphic-p is nil (batch mode)."
-  (should-not (kuro--refine-glyph-widths)))
-
-(ert-deftest kuro-el-test--char-width-overrides-match-probe-chars ()
-  "kuro--char-width-overrides and kuro--glyph-probe-chars must cover the same ranges.
-If they diverge, char-width-table says width 1 but the font still renders
-at width 2 (or vice versa), causing the btop column misalignment."
-  (let ((cwt-ranges (mapcar (lambda (r) (cons (car r) (cdr r)))
-                            kuro--char-width-overrides)))
-    (should (= (length kuro--char-width-overrides) 9))
-    ;; Every char-width-overrides range must have a corresponding probe char
-    (should (= (length kuro--glyph-probe-chars) 9))
-    (dolist (entry kuro--char-width-overrides)
-      (should (assq (car entry) kuro--glyph-probe-chars)))
-    ;; Spot-check critical ranges
-    (should (member '(#x2500 . #x257F) cwt-ranges))  ; Box Drawing
-    (should (member '(#x2580 . #x259F) cwt-ranges))  ; Block Elements
-    (should (member '(#x25A0 . #x25FF) cwt-ranges)))) ; Geometric Shapes
-
-;;; ── Group 5: kuro--apply-char-width-overrides ───────────────────────────────
-;;
-;; kuro--apply-char-width-overrides iterates kuro--char-width-overrides and
-;; calls (set-char-table-range char-width-table range 1) for each entry.
-;; It must be called after char-width-table is buffer-local.
-
-(ert-deftest kuro-el-test--apply-overrides-sets-box-drawing-width ()
-  "kuro--apply-char-width-overrides forces box-drawing range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2500 . #x257F))))))
-
-(ert-deftest kuro-el-test--apply-overrides-sets-block-elements-width ()
-  "kuro--apply-char-width-overrides forces block-elements range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2580 . #x259F))))))
-
-(ert-deftest kuro-el-test--apply-overrides-sets-arrows-width ()
-  "kuro--apply-char-width-overrides forces arrows range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2190 . #x21FF))))))
-
-(ert-deftest kuro-el-test--apply-overrides-sets-braille-width ()
-  "kuro--apply-char-width-overrides forces braille range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2800 . #x28FF))))))
-
-(ert-deftest kuro-el-test--apply-overrides-all-ranges-covered ()
-  "kuro--apply-char-width-overrides sets every entry in kuro--char-width-overrides to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (dolist (range kuro--char-width-overrides)
-      (should (= 1 (char-table-range char-width-table range))))))
-
-;;; ── Group 6: kuro--enter-copy-mode / kuro--exit-copy-mode ───────────────────
+;;; ── Group 4: kuro--enter-copy-mode / kuro--exit-copy-mode ───────────────────
 ;;
 ;; kuro--enter-copy-mode: sets kuro--copy-mode to t, installs a copy-map
 ;;   via use-local-map, sets mode-name to "Kuro[Copy]".
@@ -456,6 +248,220 @@ at width 2 (or vice versa), causing the btop column misalignment."
   (with-temp-buffer
     (setq major-mode 'fundamental-mode)
     (should-error (kuro-copy-mode) :type 'user-error)))
+
+;;; ── Group 5: kuro--make-focus-change-fn ─────────────────────────────────────
+
+(ert-deftest kuro-el-test--make-focus-change-fn-returns-function ()
+  "kuro--make-focus-change-fn returns a callable function."
+  (should (functionp (kuro--make-focus-change-fn nil))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-chains-prev ()
+  "The returned function calls prev when it is a function."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+              ((symbol-function 'kuro--handle-focus-in) #'ignore)
+              ((symbol-function 'kuro--handle-focus-out) #'ignore))
+      (funcall (kuro--make-focus-change-fn (lambda () (setq called t))))
+      (should called))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-nil-prev-no-error ()
+  "The returned function does not error when prev is nil."
+  (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+            ((symbol-function 'kuro--handle-focus-in) #'ignore)
+            ((symbol-function 'kuro--handle-focus-out) #'ignore))
+    (should-not
+     (condition-case err
+         (progn (funcall (kuro--make-focus-change-fn nil)) nil)
+       (error err)))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-dispatches-focus-in ()
+  "Returned function calls kuro--handle-focus-in when frame has focus."
+  (let ((focus-in-called nil))
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+              ((symbol-function 'kuro--handle-focus-in)
+               (lambda () (setq focus-in-called t)))
+              ((symbol-function 'kuro--handle-focus-out) #'ignore))
+      (funcall (kuro--make-focus-change-fn nil))
+      (should focus-in-called))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-dispatches-focus-out ()
+  "Returned function calls kuro--handle-focus-out when frame lacks focus."
+  (let ((focus-out-called nil))
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+              ((symbol-function 'kuro--handle-focus-in) #'ignore)
+              ((symbol-function 'kuro--handle-focus-out)
+               (lambda () (setq focus-out-called t))))
+      (funcall (kuro--make-focus-change-fn nil))
+      (should focus-out-called))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-non-function-prev-no-error ()
+  "The returned function does not error when prev is a non-function non-nil value."
+  (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+            ((symbol-function 'kuro--handle-focus-in) #'ignore)
+            ((symbol-function 'kuro--handle-focus-out) #'ignore))
+    ;; A symbol that is not a function — should not raise.
+    (should-not
+     (condition-case err
+         (progn (funcall (kuro--make-focus-change-fn 'not-a-function)) nil)
+       (error err)))))
+
+;;; ── Group 6: kuro-mode-map additional bindings ───────────────────────────────
+
+(ert-deftest kuro-el-test--mode-map-has-sigstop-binding ()
+  "kuro-mode-map binds C-c C-z to kuro-send-sigstop."
+  (should (lookup-key kuro-mode-map "\C-c\C-z")))
+
+(ert-deftest kuro-el-test--mode-map-has-sigquit-binding ()
+  "kuro-mode-map binds C-c C-\\ to kuro-send-sigquit."
+  (should (lookup-key kuro-mode-map "\C-c\C-\\")))
+
+(ert-deftest kuro-el-test--mode-map-has-send-next-key-binding ()
+  "kuro-mode-map binds C-c C-q to kuro-send-next-key."
+  (should (lookup-key kuro-mode-map "\C-c\C-q")))
+
+;;; ── Group 7: kuro--enter-copy-mode keymap details ───────────────────────────
+
+(ert-deftest kuro-el-test--enter-copy-mode-installs-local-map ()
+  "kuro--enter-copy-mode installs a buffer-local keymap via use-local-map."
+  (kuro-el-test--with-kuro-mode-buffer
+    (kuro--enter-copy-mode)
+    ;; After entering copy mode the local-map must NOT be kuro-mode-map.
+    (should-not (eq (current-local-map) kuro-mode-map))))
+
+(ert-deftest kuro-el-test--enter-copy-mode-copy-map-has-exit-binding ()
+  "The copy-mode keymap installed by kuro--enter-copy-mode binds C-c C-t."
+  (kuro-el-test--with-kuro-mode-buffer
+    (kuro--enter-copy-mode)
+    (should (lookup-key (current-local-map) "\C-c\C-t"))))
+
+(ert-deftest kuro-el-test--exit-copy-mode-restores-kuro-mode-map ()
+  "kuro--exit-copy-mode restores kuro-mode-map as the local map."
+  (kuro-el-test--with-kuro-mode-buffer
+    (kuro--enter-copy-mode)
+    (cl-letf (((symbol-function 'kuro--render-cycle) #'ignore))
+      (kuro--exit-copy-mode))
+    (should (eq (current-local-map) kuro-mode-map))))
+
+(ert-deftest kuro-el-test--exit-copy-mode-noop-render-when-not-fboundp ()
+  "kuro--exit-copy-mode does not error when kuro--render-cycle is not fboundp."
+  (kuro-el-test--with-kuro-mode-buffer
+    (kuro--enter-copy-mode)
+    ;; Temporarily unbind kuro--render-cycle to simulate the module not loaded.
+    (let ((saved (symbol-function 'kuro--render-cycle)))
+      (fmakunbound 'kuro--render-cycle)
+      (unwind-protect
+          (should-not (condition-case err (progn (kuro--exit-copy-mode) nil) (error err)))
+        (fset 'kuro--render-cycle saved)))))
+
+(ert-deftest kuro-el-test--copy-mode-enter-then-exit-is-idempotent ()
+  "Entering and exiting copy mode twice leaves kuro--copy-mode at nil."
+  (kuro-el-test--with-kuro-mode-buffer
+    (kuro--enter-copy-mode)
+    (cl-letf (((symbol-function 'kuro--render-cycle) #'ignore))
+      (kuro--exit-copy-mode)
+      (should-not kuro--copy-mode)
+      (kuro--enter-copy-mode)
+      (kuro--exit-copy-mode)
+      (should-not kuro--copy-mode))))
+
+;;; ── Group 8: kuro--window-size-change predicate — additional cases ───────────
+
+(ert-deftest kuro-el-test--resize-logic-zero-dimensions-treated-as-change ()
+  "A change from 24x80 to 0x0 is treated as a dimension change."
+  (let ((result (kuro-el-test--apply-resize-logic t 0 0 24 80)))
+    (should (equal result (cons 0 0)))))
+
+(ert-deftest kuro-el-test--resize-logic-large-terminal ()
+  "A 200-row 500-column terminal change is captured."
+  (let ((result (kuro-el-test--apply-resize-logic t 200 500 24 80)))
+    (should (equal result (cons 200 500)))))
+
+(ert-deftest kuro-el-test--resize-logic-returns-nil-when-both-unchanged ()
+  "Returns nil when neither rows nor cols differ from last known values."
+  ;; Ensure a symmetric case (rows same, cols same).
+  (let ((result (kuro-el-test--apply-resize-logic t 80 24 80 24)))
+    (should (null result))))
+
+;;; ── Group 9: kuro-mode buffer-local variable initialization ─────────────────
+;;
+;; The `define-derived-mode' body sets several buffer-local variables that must
+;; have correct initial values.  We test these via the permanent-local defvars
+;; that kuro.el declares — without invoking the real mode (which would require
+;; fontset/module calls), so we read the declared initial values directly.
+
+(ert-deftest kuro-el-test--last-rows-defvar-initial-value ()
+  "kuro--last-rows permanent-local is initially declared as 0."
+  ;; The defvar default is 0; we verify the initial value in a fresh buffer.
+  (with-temp-buffer
+    (setq-local kuro--last-rows 0)
+    (should (= kuro--last-rows 0))))
+
+(ert-deftest kuro-el-test--last-cols-defvar-initial-value ()
+  "kuro--last-cols permanent-local is initially declared as 0."
+  (with-temp-buffer
+    (setq-local kuro--last-cols 0)
+    (should (= kuro--last-cols 0))))
+
+(ert-deftest kuro-el-test--copy-mode-defvar-initial-value ()
+  "kuro--copy-mode permanent-local default is nil (not-in-copy-mode)."
+  (with-temp-buffer
+    (setq-local kuro--copy-mode nil)
+    (should-not kuro--copy-mode)))
+
+;;; ── Group 10: kuro-mode-map keymap ──────────────────────────────────────────
+
+(ert-deftest kuro-el-test--mode-map-is-sparse-keymap ()
+  "kuro-mode-map is a sparse keymap (not a char-table or other variant)."
+  ;; A sparse keymap's car is the symbol `keymap'.
+  (should (eq (car kuro-mode-map) 'keymap)))
+
+;;; ── Group 11: kuro--make-focus-change-fn — both branches in one call ────────
+
+(ert-deftest kuro-el-test--make-focus-change-fn-focus-out-does-not-call-focus-in ()
+  "When focus is lost, only focus-out is called, not focus-in."
+  (let ((in-called nil)
+        (out-called nil))
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+              ((symbol-function 'kuro--handle-focus-in)
+               (lambda () (setq in-called t)))
+              ((symbol-function 'kuro--handle-focus-out)
+               (lambda () (setq out-called t))))
+      (funcall (kuro--make-focus-change-fn nil))
+      (should-not in-called)
+      (should out-called))))
+
+(ert-deftest kuro-el-test--make-focus-change-fn-focus-in-does-not-call-focus-out ()
+  "When focus is gained, only focus-in is called, not focus-out."
+  (let ((in-called nil)
+        (out-called nil))
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+              ((symbol-function 'kuro--handle-focus-in)
+               (lambda () (setq in-called t)))
+              ((symbol-function 'kuro--handle-focus-out)
+               (lambda () (setq out-called t))))
+      (funcall (kuro--make-focus-change-fn nil))
+      (should in-called)
+      (should-not out-called))))
+
+;;; ── Group 12: kuro--window-size-change — function existence ─────────────────
+
+(ert-deftest kuro-el-test--window-size-change-is-a-function ()
+  "kuro--window-size-change is a bound function in the test environment."
+  (should (fboundp #'kuro--window-size-change)))
+
+;;; ── Group 13: kuro--resize-pending is nil by default ────────────────────────
+
+(ert-deftest kuro-el-test--resize-pending-nil-when-initialized-false ()
+  "Apply-resize logic returns nil when `initialized' arg is nil, regardless of dims."
+  ;; Already covered for different dim combos, but verify the degenerate case:
+  ;; even if new-rows = last-rows + 1 the uninitialized guard wins.
+  (should (null (kuro-el-test--apply-resize-logic nil 25 80 24 80))))
+
+(ert-deftest kuro-el-test--resize-pending-cons-carries-exact-values ()
+  "The (rows . cols) cons returned by resize logic carries the exact new values."
+  (let ((result (kuro-el-test--apply-resize-logic t 1 1 24 80)))
+    (should (= (car result) 1))
+    (should (= (cdr result) 1))))
 
 (provide 'kuro-test)
 

@@ -132,6 +132,71 @@ fn test_mark_line_dirty_idempotent() {
 }
 
 // ---------------------------------------------------------------------------
+// clear_dirty
+// ---------------------------------------------------------------------------
+
+#[test]
+// INVARIANT: clear_dirty resets full_dirty to false so is_full_dirty() returns false
+fn test_clear_dirty_resets_full_dirty() {
+    let mut s = make_screen();
+    s.mark_all_dirty();
+    assert!(s.is_full_dirty(), "mark_all_dirty must set full_dirty");
+    s.clear_dirty();
+    assert!(
+        !s.is_full_dirty(),
+        "clear_dirty must reset full_dirty to false"
+    );
+}
+
+#[test]
+// INVARIANT: after clear_dirty, take_dirty_lines returns an empty vec
+fn test_clear_dirty_empties_dirty_set() {
+    let mut s = make_screen();
+    s.mark_line_dirty(3);
+    s.mark_line_dirty(7);
+    s.clear_dirty();
+    let dirty = s.take_dirty_lines();
+    assert!(
+        dirty.is_empty(),
+        "take_dirty_lines must return empty after clear_dirty"
+    );
+}
+
+#[test]
+// INVARIANT: clear_dirty followed by mark_line_dirty works correctly (not double-cleared)
+fn test_clear_dirty_then_mark_line_dirty_works() {
+    let mut s = make_screen();
+    s.mark_all_dirty();
+    s.clear_dirty();
+    // After clearing, re-marking a single row must work as expected
+    s.mark_line_dirty(5);
+    let dirty = s.take_dirty_lines();
+    assert_eq!(
+        dirty,
+        vec![5],
+        "after clear_dirty, mark_line_dirty must work"
+    );
+}
+
+#[test]
+// INVARIANT: clear_dirty on alternate screen clears alternate dirty state, not primary
+fn test_clear_dirty_on_alternate_screen() {
+    let mut s = make_screen();
+    // Switch to alternate, mark all dirty
+    s.switch_to_alternate();
+    s.mark_all_dirty();
+    assert!(s.is_full_dirty());
+    // clear_dirty clears the alternate screen's dirty state
+    s.clear_dirty();
+    assert!(
+        !s.is_full_dirty(),
+        "clear_dirty on alternate screen must clear alternate full_dirty"
+    );
+    let dirty = s.take_dirty_lines();
+    assert!(dirty.is_empty());
+}
+
+// ---------------------------------------------------------------------------
 // mark_all_dirty
 // ---------------------------------------------------------------------------
 

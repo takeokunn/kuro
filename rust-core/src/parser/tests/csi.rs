@@ -9,20 +9,61 @@
 
 use super::*;
 
-#[test]
-fn test_vpa_move_cursor() {
-    let mut term = crate::TerminalCore::new(24, 80);
+// ── Test helpers ──────────────────────────────────────────────────────────────
 
-    // Start at (0, 0)
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 0);
+/// Construct a fresh `TerminalCore` with the given dimensions.
+macro_rules! term {
+    ($rows:expr, $cols:expr) => {
+        crate::TerminalCore::new($rows, $cols)
+    };
+}
 
-    // Move cursor to row 5 (1-indexed: CSI 5 d)
-    term.advance(b"\x1b[5d");
+/// Assert cursor row and column in one expression.
+macro_rules! assert_cursor {
+    ($term:expr, $row:expr, $col:expr) => {
+        assert_eq!($term.screen.cursor.row, $row, "cursor.row mismatch");
+        assert_eq!($term.screen.cursor.col, $col, "cursor.col mismatch");
+    };
+    ($term:expr, row = $row:expr) => {
+        assert_eq!($term.screen.cursor.row, $row, "cursor.row mismatch");
+    };
+    ($term:expr, col = $col:expr) => {
+        assert_eq!($term.screen.cursor.col, $col, "cursor.col mismatch");
+    };
+}
 
-    // Should move to row 4 (0-indexed), column unchanged
-    assert_eq!(term.screen.cursor.row, 4);
-    assert_eq!(term.screen.cursor.col, 0);
+/// Table-driven macro for tests that: (a) create a fresh 24×80 terminal,
+/// (b) feed a single CSI byte sequence, and (c) assert the resulting cursor.
+///
+/// Pattern: `test_name : b"sequence" => (row, col)`
+macro_rules! test_cursor_commands {
+    ($( $name:ident : $input:expr => ($row:expr, $col:expr) ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut term = term!(24, 80);
+                term.advance($input);
+                assert_cursor!(term, $row, $col);
+            }
+        )+
+    };
+}
+
+test_cursor_commands! {
+    // VPA: CSI 5 d — row 5 (1-indexed) → row 4 (0-indexed), col unchanged
+    test_vpa_move_cursor:        b"\x1b[5d"    => (4,  0),
+    // CHA: CSI 20 G — col 20 (1-indexed) → col 19 (0-indexed), row unchanged
+    test_cha_move_cursor:        b"\x1b[20G"   => (0, 19),
+    // HVP: CSI 10;30 f — (row=10, col=30) 1-indexed → (9, 29) 0-indexed
+    test_hvp_move_cursor:        b"\x1b[10;30f" => (9, 29),
+    // HVP partial: CSI 5 f — row=5, col defaults to 1 → (4, 0)
+    test_hvp_partial_params:     b"\x1b[5f"    => (4,  0),
+    // CUP explicit params: CSI 5;10 H → (4, 9) 0-indexed
+    test_cup_multi_param_semicolon: b"\x1b[5;10H" => (4, 9),
+    // CUD: CSI 4 B — move down 4 from row 0 → row 4
+    test_cud_move_cursor_down:   b"\x1b[4B"    => (4,  0),
+    // CUF: CSI 10 C — move right 10 from col 0 → col 10
+    test_cuf_move_cursor_right:  b"\x1b[10C"   => (0, 10),
 }
 
 #[test]
@@ -53,22 +94,6 @@ fn test_vpa_bounds() {
 }
 
 #[test]
-fn test_cha_move_cursor() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Start at (0, 0)
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 0);
-
-    // Move cursor to column 20 (1-indexed: CSI 20 G)
-    term.advance(b"\x1b[20G");
-
-    // Should move to column 19 (0-indexed), row unchanged
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 19);
-}
-
-#[test]
 fn test_cha_default() {
     let mut term = crate::TerminalCore::new(24, 80);
 
@@ -96,22 +121,6 @@ fn test_cha_bounds() {
 }
 
 #[test]
-fn test_hvp_move_cursor() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Start at (0, 0)
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 0);
-
-    // Move cursor to (row=10, col=30) (1-indexed: CSI 10;30 f)
-    term.advance(b"\x1b[10;30f");
-
-    // Should move to (9, 29) (0-indexed)
-    assert_eq!(term.screen.cursor.row, 9);
-    assert_eq!(term.screen.cursor.col, 29);
-}
-
-#[test]
 fn test_hvp_default() {
     let mut term = crate::TerminalCore::new(24, 80);
 
@@ -124,18 +133,6 @@ fn test_hvp_default() {
 
     // Should move to (0, 0) (1-indexed: 1,1)
     assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 0);
-}
-
-#[test]
-fn test_hvp_partial_params() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Move cursor to row 5 only (column defaults to 1): CSI 5 f
-    term.advance(b"\x1b[5f");
-
-    // Should move to (4, 0) (row=5, col=1 in 1-indexed)
-    assert_eq!(term.screen.cursor.row, 4);
     assert_eq!(term.screen.cursor.col, 0);
 }
 
@@ -203,21 +200,6 @@ fn test_cuu_clamps_at_top() {
 // --- CUD (Cursor Down) tests ---
 
 #[test]
-fn test_cud_move_cursor_down() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Cursor starts at row 0
-    assert_eq!(term.screen.cursor.row, 0);
-
-    // CUD 4: move down 4 rows (CSI 4 B)
-    term.advance(b"\x1b[4B");
-
-    // Should land at row 4 (0-indexed)
-    assert_eq!(term.screen.cursor.row, 4);
-    assert_eq!(term.screen.cursor.col, 0);
-}
-
-#[test]
 fn test_cud_default() {
     let mut term = crate::TerminalCore::new(24, 80);
 
@@ -249,21 +231,6 @@ fn test_cud_clamps_at_bottom() {
 }
 
 // --- CUF (Cursor Forward / Right) tests ---
-
-#[test]
-fn test_cuf_move_cursor_right() {
-    let mut term = crate::TerminalCore::new(24, 80);
-
-    // Cursor starts at col 0
-    assert_eq!(term.screen.cursor.col, 0);
-
-    // CUF 10: move right 10 columns (CSI 10 C)
-    term.advance(b"\x1b[10C");
-
-    // Should land at col 10 (0-indexed)
-    assert_eq!(term.screen.cursor.row, 0);
-    assert_eq!(term.screen.cursor.col, 10);
-}
 
 #[test]
 fn test_cuf_default() {
@@ -626,6 +593,145 @@ fn test_cpl_nix_progress_pattern() {
     term.advance(b"updated1");
     assert_eq!(term.screen.cursor.row, 0);
     assert_eq!(term.screen.cursor.col, 8);
+}
+
+// ── New tests: multi-param, default-param, boundary ──────────────────────────
+
+#[test]
+fn test_cup_default_row_only() {
+    // CSI ;5H — row omitted (defaults to 1), col=5 → (0,4)
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(10, 30);
+    term.advance(b"\x1b[;5H");
+    assert_cursor!(term, 0, 4);
+}
+
+#[test]
+fn test_cuu_multi_row_from_middle() {
+    // Move down to row 10, then CUU 3 → row 7; column stays
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(10, 20);
+    term.advance(b"\x1b[3A");
+    assert_cursor!(term, 7, 20);
+}
+
+#[test]
+fn test_cud_explicit_one_same_as_default() {
+    // CSI 1 B == CSI B: both move down exactly one row
+    let mut term_explicit = term!(24, 80);
+    term_explicit.screen.move_cursor(3, 5);
+    term_explicit.advance(b"\x1b[1B");
+
+    let mut term_default = term!(24, 80);
+    term_default.screen.move_cursor(3, 5);
+    let params = vte::Params::default();
+    csi_cud(&mut term_default, &params);
+
+    assert_eq!(
+        term_explicit.screen.cursor.row,
+        term_default.screen.cursor.row
+    );
+    assert_eq!(
+        term_explicit.screen.cursor.col,
+        term_default.screen.cursor.col
+    );
+}
+
+#[test]
+fn test_cuf_multi_column_from_middle() {
+    // Move to col 10, CUF 5 → col 15; row stays
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(7, 10);
+    term.advance(b"\x1b[5C");
+    assert_cursor!(term, 7, 15);
+}
+
+#[test]
+fn test_cub_explicit_zero_treated_as_1() {
+    // CSI 0 D — explicit zero must be treated as 1 by .max(1)
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(0, 5);
+    term.advance(b"\x1b[0D");
+    assert_cursor!(term, 0, 4);
+}
+
+#[test]
+fn test_cuu_clamps_already_at_top_with_large_n() {
+    // Already at row 0; CUU 1000 must stay at row 0
+    let mut term = term!(24, 80);
+    assert_eq!(term.screen.cursor.row, 0);
+    term.advance(b"\x1b[1000A");
+    assert_cursor!(term, row = 0);
+}
+
+#[test]
+fn test_cuf_clamps_already_at_right_with_large_n() {
+    // Start at last column; CUF 1000 must stay at last column
+    let mut term = term!(24, 40);
+    term.screen.move_cursor(0, 39);
+    term.advance(b"\x1b[1000C");
+    assert_cursor!(term, col = 39);
+}
+
+#[test]
+fn test_cup_top_left_corner_idempotent() {
+    // CUP to (1,1) from any position must always yield (0,0)
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(23, 79);
+    term.advance(b"\x1b[1;1H");
+    assert_cursor!(term, 0, 0);
+    // Repeating the same sequence changes nothing
+    term.advance(b"\x1b[1;1H");
+    assert_cursor!(term, 0, 0);
+}
+
+// ── Edge-case tests ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_csi_vpa_zero_param_maps_to_row_zero() {
+    // CSI 0 d — explicit zero is treated as 1 (1-indexed), which maps to row 0 (0-indexed).
+    // The VPA handler uses `.unwrap_or(1).saturating_sub(1)`, so 0 → saturating_sub → 0.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(10, 5);
+    term.advance(b"\x1b[0d");
+    assert_cursor!(term, row = 0);
+}
+
+#[test]
+fn test_csi_cha_param_exceeds_width_clamps() {
+    // CSI 999 G on an 80-col terminal: column must clamp to the last column (79).
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[999G");
+    assert_cursor!(term, col = 79);
+}
+
+#[test]
+fn test_csi_cursor_up_cuu_moves_cursor() {
+    // CSI 3 A from row 10 → row 7; column unchanged.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(10, 0);
+    term.advance(b"\x1b[3A");
+    assert_cursor!(term, 7, 0);
+}
+
+#[test]
+fn test_csi_cursor_down_cud_moves_cursor() {
+    // CSI 2 B from row 5 → row 7; column unchanged.
+    let mut term = term!(24, 80);
+    term.screen.move_cursor(5, 0);
+    term.advance(b"\x1b[2B");
+    assert_cursor!(term, 7, 0);
+}
+
+#[test]
+fn test_csi_rep_does_not_panic() {
+    // REP (CSI 3 b) is not implemented (falls through to `_ => {}`).
+    // Verify that feeding it after a printable character does not panic.
+    let mut term = term!(24, 80);
+    term.advance(b"A"); // print 'A'
+    term.advance(b"\x1b[3b"); // REP 3 — silently ignored
+                              // The cursor must not have moved back or wrapped in an unexpected way.
+    assert_cursor!(term, row = 0);
 }
 
 use proptest::prelude::*;

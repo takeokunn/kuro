@@ -291,65 +291,315 @@ Each `forward-line N' places point at line N+1, cur-line = N."
 ;;   3. (kuro--get-focus-events) — focus tracking mode must be enabled
 ;; When any guard fails the function is a no-op (sends nothing).
 
+(defmacro kuro-nav-test--with-focus-stubs (initialized focus-on sent-var &rest body)
+  "Run BODY with focus-handler stubs in place.
+INITIALIZED and FOCUS-ON control the guard predicates.
+SENT-VAR names a variable that receives the string passed to `kuro--send-key'."
+  (declare (indent 3))
+  `(let ((kuro--initialized ,initialized)
+         (,sent-var nil))
+     (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+               ((symbol-function 'kuro--get-focus-events) (lambda () ,focus-on))
+               ((symbol-function 'kuro--send-key)         (lambda (s) (setq ,sent-var s))))
+       ,@body)))
+
 (ert-deftest kuro-navigation--handle-focus-in-noop-when-not-initialized ()
   "kuro--handle-focus-in does nothing when kuro--initialized is nil."
-  (let ((kuro--initialized nil)
-        (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'kuro--get-focus-events) (lambda () t))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-      (kuro--handle-focus-in)
-      (should-not sent))))
+  (kuro-nav-test--with-focus-stubs nil t sent
+    (kuro--handle-focus-in)
+    (should-not sent)))
 
 (ert-deftest kuro-navigation--handle-focus-in-noop-when-focus-tracking-off ()
   "kuro--handle-focus-in does nothing when focus-tracking mode is disabled."
-  (let ((kuro--initialized t)
-        (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'kuro--get-focus-events) (lambda () nil))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-      (kuro--handle-focus-in)
-      (should-not sent))))
+  (kuro-nav-test--with-focus-stubs t nil sent
+    (kuro--handle-focus-in)
+    (should-not sent)))
 
 (ert-deftest kuro-navigation--handle-focus-in-sends-escape-sequence ()
   "kuro--handle-focus-in sends ESC [ I when initialized and focus-tracking is on."
-  (let ((kuro--initialized t)
-        (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'kuro--get-focus-events) (lambda () t))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-      (kuro--handle-focus-in)
-      (should (equal sent "\e[I")))))
+  (kuro-nav-test--with-focus-stubs t t sent
+    (kuro--handle-focus-in)
+    (should (equal sent "\e[I"))))
 
 (ert-deftest kuro-navigation--handle-focus-out-noop-when-not-initialized ()
   "kuro--handle-focus-out does nothing when kuro--initialized is nil."
-  (let ((kuro--initialized nil)
-        (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'kuro--get-focus-events) (lambda () t))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-      (kuro--handle-focus-out)
-      (should-not sent))))
+  (kuro-nav-test--with-focus-stubs nil t sent
+    (kuro--handle-focus-out)
+    (should-not sent)))
 
 (ert-deftest kuro-navigation--handle-focus-out-noop-when-focus-tracking-off ()
   "kuro--handle-focus-out does nothing when focus-tracking mode is disabled."
-  (let ((kuro--initialized t)
-        (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'kuro--get-focus-events) (lambda () nil))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-      (kuro--handle-focus-out)
-      (should-not sent))))
+  (kuro-nav-test--with-focus-stubs t nil sent
+    (kuro--handle-focus-out)
+    (should-not sent)))
 
 (ert-deftest kuro-navigation--handle-focus-out-sends-escape-sequence ()
   "kuro--handle-focus-out sends ESC [ O when initialized and focus-tracking is on."
+  (kuro-nav-test--with-focus-stubs t t sent
+    (kuro--handle-focus-out)
+    (should (equal sent "\e[O"))))
+
+;;; Group 7: kuro--navigate-to-prompt shared helper
+
+(ert-deftest kuro-navigation--navigate-to-prompt-previous-finds-nearest ()
+  "kuro--navigate-to-prompt 'previous finds the highest row < cur-line."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 2 0) '("prompt-start" 6 0))
+    (forward-line 8)   ; cur-line = 8
+    (kuro--navigate-to-prompt 'previous)
+    ;; row 6 is nearest before 8 → line 7
+    (should (= (line-number-at-pos) 7))))
+
+(ert-deftest kuro-navigation--navigate-to-prompt-next-finds-nearest ()
+  "kuro--navigate-to-prompt 'next finds the lowest row > cur-line."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 3 0) '("prompt-start" 7 0))
+    (forward-line 4)   ; cur-line = 4
+    (kuro--navigate-to-prompt 'next)
+    ;; row 7 is nearest after 4 → line 8
+    (should (= (line-number-at-pos) 8))))
+
+(ert-deftest kuro-navigation--navigate-to-prompt-previous-no-candidate ()
+  "kuro--navigate-to-prompt 'previous emits \"kuro: no previous prompt\" when none found."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 5 0))
+    (forward-line 2)   ; cur-line = 2, prompt is after cursor
+    (let (msgs)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) msgs))))
+        (kuro--navigate-to-prompt 'previous))
+      (should (equal msgs '("kuro: no previous prompt"))))))
+
+(ert-deftest kuro-navigation--navigate-to-prompt-next-no-candidate ()
+  "kuro--navigate-to-prompt 'next emits \"kuro: no next prompt\" when none found."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 2 0))
+    (forward-line 5)   ; cur-line = 5, prompt is before cursor
+    (let (msgs)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) msgs))))
+        (kuro--navigate-to-prompt 'next))
+      (should (equal msgs '("kuro: no next prompt"))))))
+
+(ert-deftest kuro-navigation--navigate-to-prompt-ignores-non-prompt-start ()
+  "kuro--navigate-to-prompt ignores entries that are not \"prompt-start\"."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-end" 1 0) '("command-start" 3 0) '("prompt-start" 5 0))
+    (forward-line 2)   ; cur-line = 2
+    (kuro--navigate-to-prompt 'next)
+    ;; Only row 5 has mark-type prompt-start → line 6
+    (should (= (line-number-at-pos) 6))))
+
+;;; Group 8: kuro--with-focus-guard macro
+
+(ert-deftest kuro-navigation--focus-guard-executes-when-all-conditions-met ()
+  "kuro--with-focus-guard runs body when mode, initialized, and focus-events are all true."
+  (let ((kuro--initialized t)
+        (ran nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t)))
+      (kuro--with-focus-guard (setq ran t))
+      (should ran))))
+
+(ert-deftest kuro-navigation--focus-guard-noop-when-not-initialized ()
+  "kuro--with-focus-guard skips body when kuro--initialized is nil."
+  (let ((kuro--initialized nil)
+        (ran nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t)))
+      (kuro--with-focus-guard (setq ran t))
+      (should-not ran))))
+
+(ert-deftest kuro-navigation--focus-guard-noop-when-focus-events-off ()
+  "kuro--with-focus-guard skips body when kuro--get-focus-events returns nil."
+  (let ((kuro--initialized t)
+        (ran nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+              ((symbol-function 'kuro--get-focus-events) (lambda () nil)))
+      (kuro--with-focus-guard (setq ran t))
+      (should-not ran))))
+
+(ert-deftest kuro-navigation--focus-guard-noop-when-wrong-mode ()
+  "kuro--with-focus-guard skips body when derived-mode-p returns nil."
+  (let ((kuro--initialized t)
+        (ran nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) nil))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t)))
+      (kuro--with-focus-guard (setq ran t))
+      (should-not ran))))
+
+(ert-deftest kuro-navigation--focus-guard-splices-multiple-forms ()
+  "kuro--with-focus-guard executes all body forms in sequence."
+  (let ((kuro--initialized t)
+        (log nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t)))
+      (kuro--with-focus-guard (push 1 log) (push 2 log))
+      (should (equal (nreverse log) '(1 2))))))
+
+(ert-deftest kuro-navigation-focus-handlers-are-bound ()
+  "Both focus handlers are fboundp after macro expansion."
+  (should (fboundp 'kuro--handle-focus-in))
+  (should (fboundp 'kuro--handle-focus-out)))
+
+;;; Group 9: kuro--goto-prompt-row and boundary conditions
+
+(ert-deftest kuro-navigation--goto-prompt-row-zero-places-at-first-line ()
+  "kuro--goto-prompt-row 0 places point at line 1 (point-min + 0 lines)."
+  (with-temp-buffer
+    (dotimes (_ 10) (insert "\n"))
+    (goto-char (point-max))
+    (kuro--goto-prompt-row 0)
+    (should (= (line-number-at-pos) 1))))
+
+(ert-deftest kuro-navigation--goto-prompt-row-moves-to-correct-line ()
+  "kuro--goto-prompt-row N places point at line N+1."
+  (with-temp-buffer
+    (dotimes (_ 15) (insert "\n"))
+    (goto-char (point-max))
+    (kuro--goto-prompt-row 5)
+    (should (= (line-number-at-pos) 6))))
+
+(ert-deftest kuro-navigation--previous-prompt-from-row-zero-no-candidate ()
+  "kuro-previous-prompt at row 0 (cur-line=0) finds no prompt before it."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 3 0))
+    ;; cursor at line 1 → cur-line = 0; no prompt at row < 0
+    (goto-char (point-min))
+    (let (msgs)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) msgs))))
+        (kuro-previous-prompt))
+      (should (equal msgs '("kuro: no previous prompt"))))))
+
+(ert-deftest kuro-navigation--update-prompt-positions-preserves-duplicates ()
+  "kuro--update-prompt-positions keeps duplicate rows when both lists have same row."
+  ;; Two marks at row 3 — one from each list — both should appear in result.
+  (let* ((existing '(("prompt-start" 3 0)))
+         (new-marks '(("prompt-end" 3 0)))
+         (result (kuro--update-prompt-positions new-marks existing 100)))
+    (should (= (length result) 2))
+    (should (cl-every (lambda (e) (= (cadr e) 3)) result))))
+
+(ert-deftest kuro-navigation--navigate-to-prompt-previous-single-prompt-at-start ()
+  "Navigation 'previous with a single prompt at row 0 from row 5 reaches row 0."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 0 0))
+    (forward-line 5)   ; cur-line = 5
+    (kuro--navigate-to-prompt 'previous)
+    ;; row 0 → line 1
+    (should (= (line-number-at-pos) 1))))
+
+;;; Group 10: kuro--goto-prompt-row boundary conditions
+
+(ert-deftest kuro-navigation--goto-prompt-row-beyond-buffer-end ()
+  "kuro--goto-prompt-row beyond buffer line count lands at last line without error."
+  (with-temp-buffer
+    ;; Insert exactly 5 lines.
+    (dotimes (_ 5) (insert "\n"))
+    (goto-char (point-min))
+    ;; forward-line clamps at end of buffer — no error.
+    (should-not (condition-case err
+                    (progn (kuro--goto-prompt-row 100) nil)
+                  (error err)))
+    ;; Point must be at or before point-max.
+    (should (<= (point) (point-max)))))
+
+(ert-deftest kuro-navigation--goto-prompt-row-one ()
+  "kuro--goto-prompt-row 1 places point at line 2."
+  (with-temp-buffer
+    (dotimes (_ 10) (insert "\n"))
+    (goto-char (point-max))
+    (kuro--goto-prompt-row 1)
+    (should (= (line-number-at-pos) 2))))
+
+;;; Group 11: kuro--def-focus-handler macro structure
+
+(ert-deftest kuro-navigation--def-focus-handler-names-function ()
+  "kuro--def-focus-handler creates a function with the given NAME."
+  ;; kuro--handle-focus-in and kuro--handle-focus-out were created by the macro
+  ;; at load time; verify they are fboundp.
+  (should (fboundp 'kuro--handle-focus-in))
+  (should (fboundp 'kuro--handle-focus-out)))
+
+(ert-deftest kuro-navigation--def-focus-handler-sends-correct-sequence-in ()
+  "kuro--handle-focus-in sends exactly \"\\e[I\" (ESC [ I)."
   (let ((kuro--initialized t)
         (sent nil))
-    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
               ((symbol-function 'kuro--get-focus-events) (lambda () t))
-              ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
+              ((symbol-function 'kuro--send-key)         (lambda (s) (setq sent s))))
+      (kuro--handle-focus-in)
+      (should (string= sent "\e[I")))))
+
+(ert-deftest kuro-navigation--def-focus-handler-sends-correct-sequence-out ()
+  "kuro--handle-focus-out sends exactly \"\\e[O\" (ESC [ O)."
+  (let ((kuro--initialized t)
+        (sent nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) t))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t))
+              ((symbol-function 'kuro--send-key)         (lambda (s) (setq sent s))))
       (kuro--handle-focus-out)
-      (should (equal sent "\e[O")))))
+      (should (string= sent "\e[O")))))
+
+(ert-deftest kuro-navigation--handle-focus-in-noop-when-wrong-mode ()
+  "kuro--handle-focus-in does nothing when derived-mode-p returns nil."
+  (let ((kuro--initialized t)
+        (sent nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) nil))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t))
+              ((symbol-function 'kuro--send-key)         (lambda (s) (setq sent s))))
+      (kuro--handle-focus-in)
+      (should-not sent))))
+
+(ert-deftest kuro-navigation--handle-focus-out-noop-when-wrong-mode ()
+  "kuro--handle-focus-out does nothing when derived-mode-p returns nil."
+  (let ((kuro--initialized t)
+        (sent nil))
+    (cl-letf (((symbol-function 'derived-mode-p)        (lambda (&rest _) nil))
+              ((symbol-function 'kuro--get-focus-events) (lambda () t))
+              ((symbol-function 'kuro--send-key)         (lambda (s) (setq sent s))))
+      (kuro--handle-focus-out)
+      (should-not sent))))
+
+;;; Group 12: Navigation with non-zero COL values
+
+(ert-deftest kuro-navigation--col-value-is-ignored-by-navigation ()
+  "Navigation uses ROW (cadr) only; COL (caddr) is irrelevant."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 3 99)   ; COL=99 — should not affect navigation
+            '("prompt-start" 6 0))
+    (forward-line 5)   ; cur-line = 5
+    (kuro--navigate-to-prompt 'previous)
+    ;; Nearest row < 5 with prompt-start is row 3 → line 4.
+    (should (= (line-number-at-pos) 4))))
+
+(ert-deftest kuro-navigation--update-prompt-positions-max-count-one-keeps-lowest-row ()
+  "max-count=1 retains only the mark at the lowest row after sorting."
+  (let* ((marks '(("prompt-start" 5 0) ("prompt-end" 2 0) ("command-start" 8 0)))
+         (result (kuro--update-prompt-positions marks nil 1)))
+    (should (= (length result) 1))
+    (should (= (cadr (nth 0 result)) 2))))
+
+(ert-deftest kuro-navigation--next-prompt-from-point-min ()
+  "kuro-next-prompt at point-min (cur-line=0) finds the first prompt at row > 0."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 1 0)
+            '("prompt-start" 4 0))
+    ;; cur-line = 0 (at point-min)
+    (goto-char (point-min))
+    (kuro-next-prompt)
+    ;; First prompt-start after row 0 is row 1 → line 2.
+    (should (= (line-number-at-pos) 2))))
+
+(ert-deftest kuro-navigation--previous-prompt-at-row-adjacent-to-prompt ()
+  "kuro-previous-prompt at cur-line=row+1 finds the prompt exactly one row behind."
+  (kuro-nav-test--with-prompts
+      (list '("prompt-start" 4 0))
+    (forward-line 5)   ; cur-line = 5, prompt at row 4 (< 5) qualifies
+    (kuro-previous-prompt)
+    ;; row 4 → line 5.
+    (should (= (line-number-at-pos) 5))))
 
 (provide 'kuro-navigation-test)
 ;;; kuro-navigation-test.el ends here

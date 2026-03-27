@@ -143,6 +143,174 @@ proptest! {
 }
 
 // -------------------------------------------------------------------------
+// CellExtras allocation / deallocation
+// -------------------------------------------------------------------------
+
+#[test]
+// INVARIANT: set_hyperlink_id(None) on a default cell (no extras) must be a
+// no-op: no extras allocated, hyperlink_id remains None.
+fn test_set_hyperlink_id_none_when_no_extras() {
+    let mut cell = Cell::new('A');
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "set_hyperlink_id(None) on bare cell must leave hyperlink_id as None"
+    );
+    // extras must remain absent (image_id also None confirms no allocation)
+    assert_eq!(cell.image_id(), None);
+}
+
+#[test]
+// ALLOCATION: set_hyperlink_id(Some(...)) must allocate extras and store the id.
+fn test_set_hyperlink_id_some_allocates_extras() {
+    let mut cell = Cell::new('B');
+    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    assert_eq!(
+        cell.hyperlink_id(),
+        Some("https://example.com"),
+        "set_hyperlink_id(Some(...)) must store the hyperlink id"
+    );
+}
+
+#[test]
+// DEALLOCATION: after setting a hyperlink, clearing it while image_id is None
+// must deallocate extras entirely (both accessors return None).
+fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
+    let mut cell = Cell::new('C');
+    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    // Now clear the hyperlink while image_id is still None
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must remain None (extras deallocated)"
+    );
+}
+
+#[test]
+// RETENTION: clearing hyperlink_id while image_id is Some must keep extras alive.
+fn test_set_hyperlink_id_none_keeps_extras_when_image_some() {
+    let mut cell = Cell::new('D');
+    cell.set_image_id(Some(7));
+    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    // Clear only the hyperlink — extras must survive because image_id is still set
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.image_id(),
+        Some(7),
+        "image_id must remain Some(7) — extras must not be deallocated"
+    );
+}
+
+#[test]
+// DEALLOCATION (symmetric): clearing image_id while hyperlink_id is None must
+// deallocate extras entirely.
+fn test_set_image_id_none_clears_extras_when_hyperlink_none() {
+    let mut cell = Cell::new('E');
+    cell.set_image_id(Some(42));
+    cell.set_image_id(None);
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must remain None (extras deallocated)"
+    );
+}
+
+#[test]
+// ALLOCATION: set_image_id(Some(...)) must allocate extras and store the id.
+fn test_set_image_id_some_allocates_extras() {
+    let mut cell = Cell::new('F');
+    cell.set_image_id(Some(99));
+    assert_eq!(
+        cell.image_id(),
+        Some(99),
+        "set_image_id(Some(99)) must store the image id"
+    );
+}
+
+#[test]
+// COMBINED CLEAR: set both hyperlink_id and image_id, then clear both → no extras.
+fn test_cell_with_hyperlink_and_image_both_cleared() {
+    let mut cell = Cell::new('G');
+    cell.set_hyperlink_id(Some("https://a.com".to_owned()));
+    cell.set_image_id(Some(5));
+    // Clear in reverse order: image first, then hyperlink
+    cell.set_image_id(None);
+    // image cleared but hyperlink still set — extras must persist
+    assert_eq!(
+        cell.hyperlink_id(),
+        Some("https://a.com"),
+        "hyperlink_id must survive clearing image_id"
+    );
+    cell.set_hyperlink_id(None);
+    // Now both cleared
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after final clear"
+    );
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must be None after both cleared"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Cell::new with multibyte characters
+// -------------------------------------------------------------------------
+
+#[test]
+// ENCODING: Cell::new with a multi-byte UTF-8 character must store and
+// retrieve it correctly via char().
+fn test_cell_new_multibyte_utf8() {
+    let cell = Cell::new('→'); // U+2192, 3 bytes in UTF-8
+    assert_eq!(
+        cell.char(),
+        '→',
+        "Cell::new('→') must store and return the correct char"
+    );
+    assert_eq!(
+        cell.width,
+        CellWidth::Half,
+        "Cell::new must produce CellWidth::Half"
+    );
+}
+
+// -------------------------------------------------------------------------
+// SgrAttributes::reset idempotence (example-based complement to PBT)
+// -------------------------------------------------------------------------
+
+#[test]
+// IDEMPOTENCE: reset() on an already-default SgrAttributes must be a no-op —
+// the result must still equal SgrAttributes::default().
+fn test_sgr_attributes_reset_idempotent() {
+    let mut attrs = SgrAttributes::default();
+    attrs.reset();
+    assert_eq!(
+        attrs,
+        SgrAttributes::default(),
+        "reset() on default attrs must be idempotent"
+    );
+}
+
+// -------------------------------------------------------------------------
 // Example-based tests (exhaustive enumeration where PBT is awkward)
 // -------------------------------------------------------------------------
 

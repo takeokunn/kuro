@@ -31,74 +31,41 @@
 (declare-function kuro--send-key "kuro-ffi" (str))
 (declare-function kuro--schedule-immediate-render "kuro-input" ())
 
+(defmacro kuro--def-key-sequence (name doc normal application)
+  "Define an interactive command NAME that sends a key sequence to the PTY.
+NORMAL is sent in normal cursor mode; APPLICATION in application cursor keys mode.
+DOC is the function docstring."
+  `(defun ,name () ,doc
+     (interactive)
+     (kuro--send-key-sequence ,normal ,application)))
+
 ;;; Arrow Keys (Normal and Application Mode)
-
-(defun kuro--arrow-up ()
-  "Send arrow up key."
-  (interactive)
-  (kuro--send-key-sequence "\e[A" "\eOA"))
-
-(defun kuro--arrow-down ()
-  "Send arrow down key."
-  (interactive)
-  (kuro--send-key-sequence "\e[B" "\eOB"))
-
-(defun kuro--arrow-left ()
-  "Send arrow left key."
-  (interactive)
-  (kuro--send-key-sequence "\e[D" "\eOD"))
-
-(defun kuro--arrow-right ()
-  "Send arrow right key."
-  (interactive)
-  (kuro--send-key-sequence "\e[C" "\eOC"))
+(kuro--def-key-sequence kuro--arrow-up    "Send arrow up key."    "\e[A" "\eOA")
+(kuro--def-key-sequence kuro--arrow-down  "Send arrow down key."  "\e[B" "\eOB")
+(kuro--def-key-sequence kuro--arrow-left  "Send arrow left key."  "\e[D" "\eOD")
+(kuro--def-key-sequence kuro--arrow-right "Send arrow right key." "\e[C" "\eOC")
 
 ;;; Home/End/Page Keys
-
-(defun kuro--HOME ()
-  "Send Home key."
-  (interactive)
-  (kuro--send-key-sequence "\e[H" "\e[1~"))
-
-(defun kuro--END ()
-  "Send End key."
-  (interactive)
-  (kuro--send-key-sequence "\e[F" "\e[4~"))
-
-(defun kuro--INSERT ()
-  "Send Insert key."
-  (interactive)
-  (kuro--send-key-sequence "\e[2~" "\e[2~"))
-
-(defun kuro--DELETE ()
-  "Send Delete key."
-  (interactive)
-  (kuro--send-key-sequence "\e[3~" "\e[3~"))
-
-(defun kuro--PAGE-UP ()
-  "Send Page Up key."
-  (interactive)
-  (kuro--send-key-sequence "\e[5~" "\e[5~"))
-
-(defun kuro--PAGE-DOWN ()
-  "Send Page Down key."
-  (interactive)
-  (kuro--send-key-sequence "\e[6~" "\e[6~"))
+(kuro--def-key-sequence kuro--HOME      "Send Home key."      "\e[H"  "\e[1~")
+(kuro--def-key-sequence kuro--END       "Send End key."       "\e[F"  "\e[4~")
+(kuro--def-key-sequence kuro--INSERT    "Send Insert key."    "\e[2~" "\e[2~")
+(kuro--def-key-sequence kuro--DELETE    "Send Delete key."    "\e[3~" "\e[3~")
+(kuro--def-key-sequence kuro--PAGE-UP   "Send Page Up key."   "\e[5~" "\e[5~")
+(kuro--def-key-sequence kuro--PAGE-DOWN "Send Page Down key." "\e[6~" "\e[6~")
 
 ;;; Function Keys F1-F12
-
-(defun kuro--F1 ()  "Send F1 key."  (interactive) (kuro--send-key-sequence "\eOP"    "\eOP"))
-(defun kuro--F2 ()  "Send F2 key."  (interactive) (kuro--send-key-sequence "\eOQ"    "\eOQ"))
-(defun kuro--F3 ()  "Send F3 key."  (interactive) (kuro--send-key-sequence "\eOR"    "\eOR"))
-(defun kuro--F4 ()  "Send F4 key."  (interactive) (kuro--send-key-sequence "\eOS"    "\eOS"))
-(defun kuro--F5 ()  "Send F5 key."  (interactive) (kuro--send-key-sequence "\e[15~"  "\e[15~"))
-(defun kuro--F6 ()  "Send F6 key."  (interactive) (kuro--send-key-sequence "\e[17~"  "\e[17~"))
-(defun kuro--F7 ()  "Send F7 key."  (interactive) (kuro--send-key-sequence "\e[18~"  "\e[18~"))
-(defun kuro--F8 ()  "Send F8 key."  (interactive) (kuro--send-key-sequence "\e[19~"  "\e[19~"))
-(defun kuro--F9 ()  "Send F9 key."  (interactive) (kuro--send-key-sequence "\e[20~"  "\e[20~"))
-(defun kuro--F10 () "Send F10 key." (interactive) (kuro--send-key-sequence "\e[21~"  "\e[21~"))
-(defun kuro--F11 () "Send F11 key." (interactive) (kuro--send-key-sequence "\e[23~"  "\e[23~"))
-(defun kuro--F12 () "Send F12 key." (interactive) (kuro--send-key-sequence "\e[24~"  "\e[24~"))
+(kuro--def-key-sequence kuro--F1  "Send F1 key."  "\eOP"   "\eOP")
+(kuro--def-key-sequence kuro--F2  "Send F2 key."  "\eOQ"   "\eOQ")
+(kuro--def-key-sequence kuro--F3  "Send F3 key."  "\eOR"   "\eOR")
+(kuro--def-key-sequence kuro--F4  "Send F4 key."  "\eOS"   "\eOS")
+(kuro--def-key-sequence kuro--F5  "Send F5 key."  "\e[15~" "\e[15~")
+(kuro--def-key-sequence kuro--F6  "Send F6 key."  "\e[17~" "\e[17~")
+(kuro--def-key-sequence kuro--F7  "Send F7 key."  "\e[18~" "\e[18~")
+(kuro--def-key-sequence kuro--F8  "Send F8 key."  "\e[19~" "\e[19~")
+(kuro--def-key-sequence kuro--F9  "Send F9 key."  "\e[20~" "\e[20~")
+(kuro--def-key-sequence kuro--F10 "Send F10 key." "\e[21~" "\e[21~")
+(kuro--def-key-sequence kuro--F11 "Send F11 key." "\e[23~" "\e[23~")
+(kuro--def-key-sequence kuro--F12 "Send F12 key." "\e[24~" "\e[24~")
 
 ;;; Modifier Combinations
 

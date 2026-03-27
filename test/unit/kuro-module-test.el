@@ -139,7 +139,74 @@
           (let ((path (kuro-module--find-library)))
             (should (string-match-p "target/release" path))))))))
 
-;;; Group 5: kuro--module-loaded state variable
+;;; Group 5: Individual tier functions
+
+(ert-deftest kuro-module-tier-custom-returns-path-when-exists ()
+  "kuro-module--tier-custom returns kuro-module-binary-path when file exists."
+  (let* ((tmpdir (make-temp-file "kuro-tier1-" t))
+         (tmpfile (expand-file-name "libkuro_core.so" tmpdir)))
+    (write-region "" nil tmpfile)
+    (unwind-protect
+        (let ((kuro-module-binary-path tmpfile))
+          (should (equal (kuro-module--tier-custom) tmpfile)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-tier-custom-returns-nil-when-missing ()
+  "kuro-module--tier-custom returns nil when the file does not exist."
+  (let ((kuro-module-binary-path "/nonexistent-kuro-tier1.so"))
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil)))
+      (should-not (kuro-module--tier-custom)))))
+
+(ert-deftest kuro-module-tier-custom-returns-nil-when-path-nil ()
+  "kuro-module--tier-custom returns nil when kuro-module-binary-path is nil."
+  (let ((kuro-module-binary-path nil))
+    (should-not (kuro-module--tier-custom))))
+
+(ert-deftest kuro-module-tier-env-uses-env-var ()
+  "kuro-module--tier-env returns the expanded lib path when env dir and file exist."
+  (let* ((tmpdir (make-temp-file "kuro-tier2-" t))
+         (ext (kuro-module--platform-extension))
+         (lib-name (format "libkuro_core.%s" ext))
+         (tmpfile (expand-file-name lib-name tmpdir)))
+    (write-region "" nil tmpfile)
+    (unwind-protect
+        (cl-letf (((symbol-function 'getenv)
+                   (lambda (var)
+                     (if (equal var "KURO_MODULE_PATH") tmpdir
+                       (getenv var)))))
+          (should (equal (kuro-module--tier-env) tmpfile)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-tier-env-returns-nil-when-env-unset ()
+  "kuro-module--tier-env returns nil when KURO_MODULE_PATH is unset."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (var)
+               (if (equal var "KURO_MODULE_PATH") nil
+                 (getenv var)))))
+    (should-not (kuro-module--tier-env))))
+
+(ert-deftest kuro-module-search-tiers-is-defconst ()
+  "kuro-module--search-tiers is a list of exactly 4 function symbols."
+  (should (= (length kuro-module--search-tiers) 4))
+  (should (cl-every #'symbolp kuro-module--search-tiers)))
+
+(ert-deftest kuro-module-find-library-uses-first-found-tier ()
+  "kuro-module--find-library returns the first non-nil tier result."
+  (cl-letf (((symbol-function 'kuro-module--tier-custom) (lambda () nil))
+            ((symbol-function 'kuro-module--tier-env)    (lambda () "/found/kuro.so"))
+            ((symbol-function 'kuro-module--tier-xdg)   (lambda () (error "should not reach xdg")))
+            ((symbol-function 'kuro-module--tier-dev)   (lambda () (error "should not reach dev"))))
+    (should (equal (kuro-module--find-library) "/found/kuro.so"))))
+
+(ert-deftest kuro-module-find-library-falls-through-to-dev ()
+  "kuro-module--find-library reaches tier-dev when all preceding tiers return nil."
+  (cl-letf (((symbol-function 'kuro-module--tier-custom) (lambda () nil))
+            ((symbol-function 'kuro-module--tier-env)    (lambda () nil))
+            ((symbol-function 'kuro-module--tier-xdg)   (lambda () nil))
+            ((symbol-function 'kuro-module--tier-dev)   (lambda () "/dev/libkuro_core.so")))
+    (should (equal (kuro-module--find-library) "/dev/libkuro_core.so"))))
+
+;;; Group 6: kuro--module-loaded state variable
 
 (ert-deftest kuro-module-test--module-loaded-var-is-defined ()
   "`kuro--module-loaded' is defined as a variable."
@@ -152,6 +219,330 @@
 (ert-deftest kuro-module-test--module-load-is-callable ()
   "`kuro-module-load' is a function."
   (should (fboundp 'kuro-module-load)))
+
+;;; Group 7: kuro--module-try macro
+
+(ert-deftest kuro-module-test--module-try-returns-path-when-file-exists ()
+  "`kuro--module-try' returns the path string when the file exists."
+  (let* ((tmpdir (make-temp-file "kuro-try-test-" t))
+         (tmpfile (expand-file-name "test.so" tmpdir)))
+    (write-region "" nil tmpfile)
+    (unwind-protect
+        (should (equal (kuro--module-try tmpfile) tmpfile))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-test--module-try-returns-nil-when-file-missing ()
+  "`kuro--module-try' returns nil when the file does not exist."
+  (should-not (kuro--module-try "/nonexistent-kuro-try-test.so")))
+
+(ert-deftest kuro-module-test--module-try-returns-nil-when-path-is-nil ()
+  "`kuro--module-try' returns nil without error when path-expr evaluates to nil."
+  (should-not (kuro--module-try nil)))
+
+(ert-deftest kuro-module-test--module-try-evaluates-path-expr-once ()
+  "`kuro--module-try' evaluates its argument exactly once (macro hygiene)."
+  (let ((eval-count 0))
+    ;; The counter increments inside the path-expr; confirm it runs exactly once.
+    (kuro--module-try (progn (setq eval-count (1+ eval-count)) nil))
+    (should (= eval-count 1))))
+
+;;; Group 8: kuro-module--tier-xdg
+
+(ert-deftest kuro-module-tier-xdg-returns-path-when-file-exists ()
+  "`kuro-module--tier-xdg' returns the canonical XDG library path when the file exists."
+  ;; Compute the expected XDG path using the same expression as the SUT, then
+  ;; stub file-exists-p to return t for that exact path.
+  (let* ((ext (kuro-module--platform-extension))
+         (lib-name (format "libkuro_core.%s" ext))
+         (expected (expand-file-name lib-name "~/.local/share/kuro/")))
+    (cl-letf (((symbol-function 'file-exists-p)
+               (lambda (path) (equal path expected))))
+      (should (equal (kuro-module--tier-xdg) expected)))))
+
+(ert-deftest kuro-module-tier-xdg-returns-nil-when-file-absent ()
+  "`kuro-module--tier-xdg' returns nil when the XDG path does not exist."
+  ;; Stub file-exists-p to always return nil for the xdg path specifically.
+  (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil)))
+    (should-not (kuro-module--tier-xdg))))
+
+(ert-deftest kuro-module-tier-xdg-path-contains-xdg-dir ()
+  "`kuro-module--tier-xdg' constructs a path that includes the XDG share directory."
+  ;; Bypass file-exists-p so we can inspect the path expression; we compare
+  ;; the path returned by expand-file-name (before the file-exists-p check).
+  (let* ((ext (kuro-module--platform-extension))
+         (lib-name (format "libkuro_core.%s" ext))
+         (expected-xdg (expand-file-name lib-name "~/.local/share/kuro/")))
+    ;; Stub file-exists-p to return t so tier-xdg returns the path.
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) t)))
+      (let ((result (kuro-module--tier-xdg)))
+        (should (equal result expected-xdg))))))
+
+;;; Group 9: kuro-module--tier-dev
+
+(ert-deftest kuro-module-tier-dev-returns-string ()
+  "`kuro-module--tier-dev' always returns a string (never nil)."
+  (should (stringp (kuro-module--tier-dev))))
+
+(ert-deftest kuro-module-tier-dev-path-contains-target-release ()
+  "`kuro-module--tier-dev' path contains \"target/release\"."
+  (should (string-match-p "target/release" (kuro-module--tier-dev))))
+
+(ert-deftest kuro-module-tier-dev-path-contains-lib-name ()
+  "`kuro-module--tier-dev' path contains the platform library filename."
+  (let* ((ext (kuro-module--platform-extension))
+         (lib-name (format "libkuro_core.%s" ext)))
+    (should (string-match-p (regexp-quote lib-name) (kuro-module--tier-dev)))))
+
+;;; Group 10: kuro-module--search-tiers defconst
+
+(ert-deftest kuro-module-search-tiers-has-four-elements ()
+  "`kuro-module--search-tiers' contains exactly 4 elements."
+  (should (= (length kuro-module--search-tiers) 4)))
+
+(ert-deftest kuro-module-search-tiers-all-are-symbols ()
+  "Every element of `kuro-module--search-tiers' is a symbol."
+  (should (cl-every #'symbolp kuro-module--search-tiers)))
+
+(ert-deftest kuro-module-search-tiers-all-are-fbound ()
+  "Every symbol in `kuro-module--search-tiers' names a defined function."
+  (should (cl-every #'fboundp kuro-module--search-tiers)))
+
+(ert-deftest kuro-module-search-tiers-priority-order ()
+  "The 4 tiers appear in the documented priority order: custom, env, xdg, dev."
+  (should (equal kuro-module--search-tiers
+                 '(kuro-module--tier-custom
+                   kuro-module--tier-env
+                   kuro-module--tier-xdg
+                   kuro-module--tier-dev))))
+
+;;; Group 11: kuro-module--find-library — all tiers return nil
+
+(ert-deftest kuro-module-find-library-all-tiers-nil-returns-dev-fallback ()
+  "When custom/env/xdg tiers return nil and dev returns a string, the string is returned."
+  ;; This is equivalent to the all-nil path: dev cannot return nil (it uses
+  ;; expand-file-name unconditionally), so test that only-dev-non-nil works.
+  (cl-letf (((symbol-function 'kuro-module--tier-custom) (lambda () nil))
+            ((symbol-function 'kuro-module--tier-env)    (lambda () nil))
+            ((symbol-function 'kuro-module--tier-xdg)   (lambda () nil))
+            ((symbol-function 'kuro-module--tier-dev)   (lambda () "/stub/libkuro_core.so")))
+    (should (equal (kuro-module--find-library) "/stub/libkuro_core.so"))))
+
+(ert-deftest kuro-module-find-library-stops-at-first-non-nil ()
+  "kuro-module--find-library stops at tier-custom and does not call later tiers."
+  (let ((env-called nil)
+        (xdg-called nil)
+        (dev-called nil))
+    (cl-letf (((symbol-function 'kuro-module--tier-custom)
+               (lambda () "/custom/libkuro_core.so"))
+              ((symbol-function 'kuro-module--tier-env)
+               (lambda () (setq env-called t) "/env/lib.so"))
+              ((symbol-function 'kuro-module--tier-xdg)
+               (lambda () (setq xdg-called t) "/xdg/lib.so"))
+              ((symbol-function 'kuro-module--tier-dev)
+               (lambda () (setq dev-called t) "/dev/lib.so")))
+      (kuro-module--find-library)
+      (should-not env-called)
+      (should-not xdg-called)
+      (should-not dev-called))))
+
+;;; Group 12: kuro--ensure-module-loaded
+
+(ert-deftest kuro-module-test--ensure-module-loaded-noop-when-already-loaded ()
+  "`kuro--ensure-module-loaded' does not call `kuro-module-load' when already loaded."
+  (let ((kuro--module-loaded t)
+        (load-called nil))
+    (cl-letf (((symbol-function 'kuro-module-load)
+               (lambda () (setq load-called t))))
+      (kuro--ensure-module-loaded)
+      (should-not load-called))))
+
+(ert-deftest kuro-module-test--ensure-module-loaded-calls-load-when-not-loaded ()
+  "`kuro--ensure-module-loaded' calls `kuro-module-load' exactly once when unloaded."
+  (let ((kuro--module-loaded nil)
+        (load-call-count 0))
+    (cl-letf (((symbol-function 'kuro-module-load)
+               (lambda () (setq load-call-count (1+ load-call-count)))))
+      (kuro--ensure-module-loaded)
+      (should (= load-call-count 1)))))
+
+(ert-deftest kuro-module-test--ensure-module-loaded-sets-flag-after-load ()
+  "`kuro--ensure-module-loaded' sets `kuro--module-loaded' to non-nil after loading."
+  (let ((kuro--module-loaded nil))
+    (cl-letf (((symbol-function 'kuro-module-load) (lambda () nil)))
+      (kuro--ensure-module-loaded)
+      (should kuro--module-loaded))))
+
+;;; Group 13: kuro-module-load — already-fbound guard
+
+(ert-deftest kuro-module-test--module-load-noop-when-kuro-core-init-fbound ()
+  "`kuro-module-load' does not call `module-load' when `kuro-core-init' is already fbound."
+  (let ((module-load-called nil))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda () nil))
+              ((symbol-function 'module-load)
+               (lambda (_path) (setq module-load-called t))))
+      ;; kuro-core-init is now fbound — load must be a no-op.
+      (kuro-module-load)
+      (should-not module-load-called))))
+
+(ert-deftest kuro-module-test--module-load-emits-message-when-not-found ()
+  "`kuro-module-load' emits a message containing useful info when the module is missing."
+  ;; Ensure kuro-core-init is NOT fbound so the load path is taken.
+  (let ((last-message nil))
+    (cl-letf (((symbol-function 'fboundp) (lambda (sym)
+                                            (if (eq sym 'kuro-core-init) nil
+                                              (fboundp sym))))
+              ((symbol-function 'kuro-module--find-library)
+               (lambda () "/nonexistent/libkuro_core.so"))
+              ((symbol-function 'file-exists-p) (lambda (_) nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq last-message (apply #'format fmt args)))))
+      (kuro-module-load)
+      ;; The message must contain either "not found" or the searched path.
+      (should (stringp last-message))
+      (should (string-match-p "kuro" last-message)))))
+
+;;; Group 14: kuro-module--lib-name helper
+
+(ert-deftest kuro-module-lib-name-is-string ()
+  "`kuro-module--lib-name' returns a non-empty string."
+  (should (stringp (kuro-module--lib-name)))
+  (should (> (length (kuro-module--lib-name)) 0)))
+
+(ert-deftest kuro-module-lib-name-starts-with-libkuro-core ()
+  "`kuro-module--lib-name' always starts with \"libkuro_core.\"."
+  (should (string-prefix-p "libkuro_core." (kuro-module--lib-name))))
+
+(ert-deftest kuro-module-lib-name-matches-tier-functions ()
+  "`kuro-module--lib-name' is consistent with what tier functions use."
+  ;; tier-dev uses kuro-module--lib-name internally; its result must contain the lib name.
+  (let ((lib-name (kuro-module--lib-name))
+        (dev-path  (kuro-module--tier-dev)))
+    (should (string-match-p (regexp-quote lib-name) dev-path))))
+
+(ert-deftest kuro-module-lib-name-no-dot-in-stem ()
+  "`kuro-module--lib-name' stem (before the extension dot) contains no dots."
+  ;; Format is always libkuro_core.<ext>; the stem uses underscores not dots.
+  (let* ((lib-name (kuro-module--lib-name))
+         (stem (substring lib-name 0 (string-match "\\." lib-name))))
+    (should-not (string-match-p "\\." stem))))
+
+(ert-deftest kuro-module-tier-xdg-uses-lib-name ()
+  "`kuro-module--tier-xdg' result (when file exists) ends with kuro-module--lib-name."
+  (let* ((lib-name (kuro-module--lib-name))
+         (expected (expand-file-name lib-name "~/.local/share/kuro/")))
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) t)))
+      (should (string-suffix-p lib-name (kuro-module--tier-xdg))))))
+
+;;; Group 15: kuro-module--platform-extension — unsupported platform
+
+(ert-deftest kuro-module-platform-extension-unsupported-signals-error ()
+  "`kuro-module--platform-extension' signals an error for unsupported system-type."
+  (let ((system-type 'windows-nt))
+    (should-error (kuro-module--platform-extension) :type 'error)))
+
+(ert-deftest kuro-module-platform-extension-linux-returns-so ()
+  "`kuro-module--platform-extension' returns \"so\" when system-type is gnu/linux."
+  (let ((system-type 'gnu/linux))
+    (should (equal (kuro-module--platform-extension) "so"))))
+
+(ert-deftest kuro-module-platform-extension-darwin-returns-dylib ()
+  "`kuro-module--platform-extension' returns \"dylib\" when system-type is darwin."
+  (let ((system-type 'darwin))
+    (should (equal (kuro-module--platform-extension) "dylib"))))
+
+(ert-deftest kuro-module-lib-name-linux-ends-in-so ()
+  "`kuro-module--lib-name' ends with \".so\" on GNU/Linux."
+  (let ((system-type 'gnu/linux))
+    (should (string-suffix-p ".so" (kuro-module--lib-name)))))
+
+(ert-deftest kuro-module-lib-name-darwin-ends-in-dylib ()
+  "`kuro-module--lib-name' ends with \".dylib\" on macOS/darwin."
+  (let ((system-type 'darwin))
+    (should (string-suffix-p ".dylib" (kuro-module--lib-name)))))
+
+
+;;; Group 16: kuro-module-load — module-load invocation path
+
+(ert-deftest kuro-module-test--module-load-calls-module-load-when-file-found ()
+  "`kuro-module-load' calls `module-load' with the located file path when it exists.
+kuro-core-init is naturally unbound in the test environment, so no fboundp stub needed."
+  (let ((loaded-path nil))
+    ;; Temporarily unbind kuro-core-init if somehow bound (defensive).
+    (let ((was-bound (fboundp 'kuro-core-init)))
+      (when was-bound (fmakunbound 'kuro-core-init))
+      (cl-letf (((symbol-function 'kuro-module--find-library)
+                 (lambda () "/fake/libkuro_core.so"))
+                ((symbol-function 'file-exists-p)
+                 (lambda (p) (equal p "/fake/libkuro_core.so")))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'module-load)
+                 (lambda (path) (setq loaded-path path))))
+        (unwind-protect
+            (progn
+              (kuro-module-load)
+              (should (equal loaded-path "/fake/libkuro_core.so")))
+          (when was-bound
+            (fset 'kuro-core-init (lambda () nil))))))))
+
+(ert-deftest kuro-module-test--module-load-message-fmt-contains-path ()
+  "`kuro-module-load' calls `message' with the module path in the format string."
+  ;; Capture the format string and first arg rather than the formatted result
+  ;; to avoid any recursive message calls.
+  (let ((captured-fmt nil)
+        (captured-arg nil))
+    (let ((was-bound (fboundp 'kuro-core-init)))
+      (when was-bound (fmakunbound 'kuro-core-init))
+      (cl-letf (((symbol-function 'kuro-module--find-library)
+                 (lambda () "/stub/libkuro_core.so"))
+                ((symbol-function 'file-exists-p)
+                 (lambda (p) (equal p "/stub/libkuro_core.so")))
+                ((symbol-function 'module-load) (lambda (_) nil))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (setq captured-fmt fmt)
+                   (setq captured-arg (car args)))))
+        (unwind-protect
+            (progn
+              (kuro-module-load)
+              (should (stringp captured-fmt))
+              ;; The path is passed as the %s argument to message.
+              (should (equal captured-arg "/stub/libkuro_core.so")))
+          (when was-bound
+            (fset 'kuro-core-init (lambda () nil))))))))
+
+(ert-deftest kuro-module-test--ensure-module-loaded-idempotent ()
+  "`kuro--ensure-module-loaded' is idempotent: second call is a no-op."
+  (let ((kuro--module-loaded nil)
+        (load-call-count 0))
+    (cl-letf (((symbol-function 'kuro-module-load)
+               (lambda () (setq load-call-count (1+ load-call-count)))))
+      (kuro--ensure-module-loaded)
+      (kuro--ensure-module-loaded)
+      (should (= load-call-count 1)))))
+
+(ert-deftest kuro-module-test--ensure-module-loaded-flag-stays-non-nil ()
+  "`kuro--module-loaded' remains non-nil after two calls to `kuro--ensure-module-loaded'."
+  (let ((kuro--module-loaded nil))
+    (cl-letf (((symbol-function 'kuro-module-load) (lambda () nil)))
+      (kuro--ensure-module-loaded)
+      (kuro--ensure-module-loaded)
+      (should kuro--module-loaded))))
+
+(ert-deftest kuro-module-test--module-try-empty-string-file-exists-stubbed-nil ()
+  "`kuro--module-try' returns nil for empty string when file-exists-p is stubbed nil."
+  (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil)))
+    (should-not (kuro--module-try ""))))
+
+(ert-deftest kuro-module-test--module-load-noop-is-repeatable ()
+  "`kuro-module-load' can be called twice safely when kuro-core-init is fbound."
+  (let ((call-count 0))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda () nil))
+              ((symbol-function 'module-load)
+               (lambda (_) (setq call-count (1+ call-count)))))
+      (kuro-module-load)
+      (kuro-module-load)
+      (should (= call-count 0)))))
+
 
 (provide 'kuro-module-test)
 

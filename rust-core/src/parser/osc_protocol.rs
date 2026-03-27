@@ -5,6 +5,19 @@ use base64::Engine as _;
 
 use crate::TerminalCore;
 
+/// Decode a `params` slot as UTF-8, returning `""` on failure.
+///
+/// Usage: `osc_param_str!(params, 1)` expands to the UTF-8 string at index 1,
+/// or `""` if the slot is absent or contains invalid UTF-8.
+macro_rules! osc_param_str {
+    ($params:expr, $idx:literal) => {
+        $params
+            .get($idx)
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .unwrap_or("")
+    };
+}
+
 /// Encode an RGB triple as `rgb:RRRR/GGGG/BBBB` for OSC query responses.
 pub(super) fn encode_color_spec(rgb: [u8; 3]) -> String {
     format!(
@@ -90,7 +103,7 @@ pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
                 *entry = None;
             }
         } else {
-            let idx_str = std::str::from_utf8(idx_raw).unwrap_or("");
+            let idx_str = osc_param_str!(params, 1);
             if let Ok(idx) = idx_str.parse::<usize>() {
                 if idx < 256 {
                     core.osc_data.palette[idx] = None;
@@ -148,7 +161,7 @@ pub(crate) fn handle_osc_default_colors(core: &mut TerminalCore, params: &[&[u8]
             let resp = format!("\x1b]{};{}\x07", num_str, encode_color_spec(rgb));
             core.meta.pending_responses.push(resp.into_bytes());
         } else {
-            let spec = std::str::from_utf8(spec_raw).unwrap_or("");
+            let spec = osc_param_str!(params, 1);
             if let Some([r, g, b]) = parse_color_spec(spec) {
                 let color = Some(crate::types::Color::Rgb(r, g, b));
                 match osc_num {
@@ -167,112 +180,142 @@ pub(crate) fn handle_osc_default_colors(core: &mut TerminalCore, params: &[&[u8]
 #[path = "tests/osc_protocol.rs"]
 mod tests;
 
-/// Handle OSC 1337 — iTerm2 inline images.
-pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
-    if let Some(rest_raw) = params.get(1) {
-        let rest = std::str::from_utf8(rest_raw).unwrap_or("");
-        if let Some(stripped) = rest.strip_prefix("File=") {
-            // Split at ':' to separate params from base64 data
-            if let Some(colon_pos) = stripped.find(':') {
-                let param_str = &stripped[..colon_pos];
-                let b64_data = &stripped[colon_pos + 1..];
+// ── iTerm2 OSC 1337 helpers ───────────────────────────────────────────────────
 
-                // Parse parameters
-                let mut inline = false;
-                let mut display_cols: u32 = 0;
-                let mut display_rows: u32 = 0;
-                for kv in param_str.split(';') {
-                    if let Some(v) = kv.strip_prefix("inline=") {
-                        inline = v == "1";
-                    } else if let Some(v) = kv.strip_prefix("width=") {
-                        // Width: N (cells), Npx, N%, auto
-                        display_cols = v
-                            .trim_end_matches("px")
-                            .trim_end_matches('%')
-                            .parse()
-                            .unwrap_or(0);
-                    } else if let Some(v) = kv.strip_prefix("height=") {
-                        display_rows = v
-                            .trim_end_matches("px")
-                            .trim_end_matches('%')
-                            .parse()
-                            .unwrap_or(0);
-                    }
-                }
+/// Parsed key=value parameters from an iTerm2 `File=…` header.
+pub(crate) struct Iterm2Params {
+    /// `inline=1` — render image inline in the terminal.
+    pub(crate) inline: bool,
+    /// Requested display width in terminal columns (`width=N`); `None` means auto.
+    pub(crate) display_cols: Option<u32>,
+    /// Requested display height in terminal rows (`height=N`); `None` means auto.
+    pub(crate) display_rows: Option<u32>,
+}
 
-                if inline && !b64_data.is_empty() {
-                    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-                    if let Ok(raw) = BASE64_STANDARD.decode(b64_data.trim()) {
-                        // Try to decode as PNG first, then treat as raw RGBA
-                        use crate::grid::screen::{ImageData, ImagePlacement};
-                        use crate::parser::kitty::ImageFormat;
+/// Parse the semicolon-separated `key=value` string that precedes the `:` separator
+/// in an iTerm2 `File=…` payload.
+///
+/// Unknown keys are silently ignored. Width/height suffixes (`px`, `%`) are stripped
+/// before numeric parsing; `0` or unparseable values leave the field as `None`.
+pub(crate) fn parse_iterm2_params(param_str: &str) -> Iterm2Params {
+    let mut inline = false;
+    let mut display_cols: Option<u32> = None;
+    let mut display_rows: Option<u32> = None;
 
-                        let result = {
-                            let decoder = png::Decoder::new(std::io::Cursor::new(&raw));
-                            decoder.read_info().ok().and_then(|mut reader| {
-                                let mut buf = vec![0u8; reader.output_buffer_size()];
-                                reader.next_frame(&mut buf).ok().map(|info| {
-                                    buf.truncate(info.buffer_size());
-                                    let fmt = match info.color_type {
-                                        png::ColorType::Rgba => ImageFormat::Rgba,
-                                        _ => ImageFormat::Rgb,
-                                    };
-                                    let w = info.width;
-                                    let h = info.height;
-                                    // Convert to RGBA if RGB
-                                    let pixels = if fmt == ImageFormat::Rgb {
-                                        buf.chunks(3)
-                                            .flat_map(|p| [p[0], p[1], p[2], 255])
-                                            .collect()
-                                    } else {
-                                        buf
-                                    };
-                                    (pixels, ImageFormat::Rgba, w, h)
-                                })
-                            })
-                        };
-
-                        if let Some((pixels, format, pw, ph)) = result {
-                            let cols = if display_cols > 0 {
-                                display_cols
-                            } else {
-                                pw.div_ceil(8)
-                            };
-                            let rows = if display_rows > 0 {
-                                display_rows
-                            } else {
-                                ph.div_ceil(16)
-                            };
-
-                            let data = ImageData {
-                                pixels,
-                                format,
-                                pixel_width: pw,
-                                pixel_height: ph,
-                            };
-                            let actual_id =
-                                core.screen.active_graphics_mut().store_image(None, data);
-                            let cursor = *core.screen.cursor();
-                            let placement = ImagePlacement {
-                                image_id: actual_id,
-                                row: cursor.row,
-                                col: cursor.col,
-                                display_cols: cols.max(1),
-                                display_rows: rows.max(1),
-                            };
-                            if let Some(notif) =
-                                core.screen.active_graphics_mut().add_placement(placement)
-                            {
-                                core.kitty.pending_image_notifications.push(notif);
-                            }
-                            // Advance cursor
-                            let max_row = (core.screen.rows() as usize).saturating_sub(1);
-                            let new_row = cursor.row.saturating_add(rows as usize).min(max_row);
-                            core.screen.move_cursor(new_row, 0);
-                        }
-                    }
-                }
+    for kv in param_str.split(';') {
+        if let Some(v) = kv.strip_prefix("inline=") {
+            inline = v == "1";
+        } else if let Some(v) = kv.strip_prefix("width=") {
+            let n: u32 = v
+                .trim_end_matches("px")
+                .trim_end_matches('%')
+                .parse()
+                .unwrap_or(0);
+            if n > 0 {
+                display_cols = Some(n);
+            }
+        } else if let Some(v) = kv.strip_prefix("height=") {
+            let n: u32 = v
+                .trim_end_matches("px")
+                .trim_end_matches('%')
+                .parse()
+                .unwrap_or(0);
+            if n > 0 {
+                display_rows = Some(n);
             }
         }
     }
+
+    Iterm2Params {
+        inline,
+        display_cols,
+        display_rows,
+    }
+}
+
+/// Decode base64-encoded image data and return `(rgba_pixels, width, height)`.
+///
+/// Attempts PNG decoding first; on success converts RGB frames to RGBA.
+/// Returns `None` if `b64_data` is empty, base64-invalid, or not a valid PNG.
+pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)> {
+    if b64_data.is_empty() {
+        return None;
+    }
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    let raw = BASE64_STANDARD.decode(b64_data.trim()).ok()?;
+
+    use crate::parser::kitty::ImageFormat;
+    let decoder = png::Decoder::new(std::io::Cursor::new(&raw));
+    decoder.read_info().ok().and_then(|mut reader| {
+        let mut buf = vec![0u8; reader.output_buffer_size()];
+        reader.next_frame(&mut buf).ok().map(|info| {
+            buf.truncate(info.buffer_size());
+            let fmt = match info.color_type {
+                png::ColorType::Rgba => ImageFormat::Rgba,
+                _ => ImageFormat::Rgb,
+            };
+            let w = info.width;
+            let h = info.height;
+            // Convert RGB → RGBA
+            let pixels = if fmt == ImageFormat::Rgb {
+                buf.chunks(3)
+                    .flat_map(|p| [p[0], p[1], p[2], 255])
+                    .collect()
+            } else {
+                buf
+            };
+            (pixels, w, h)
+        })
+    })
+}
+
+/// Handle OSC 1337 — iTerm2 inline images.
+pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
+    let rest = osc_param_str!(params, 1);
+    let Some(stripped) = rest.strip_prefix("File=") else {
+        return;
+    };
+    let Some(colon_pos) = stripped.find(':') else {
+        return;
+    };
+    let param_str = &stripped[..colon_pos];
+    let b64_data = &stripped[colon_pos + 1..];
+
+    let p = parse_iterm2_params(param_str);
+    if !p.inline {
+        return;
+    }
+
+    let Some((pixels, pw, ph)) = decode_iterm2_image(b64_data) else {
+        return;
+    };
+
+    use crate::grid::screen::{ImageData, ImagePlacement};
+    use crate::parser::kitty::ImageFormat;
+
+    let cols = p.display_cols.unwrap_or_else(|| pw.div_ceil(8)).max(1);
+    let rows = p.display_rows.unwrap_or_else(|| ph.div_ceil(16)).max(1);
+
+    let data = ImageData {
+        pixels,
+        format: ImageFormat::Rgba,
+        pixel_width: pw,
+        pixel_height: ph,
+    };
+    let actual_id = core.screen.active_graphics_mut().store_image(None, data);
+    let cursor = *core.screen.cursor();
+    let placement = ImagePlacement {
+        image_id: actual_id,
+        row: cursor.row,
+        col: cursor.col,
+        display_cols: cols,
+        display_rows: rows,
+    };
+    if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
+        core.kitty.pending_image_notifications.push(notif);
+    }
+    // Advance cursor past the image
+    let max_row = (core.screen.rows() as usize).saturating_sub(1);
+    let new_row = cursor.row.saturating_add(rows as usize).min(max_row);
+    core.screen.move_cursor(new_row, 0);
 }

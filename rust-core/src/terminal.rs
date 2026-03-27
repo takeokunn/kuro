@@ -273,6 +273,30 @@ impl TerminalCore {
         &self.meta.pending_responses
     }
 
+    /// Get pending image placement notifications (Kitty Graphics + Sixel).
+    ///
+    /// Returns notifications that have accumulated since the last call to
+    /// [`Self::clear_pending_image_notifications`] or terminal construction.
+    /// Each notification describes one image that was placed on the terminal grid.
+    #[must_use]
+    pub fn pending_image_notifications(&self) -> &[crate::grid::screen::ImageNotification] {
+        &self.kitty.pending_image_notifications
+    }
+
+    /// Clear all pending image placement notifications.
+    pub fn clear_pending_image_notifications(&mut self) {
+        self.kitty.pending_image_notifications.clear();
+    }
+
+    /// Re-encode a stored image as a base64-encoded PNG string.
+    ///
+    /// Returns an empty string if no image with `image_id` is stored.
+    /// Searches the active screen's graphics store (primary or alternate).
+    #[must_use]
+    pub fn get_image_png_base64(&self, image_id: u32) -> String {
+        self.screen.get_image_png_base64(image_id)
+    }
+
     /// Get current foreground color
     #[must_use]
     pub const fn current_foreground(&self) -> &types::Color {

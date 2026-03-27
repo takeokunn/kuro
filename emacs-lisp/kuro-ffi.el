@@ -32,39 +32,65 @@
 
 (require 'kuro-config)
 
+;;; Structural macros
+;; Defined first so they are available for the variable declarations below.
+
+(defmacro kuro--defvar-permanent-local (name value &optional doc)
+  "Define NAME as a buffer-local variable with VALUE, marked permanent-local.
+Convenience macro for the common pattern:
+  (defvar-local NAME VALUE DOC)
+  (put \\='NAME \\='permanent-local t)
+
+Variables marked permanent-local survive `kill-all-local-variables', which is
+called when a major mode is activated.  This is required for all Kuro state
+variables so that mode re-activation (e.g., after a theme change) does not
+destroy in-progress terminal session state."
+  (declare (doc-string 3) (indent defun))
+  `(progn
+     (defvar-local ,name ,value ,doc)
+     (put ',name 'permanent-local t)))
+
 ;; These functions are provided by the Rust dynamic module at runtime.
 ;; declare-function suppresses byte/native compiler "not known to be defined" warnings.
 (declare-function kuro-core-init                    "ext:kuro-core" (command rows cols))
 (declare-function kuro-core-send-key                "ext:kuro-core" (session-id bytes))
-(declare-function kuro-core-poll-updates            "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-updates-with-faces "ext:kuro-core" (session-id))
 (declare-function kuro-core-resize                  "ext:kuro-core" (session-id rows cols))
 (declare-function kuro-core-shutdown                "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-cursor              "ext:kuro-core" (session-id))
 (declare-function kuro-core-is-process-alive        "ext:kuro-core" (session-id))
 
-(defvar-local kuro--initialized nil
+(kuro--defvar-permanent-local kuro--initialized nil
   "Non-nil if Kuro has been initialized.
 Buffer-local so that multiple kuro buffers each track their own
 session state independently.  When nil, all FFI calls are suppressed.")
-(put 'kuro--initialized 'permanent-local t)
 
-(defvar-local kuro--session-id 0
+(kuro--defvar-permanent-local kuro--session-id 0
   "Session ID returned by `kuro-core-init'.
 Buffer-local so each kuro buffer routes FFI calls to its own session.
 The first session gets ID 0; subsequent sessions get incrementing integers.")
-(put 'kuro--session-id 'permanent-local t)
 
-(defvar-local kuro--col-to-buf-map (make-hash-table :test 'eql)
+(kuro--defvar-permanent-local kuro--col-to-buf-map (make-hash-table :test 'eql)
   "Per-row mapping of grid column → buffer char offset.
 Each key is a row number (integer), each value is a vector mapping
 grid column index to buffer character offset.")
-(put 'kuro--col-to-buf-map 'permanent-local t)
 
-(defvar-local kuro--resize-pending nil
+(kuro--defvar-permanent-local kuro--resize-pending nil
   "Non-nil when a resize event is pending from the window-size-change hook.
 Value is a (NEW-ROWS . NEW-COLS) cons cell, or nil when no resize is pending.")
-(put 'kuro--resize-pending 'permanent-local t)
+
+;;; FFI definition macros
+
+(defmacro kuro--def-ffi-getter (name core-fn default doc)
+  "Define a zero-argument FFI getter function NAME.
+CORE-FN is called with `kuro--session-id'; DEFAULT is returned on error.
+DOC is the docstring for the generated function."
+  `(defun ,name () ,doc (kuro--call ,default (,core-fn kuro--session-id))))
+
+(defmacro kuro--def-ffi-unary (name core-fn default arg doc)
+  "Define a one-argument FFI wrapper wrapping CORE-FN with fallback DEFAULT.
+ARG is the parameter name symbol (used in the docstring)."
+  `(defun ,name (,arg) ,doc (kuro--call ,default (,core-fn kuro--session-id ,arg))))
 
 ;;; Core dispatch macro
 
@@ -126,11 +152,6 @@ Returns t if successful, nil otherwise."
                      data
                    (apply #'string (append data nil)))))
       (kuro-core-send-key kuro--session-id bytes))))
-
-(defun kuro--poll-updates ()
-  "Poll for terminal updates.
-Returns a list of (ROW . TEXT) pairs for dirty lines."
-  (kuro--call nil (kuro-core-poll-updates kuro--session-id)))
 
 (defun kuro--poll-updates-with-faces ()
   "Poll for terminal updates with face information.

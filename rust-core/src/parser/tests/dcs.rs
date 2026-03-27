@@ -19,52 +19,84 @@ fn run_dcs(core: &mut crate::TerminalCore, intermediates: &[u8], c: char, data: 
     dcs_unhook(core);
 }
 
+// -------------------------------------------------------------------------
+// Macros for repetitive XTGETTCAP assertion patterns
+// -------------------------------------------------------------------------
+
+/// Assert that a single XTGETTCAP response starts with the success prefix
+/// `ESC P 1 + r` and contains the hex-encoded capability name.
+///
+/// Usage: `assert_xtgettcap_success!(core, hex_name)`
+macro_rules! assert_xtgettcap_success {
+    ($core:expr, $hex:expr) => {{
+        assert_eq!(
+            $core.meta.pending_responses.len(),
+            1,
+            "exactly one response should be queued"
+        );
+        let resp = std::str::from_utf8(&$core.meta.pending_responses[0])
+            .expect("response must be valid UTF-8");
+        assert!(
+            resp.starts_with("\x1bP1+r"),
+            "known capability response must start with ESC P 1 + r, got: {resp:?}"
+        );
+        assert!(
+            resp.contains($hex),
+            "response must echo back the hex-encoded capability name"
+        );
+    }};
+}
+
+/// Assert that a single XTGETTCAP response starts with the failure prefix
+/// `ESC P 0 + r`.
+///
+/// Usage: `assert_xtgettcap_failure!(core)`
+macro_rules! assert_xtgettcap_failure {
+    ($core:expr) => {{
+        assert_eq!(
+            $core.meta.pending_responses.len(),
+            1,
+            "exactly one response should be queued for unknown capability"
+        );
+        let resp = std::str::from_utf8(&$core.meta.pending_responses[0])
+            .expect("response must be valid UTF-8");
+        assert!(
+            resp.starts_with("\x1bP0+r"),
+            "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
+        );
+    }};
+}
+
+/// Run a single XTGETTCAP DCS sequence and assert the result via
+/// `assert_xtgettcap_success!` or `assert_xtgettcap_failure!`.
+///
+/// Usage: `test_xtgettcap!(hex_payload => success "expected_hex")`
+///         `test_xtgettcap!(hex_payload => failure)`
+macro_rules! test_xtgettcap {
+    ($payload:expr => success $hex:expr) => {{
+        let mut core = crate::TerminalCore::new(24, 80);
+        run_dcs(&mut core, b"+", 'q', $payload);
+        assert_xtgettcap_success!(core, $hex);
+    }};
+    ($payload:expr => failure) => {{
+        let mut core = crate::TerminalCore::new(24, 80);
+        run_dcs(&mut core, b"+", 'q', $payload);
+        assert_xtgettcap_failure!(core);
+    }};
+}
+
 /// XTGETTCAP for a known capability ("TN" = "544e") should produce a response
 /// that starts with the DCS success prefix: ESC P 1 + r.
 #[test]
 fn test_xtgettcap_known_capability_response() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    // "TN" hex-encoded is "544e".
-    run_dcs(&mut core, b"+", 'q', b"544e");
-
-    assert_eq!(
-        core.meta.pending_responses.len(),
-        1,
-        "exactly one response should be queued for TN capability"
-    );
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "known capability response must start with ESC P 1 + r, got: {resp:?}"
-    );
-    assert!(
-        resp.contains("544e"),
-        "response must echo back the hex-encoded capability name"
-    );
+    test_xtgettcap!(b"544e" => success "544e");
 }
 
 /// XTGETTCAP for an unknown capability should produce a response that starts
 /// with the DCS failure prefix: ESC P 0 + r.
 #[test]
 fn test_xtgettcap_unknown_capability_response() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    // "XY" hex-encoded is "5859" — not a known capability.
-    run_dcs(&mut core, b"+", 'q', b"5859");
-
-    assert_eq!(
-        core.meta.pending_responses.len(),
-        1,
-        "exactly one response should be queued for unknown capability"
-    );
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP0+r"),
-        "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
-    );
+    test_xtgettcap!(b"5859" => failure);
 }
 
 /// A non-XTGETTCAP DCS hook (e.g., unknown final byte 'z') must leave the
@@ -292,6 +324,275 @@ fn test_sixel_empty_data_no_placement() {
     assert!(
         core.kitty.pending_image_notifications.is_empty(),
         "empty sixel data must produce no image notification"
+    );
+}
+
+// -------------------------------------------------------------------------
+// build_xtgettcap_response unit tests (pure lookup, no TerminalCore needed)
+// -------------------------------------------------------------------------
+
+#[test]
+fn build_xtgettcap_response_tn_starts_with_success_prefix() {
+    let resp = build_xtgettcap_response("TN", "544e");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "TN capability must produce a success response, got: {resp:?}"
+    );
+    assert!(
+        resp.contains("544e"),
+        "response must echo back the hex capability name"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_name_alias_same_as_tn() {
+    let resp_tn = build_xtgettcap_response("TN", "544e");
+    let resp_name = build_xtgettcap_response("name", "6e616d65");
+    // Both must produce success responses (same match arm)
+    assert!(resp_tn.starts_with("\x1bP1+r"));
+    assert!(resp_name.starts_with("\x1bP1+r"));
+}
+
+#[test]
+fn build_xtgettcap_response_rgb_encodes_888() {
+    let resp = build_xtgettcap_response("RGB", "524742");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "RGB must succeed, got: {resp:?}"
+    );
+    // "8:8:8" hex-encoded is "383a383a38"
+    let expected_val = {
+        let mut s = String::new();
+        for b in b"8:8:8" {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+        }
+        s
+    };
+    assert!(
+        resp.contains(&expected_val),
+        "RGB response must contain hex-encoded '8:8:8', got: {resp:?}"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_tc_empty_value() {
+    let resp = build_xtgettcap_response("Tc", "5463");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "Tc must succeed, got: {resp:?}"
+    );
+    // The value part is empty: "...5463=\x1b\\"
+    assert!(
+        resp.contains("5463=\x1b\\"),
+        "Tc response value must be empty, got: {resp:?}"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_colors_encodes_256() {
+    let resp = build_xtgettcap_response("colors", "636f6c6f7273");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "colors must succeed, got: {resp:?}"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_co_alias_same_branch() {
+    let resp = build_xtgettcap_response("Co", "436f");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "Co must succeed (alias of colors), got: {resp:?}"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_unknown_starts_with_failure_prefix() {
+    let resp = build_xtgettcap_response("UNKNOWN", "554e4b4e4f574e");
+    assert!(
+        resp.starts_with("\x1bP0+r"),
+        "unknown capability must produce a failure response, got: {resp:?}"
+    );
+}
+
+#[test]
+fn build_xtgettcap_response_ms_encodes_clipboard_format() {
+    let resp = build_xtgettcap_response("Ms", "4d73");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "Ms must succeed, got: {resp:?}"
+    );
+    assert!(resp.contains("4d73"), "Ms response must echo back hex name");
+}
+
+// -------------------------------------------------------------------------
+// New edge-case tests
+// -------------------------------------------------------------------------
+
+/// A DCS XTGETTCAP payload at exactly the `MAX_APC_PAYLOAD_BYTES` byte count
+/// must be processed without panic.
+///
+/// DCS does not impose its own byte-count cap (the cap lives in the APC
+/// pre-scanner); `dcs_put` accepts every byte.  The hex string of length
+/// `MAX_APC_PAYLOAD_BYTES` is even (4 MiB is divisible by 2), so `hex_decode`
+/// succeeds and decodes to a long ASCII string that is not a known capability,
+/// yielding exactly one failure response.
+///
+/// We synthesise the payload with `run_dcs` (calling `dcs_put` per byte) to
+/// exercise the same code path a real sequence would take, keeping the payload
+/// at exactly `MAX_APC_PAYLOAD_BYTES` ASCII bytes.
+#[test]
+fn test_dcs_payload_at_max_limit_no_panic() {
+    use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
+
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // "41" repeated MAX/2 times → hex string of exactly MAX bytes.
+    // hex_decode("41"×N) decodes to 'A'×(N/2) — not a known capability.
+    let payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_APC_PAYLOAD_BYTES / 2)
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(payload.len(), MAX_APC_PAYLOAD_BYTES);
+
+    // Must not panic.
+    run_dcs(&mut core, b"+", 'q', &payload);
+
+    // Decoded to a long unknown capability name → one failure response.
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        1,
+        "MAX-length valid-hex XTGETTCAP payload must produce exactly one (failure) response"
+    );
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
+    assert!(
+        resp.starts_with("\x1bP0+r"),
+        "unknown long-name capability must produce a failure response, got: {resp:?}"
+    );
+}
+
+/// A DCS XTGETTCAP payload that is one byte over `MAX_APC_PAYLOAD_BYTES`
+/// produces an odd-length hex string, which `hex_decode` rejects with `None`,
+/// so no response is queued.
+///
+/// `MAX_APC_PAYLOAD_BYTES` is 4 MiB (even).  Adding one byte yields an
+/// odd-length string; `!hex.len().is_multiple_of(2)` returns true and the
+/// capability is silently skipped.
+#[test]
+fn test_dcs_payload_one_byte_over_limit_is_skipped() {
+    use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
+
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // MAX bytes of "41" + one trailing '4' → odd length → skipped by hex_decode.
+    let mut payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_APC_PAYLOAD_BYTES / 2)
+        .flatten()
+        .copied()
+        .collect();
+    payload.push(b'4'); // one extra byte → odd length
+    assert_eq!(payload.len(), MAX_APC_PAYLOAD_BYTES + 1);
+
+    run_dcs(&mut core, b"+", 'q', &payload);
+
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "odd-length (over-limit) XTGETTCAP payload must be silently skipped (no response)"
+    );
+}
+
+/// An empty DCS string — ST arrives immediately after the DCS introducer —
+/// must produce no response and must not panic.
+///
+/// State path: `dcs_hook` sets `Xtgettcap { buf: [] }`, `dcs_put` is never
+/// called, `dcs_unhook` calls `handle_xtgettcap` with an empty slice.
+/// The for-loop over `s.split(';')` yields one empty string, which is skipped
+/// by the `if cap_hex.is_empty() { continue }` guard.
+#[test]
+fn test_dcs_empty_string_no_response() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // DCS + q (XTGETTCAP) with zero data bytes followed immediately by ST.
+    run_dcs(&mut core, b"+", 'q', b"");
+
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "empty DCS XTGETTCAP payload must produce no response"
+    );
+}
+
+/// A DCS string containing all printable ASCII characters (0x20–0x7E) must
+/// not panic and must produce either a success or failure response (not zero
+/// responses), because the payload is a valid even-length hex string.
+///
+/// Printable ASCII: 0x20..=0x7E = 95 characters.  We hex-encode a known
+/// sequence of printable bytes and verify the round-trip.
+///
+/// Specifically: "546f" = hex("To") — not a known capability → failure response.
+#[test]
+fn test_dcs_all_printable_ascii_payload_no_panic() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // Build a hex payload from all 95 printable ASCII bytes (0x20..=0x7E).
+    // Each byte encodes to exactly 2 hex chars, so total length is 190 bytes
+    // (even) — valid hex string.  None of the decoded names match a known
+    // capability, so we expect a single failure response.
+    let mut payload = Vec::with_capacity(95 * 2);
+    for byte in 0x20u8..=0x7Eu8 {
+        use std::fmt::Write as _;
+        let mut s = String::new();
+        let _ = write!(s, "{byte:02x}");
+        payload.extend_from_slice(s.as_bytes());
+    }
+
+    // Must not panic.
+    run_dcs(&mut core, b"+", 'q', &payload);
+
+    // The decoded string " !"#$%&'()*+,-./0123456789:;<=>?@ABC...~" is not a
+    // known capability name → failure response.
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        1,
+        "all-printable-ASCII XTGETTCAP payload must produce exactly one (failure) response"
+    );
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
+    assert!(
+        resp.starts_with("\x1bP0+r"),
+        "unknown all-printable-ASCII capability must produce a failure response, got: {resp:?}"
+    );
+}
+
+/// DCS with an unknown intermediate byte (not "+" or "") must be a no-op —
+/// no Sixel decoder is created and no response is queued.
+#[test]
+fn test_dcs_unknown_intermediate_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // Intermediate '!' with final 'q' matches neither b"+" nor b"" in dcs_hook.
+    run_dcs(&mut core, b"!", 'q', b"544e");
+
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "unknown DCS intermediate must produce no response"
+    );
+    assert!(
+        core.kitty.pending_image_notifications.is_empty(),
+        "unknown DCS intermediate must not produce an image notification"
+    );
+}
+
+/// A DCS XTGETTCAP payload with only semicolons (no actual capability tokens)
+/// must produce no response — all tokens are empty and are skipped by the
+/// `if cap_hex.is_empty() { continue }` guard.
+#[test]
+fn test_dcs_only_semicolons_zero_responses() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    run_dcs(&mut core, b"+", 'q', b";;;");
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "XTGETTCAP payload of only semicolons must produce no response"
     );
 }
 

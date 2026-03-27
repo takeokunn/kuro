@@ -37,6 +37,11 @@
 (declare-function kuro--handle-focus-in "kuro-navigation" ())
 (declare-function kuro--handle-focus-out "kuro-navigation" ())
 
+;; EA-Ambiguous font assignment and glyph-metric refinement are in kuro-char-width.el.
+(declare-function kuro--setup-char-width-table "kuro-char-width" ())
+(declare-function kuro--assign-mono-fonts "kuro-char-width" ())
+(declare-function kuro--refine-glyph-widths "kuro-char-width" ())
+
 (defvar kuro-mode-map
   (let ((map (make-sparse-keymap)))
     ;; Terminal keybindings should pass through
@@ -74,11 +79,10 @@ cycle independently call `kuro--resize'."
               ;; synchronously, avoiding a race where both paths call kuro--resize.
               (setq kuro--resize-pending (cons new-rows new-cols)))))))))
 
-(defvar-local kuro--copy-mode nil
+(kuro--defvar-permanent-local kuro--copy-mode nil
   "Non-nil when Kuro copy mode is active.
 In copy mode the PTY keymap parent is detached so standard Emacs
 navigation and text-selection commands work in the terminal buffer.")
-(put 'kuro--copy-mode 'permanent-local t)
 
 (defun kuro--enter-copy-mode ()
   "Enter Kuro copy mode: suspend PTY input and enable Emacs navigation.
@@ -120,201 +124,22 @@ are enabled.  Press C-c C-t again to return to terminal mode."
       (kuro--exit-copy-mode)
     (kuro--enter-copy-mode)))
 
-(defvar-local kuro--last-rows 0
+(kuro--defvar-permanent-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")
-(put 'kuro--last-rows 'permanent-local t)
 
-(defvar-local kuro--last-cols 0
+(kuro--defvar-permanent-local kuro--last-cols 0
   "Last known terminal column count; used to detect window size changes.")
-(put 'kuro--last-cols 'permanent-local t)
 
-(defconst kuro--char-width-overrides
-  '((#x2190 . #x21FF)    ; Arrows — EA Width A (↑↓←→ sort/nav indicators)
-    (#x2200 . #x22FF)    ; Mathematical Operators — EA Width A (×÷∞√)
-    (#x2300 . #x23FF)    ; Miscellaneous Technical — EA Width A
-    (#x2500 . #x257F)    ; Box Drawing — used by ncurses borders
-    (#x2580 . #x259F)    ; Block Elements — EA Width A (btop/htop bars)
-    (#x25A0 . #x25FF)    ; Geometric Shapes — EA Width A (■● TUI indicators)
-    (#x2600 . #x26FF)    ; Miscellaneous Symbols — EA Width A
-    (#x2700 . #x27BF)    ; Dingbats — EA Width A
-    (#x2800 . #x28FF))   ; Braille Patterns — pin to 1 for safety
-  "Unicode ranges forced to display-width 1 in kuro terminal buffers.
-These ranges are East-Asian-Ambiguous (or pinned for safety).  CJK language
-environments set them to width 2, but terminal applications and the Rust
-unicode-width crate treat them as width 1.")
 
-(defun kuro--apply-char-width-overrides ()
-  "Force all `kuro--char-width-overrides' ranges to width 1 in the current buffer.
-Must be called after `char-width-table' is buffer-local."
-  (dolist (range kuro--char-width-overrides)
-    (set-char-table-range char-width-table range 1)))
-
-(defun kuro--setup-char-width-table ()
-  "Override `char-width-table' to match unicode-width 0.2 / xterm behavior.
-In CJK language environments Emacs sets East-Asian-Ambiguous characters
-\(block elements, geometric shapes, misc symbols, etc.) to display width 2.
-However the Rust unicode-width 0.2 crate — and every standard xterm-256color
-terminal — treats those same codepoints as width 1.  Terminal applications
-such as btop lay out their UI assuming width 1, so a discrepancy causes
-visual corruption \(characters shifted right after each ambiguous glyph).
-
-IMPORTANT: `set-language-environment' replaces the buffer-local
-`char-width-table' with a fresh copy even if the variable was already
-buffer-local.  We therefore also install a hook on
-`set-language-environment-hook' that re-applies the overrides in all
-live kuro buffers."
-  (make-local-variable 'char-width-table)
-  (setq char-width-table (copy-sequence char-width-table))
-  (kuro--apply-char-width-overrides))
-
-(defun kuro--reapply-char-width-in-all-buffers ()
-  "Re-apply char-width overrides in all kuro-mode buffers.
-Called from `set-language-environment-hook' because
-`set-language-environment' replaces buffer-local `char-width-table'."
-  (dolist (buf (buffer-list))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (when (eq major-mode 'kuro-mode)
-          ;; set-language-environment replaced our table — make a fresh copy
-          ;; of the (new) global table and re-apply overrides.
-          (setq char-width-table (copy-sequence char-width-table))
-          (kuro--apply-char-width-overrides))))))
-
-(add-hook 'set-language-environment-hook #'kuro--reapply-char-width-in-all-buffers)
-
-(defun kuro--assign-mono-fonts ()
-  "Assign the frame's ASCII (monospace) font to EA-Ambiguous Unicode ranges.
-This MUST run synchronously during `kuro-mode' init — before the first
-render — so that btop/htop output is already rendered with correct glyph
-widths from the very first frame.  If deferred to an idle timer, the timer
-may never fire while btop floods the PTY with output.
-
-Modifies BOTH the selected frame's fontset (nil) and the default fontset (t).
-Using only `t' was the original bug: `t' modifies the template for future
-frames, but existing frames already have their own fontset copy made at
-frame creation time.
-
-Uses `prepend' rather than replacing the font list, so if the ASCII font
-lacks a glyph for a given codepoint Emacs falls back to the original
-\(possibly CJK) font rather than showing a missing-glyph box."
-  (when (display-graphic-p)
-    (let* ((ascii-font (face-attribute 'default :font nil t))
-           (ascii-family (and ascii-font (font-get ascii-font :family))))
-      (when ascii-family
-        (let ((family-name (if (symbolp ascii-family)
-                               (symbol-name ascii-family)
-                             ascii-family)))
-          (dolist (range kuro--char-width-overrides)
-            (condition-case nil
-                (let ((spec (font-spec :family family-name)))
-                  (set-fontset-font nil range spec nil 'prepend)
-                  (set-fontset-font t   range spec nil 'prepend))
-              (error nil))))))))
-
-(defconst kuro--glyph-probe-chars
-  '((#x2190 . #x2192)    ; Arrows: →
-    (#x2200 . #x2200)    ; Math Operators: ∀
-    (#x2300 . #x2302)    ; Misc Technical: ⌂
-    (#x2500 . #x2502)    ; Box Drawing: │
-    (#x2580 . #x2588)    ; Block Elements: █
-    (#x25A0 . #x25A0)    ; Geometric Shapes: ■
-    (#x2600 . #x2605)    ; Misc Symbols: ★
-    (#x2700 . #x2714)    ; Dingbats: ✔
-    (#x2800 . #x28C0))   ; Braille Patterns: ⣀
-  "Alist mapping range-start to a probe character for glyph width detection.
-Each probe character is a representative glyph from the corresponding
-`kuro--char-width-overrides' range.")
-
-(defconst kuro--glyph-extra-probes
-  '(#x23FA    ; ⏺ — record symbol (Claude Code status indicator)
-    #x25CF    ; ● — black circle (common TUI bullet)
-    #x2714    ; ✔ — check mark
-    #x276F)   ; ❯ — heavy right-pointing angle quotation mark ornament
-  "Individual codepoints to probe for glyph metric correction.
-The per-range probing in `kuro--glyph-probe-chars' uses one representative
-character per Unicode range, but different characters within the same range
-may use different fallback fonts with mismatched metrics.  This list targets
-specific high-frequency characters known to cause visual shaking (line-height
-fluctuation) or horizontal misalignment in TUI applications.")
-
-(defun kuro--rescale-font-for-glyph (probe-char range cell-width cell-height)
-  "Probe PROBE-CHAR and rescale its font if metrics don't match cell dimensions.
-RANGE is the fontset range to apply the rescaled font to — either a cons
-cell (START . END) for a Unicode range, or a single character for per-char
-correction.  CELL-WIDTH and CELL-HEIGHT are the expected pixel dimensions.
-Returns non-nil if a rescaling was applied."
-  (condition-case nil
-      (let* ((probe-str (string probe-char))
-             (font-obj (with-temp-buffer
-                         (insert probe-str)
-                         (font-at 0)))
-             (glyphs (and font-obj
-                          (font-get-glyphs font-obj 0 1 probe-str)))
-             (glyph (and glyphs (> (length glyphs) 0) (aref glyphs 0)))
-             (glyph-width (and glyph (aref glyph 4)))
-             (glyph-ascent (and glyph (> (length glyph) 7) (aref glyph 7)))
-             (glyph-descent (and glyph (> (length glyph) 8) (aref glyph 8)))
-             (glyph-height (and glyph-ascent glyph-descent
-                                (+ (abs glyph-ascent) (abs glyph-descent)))))
-        (when (and glyph-width (> glyph-width 0))
-          (let* ((width-ratio (/ (float glyph-width) cell-width))
-                 (height-ratio (if (and glyph-height (> glyph-height 0)
-                                        (> glyph-height cell-height))
-                                   (/ (float glyph-height) cell-height)
-                                 1.0))
-                 (max-ratio (max width-ratio height-ratio)))
-            (when (> max-ratio 1.05)
-              (let* ((fname (font-get font-obj :family))
-                     (fsize (font-get font-obj :size))
-                     (new-size (* fsize (/ 1.0 max-ratio)))
-                     (rescaled (font-spec
-                                :family (if (symbolp fname)
-                                            (symbol-name fname)
-                                          fname)
-                                :size new-size)))
-                (set-fontset-font nil range rescaled nil 'prepend)
-                (set-fontset-font t   range rescaled nil 'prepend)
-                t)))))
-    (error nil)))
-
-(defun kuro--refine-glyph-widths ()
-  "Probe actual rendered glyph widths and heights, rescale mismatched fonts.
-Called from a short timer after the kuro buffer is displayed in a window,
-so `font-at' can determine which font Emacs actually chose for each range.
-
-Two passes:
-  1. Per-range: probe one representative character per
-     `kuro--char-width-overrides' range (from `kuro--glyph-probe-chars').
-     Rescales the range-level font.
-  2. Per-character: probe individual high-frequency characters from
-     `kuro--glyph-extra-probes' that may use a different fallback font
-     than the range-level probe.  Applies a per-codepoint override.
-
-Both passes check width AND height: a fallback font matching cell width
-may still have taller ascent+descent, causing line-height fluctuation
-\(visible as vertical buffer shaking when the character blinks)."
-  (when (display-graphic-p)
-    (let* ((cell-width (frame-char-width))
-           (cell-height (frame-char-height))
-           (did-change nil))
-      (when (and cell-width (> cell-width 0) cell-height (> cell-height 0))
-        ;; Pass 1: per-range probing (existing behavior, now with height check)
-        (dolist (entry kuro--char-width-overrides)
-          (let* ((range-start (car entry))
-                 (probe-assoc (assq range-start kuro--glyph-probe-chars))
-                 (probe-char (and probe-assoc (cdr probe-assoc))))
-            (when (and probe-char
-                       (kuro--rescale-font-for-glyph
-                        probe-char entry cell-width cell-height))
-              (setq did-change t))))
-        ;; Pass 2: per-character probing for known-problematic glyphs
-        (dolist (char kuro--glyph-extra-probes)
-          (when (kuro--rescale-font-for-glyph
-                 char (cons char char) cell-width cell-height)
-            (setq did-change t)))
-        (when did-change
-          (redraw-display))))))
-
+(defun kuro--make-focus-change-fn (prev)
+  "Build an `after-focus-change-function' that dispatches kuro focus events.
+PREV is the previous handler to chain after kuro's handling.
+When PREV is a function it is called at the end; nil is ignored."
+  (lambda ()
+    (if (frame-focus-state)
+        (kuro--handle-focus-in)
+      (kuro--handle-focus-out))
+    (when (functionp prev) (funcall prev))))
 
 (define-derived-mode kuro-mode fundamental-mode "Kuro"
   "Major mode for Kuro terminal buffers."
@@ -350,16 +175,8 @@ may still have taller ascent+descent, causing line-height fluctuation
   ;; is a plain function (not a hook), so we wrap it to preserve any
   ;; existing handler.
   (when (boundp 'after-focus-change-function)
-    (let ((prev after-focus-change-function))
-      (setq-local after-focus-change-function
-                  (lambda ()
-                    (if (frame-focus-state)
-                        (kuro--handle-focus-in)
-                      (kuro--handle-focus-out))
-                    (when (functionp prev) (funcall prev)))))
-    ;; Remove the obsolete hooks so byte-compiler warnings don't appear.
-    ;; This branch is taken on Emacs 27+.
-    )
+    (setq-local after-focus-change-function
+                (kuro--make-focus-change-fn after-focus-change-function)))
   ;; Resize the PTY whenever the Emacs window size changes.
   (add-hook 'window-size-change-functions #'kuro--window-size-change))
 

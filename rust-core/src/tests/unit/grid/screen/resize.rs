@@ -1,13 +1,10 @@
 //! Unit tests for `Screen::resize` (resize.rs).
 //! Example-based tests + T2-tier PBT (500 cases) for boundary and invariant coverage.
 
+use super::{assert_cell_char, make_screen};
 use crate::grid::screen::Screen;
 use crate::types::cell::SgrAttributes;
 use proptest::prelude::*;
-
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
 
 // ---------------------------------------------------------------------------
 // Example-based tests
@@ -101,13 +98,17 @@ fn resize_preserves_content_within_new_bounds() {
 
     s.resize(20, 60);
 
-    assert_eq!(
-        s.get_cell(0, 0).unwrap().char(),
+    assert_cell_char!(
+        s,
+        0,
+        0,
         'A',
         "cell (0,0) must survive resize to smaller dimensions"
     );
-    assert_eq!(
-        s.get_cell(1, 1).unwrap().char(),
+    assert_cell_char!(
+        s,
+        1,
+        1,
         'B',
         "cell (1,1) must survive resize to smaller dimensions"
     );

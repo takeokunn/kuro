@@ -111,6 +111,14 @@ This is the standard control sequence for backward-kill-word in readline/bash."
   (kuro--send-key (string ?\e ?\x7f))
   (kuro--schedule-immediate-render))
 
+(defconst kuro--meta-punct-bindings
+  '(("M-." . ?.) ("M-<" . ?<) ("M->" . ?>)
+    ("M-?" . ??) ("M-/" . ?/) ("M-_" . ?_))
+  "Alist of (KBD-STRING . CHAR) for Meta+punctuation bindings.
+Each entry maps an Emacs key string to the character sent via `kuro--send-meta'.
+Applied by `kuro--keymap-setup-meta'.
+M-DEL and M-<backspace> are handled separately (they call `kuro--send-meta-backspace').")
+
 (defun kuro--keymap-setup-meta (map)
   "Add Meta/Alt bindings M-a through M-z and related keys to MAP.
 
@@ -146,12 +154,10 @@ and would be silently ignored in GUI frames."
         (lambda () (interactive) (kuro--send-meta c)))))
 
   ;; Keys outside the a-z/A-Z/0-9 ranges — not covered by the dolist above.
-  (define-key map (kbd "M-.")   (lambda () (interactive) (kuro--send-meta ?.)))
-  (define-key map (kbd "M-<")   (lambda () (interactive) (kuro--send-meta ?<)))
-  (define-key map (kbd "M->")   (lambda () (interactive) (kuro--send-meta ?>)))
-  (define-key map (kbd "M-?")   (lambda () (interactive) (kuro--send-meta ??)))
-  (define-key map (kbd "M-/")   (lambda () (interactive) (kuro--send-meta ?/)))
-  (define-key map (kbd "M-_")   (lambda () (interactive) (kuro--send-meta ?_)))
+  (dolist (entry kuro--meta-punct-bindings)
+    (let ((c (cdr entry)))
+      (define-key map (kbd (car entry))
+        (lambda () (interactive) (kuro--send-meta c)))))
   ;; M-DEL — delete word backward (sends ESC + DEL = ESC + 127)
   (define-key map (kbd "M-DEL")        #'kuro--send-meta-backspace)
   ;; M-<backspace> — same as M-DEL on many keyboards
@@ -170,40 +176,39 @@ The letters A/B/C/D are the original VT100 cursor movement codes (CUU/CUD/CUF/CU
 Used with `kuro--xterm-modifier-codes' to build the 12 modifier+arrow sequences
 like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
 
+(defconst kuro--fkey-handlers
+  '((f1  . kuro--F1)  (f2  . kuro--F2)  (f3  . kuro--F3)  (f4  . kuro--F4)
+    (f5  . kuro--F5)  (f6  . kuro--F6)  (f7  . kuro--F7)  (f8  . kuro--F8)
+    (f9  . kuro--F9)  (f10 . kuro--F10) (f11 . kuro--F11) (f12 . kuro--F12))
+  "Alist mapping Emacs function-key event symbols to their Kuro handler commands.")
+
+(defconst kuro--nav-key-bindings
+  '(([up]      . kuro--arrow-up)
+    ([down]    . kuro--arrow-down)
+    ([left]    . kuro--arrow-left)
+    ([right]   . kuro--arrow-right)
+    ([home]    . kuro--HOME)
+    ([end]     . kuro--END)
+    ([prior]   . kuro--PAGE-UP)
+    ([next]    . kuro--PAGE-DOWN)
+    ([delete]  . kuro--DELETE)
+    ([insert]  . kuro--INSERT)
+    ([S-prior] . kuro-scroll-up)
+    ([S-next]  . kuro-scroll-down)
+    ([S-end]   . kuro-scroll-bottom))
+  "Alist of (KEY-VECTOR . COMMAND) pairs for navigation keys.
+Covers arrow keys, home/end/page/insert/delete, and scrollback viewport.
+Applied by `kuro--keymap-setup-navigation'.")
+
 (defun kuro--keymap-setup-navigation (map)
   "Add arrow, home, end, page, function key and modifier+arrow bindings to MAP."
-  ;; Arrow keys
-  (define-key map [up]    #'kuro--arrow-up)
-  (define-key map [down]  #'kuro--arrow-down)
-  (define-key map [left]  #'kuro--arrow-left)
-  (define-key map [right] #'kuro--arrow-right)
-
-  ;; Home / End / Page / Insert / Delete
-  (define-key map [home]   #'kuro--HOME)
-  (define-key map [end]    #'kuro--END)
-  (define-key map [prior]  #'kuro--PAGE-UP)
-  (define-key map [next]   #'kuro--PAGE-DOWN)
-  (define-key map [delete] #'kuro--DELETE)
-  (define-key map [insert] #'kuro--INSERT)
-
-  ;; Scrollback viewport (Shift+PgUp / PgDn / End)
-  (define-key map [S-prior] #'kuro-scroll-up)
-  (define-key map [S-next]  #'kuro-scroll-down)
-  (define-key map [S-end]   #'kuro-scroll-bottom)
+  ;; Static navigation keys: arrows, home/end/page/insert/delete, scrollback
+  (pcase-dolist (`(,key . ,cmd) kuro--nav-key-bindings)
+    (define-key map key cmd))
 
   ;; Function keys F1–F12
-  (define-key map [f1]  #'kuro--F1)
-  (define-key map [f2]  #'kuro--F2)
-  (define-key map [f3]  #'kuro--F3)
-  (define-key map [f4]  #'kuro--F4)
-  (define-key map [f5]  #'kuro--F5)
-  (define-key map [f6]  #'kuro--F6)
-  (define-key map [f7]  #'kuro--F7)
-  (define-key map [f8]  #'kuro--F8)
-  (define-key map [f9]  #'kuro--F9)
-  (define-key map [f10] #'kuro--F10)
-  (define-key map [f11] #'kuro--F11)
-  (define-key map [f12] #'kuro--F12)
+  (dolist (entry kuro--fkey-handlers)
+    (define-key map (vector (car entry)) (cdr entry)))
 
   ;; Modifier + arrow keys: xterm CSI 1;Nm sequences
   (dolist (mod kuro--xterm-modifier-codes)
@@ -215,16 +220,22 @@ like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
             (kuro--send-key seq)
             (kuro--schedule-immediate-render)))))))
 
+(defconst kuro--mouse-bindings
+  '(([down-mouse-1] . kuro--mouse-press)
+    ([down-mouse-2] . kuro--mouse-press)
+    ([down-mouse-3] . kuro--mouse-press)
+    ([mouse-1]      . kuro--mouse-release)
+    ([mouse-2]      . kuro--mouse-release)
+    ([mouse-3]      . kuro--mouse-release)
+    ([mouse-4]      . kuro--mouse-scroll-up)
+    ([mouse-5]      . kuro--mouse-scroll-down))
+  "Alist of (KEY-VECTOR . COMMAND) pairs for mouse event bindings.
+Applied by `kuro--keymap-setup-mouse'.")
+
 (defun kuro--keymap-setup-mouse (map)
-  "Add mouse event bindings to MAP."
-  (define-key map [down-mouse-1] #'kuro--mouse-press)
-  (define-key map [down-mouse-2] #'kuro--mouse-press)
-  (define-key map [down-mouse-3] #'kuro--mouse-press)
-  (define-key map [mouse-1]      #'kuro--mouse-release)
-  (define-key map [mouse-2]      #'kuro--mouse-release)
-  (define-key map [mouse-3]      #'kuro--mouse-release)
-  (define-key map [mouse-4]      #'kuro--mouse-scroll-up)
-  (define-key map [mouse-5]      #'kuro--mouse-scroll-down))
+  "Add mouse event bindings to MAP using `kuro--mouse-bindings'."
+  (pcase-dolist (`(,key . ,cmd) kuro--mouse-bindings)
+    (define-key map key cmd)))
 
 (defun kuro--keymap-setup-yank (map)
   "Add yank remapping and keymap-exception removal to MAP.

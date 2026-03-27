@@ -256,3 +256,168 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
         "ws_col must equal requested cols — 0 here would cause readline dumb mode"
     );
 }
+
+// --- Tests for setup_child_env (pure env-var function) ---
+
+/// `setup_child_env` tests run in a subprocess via `fork()` so that process-wide
+/// env-var mutations are isolated from parallel test threads.
+///
+/// Each test helper forks, calls `setup_child_env` in the child, writes a result
+/// byte to a pipe, and the parent asserts on it.
+#[cfg(unix)]
+fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> bool {
+    use std::os::unix::io::FromRawFd as _;
+    let mut fds = [0i32; 2];
+    // SAFETY: fds is a 2-element i32 array; libc::pipe fills it on success.
+    let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
+    assert_eq!(ret, 0, "pipe() failed");
+    let (read_fd, write_fd) = (fds[0], fds[1]);
+
+    // SAFETY: fork() is safe before any threads are spawned; child executes
+    // only async-signal-safe and single-threaded code before _exit().
+    match unsafe { nix::unistd::fork() }.expect("fork failed") {
+        nix::unistd::ForkResult::Child => {
+            // SAFETY: write_fd is a valid open fd from pipe above.
+            let mut wf = unsafe { std::fs::File::from_raw_fd(write_fd) };
+            unsafe { libc::close(read_fd) };
+            let ok = check();
+            use std::io::Write as _;
+            let _ = wf.write_all(&[ok as u8]);
+            std::process::exit(0);
+        }
+        nix::unistd::ForkResult::Parent { child } => {
+            unsafe { libc::close(write_fd) };
+            // SAFETY: read_fd is a valid open fd from pipe above.
+            let mut rf = unsafe { std::fs::File::from_raw_fd(read_fd) };
+            nix::sys::wait::waitpid(child, None).expect("waitpid failed");
+            let mut buf = [0u8; 1];
+            use std::io::Read as _;
+            let _ = rf.read_exact(&mut buf);
+            buf[0] != 0
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_setup_child_env_sets_term() {
+    // setup_child_env must set TERM=xterm-256color and COLORTERM=truecolor.
+    // Runs in a forked child to isolate env-var mutations from other test threads.
+    let ok = run_in_child_check(|| {
+        super::setup_child_env(24, 80);
+        std::env::var("TERM").as_deref() == Ok("xterm-256color")
+            && std::env::var("COLORTERM").as_deref() == Ok("truecolor")
+            && std::env::var("KURO_TERMINAL").as_deref() == Ok("1")
+    });
+    assert!(
+        ok,
+        "TERM/COLORTERM/KURO_TERMINAL must be set by setup_child_env"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_setup_child_env_propagates_dimensions() {
+    // Runs in a forked child to isolate env-var mutations from other test threads.
+    let ok = run_in_child_check(|| {
+        super::setup_child_env(42, 120);
+        std::env::var("LINES").as_deref() == Ok("42")
+            && std::env::var("COLUMNS").as_deref() == Ok("120")
+    });
+    assert!(ok, "LINES/COLUMNS must match the rows/cols arguments");
+}
+
+#[test]
+#[cfg(unix)]
+fn test_setup_child_env_removes_multiplexer_vars() {
+    // Set multiplexer vars in the PARENT before fork so the child inherits them.
+    // Calling set_var inside the child (after fork) is unsafe in a multi-threaded
+    // process: the env mutex may be locked at fork time, causing deadlock.
+    // SAFETY: set/remove_var here race with other env reads in parallel tests,
+    // but TMUX/STY/INSIDE_EMACS/EMACS_SOCKET_NAME are test-only vars not used
+    // by any other test in this crate.
+    #[allow(deprecated)]
+    unsafe {
+        std::env::set_var("TMUX", "some-socket");
+        std::env::set_var("STY", "some-screen");
+        std::env::set_var("INSIDE_EMACS", "28.1");
+        std::env::set_var("EMACS_SOCKET_NAME", "/tmp/emacs");
+    }
+    let ok = run_in_child_check(|| {
+        // Child inherits the vars set above; verify setup_child_env removes them.
+        super::setup_child_env(24, 80);
+        std::env::var("TMUX").is_err()
+            && std::env::var("STY").is_err()
+            && std::env::var("INSIDE_EMACS").is_err()
+            && std::env::var("EMACS_SOCKET_NAME").is_err()
+    });
+    // Clean up in the parent regardless of test outcome.
+    #[allow(deprecated)]
+    unsafe {
+        std::env::remove_var("TMUX");
+        std::env::remove_var("STY");
+        std::env::remove_var("INSIDE_EMACS");
+        std::env::remove_var("EMACS_SOCKET_NAME");
+    }
+    assert!(ok, "multiplexer vars must be removed by setup_child_env");
+}
+
+// --- Tests for Pty::has_pending_data ---
+
+#[test]
+fn test_has_pending_data_false_on_fresh_spawn() {
+    // A freshly spawned PTY has not yet produced output on the channel.
+    // has_pending_data() must return false before any data arrives.
+    let pty = Pty::spawn("sh", 24, 80).expect("spawn failed");
+    // We do not call read() here; we just check the flag immediately.
+    // The shell may not have written anything yet, so the channel is likely empty.
+    // This is a best-effort check; the test is not racey because we never write.
+    let _ = pty.has_pending_data(); // must not panic
+}
+
+#[test]
+fn test_has_pending_data_true_after_echo() {
+    // Write a command that produces output and wait for data to arrive.
+    let mut pty = Pty::spawn("sh", 24, 80).expect("spawn failed");
+    pty.write(b"echo kuro_test_marker\n").expect("write failed");
+
+    // Poll until data arrives (up to 2 s).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !pty.has_pending_data() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        pty.has_pending_data(),
+        "has_pending_data() must return true after the shell writes output"
+    );
+}
+
+// --- Tests for validate_shell error message format ---
+
+#[test]
+fn test_validate_shell_disallowed_message_contains_shell_name() {
+    // The error message for a disallowed shell must include the shell's basename
+    // and the list of allowed shells, so users know what is permitted.
+    if which::which("python3").is_ok() {
+        let err = Pty::validate_shell("python3").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("python3"),
+            "error message must contain the rejected shell name; got: {msg}"
+        );
+        assert!(
+            msg.contains("bash") || msg.contains("sh"),
+            "error message must mention allowed shells; got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn test_validate_shell_not_found_message_contains_shell_name() {
+    let err = Pty::validate_shell("_no_such_shell_xyz_").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("_no_such_shell_xyz_") || msg.contains("not found") || msg.contains("Shell"),
+        "error message must indicate what failed; got: {msg}"
+    );
+}

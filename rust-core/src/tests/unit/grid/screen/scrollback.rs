@@ -438,3 +438,170 @@ fn test_alternate_screen_scroll_up_no_scrollback() {
         "alternate screen scroll_up must not write to primary scrollback"
     );
 }
+
+// ── Eviction: oldest lines dropped when max_lines exceeded ───────────────────
+
+#[test]
+fn test_scrollback_evicts_oldest_lines_at_max() {
+    // Fill scrollback to exactly max_lines, then add one more.
+    // The oldest line must be evicted, keeping buffer at max_lines.
+    let mut screen = Screen::new(5, 10);
+    screen.set_scrollback_max_lines(3);
+    let attrs = crate::types::cell::SgrAttributes::default();
+
+    // Push 4 lines: '1', '2', '3', '4'.
+    for ch in ['1', '2', '3', '4'] {
+        screen.move_cursor(0, 0);
+        screen.print(ch, attrs, false);
+        screen.scroll_up(1, Color::Default);
+    }
+    // Buffer must be capped at 3.
+    assert_eq!(
+        screen.scrollback_line_count, 3,
+        "scrollback must be capped at max_lines=3"
+    );
+    assert_eq!(screen.scrollback_buffer.len(), 3);
+
+    // The oldest line ('1') must have been evicted; most-recent is '4'.
+    let lines = screen.get_scrollback_lines(3);
+    assert_eq!(
+        lines[0].get_cell(0).map(crate::types::cell::Cell::char),
+        Some('4'),
+        "most recent line must be '4'"
+    );
+    // '1' must not appear anywhere in the buffer.
+    let has_1 = lines
+        .iter()
+        .any(|l| l.get_cell(0).map(crate::types::cell::Cell::char) == Some('1'));
+    assert!(!has_1, "evicted line '1' must not remain in scrollback");
+}
+
+// ── viewport_scroll_up(0) is a no-op ─────────────────────────────────────────
+
+#[test]
+fn test_viewport_scroll_up_zero_is_noop() {
+    let mut screen = screen_with_scrollback(10);
+    screen.clear_scroll_dirty();
+    let offset_before = screen.scroll_offset();
+    screen.viewport_scroll_up(0);
+    assert_eq!(
+        screen.scroll_offset(),
+        offset_before,
+        "viewport_scroll_up(0) must not change scroll_offset"
+    );
+    assert!(
+        !screen.is_scroll_dirty(),
+        "viewport_scroll_up(0) must not set scroll_dirty"
+    );
+}
+
+// ── viewport_scroll_down(0) is a no-op ───────────────────────────────────────
+
+#[test]
+fn test_viewport_scroll_down_zero_is_noop() {
+    let mut screen = screen_with_scrollback(10);
+    screen.viewport_scroll_up(5);
+    screen.clear_scroll_dirty();
+    let offset_before = screen.scroll_offset();
+    screen.viewport_scroll_down(0);
+    assert_eq!(
+        screen.scroll_offset(),
+        offset_before,
+        "viewport_scroll_down(0) must not change scroll_offset"
+    );
+    assert!(
+        !screen.is_scroll_dirty(),
+        "viewport_scroll_down(0) must not set scroll_dirty"
+    );
+}
+
+// ── set_scrollback_max_lines(0) evicts everything ────────────────────────────
+
+#[test]
+fn test_set_scrollback_max_zero_clears_all() {
+    let mut screen = screen_with_scrollback(15);
+    assert_eq!(screen.scrollback_line_count, 15);
+    screen.set_scrollback_max_lines(0);
+    assert_eq!(
+        screen.scrollback_line_count, 0,
+        "set_scrollback_max_lines(0) must evict all scrollback lines"
+    );
+    assert!(
+        screen.scrollback_buffer.is_empty(),
+        "scrollback_buffer must be empty after max set to 0"
+    );
+}
+
+// ── get_scrollback_lines respects max_lines argument ─────────────────────────
+
+#[test]
+fn test_get_scrollback_lines_respects_limit() {
+    let screen = screen_with_scrollback(20);
+    let lines = screen.get_scrollback_lines(5);
+    assert_eq!(
+        lines.len(),
+        5,
+        "get_scrollback_lines(5) must return at most 5 lines even if buffer has 20"
+    );
+}
+
+#[test]
+fn test_get_scrollback_lines_zero_returns_empty() {
+    let screen = screen_with_scrollback(10);
+    let lines = screen.get_scrollback_lines(0);
+    assert!(
+        lines.is_empty(),
+        "get_scrollback_lines(0) must return an empty Vec"
+    );
+}
+
+// ── get_scrollback_viewport_line at full offset (anchor == 0) ────────────────
+
+#[test]
+fn test_get_scrollback_viewport_line_at_full_offset_bottom_row() {
+    // With n=5, offset=5, rows=5:
+    //   anchor = n - offset = 0
+    //   row=4 (bottom) → idx = 0 + 4 - (5-1) = 0 → Some(scrollback[0])
+    //   row=3           → idx = 0 + 3 - 4 = -1   → None
+    let mut screen = Screen::new(5, 10);
+    screen.set_scrollback_max_lines(5);
+    for _ in 0..5 {
+        screen.scroll_up(1, Color::Default);
+    }
+    assert_eq!(screen.scrollback_line_count, 5);
+    screen.viewport_scroll_up(5); // scroll_offset == scrollback_line_count == 5
+    assert_eq!(screen.scroll_offset(), 5);
+
+    // Bottom row (4) maps to scrollback[0] — the oldest line.
+    assert!(
+        screen.get_scrollback_viewport_line(4).is_some(),
+        "bottom row must map to Some(scrollback[0]) when offset==n"
+    );
+    // Row 3 is one step before the oldest line — out of range.
+    assert!(
+        screen.get_scrollback_viewport_line(3).is_none(),
+        "row 3 must map to None when anchor==0 and rows==5"
+    );
+}
+
+// ── clear_scrollback does not reset scroll_offset ────────────────────────────
+
+#[test]
+fn test_clear_scrollback_does_not_reset_scroll_offset() {
+    // Document (not change) the current behavior: clear_scrollback empties the
+    // buffer but does NOT reset scroll_offset. Callers must reset it separately.
+    let mut screen = screen_with_scrollback(20);
+    screen.viewport_scroll_up(10);
+    let offset_before = screen.scroll_offset();
+    screen.clear_scrollback();
+    assert_eq!(
+        screen.scrollback_line_count, 0,
+        "scrollback_line_count must be 0 after clear_scrollback"
+    );
+    // scroll_offset is intentionally NOT reset by clear_scrollback.
+    assert_eq!(
+        screen.scroll_offset(),
+        offset_before,
+        "clear_scrollback must not change scroll_offset (caller responsibility)"
+    );
+}

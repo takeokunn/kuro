@@ -51,41 +51,49 @@ Called from `kuro--start-render-loop' when the render loop starts."
   (setq kuro--blink-slow-frames-cached (max 1 (round (* kuro-frame-rate 0.5))))
   (setq kuro--blink-fast-frames-cached (max 1 (round (* kuro-frame-rate 0.167)))))
 
-(defun kuro--blink-slow-frames ()
+(defsubst kuro--blink-slow-frames ()
   "Return frame interval for slow text blink cycle (SGR 5).
 Returns the cached value from `kuro--blink-slow-frames-cached'."
   kuro--blink-slow-frames-cached)
 
-(defun kuro--blink-fast-frames ()
+(defsubst kuro--blink-fast-frames ()
   "Return frame interval for fast text blink cycle (SGR 6).
 Returns the cached value from `kuro--blink-fast-frames-cached'."
   kuro--blink-fast-frames-cached)
 
 ;;; Buffer-local state
 
-(defvar-local kuro--blink-overlays nil
+(kuro--defvar-permanent-local kuro--blink-overlays nil
   "List of active blink overlays in the current kuro buffer.")
-(put 'kuro--blink-overlays 'permanent-local t)
 
-(defvar-local kuro--image-overlays nil
+(kuro--defvar-permanent-local kuro--image-overlays nil
   "List of image display overlays in the current kuro buffer.
 Each overlay has a `kuro-image' property and a `display' image spec.")
-(put 'kuro--image-overlays 'permanent-local t)
 
 (defvar kuro--face-prop-template (list 'face nil)
   "Reusable property list for face application to avoid per-call allocation.")
 
-(defvar-local kuro--blink-frame-count 0
+(kuro--defvar-permanent-local kuro--blink-frame-count 0
   "Frame counter used for blink animation timing.")
-(put 'kuro--blink-frame-count 'permanent-local t)
 
-(defvar-local kuro--blink-visible-slow t
+(kuro--defvar-permanent-local kuro--blink-visible-slow t
   "Non-nil when slow-blink text is currently in the visible phase.")
-(put 'kuro--blink-visible-slow 'permanent-local t)
 
-(defvar-local kuro--blink-visible-fast t
+(kuro--defvar-permanent-local kuro--blink-visible-fast t
   "Non-nil when fast-blink text is currently in the visible phase.")
-(put 'kuro--blink-visible-fast 'permanent-local t)
+
+;;; Blink helpers
+
+(defsubst kuro--blink-visible (blink-type)
+  "Return the current visibility state for BLINK-TYPE (`slow' or `fast')."
+  (if (eq blink-type 'slow) kuro--blink-visible-slow kuro--blink-visible-fast))
+
+(defmacro kuro--toggle-blink-state (blink-type)
+  "Toggle the visibility state variable for BLINK-TYPE and return the new value.
+Modifies `kuro--blink-visible-slow' or `kuro--blink-visible-fast' in-place."
+  `(if (eq ,blink-type 'slow)
+       (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
+     (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))))
 
 ;;; Blink overlays
 
@@ -93,14 +101,22 @@ Each overlay has a `kuro-image' property and a `display' image spec.")
   "Create a blink overlay covering buffer positions START to END.
 BLINK-TYPE is the symbol `slow' or `fast', controlling which blink
 visibility state variable is consulted."
-  (let* ((visible (if (eq blink-type 'slow)
-                      kuro--blink-visible-slow
-                    kuro--blink-visible-fast))
+  (let* ((visible (kuro--blink-visible blink-type))
          (ov (make-overlay start end)))
     (overlay-put ov 'kuro-blink t)
     (overlay-put ov 'kuro-blink-type blink-type)
     (overlay-put ov 'invisible (not visible))
     (push ov kuro--blink-overlays)))
+
+(defun kuro--toggle-blink-phase (blink-type)
+  "Toggle BLINK-TYPE (`slow' or `fast') visibility state and update matching overlays.
+The state variable is toggled first; the new state is then applied to every
+live overlay whose `kuro-blink-type' matches BLINK-TYPE."
+  (let ((visible (kuro--toggle-blink-state blink-type)))
+    (dolist (ov kuro--blink-overlays)
+      (when (and (overlay-buffer ov)
+                 (eq (overlay-get ov 'kuro-blink-type) blink-type))
+        (overlay-put ov 'invisible (not visible))))))
 
 (defun kuro--tick-blink-overlays ()
   "Advance the blink frame counter and toggle overlay visibility at correct intervals.
@@ -111,17 +127,9 @@ blink timing is correct at any frame rate (not just 30 fps).
 Called once per render cycle from `kuro--render-cycle'."
   (setq kuro--blink-frame-count (1+ kuro--blink-frame-count))
   (when (zerop (mod kuro--blink-frame-count (kuro--blink-slow-frames)))
-    (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
-    (dolist (ov kuro--blink-overlays)
-      (when (and (overlay-buffer ov)
-                 (eq (overlay-get ov 'kuro-blink-type) 'slow))
-        (overlay-put ov 'invisible (not kuro--blink-visible-slow)))))
+    (kuro--toggle-blink-phase 'slow))
   (when (zerop (mod kuro--blink-frame-count (kuro--blink-fast-frames)))
-    (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))
-    (dolist (ov kuro--blink-overlays)
-      (when (and (overlay-buffer ov)
-                 (eq (overlay-get ov 'kuro-blink-type) 'fast))
-        (overlay-put ov 'invisible (not kuro--blink-visible-fast))))))
+    (kuro--toggle-blink-phase 'fast)))
 
 ;;; Image overlays (Kitty Graphics Protocol)
 
@@ -150,37 +158,42 @@ and ends after row start."
           (push ov remaining)))
       (setq kuro--image-overlays (nreverse remaining)))))
 
+(defun kuro--decode-png-image (b64)
+  "Decode base64 B64 and return an Emacs PNG image object.
+May signal an error if B64 is malformed or `create-image' fails."
+  (create-image
+   (encode-coding-string (base64-decode-string b64) 'binary)
+   'png t))
+
+(defun kuro--place-image-overlay (img row col cell-width)
+  "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH chars.
+Uses `forward-char' for column positioning so wide characters (2 terminal
+columns, 1 buffer position) are handled correctly.  Pushes the new overlay
+onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
+  (let* ((start (save-excursion
+                  (goto-char (point-min))
+                  (forward-line row)
+                  (forward-char col)
+                  (point)))
+         (end (min (+ start cell-width) (point-max))))
+    (when (< start (point-max))
+      (let ((ov (make-overlay start end)))
+        (overlay-put ov 'kuro-image t)
+        (overlay-put ov 'display    img)
+        (overlay-put ov 'evaporate  t)   ; auto-delete if region deleted
+        (push ov kuro--image-overlays)))))
+
 (defun kuro--render-image-notification (notif)
   "Render a single Kitty Graphics image placement NOTIF in the terminal buffer.
 NOTIF is a list of the form (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT).
 Creates an overlay with a `display' image property at the correct grid position."
-  (let* ((image-id   (nth 0 notif))
-         (row        (nth 1 notif))
-         (col        (nth 2 notif))
-         (cell-width (max 1 (nth 3 notif)))
-         (b64        (kuro--get-image image-id)))
+  (pcase-let* ((`(,image-id ,row ,col ,raw-width . ,_) notif)
+               (cell-width (max 1 raw-width))
+               (b64 (kuro--get-image image-id)))
     (when (and b64 (stringp b64) (not (string-empty-p b64)))
       (condition-case err
-          (let* (                 ;; Decode base64 → raw PNG bytes (binary string)
-                 (png-data (encode-coding-string (base64-decode-string b64) 'binary))
-                 ;; Build Emacs image object
-                 (img      (create-image png-data 'png t))
-                 ;; Locate buffer position for (row, col)
-                 ;; Use forward-char rather than (+ line-pos col) so wide characters
-                 ;; (which occupy 2 terminal columns but 1 buffer position) are handled correctly.
-                 (start    (save-excursion
-                             (goto-char (point-min))
-                             (forward-line row)
-                             (forward-char col)
-                             (point)))
-                 ;; Span cell-width characters so the image occludes the right cells
-                 (end      (+ start cell-width)))
-            (when (and img (< start (point-max)))
-              (let ((ov (make-overlay start (min end (point-max)))))
-                (overlay-put ov 'kuro-image    t)
-                (overlay-put ov 'display       img)
-                (overlay-put ov 'evaporate     t)  ; auto-delete if region deleted
-                (push ov kuro--image-overlays))))
+          (when-let ((img (kuro--decode-png-image b64)))
+            (kuro--place-image-overlay img row col cell-width))
         (error
          (message "kuro: image render error for id %d: %s" image-id err))))))
 

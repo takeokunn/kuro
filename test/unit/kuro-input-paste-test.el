@@ -233,5 +233,287 @@ The wrap sequences ESC[200~/ESC[201~ are intact; the user ESC is gone."
       (kill-buffer buf1)
       (kill-buffer buf2))))
 
+;;; Group 6: kuro--paste-open and kuro--paste-close defconst values
+
+(ert-deftest kuro-input-paste--paste-open-is-correct-sequence ()
+  "kuro--paste-open is exactly ESC[200~ (DEC mode 2004 open bracket)."
+  (should (equal kuro--paste-open "\e[200~")))
+
+(ert-deftest kuro-input-paste--paste-close-is-correct-sequence ()
+  "kuro--paste-close is exactly ESC[201~ (DEC mode 2004 close bracket)."
+  (should (equal kuro--paste-close "\e[201~")))
+
+(ert-deftest kuro-input-paste--paste-open-starts-with-esc ()
+  "kuro--paste-open starts with ESC (0x1B)."
+  (should (= (aref kuro--paste-open 0) #x1B)))
+
+(ert-deftest kuro-input-paste--paste-close-starts-with-esc ()
+  "kuro--paste-close starts with ESC (0x1B)."
+  (should (= (aref kuro--paste-close 0) #x1B)))
+
+(ert-deftest kuro-input-paste--paste-sequences-are-distinct ()
+  "kuro--paste-open and kuro--paste-close are different strings."
+  (should-not (equal kuro--paste-open kuro--paste-close)))
+
+;;; Group 7: kuro--send-paste-or-raw dispatch
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-plain-mode ()
+  "kuro--send-paste-or-raw sends text verbatim when bracketed paste is off."
+  (with-temp-buffer
+    (let ((kuro--bracketed-paste-mode nil)
+          (captured nil))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq captured s))))
+        (kuro--send-paste-or-raw "hello"))
+      (should (equal captured "hello")))))
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-bracketed-mode-wraps ()
+  "kuro--send-paste-or-raw wraps text with open/close sequences when mode is on."
+  (with-temp-buffer
+    (let ((kuro--bracketed-paste-mode t)
+          (captured nil))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq captured s))))
+        (kuro--send-paste-or-raw "world"))
+      (should (string-prefix-p kuro--paste-open captured))
+      (should (string-suffix-p kuro--paste-close captured))
+      (should (string-match-p "world" captured)))))
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-bracketed-mode-sanitizes ()
+  "kuro--send-paste-or-raw sanitizes ESC from text in bracketed mode."
+  (with-temp-buffer
+    (let ((kuro--bracketed-paste-mode t)
+          (esc (string #x1b))
+          (captured nil))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq captured s))))
+        (kuro--send-paste-or-raw (concat "a" esc "b")))
+      ;; The inner content must not contain ESC (only the bracket sequences do)
+      (let* ((inner-start (length kuro--paste-open))
+             (inner-end (- (length captured) (length kuro--paste-close)))
+             (inner (substring captured inner-start inner-end)))
+        (should-not (string-match-p (regexp-quote esc) inner))))))
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-plain-preserves-esc ()
+  "kuro--send-paste-or-raw does NOT sanitize in plain mode — ESC passes through."
+  (with-temp-buffer
+    (let ((kuro--bracketed-paste-mode nil)
+          (esc (string #x1b))
+          (captured nil))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq captured s))))
+        (kuro--send-paste-or-raw (concat "a" esc "b")))
+      (should (string= captured (concat "a" esc "b"))))))
+
+;;; Group 8: kuro--yank dispatch
+
+(ert-deftest kuro-input-paste--yank-calls-schedule-render ()
+  "kuro--yank calls kuro--schedule-immediate-render after sending."
+  (let ((kill-ring nil)
+        (render-called nil))
+    (with-temp-buffer
+      (kill-new "text")
+      (let ((kuro--bracketed-paste-mode nil))
+        (cl-letf (((symbol-function 'kuro--send-key)
+                   (lambda (_s) nil))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () (setq render-called t))))
+          (kuro--yank)))
+      (should render-called))))
+
+(ert-deftest kuro-input-paste--yank-with-numeric-arg ()
+  "kuro--yank with numeric arg 2 retrieves the second kill-ring entry."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "first")
+      (kill-new "second")
+      ;; kill-ring is now ("second" "first"), current-kill 1 → "first"
+      (let ((kuro--bracketed-paste-mode nil)
+            (sent (kuro-paste-test--capture-sent (kuro--yank 2))))
+        ;; arg=2 → n=(1- 2)=1 → current-kill 1 = "first"
+        (should (equal sent '("first")))))))
+
+;;; Group 9: kuro--yank-pop edge cases
+
+(ert-deftest kuro-input-paste--yank-pop-accepts-yank-as-last-cmd ()
+  "kuro--yank-pop accepts `yank' (not just kuro--yank) as previous command."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "entry")
+      (let ((last-command 'yank)
+            (kuro--bracketed-paste-mode nil))
+        ;; Should not signal an error
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (equal sent '("entry"))))))))
+
+(ert-deftest kuro-input-paste--yank-pop-accepts-kuro-yank-pop-as-last-cmd ()
+  "kuro--yank-pop accepts kuro--yank-pop itself as a valid previous command."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "entry2")
+      (let ((last-command 'kuro--yank-pop)
+            (kuro--bracketed-paste-mode nil))
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (equal sent '("entry2"))))))))
+
+;;; Group 10: kuro--sanitize-paste — combined ESC and C1 CSI edge cases
+
+(ert-deftest kuro-input-paste--sanitize-mixed-esc-and-c1 ()
+  "kuro--sanitize-paste strips both ESC and C1 CSI bytes from the same string."
+  (let ((esc (string #x1b))
+        (c1  (string #x9b)))
+    (should (equal (kuro--sanitize-paste (concat "a" esc "b" c1 "c"))
+                   "abc"))))
+
+(ert-deftest kuro-input-paste--sanitize-only-c1-bytes ()
+  "kuro--sanitize-paste returns empty string when input is all C1 CSI bytes."
+  (let ((c1 (string #x9b)))
+    (should (equal (kuro--sanitize-paste (concat c1 c1 c1)) ""))))
+
+(ert-deftest kuro-input-paste--sanitize-preserves-unicode ()
+  "kuro--sanitize-paste preserves multibyte Unicode characters."
+  (should (equal (kuro--sanitize-paste "日本語テスト") "日本語テスト")))
+
+(ert-deftest kuro-input-paste--sanitize-esc-between-unicode ()
+  "kuro--sanitize-paste strips ESC bytes interspersed with Unicode."
+  (let ((esc (string #x1b)))
+    (should (equal (kuro--sanitize-paste (concat "日本" esc "語"))
+                   "日本語"))))
+
+(ert-deftest kuro-input-paste--sanitize-long-string-with-c1 ()
+  "kuro--sanitize-paste handles a long string with C1 CSI bytes mixed in."
+  (let* ((c1 (string #x9b))
+         (clean (make-string 50 ?a))
+         (dirty (concat clean c1 clean c1 clean c1 clean))
+         (expected (make-string 200 ?a)))
+    (should (equal (kuro--sanitize-paste dirty) expected))))
+
+(ert-deftest kuro-input-paste--sanitize-preserves-cr-lf ()
+  "kuro--sanitize-paste preserves CR and LF characters."
+  (should (equal (kuro--sanitize-paste "line1\r\nline2\rline3\n")
+                 "line1\r\nline2\rline3\n")))
+
+(ert-deftest kuro-input-paste--sanitize-consecutive-esc-and-c1 ()
+  "kuro--sanitize-paste strips multiple consecutive ESC and C1 bytes."
+  (let ((esc (string #x1b))
+        (c1  (string #x9b)))
+    (should (equal (kuro--sanitize-paste (concat esc esc c1 c1 "text" esc c1))
+                   "text"))))
+
+(ert-deftest kuro-input-paste--sanitize-does-not-strip-del ()
+  "kuro--sanitize-paste does not strip DEL (0x7F) — only ESC (0x1B) and C1 (0x9B)."
+  (let ((del (string #x7f)))
+    (should (equal (kuro--sanitize-paste (concat "a" del "b")) (concat "a" del "b")))))
+
+(ert-deftest kuro-input-paste--sanitize-null-byte-preserved ()
+  "kuro--sanitize-paste preserves NUL bytes (only ESC and C1 CSI are stripped)."
+  (let ((nul (string 0)))
+    (should (equal (kuro--sanitize-paste (concat "a" nul "b")) (concat "a" nul "b")))))
+
+(ert-deftest kuro-input-paste--sanitize-c1-then-injection-sequence ()
+  "kuro--sanitize-paste neutralizes 8-bit injection attempt via C1 CSI + 201~ ."
+  (let* ((c1 (string #x9b))
+         (payload (concat "evil" c1 "201~injection")))
+    (should (equal (kuro--sanitize-paste payload) "evil201~injection"))))
+
+
+;;; Group 11: kuro--yank and kuro--yank-pop additional dispatch cases
+
+(ert-deftest kuro-input-paste--yank-arg-1-fetches-most-recent ()
+  "kuro--yank with numeric arg 1 fetches the most recent kill-ring entry."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "first-entry")
+      (let ((kuro--bracketed-paste-mode nil)
+            (sent (kuro-paste-test--capture-sent (kuro--yank 1))))
+        ;; arg=1 → n=(1- 1)=0 → current-kill 0 = "first-entry"
+        (should (equal sent '("first-entry")))))))
+
+(ert-deftest kuro-input-paste--yank-arg-3-fetches-third-entry ()
+  "kuro--yank with numeric arg 3 fetches the third kill-ring entry."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "entry-a")
+      (kill-new "entry-b")
+      (kill-new "entry-c")
+      ;; kill-ring: ("entry-c" "entry-b" "entry-a"), indices 0/1/2
+      ;; arg=3 → n=(1- 3)=2 → current-kill 2 = "entry-a"
+      (let ((kuro--bracketed-paste-mode nil)
+            (sent (kuro-paste-test--capture-sent (kuro--yank 3))))
+        (should (equal sent '("entry-a")))))))
+
+(ert-deftest kuro-input-paste--yank-no-arg-fetches-most-recent ()
+  "kuro--yank with no arg (nil) fetches the most recent kill-ring entry."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "top-of-ring")
+      (let ((kuro--bracketed-paste-mode nil)
+            (sent (kuro-paste-test--capture-sent (kuro--yank nil))))
+        ;; nil arg → n=0 → current-kill 0 = "top-of-ring"
+        (should (equal sent '("top-of-ring")))))))
+
+(ert-deftest kuro-input-paste--yank-pop-sanitizes-c1-in-bracketed-mode ()
+  "kuro--yank-pop strips C1 CSI from content when bracketed paste mode is active."
+  (let ((kill-ring nil)
+        (c1 (string #x9b)))
+    (with-temp-buffer
+      (kill-new (concat "evil" c1 "201~payload"))
+      (let ((last-command 'kuro--yank)
+            (kuro--bracketed-paste-mode t))
+        (let* ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0)))
+               (payload (car sent))
+               (inner-start (length kuro--paste-open))
+               (inner-end (- (length payload) (length kuro--paste-close)))
+               (inner (substring payload inner-start inner-end)))
+          (should (string-prefix-p kuro--paste-open payload))
+          (should (string-suffix-p kuro--paste-close payload))
+          ;; C1 byte must not appear in the inner content
+          (should-not (string-match-p (regexp-quote c1) inner)))))))
+
+(ert-deftest kuro-input-paste--yank-calls-send-key-exactly-once ()
+  "kuro--yank calls kuro--send-key exactly once per invocation."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "single-call")
+      (let ((kuro--bracketed-paste-mode t)
+            (sent (kuro-paste-test--capture-sent (kuro--yank))))
+        (should (= (length sent) 1))))))
+
+(ert-deftest kuro-input-paste--yank-pop-errors-on-unrelated-last-command ()
+  "kuro--yank-pop rejects last-command values other than yank/kuro--yank/kuro--yank-pop."
+  (let ((last-command 'forward-char)
+        (kuro--bracketed-paste-mode nil))
+    (should-error (kuro--yank-pop) :type 'user-error)))
+
+(ert-deftest kuro-input-paste--send-paste-or-raw-bracketed-long-string ()
+  "kuro--send-paste-or-raw does not truncate long strings in bracketed mode."
+  (with-temp-buffer
+    (let* ((long-text (make-string 10000 ?x))
+           (kuro--bracketed-paste-mode t)
+           (captured nil))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq captured s))))
+        (kuro--send-paste-or-raw long-text))
+      (should (= (length captured)
+                 (+ (length kuro--paste-open)
+                    (length long-text)
+                    (length kuro--paste-close)))))))
+
+(ert-deftest kuro-input-paste--yank-pop-plain-no-wrapping ()
+  "kuro--yank-pop in plain mode sends the raw text without any bracket sequences."
+  (let ((kill-ring nil))
+    (with-temp-buffer
+      (kill-new "unwrapped")
+      (let ((last-command 'yank)
+            (kuro--bracketed-paste-mode nil))
+        (let ((sent (kuro-paste-test--capture-sent (kuro--yank-pop 0))))
+          (should (equal (car sent) "unwrapped"))
+          (should-not (string-prefix-p kuro--paste-open (car sent))))))))
+
+(ert-deftest kuro-input-paste--keyboard-flags-initial-value-is-zero ()
+  "kuro--keyboard-flags has an initial value of 0 in a fresh buffer."
+  (with-temp-buffer
+    (should (= kuro--keyboard-flags 0))))
+
 (provide 'kuro-input-paste-test)
 ;;; kuro-input-paste-test.el ends here

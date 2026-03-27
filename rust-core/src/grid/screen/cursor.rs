@@ -22,6 +22,9 @@ impl Screen {
     /// Get mutable reference to the active screen's cursor
     #[inline]
     pub fn cursor_mut(&mut self) -> &mut Cursor {
+        // active_screen_mut() returns Some(self) in normal mode and
+        // Some(alt) in alternate mode, so the unwrap_or_else fallback
+        // is only reached if the invariant is violated (None in alt mode).
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
                 return &mut alt.cursor;
@@ -33,34 +36,21 @@ impl Screen {
     /// Move cursor to absolute position (clears pending wrap)
     #[inline]
     pub fn move_cursor(&mut self, row: usize, col: usize) {
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_mut() {
-                alt.cursor.row = row.min(alt.rows as usize - 1);
-                alt.cursor.col = col.min(alt.cols as usize - 1);
-                alt.cursor.pending_wrap = false;
-            }
-        } else {
-            self.cursor.row = row.min(self.rows as usize - 1);
-            self.cursor.col = col.min(self.cols as usize - 1);
-            self.cursor.pending_wrap = false;
+        if let Some(screen) = self.active_screen_mut() {
+            screen.cursor.row = row.min(screen.rows as usize - 1);
+            screen.cursor.col = col.min(screen.cols as usize - 1);
+            screen.cursor.pending_wrap = false;
         }
     }
 
     /// Move cursor relative (clears pending wrap)
     #[inline]
     pub fn move_cursor_by(&mut self, row_offset: i32, col_offset: i32) {
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_mut() {
-                alt.cursor.move_by(col_offset, row_offset);
-                alt.cursor.row = alt.cursor.row.min(alt.rows as usize - 1);
-                alt.cursor.col = alt.cursor.col.min(alt.cols as usize - 1);
-                alt.cursor.pending_wrap = false;
-            }
-        } else {
-            self.cursor.move_by(col_offset, row_offset);
-            self.cursor.row = self.cursor.row.min(self.rows as usize - 1);
-            self.cursor.col = self.cursor.col.min(self.cols as usize - 1);
-            self.cursor.pending_wrap = false;
+        if let Some(screen) = self.active_screen_mut() {
+            screen.cursor.move_by(col_offset, row_offset);
+            screen.cursor.row = screen.cursor.row.min(screen.rows as usize - 1);
+            screen.cursor.col = screen.cursor.col.min(screen.cols as usize - 1);
+            screen.cursor.pending_wrap = false;
         }
     }
 

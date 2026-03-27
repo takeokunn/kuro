@@ -10,6 +10,67 @@ use crate::ffi::error::StateError;
 use crate::types::cell::SgrAttributes;
 use crate::types::color::Color;
 
+// ---------------------------------------------------------------------------
+// Test macros
+// ---------------------------------------------------------------------------
+
+/// Assert that calling `$expr` once returns a truthy/`Some`/non-empty result,
+/// then a second call returns a falsy/`None`/empty result (drain-once semantics).
+///
+/// Works with `bool`, `Option<_>`, and `Vec<_>` via the `$empty` pattern:
+///   - bool: `assert_drain_once!(session.take_bell_pending(), false)`
+///   - Option: `assert_drain_once!(session.take_title_if_dirty(), None::<String>)`
+///   - Vec: `assert_drain_once!(session.take_clipboard_actions(), vec![])`
+macro_rules! assert_drain_once {
+    // bool variant
+    ($first:expr, bool) => {{
+        assert!($first, "first call must return true");
+        assert!(!$first, "second call must return false (flag cleared)");
+    }};
+    // Option variant — checks first is Some, second is None
+    ($session:expr, $method:ident, option) => {{
+        assert!($session.$method().is_some(), "first call must return Some");
+        assert!($session.$method().is_none(), "second call must return None");
+    }};
+    // Vec variant — checks first is non-empty, second is empty
+    ($session:expr, $method:ident, vec) => {{
+        assert!(
+            !$session.$method().is_empty(),
+            "first call must be non-empty"
+        );
+        assert!($session.$method().is_empty(), "second call must be empty");
+    }};
+}
+
+/// Assert that a session's `core.screen.take_dirty_lines()` returns exactly `$count` rows.
+macro_rules! assert_dirty_count {
+    ($session:expr, $count:expr) => {{
+        let dirty = $session.core.screen.take_dirty_lines();
+        assert_eq!(
+            dirty.len(),
+            $count,
+            "expected {} dirty rows, got {}",
+            $count,
+            dirty.len()
+        );
+    }};
+}
+
+/// Advance a session, then assert all listed row indices are present in `get_dirty_lines`.
+macro_rules! assert_rows_dirty {
+    ($session:expr, advance $bytes:expr, rows [$($row:literal),+]) => {{
+        $session.core.advance($bytes);
+        let dirty = $session.get_dirty_lines();
+        $(
+            assert!(
+                dirty.iter().any(|(r, _)| *r == $row),
+                "row {} must be dirty after advance",
+                $row
+            );
+        )+
+    }};
+}
+
 // Helper: construct a TerminalSession without spawning a real PTY.
 pub(super) fn make_session() -> TerminalSession {
     TerminalSession {
@@ -20,6 +81,9 @@ pub(super) fn make_session() -> TerminalSession {
         state: SessionState::Bound,
         #[cfg(unix)]
         pending_input: Vec::new(),
+        row_hashes: std::collections::HashMap::new(),
+        palette_epoch: 0,
+        was_alt_screen: false,
     }
 }
 
@@ -117,18 +181,10 @@ fn test_sync_output_suppresses_dirty_lines() {
 #[test]
 fn test_sync_output_reset_marks_all_dirty() {
     let mut session = make_session();
-
     session.core.advance(b"\x1b[?2026hHello sync world");
     session.core.screen.take_dirty_lines();
-
     session.core.advance(b"\x1b[?2026l");
-
-    let dirty_count = session.core.screen.take_dirty_lines().len();
-    assert_eq!(
-        dirty_count, 24,
-        "After ?2026l, all {} rows should be dirty; got {}",
-        24, dirty_count
-    );
+    assert_dirty_count!(session, 24);
 }
 
 // ---------------------------------------------------------------------------
@@ -581,296 +637,8 @@ fn test_is_process_alive_no_pty() {
 // With the full_dirty approach, consume_scroll_events always returns (0, 0)
 // for full-screen scrolls.  This test verifies the scrollback path still
 // returns (0, 0) and that full_dirty is cleared by take_dirty_lines.
-// ---------------------------------------------------------------------------
-// Global session state: detach / attach / list
-// ---------------------------------------------------------------------------
 
-/// Insert a fresh `Bound` session under an arbitrary sentinel key.
-/// The caller must clean up with `shutdown_session(id)` when done.
-fn insert_bound_session(id: u64) {
-    let session = make_session(); // state: SessionState::Bound
-    TERMINAL_SESSIONS.lock().unwrap().insert(id, session);
-}
-
-/// Insert a fresh `Detached` session under an arbitrary sentinel key.
-fn insert_detached_session(id: u64) {
-    let mut session = make_session();
-    session.set_detached();
-    TERMINAL_SESSIONS.lock().unwrap().insert(id, session);
-}
-
-/// `detach_session` transitions a Bound session to Detached and returns Ok.
-#[test]
-fn test_detach_session_bound_to_detached() {
-    const ID: u64 = u64::MAX - 20;
-    shutdown_session(ID).ok();
-    insert_bound_session(ID);
-
-    let result = detach_session(ID);
-    assert!(
-        result.is_ok(),
-        "detach_session should succeed for a Bound session"
-    );
-
-    let is_detached = TERMINAL_SESSIONS
-        .lock()
-        .unwrap()
-        .get(&ID)
-        .is_some_and(super::session::TerminalSession::is_detached);
-    assert!(is_detached, "session must be Detached after detach_session");
-
-    shutdown_session(ID).ok();
-}
-
-/// `attach_session` transitions a Detached session to Bound and returns Ok.
-#[test]
-fn test_attach_session_detached_to_bound() {
-    const ID: u64 = u64::MAX - 21;
-    shutdown_session(ID).ok();
-    insert_detached_session(ID);
-
-    let result = attach_session(ID);
-    assert!(
-        result.is_ok(),
-        "attach_session should succeed for a Detached session"
-    );
-
-    let is_detached = TERMINAL_SESSIONS
-        .lock()
-        .unwrap()
-        .get(&ID)
-        .is_none_or(super::session::TerminalSession::is_detached);
-    assert!(
-        !is_detached,
-        "session must be Bound (not Detached) after attach_session"
-    );
-
-    shutdown_session(ID).ok();
-}
-
-/// `attach_session` on a Bound session returns Err(TerminalSessionExists).
-///
-/// This guard prevents two Emacs buffers from owning the same session
-/// simultaneously with competing render loops.
-#[test]
-fn test_attach_session_already_bound_returns_terminal_session_exists() {
-    const ID: u64 = u64::MAX - 22;
-    shutdown_session(ID).ok();
-    insert_bound_session(ID); // already Bound
-
-    let result = attach_session(ID);
-    assert!(
-        result.is_err(),
-        "attach_session must return Err when the session is already Bound"
-    );
-    assert!(
-        matches!(
-            result.unwrap_err(),
-            KuroError::State(StateError::TerminalSessionExists)
-        ),
-        "error must be TerminalSessionExists"
-    );
-
-    shutdown_session(ID).ok();
-}
-
-/// `detach_session` on a nonexistent ID returns Err(NoTerminalSession).
-#[test]
-fn test_detach_session_nonexistent_returns_no_session() {
-    const ID: u64 = u64::MAX - 23;
-    shutdown_session(ID).ok(); // ensure absent
-
-    let result = detach_session(ID);
-    assert!(
-        result.is_err(),
-        "detach_session must return Err for nonexistent ID"
-    );
-    assert!(
-        matches!(
-            result.unwrap_err(),
-            KuroError::State(StateError::NoTerminalSession)
-        ),
-        "error must be NoTerminalSession"
-    );
-}
-
-/// `attach_session` on a nonexistent ID returns Err(NoTerminalSession).
-#[test]
-fn test_attach_session_nonexistent_returns_no_session() {
-    const ID: u64 = u64::MAX - 24;
-    shutdown_session(ID).ok(); // ensure absent
-
-    let result = attach_session(ID);
-    assert!(
-        result.is_err(),
-        "attach_session must return Err for nonexistent ID"
-    );
-    assert!(
-        matches!(
-            result.unwrap_err(),
-            KuroError::State(StateError::NoTerminalSession)
-        ),
-        "error must be NoTerminalSession"
-    );
-}
-
-/// `list_sessions` tuple order: (id, command, `is_detached`, `is_alive`) at indices 0..3.
-///
-/// A Detached session must have `is_detached=true` at index 2 and
-/// `is_alive=true` at index 3 (pty:None sessions always report alive).
-/// This is the Rust-side mirror of the Elisp nth-index regression test.
-#[test]
-fn test_list_sessions_tuple_order_detached() {
-    const ID: u64 = u64::MAX - 25;
-    shutdown_session(ID).ok();
-    insert_detached_session(ID); // Detached, command = ""
-
-    let sessions = list_sessions();
-    let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(
-        entry.is_some(),
-        "list_sessions must include the inserted session"
-    );
-
-    let (found_id, _command, is_detached, is_alive) = entry.unwrap();
-    assert_eq!(*found_id, ID, "index 0 must be the session ID");
-    assert!(
-        *is_detached,
-        "index 2 must be is_detached=true for a Detached session"
-    );
-    assert!(
-        *is_alive,
-        "index 3 must be is_alive=true (pty:None reports alive)"
-    );
-
-    shutdown_session(ID).ok();
-}
-
-/// `list_sessions`: a Bound session has `is_detached=false` at index 2.
-#[test]
-fn test_list_sessions_bound_session_not_detached() {
-    const ID: u64 = u64::MAX - 26;
-    shutdown_session(ID).ok();
-    insert_bound_session(ID);
-
-    let sessions = list_sessions();
-    let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(
-        entry.is_some(),
-        "list_sessions must include the inserted session"
-    );
-
-    let (_, _, is_detached, is_alive) = entry.unwrap();
-    assert!(
-        !is_detached,
-        "index 2 must be is_detached=false for a Bound session"
-    );
-    assert!(
-        *is_alive,
-        "index 3 must be is_alive=true for a Bound session with pty:None"
-    );
-
-    shutdown_session(ID).ok();
-}
-
-/// `list_sessions` does not include the sentinel ID when that ID has been cleaned up.
-///
-/// This verifies that `shutdown_session` actually removes the entry so the
-/// test sentinel IDs do not pollute subsequent `list_sessions` calls.
-#[test]
-fn test_list_sessions_cleaned_up_id_absent() {
-    const ID: u64 = u64::MAX - 27;
-    shutdown_session(ID).ok();
-    insert_bound_session(ID);
-    shutdown_session(ID).ok();
-
-    let sessions = list_sessions();
-    assert!(
-        sessions.iter().all(|(id, ..)| *id != ID),
-        "list_sessions must not include a session that was shut down"
-    );
-}
-
-/// `list_sessions` includes the non-empty `command` string in tuple index 1.
-#[test]
-fn test_list_sessions_command_field_included() {
-    const ID: u64 = u64::MAX - 28;
-    shutdown_session(ID).ok();
-    let mut session = make_session();
-    session.command = "fish".to_owned();
-    TERMINAL_SESSIONS.lock().unwrap().insert(ID, session);
-
-    let sessions = list_sessions();
-    let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(
-        entry.is_some(),
-        "list_sessions must include the inserted session"
-    );
-    let (_, command, _, _) = entry.unwrap();
-    assert_eq!(
-        command, "fish",
-        "command field must match the session's command string"
-    );
-
-    shutdown_session(ID).ok();
-}
-
-/// `list_sessions` returns entries for both Bound and Detached sessions.
-#[test]
-fn test_list_sessions_mixed_bound_and_detached() {
-    const BOUND_ID: u64 = u64::MAX - 29;
-    const DETACHED_ID: u64 = u64::MAX - 30;
-    shutdown_session(BOUND_ID).ok();
-    shutdown_session(DETACHED_ID).ok();
-    insert_bound_session(BOUND_ID);
-    insert_detached_session(DETACHED_ID);
-
-    let sessions = list_sessions();
-    let bound_entry = sessions.iter().find(|(id, ..)| *id == BOUND_ID);
-    let detached_entry = sessions.iter().find(|(id, ..)| *id == DETACHED_ID);
-
-    assert!(
-        bound_entry.is_some(),
-        "list_sessions must include the Bound session"
-    );
-    assert!(
-        detached_entry.is_some(),
-        "list_sessions must include the Detached session"
-    );
-
-    let (_, _, is_detached_b, _) = bound_entry.unwrap();
-    let (_, _, is_detached_d, _) = detached_entry.unwrap();
-    assert!(!is_detached_b, "Bound session must have is_detached=false");
-    assert!(
-        *is_detached_d,
-        "Detached session must have is_detached=true"
-    );
-
-    shutdown_session(BOUND_ID).ok();
-    shutdown_session(DETACHED_ID).ok();
-}
-
-/// `list_sessions` does NOT reap a detached session whose PTY is None (alive=true).
-///
-/// The retain predicate `is_detached && !is_alive` must NOT fire for sessions
-/// with `pty: None` since `is_process_alive()` returns `true` for those.
-/// This is the regression guard for the opportunistic-reap change in FR-D.
-#[test]
-fn test_list_sessions_live_detached_not_reaped() {
-    const ID: u64 = u64::MAX - 31;
-    shutdown_session(ID).ok();
-    insert_detached_session(ID); // pty: None => is_alive=true
-
-    let sessions = list_sessions();
-    let entry = sessions.iter().find(|(id, ..)| *id == ID);
-    assert!(
-        entry.is_some(),
-        "list_sessions must NOT reap a detached session whose PTY reports alive \
-         (pty:None sessions always report alive and must survive the retain call)"
-    );
-
-    shutdown_session(ID).ok();
-}
+include!("tests_unit_session.rs");
 
 #[test]
 fn test_consume_scroll_events_suppressed_during_scrollback() {
@@ -903,3 +671,118 @@ fn test_consume_scroll_events_suppressed_during_scrollback() {
         "scroll events must be suppressed during scrollback view"
     );
 }
+
+include!("tests_unit_dirty.rs");
+
+// ---------------------------------------------------------------------------
+// New coverage: encode_line_faces, take_cwd_if_dirty, cursor shape, pid
+// ---------------------------------------------------------------------------
+
+/// `encode_line_faces` with three consecutive ASCII cells produces 1 or more
+/// face ranges covering all three columns; text must be exactly "ABC".
+#[test]
+fn test_encode_line_faces_three_ascii_cells_text() {
+    use crate::types::cell::{Cell, CellWidth, SgrAttributes};
+    let cells = vec![
+        Cell::with_char_and_width('A', SgrAttributes::default(), CellWidth::Half),
+        Cell::with_char_and_width('B', SgrAttributes::default(), CellWidth::Half),
+        Cell::with_char_and_width('C', SgrAttributes::default(), CellWidth::Half),
+    ];
+    let (row, text, face_ranges, col_to_buf) = TerminalSession::encode_line_faces(3, &cells);
+    assert_eq!(row, 3, "row index must pass through unchanged");
+    assert_eq!(text, "ABC", "three ASCII cells must produce text 'ABC'");
+    assert!(
+        !face_ranges.is_empty(),
+        "three cells must produce at least one face range"
+    );
+    // All three cells are ASCII: col_to_buf must be empty (identity mapping).
+    assert!(
+        col_to_buf.is_empty(),
+        "pure-ASCII three-cell line must return empty col_to_buf"
+    );
+}
+
+/// `take_cwd_if_dirty` returns the path stripped of `file://hostname` prefix
+/// when OSC 7 is sent with a full URI including hostname.
+#[test]
+fn test_take_cwd_if_dirty_strips_hostname_prefix() {
+    let mut session = make_session();
+
+    // OSC 7 with full file://hostname/path URI
+    session.core.advance(b"\x1b]7;file://myhost/tmp/work\x07");
+
+    let result = session.take_cwd_if_dirty();
+    assert!(
+        result.is_some(),
+        "take_cwd_if_dirty must return Some after OSC 7 with hostname"
+    );
+    let path = result.unwrap();
+    // The implementation strips `file://hostname` leaving `/tmp/work`
+    assert!(
+        path.starts_with('/'),
+        "stripped path must start with '/', got: {path:?}"
+    );
+    assert!(
+        path.contains("tmp") || path.contains("work"),
+        "stripped path must contain the path component, got: {path:?}"
+    );
+}
+
+/// `get_cursor_shape` changes to `SteadyUnderline` after `CSI 4 SP q`.
+#[test]
+fn test_get_cursor_shape_changes_via_decscusr() {
+    use crate::types::cursor::CursorShape;
+    let mut session = make_session();
+
+    // CSI 4 SP q → SteadyUnderline (DECSCUSR param 4)
+    session.core.advance(b"\x1b[4 q");
+    let shape = session.get_cursor_shape();
+    assert_eq!(
+        shape,
+        CursorShape::SteadyUnderline,
+        "cursor shape must be SteadyUnderline after CSI 4 SP q"
+    );
+}
+
+/// `encode_line_faces` with row index 23 (last row on a 24-row screen) passes
+/// the row index through unchanged.
+#[test]
+fn test_encode_line_faces_last_row_index_preserved() {
+    use crate::types::cell::{Cell, CellWidth, SgrAttributes};
+    let cells = vec![Cell::with_char_and_width(
+        'Z',
+        SgrAttributes::default(),
+        CellWidth::Half,
+    )];
+    let (row, text, _, _) = TerminalSession::encode_line_faces(23, &cells);
+    assert_eq!(row, 23, "row index 23 must be preserved");
+    assert_eq!(text, "Z");
+}
+
+/// `get_scrollback_count` returns 0 on a fresh session (nothing pushed yet).
+#[test]
+fn test_get_scrollback_count_zero_on_fresh_session() {
+    let session = make_session();
+    assert_eq!(
+        session.get_scrollback_count(),
+        0,
+        "scrollback count must be 0 on a freshly constructed session"
+    );
+}
+
+/// `clear_scrollback` is idempotent: calling it on an already-empty session
+/// must not panic or corrupt state.
+#[test]
+fn test_clear_scrollback_idempotent_on_empty() {
+    let mut session = make_session();
+    // No content pushed — scrollback is already empty.
+    session.clear_scrollback();
+    session.clear_scrollback(); // second call must be safe
+    assert_eq!(
+        session.get_scrollback_count(),
+        0,
+        "scrollback count must remain 0 after two clear_scrollback calls on empty session"
+    );
+}
+
+include!("tests_unit_isolation.rs");

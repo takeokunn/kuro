@@ -10,4 +10,5 @@
 
 pub(super) mod ffi;
 pub(super) mod grid;
+pub(super) mod parser;
 pub(super) mod types;

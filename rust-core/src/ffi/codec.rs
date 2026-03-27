@@ -7,9 +7,9 @@
 //! # Encoding formats
 //!
 //! ## Color encoding (u32)
-//! - `0xFF000000`: `Color::Default` (sentinel, distinct from true black)
-//! - Bit 31 set (`0x80000000 | index`): Named color (index 0-15)
-//! - Bit 30 set (`0x40000000 | index`): Indexed color (index 0-255)
+//! - `0xFF000000` ([`COLOR_DEFAULT_SENTINEL`]): `Color::Default` (distinct from true black)
+//! - Bit 31 set ([`COLOR_NAMED_MARKER`] `| index`): Named color (index 0-15)
+//! - Bit 30 set ([`COLOR_INDEXED_MARKER`] `| index`): Indexed color (index 0-255)
 //! - Lower 24 bits only: RGB packed as `(R << 16) | (G << 8) | B`
 //!
 //! ## Attribute encoding (u64)
@@ -17,16 +17,70 @@
 //! - Bit 0 (`0x001`): bold
 //! - Bit 1 (`0x002`): dim
 //! - Bit 2 (`0x004`): italic
-//! - Bit 3 (`0x008`): underline (any style)
-//! - Bits 9-11 (`0xE00`, shift 9): underline style (0-5)
+//! - Bit 3 (`0x008`, [`ATTRS_UNDERLINE_BIT`]): underline (any style)
+//! - Bits 9-11 (shift [`ATTRS_STYLE_SHIFT`]): underline style (0-5)
 //! - Bit 4 (`0x010`): blink slow
 //! - Bit 5 (`0x020`): blink fast
 //! - Bit 6 (`0x040`): inverse
 //! - Bit 7 (`0x080`): hidden
 //! - Bit 8 (`0x100`): strikethrough
 
+use crate::grid::line::Line;
 use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
 use crate::types::color::Color;
+use std::hash::{DefaultHasher, Hash, Hasher};
+
+// -------------------------------------------------------------------------
+// Color encoding constants
+// -------------------------------------------------------------------------
+
+/// Sentinel value for `Color::Default` in the u32 FFI encoding.
+///
+/// Cannot be confused with any RGB value because the upper byte `0xFF` is
+/// never set by RGB (`r << 16 | g << 8 | b` uses at most 24 bits) and the
+/// named/indexed markers use bits 31 and 30 respectively, not `0xFF…`.
+pub const COLOR_DEFAULT_SENTINEL: u32 = 0xFF00_0000;
+
+/// Bit-31 marker for `Color::Named` in the u32 FFI encoding.
+///
+/// `encode_color(Color::Named(c))` produces `COLOR_NAMED_MARKER | (c as u8)`.
+pub const COLOR_NAMED_MARKER: u32 = 0x8000_0000;
+
+/// Bit-30 marker for `Color::Indexed` in the u32 FFI encoding.
+///
+/// `encode_color(Color::Indexed(i))` produces `COLOR_INDEXED_MARKER | i`.
+pub const COLOR_INDEXED_MARKER: u32 = 0x4000_0000;
+
+/// Bit shift for the red channel in RGB packing: `r << RGB_R_SHIFT`.
+pub const RGB_R_SHIFT: u32 = 16;
+
+/// Bit shift for the green channel in RGB packing: `g << RGB_G_SHIFT`.
+pub const RGB_G_SHIFT: u32 = 8;
+
+// -------------------------------------------------------------------------
+// Attribute encoding constants
+// -------------------------------------------------------------------------
+
+/// Bitmask that selects the three SGR flag bits that map directly (bold, dim,
+/// italic) before the underline-bit insertion gap.
+///
+/// `SgrFlags` bits 0-2 (BOLD, DIM, ITALIC) map to encode bits 0-2 unchanged.
+const ATTRS_LOW_BITS_MASK: u64 = 0x07;
+
+/// Right-shift applied to the upper `SgrFlags` bits (BLINK_SLOW … STRIKETHROUGH,
+/// i.e. original bits 3-7) before they are placed at encode bits 4-8, making
+/// room for the underline flag at bit 3.
+const ATTRS_HIGH_BITS_RSHIFT: u32 = 3;
+
+/// Left-shift that moves the upper `SgrFlags` bits into their final encode
+/// positions (bits 4-8) after the right-shift above.
+const ATTRS_HIGH_BITS_LSHIFT: u32 = 4;
+
+/// Bit position of the "any underline active" flag in the encoded `u64`.
+pub const ATTRS_UNDERLINE_BIT: u64 = 0x008;
+
+/// Bit position (shift) of the 3-bit underline style field in the encoded `u64`.
+pub const ATTRS_STYLE_SHIFT: u32 = 9;
 
 /// Encoded line data for FFI transfer: `(row, text, face_ranges, col_to_buf)`.
 ///
@@ -51,37 +105,41 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 ///
 /// The encoding uses sentinel/marker bits to distinguish color variants
 /// without ambiguity:
-/// - `Color::Default` → `0xFF000000` (cannot be confused with any RGB value)
-/// - `Color::Named(c)` → `0x80000000 | index`
-/// - `Color::Indexed(i)` → `0x40000000 | i`
-/// - `Color::Rgb(r, g, b)` → `(r << 16) | (g << 8) | b` (can be 0 = true black)
+/// - `Color::Default` → [`COLOR_DEFAULT_SENTINEL`]
+/// - `Color::Named(c)` → [`COLOR_NAMED_MARKER`] `| index`
+/// - `Color::Indexed(i)` → [`COLOR_INDEXED_MARKER`] `| i`
+/// - `Color::Rgb(r, g, b)` → `(r << RGB_R_SHIFT) | (g << RGB_G_SHIFT) | b` (can be 0 = true black)
 #[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_color(color: &Color) -> u32 {
     match color {
-        Color::Default => 0xFF00_0000u32,
+        Color::Default => COLOR_DEFAULT_SENTINEL,
         // NamedColor is #[repr(u8)] with discriminants 0..=15,
         // so a direct cast replaces the 16-arm match with a single instruction.
-        Color::Named(named) => 0x8000_0000u32 | u32::from(*named as u8),
-        Color::Indexed(idx) => 0x4000_0000u32 | u32::from(*idx),
-        Color::Rgb(r, g, b) => (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b),
+        Color::Named(named) => COLOR_NAMED_MARKER | u32::from(*named as u8),
+        Color::Indexed(idx) => COLOR_INDEXED_MARKER | u32::from(*idx),
+        Color::Rgb(r, g, b) => {
+            (u32::from(*r) << RGB_R_SHIFT) | (u32::from(*g) << RGB_G_SHIFT) | u32::from(*b)
+        }
     }
 }
 
 /// Encode `SgrAttributes` as a `u64` bitmask for FFI transfer.
 ///
 /// Each boolean SGR attribute maps to a dedicated bit position.
-/// The underline style is encoded in bits 9-11 as a 3-bit integer.
+/// The underline style is encoded in bits [`ATTRS_STYLE_SHIFT`]-11 as a 3-bit integer.
 #[inline]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
     // SgrFlags layout:  BOLD=0, DIM=1, ITALIC=2, BLINK_SLOW=3, BLINK_FAST=4, INVERSE=5, HIDDEN=6, STRIKETHROUGH=7
     // Encode layout:    bold=0, dim=1,  italic=2, underline=3,  blink_slow=4, blink_fast=5, inverse=6, hidden=7, strike=8
-    // Bits 0-2 map directly; bits 3-7 shift left by 1 to make room for the underline flag at bit 3.
+    // Bits 0-2 (ATTRS_LOW_BITS_MASK) map directly; bits 3-7 shift left by 1
+    // (ATTRS_HIGH_BITS_RSHIFT / ATTRS_HIGH_BITS_LSHIFT) to make room for the underline flag at bit 3.
     let raw = u64::from(attrs.flags.bits());
-    let mut bits = (raw & 0x07) | ((raw >> 3) << 4);
+    let mut bits =
+        (raw & ATTRS_LOW_BITS_MASK) | ((raw >> ATTRS_HIGH_BITS_RSHIFT) << ATTRS_HIGH_BITS_LSHIFT);
     if attrs.underline() {
-        bits |= 0x008;
+        bits |= ATTRS_UNDERLINE_BIT;
     }
     let style_bits: u64 = match attrs.underline_style {
         UnderlineStyle::None => 0,
@@ -91,7 +149,7 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
         UnderlineStyle::Dotted => 4,
         UnderlineStyle::Dashed => 5,
     };
-    bits |= style_bits << 9;
+    bits |= style_bits << ATTRS_STYLE_SHIFT;
     bits
 }
 
@@ -235,6 +293,143 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     }
 
     (text, face_ranges, col_to_buf)
+}
+
+/// Encode a list of dirty lines into a flat binary frame for FFI transfer.
+///
+/// # Binary frame format
+///
+/// ```text
+/// Header (4 bytes):
+///   [0..4]  num_rows: u32 LE
+///
+/// Per row:
+///   [0..4]   row_index: u32 LE
+///   [4..8]   num_face_ranges: u32 LE
+///   [8..12]  text_byte_len: u32 LE
+///   [12..12+text_byte_len]  UTF-8 text bytes
+///
+///   Per face range (24 bytes each):
+///     [0..4]   start_buf: u32 LE
+///     [4..8]   end_buf: u32 LE
+///     [8..12]  fg: u32 LE
+///     [12..16] bg: u32 LE
+///     [16..24] flags: u64 LE
+///
+///   col_to_buf section:
+///     [0..4]   col_to_buf_len: u32 LE
+///     [4..4+col_to_buf_len*4]  u32 LE entries
+/// ```
+///
+/// The Emacs side decodes this with `kuro--decode-binary-updates`, which uses
+/// `aref` + `logior`/`ash` to reconstruct little-endian integers.
+#[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
+pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
+    // Pre-compute total capacity to avoid repeated reallocation.
+    let capacity = {
+        let mut cap = 4usize; // num_rows header
+        for (_, text, face_ranges, col_to_buf) in lines {
+            cap += 12; // row_index + num_face_ranges + text_byte_len
+            cap += text.len();
+            cap += face_ranges.len() * 24; // 24 bytes per face range
+            cap += 4; // col_to_buf_len
+            cap += col_to_buf.len() * 4;
+        }
+        cap
+    };
+    let mut buf = Vec::with_capacity(capacity);
+
+    // Header: num_rows
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
+    )]
+    buf.extend_from_slice(&(lines.len() as u32).to_le_bytes());
+
+    for (row_index, text, face_ranges, col_to_buf) in lines {
+        // row_index
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "row index is a terminal row (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(*row_index as u32).to_le_bytes());
+
+        // num_face_ranges
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(face_ranges.len() as u32).to_le_bytes());
+
+        // text_byte_len + text bytes
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "UTF-8 text byte length for one terminal line fits u32"
+        )]
+        buf.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        buf.extend_from_slice(text.as_bytes());
+
+        // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64)
+        for &(start_buf, end_buf, fg, bg, flags) in face_ranges {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
+            )]
+            {
+                buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
+                buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
+            }
+            buf.extend_from_slice(&fg.to_le_bytes());
+            buf.extend_from_slice(&bg.to_le_bytes());
+            buf.extend_from_slice(&flags.to_le_bytes());
+        }
+
+        // col_to_buf section: length header + u32 entries
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(col_to_buf.len() as u32).to_le_bytes());
+        for &offset in col_to_buf {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
+            )]
+            buf.extend_from_slice(&(offset as u32).to_le_bytes());
+        }
+    }
+
+    buf
+}
+
+/// Compute a stable 64-bit hash for a terminal row.
+///
+/// Hashes every cell's grapheme bytes, encoded foreground/background colors,
+/// encoded SGR flags, and the `col_to_buf` mapping slice.  The result is used
+/// by `get_dirty_lines_with_faces` to detect unchanged rows and skip re-encoding
+/// them (row-hash skip optimisation, Option A).
+///
+/// A new `DefaultHasher` is created per call — this is the standard usage
+/// pattern when you need a one-shot hash of multiple values.
+#[inline]
+pub(crate) fn compute_row_hash(row: &Line, col_to_buf: &[usize]) -> u64 {
+    let mut h = DefaultHasher::new();
+    for cell in &row.cells {
+        // Hash the grapheme bytes directly — no allocation needed.
+        cell.grapheme().as_bytes().hash(&mut h);
+        // Encode colors to u32 and hash for a stable, format-independent representation.
+        encode_color(&cell.attrs.foreground).hash(&mut h);
+        encode_color(&cell.attrs.background).hash(&mut h);
+        // Encode all SGR attribute flags (bold/italic/underline/blink/…) as u64.
+        encode_attrs(&cell.attrs).hash(&mut h);
+        // Hash underline color separately (included in encode_attrs via encode_color).
+        encode_color(&cell.attrs.underline_color).hash(&mut h);
+        // Hash cell width (Half/Full/Wide) as its discriminant.
+        (cell.width as u8).hash(&mut h);
+    }
+    // Hash the col_to_buf mapping so wide-char layout changes are detected.
+    col_to_buf.hash(&mut h);
+    h.finish()
 }
 
 #[cfg(test)]

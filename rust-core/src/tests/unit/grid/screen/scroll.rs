@@ -3,15 +3,9 @@
 //! Module under test: `grid/screen/scroll.rs`
 //! Tier: T3 — `ProptestConfig::with_cases(256)`
 
-use crate::grid::screen::Screen;
+use super::make_screen;
 use crate::types::color::Color;
 use proptest::prelude::*;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
 
 // ── Property-based tests ──────────────────────────────────────────────────────
 

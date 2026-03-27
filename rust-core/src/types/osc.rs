@@ -87,3 +87,137 @@ impl Default for OscData {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::color::Color;
+
+    // -------------------------------------------------------------------------
+    // OscData construction
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // CONSTRUCTION: OscData::default() must initialise cwd_dirty to false.
+    fn osc_data_default_cwd_dirty_false() {
+        assert!(!OscData::default().cwd_dirty);
+    }
+
+    #[test]
+    // CONSTRUCTION: OscData::default() palette must have exactly 256 None entries.
+    fn osc_data_default_palette_len_256_all_none() {
+        let d = OscData::default();
+        assert_eq!(d.palette.len(), 256);
+        assert!(d.palette.iter().all(Option::is_none));
+    }
+
+    #[test]
+    // MUTATION: Writing and reading back a palette entry must round-trip.
+    fn osc_data_palette_write_roundtrip() {
+        let mut d = OscData::default();
+        d.palette[0] = Some([0x00, 0x00, 0x00]);
+        d.palette[255] = Some([0xFF, 0xFF, 0xFF]);
+        assert_eq!(d.palette[0], Some([0x00, 0x00, 0x00]));
+        assert_eq!(d.palette[255], Some([0xFF, 0xFF, 0xFF]));
+    }
+
+    #[test]
+    // MUTATION: Setting cwd stores the path string.
+    fn osc_data_set_cwd_stores_path() {
+        let d = OscData {
+            cwd: Some("/home/user".to_owned()),
+            ..Default::default()
+        };
+        assert_eq!(d.cwd.as_deref(), Some("/home/user"));
+    }
+
+    // -------------------------------------------------------------------------
+    // HyperlinkState
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // CONSTRUCTION: HyperlinkState::default() must have uri == None.
+    fn hyperlink_state_default_is_none() {
+        assert!(HyperlinkState::default().uri.is_none());
+    }
+
+    #[test]
+    // MUTATION: Setting uri to Some and back to None round-trips.
+    fn hyperlink_state_set_then_clear_uri() {
+        let mut h = HyperlinkState {
+            uri: Some("https://rust-lang.org".to_owned()),
+        };
+        assert_eq!(h.uri.as_deref(), Some("https://rust-lang.org"));
+        h.uri = None;
+        assert!(h.uri.is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // PromptMark / PromptMarkEvent
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // CONSTRUCTION: All four PromptMark variants are distinct.
+    fn prompt_mark_all_variants_distinct() {
+        let variants = [
+            PromptMark::PromptStart,
+            PromptMark::PromptEnd,
+            PromptMark::CommandStart,
+            PromptMark::CommandEnd,
+        ];
+        for (i, a) in variants.iter().enumerate() {
+            for (j, b) in variants.iter().enumerate() {
+                if i == j {
+                    assert_eq!(a, b, "variant must equal itself");
+                } else {
+                    assert_ne!(a, b, "variant {i} must differ from variant {j}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    // CONSTRUCTION: PromptMarkEvent fields are stored and read back correctly.
+    fn prompt_mark_event_field_access() {
+        let ev = PromptMarkEvent {
+            mark: PromptMark::CommandEnd,
+            row: 10,
+            col: 3,
+        };
+        assert!(matches!(ev.mark, PromptMark::CommandEnd));
+        assert_eq!(ev.row, 10);
+        assert_eq!(ev.col, 3);
+    }
+
+    // -------------------------------------------------------------------------
+    // ClipboardAction
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // CONSTRUCTION: ClipboardAction::Write stores its payload.
+    fn clipboard_action_write_payload_stored() {
+        let a = ClipboardAction::Write("clipboard text".to_owned());
+        assert!(matches!(a, ClipboardAction::Write(ref s) if s == "clipboard text"));
+    }
+
+    #[test]
+    // CONSTRUCTION: OscData::default() has no pending clipboard actions.
+    fn osc_data_default_clipboard_actions_empty() {
+        let d = OscData::default();
+        assert!(d.clipboard_actions.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Color fields
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // CONSTRUCTION: Setting default_fg via struct literal stores the color.
+    fn osc_data_default_fg_rgb_stored() {
+        let d = OscData {
+            default_fg: Some(Color::Rgb(255, 0, 128)),
+            ..Default::default()
+        };
+        assert!(matches!(d.default_fg, Some(Color::Rgb(255, 0, 128))));
+    }
+}

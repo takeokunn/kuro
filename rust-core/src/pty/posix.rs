@@ -22,6 +22,144 @@ const ALLOWED_SHELLS: &[&str] = &["bash", "zsh", "sh", "fish"];
 /// Channel capacity for PTY data - prevents unbounded memory growth
 const CHANNEL_CAPACITY: usize = 100;
 
+/// Set child process environment variables for terminal operation.
+///
+/// Removes multiplexer variables that break nesting, sets TERM/COLORTERM for
+/// colour-aware programs, and propagates the initial PTY dimensions so that
+/// readline/ncurses reads correct values before any SIGWINCH fires.
+///
+/// # Safety
+/// Must only be called in the child process after `fork()` and after `dup2`
+/// has redirected stdin/stdout/stderr. `std::env::set_var` is not
+/// async-signal-safe in general, but is safe here because no other threads
+/// exist in the child process.
+#[inline]
+fn setup_child_env(rows: u16, cols: u16) {
+    // Remove terminal-multiplexer variables so tmux/screen behave correctly inside kuro.
+    std::env::remove_var("TMUX");
+    std::env::remove_var("STY");
+    // Remove Emacs host-side variables so emacsclient does not talk to the parent Emacs.
+    std::env::remove_var("INSIDE_EMACS");
+    std::env::remove_var("EMACS_SOCKET_NAME");
+    // Advertise the kuro environment to programs that wish to detect it.
+    std::env::set_var("KURO_TERMINAL", "1");
+    // Terminal capability declarations for readline / ncurses / color-aware programs.
+    std::env::set_var("TERM", "xterm-256color");
+    std::env::set_var("COLORTERM", "truecolor");
+    // Belt-and-suspenders: some shells read COLUMNS/LINES before calling TIOCGWINSZ.
+    std::env::set_var("COLUMNS", cols.to_string());
+    std::env::set_var("LINES", rows.to_string());
+}
+
+/// Configure a forked child process: establish a PTY session, redirect I/O,
+/// sanitize the environment, and exec the shell.
+///
+/// This function runs entirely in the child process after `fork()`.  If it
+/// returns `Err`, the child propagates the error (the parent is a separate
+/// process and is unaffected).  On success, `execv` replaces the child image
+/// with the shell binary and this function never returns normally.
+///
+/// # Safety
+/// Must only be called in the child process after `fork()`.
+/// All unsafe blocks inside perform only async-signal-safe operations until `execv`.
+fn exec_in_child(
+    slave: std::os::fd::OwnedFd,
+    master_file: std::fs::File,
+    reader_fd: RawFd,
+    shell_path: &std::path::Path,
+    rows: u16,
+    cols: u16,
+    command: &str,
+) -> Result<()> {
+    // Establish a new session so the shell becomes the session leader.
+    nix::unistd::setsid()
+        .map_err(|e| pty_operation_error("setsid", &format!("Failed to setsid: {e}")))?;
+
+    // Set the slave PTY as the controlling terminal.
+    // TIOCSCTTY is required after setsid(); without it tcgetpgrp() fails in the shell.
+    // SAFETY: slave is a valid PTY slave fd; TIOCSCTTY is async-signal-safe after setsid().
+    // TIOCSCTTY is u32 on macOS, u64 on Linux — .into() bridges the difference.
+    // TIOCSCTTY is u32 on macOS (making .into() a no-op) but u64 on Linux
+    // (where .into() is required).  Use #[allow] rather than #[expect] so
+    // that the annotation does not fail on the platform where the conversion
+    // is already the correct type.
+    #[allow(clippy::useless_conversion)]
+    unsafe {
+        if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY.into(), 0) == -1 {
+            return Err(pty_operation_error(
+                "TIOCSCTTY",
+                &format!(
+                    "Failed to set controlling terminal: {}",
+                    std::io::Error::last_os_error()
+                ),
+            ));
+        }
+    }
+
+    // Redirect stdin/stdout/stderr to the slave PTY.
+    // SAFETY: slave.as_raw_fd() is a valid open fd; dup2 to 0/1/2 is async-signal-safe.
+    unsafe {
+        if libc::dup2(slave.as_raw_fd(), 0) == -1 {
+            return Err(pty_operation_error("dup2", "Failed to dup2 stdin"));
+        }
+        if libc::dup2(slave.as_raw_fd(), 1) == -1 {
+            return Err(pty_operation_error("dup2", "Failed to dup2 stdout"));
+        }
+        if libc::dup2(slave.as_raw_fd(), 2) == -1 {
+            return Err(pty_operation_error("dup2", "Failed to dup2 stderr"));
+        }
+    }
+
+    // Release the slave and master ends — stdin/stdout/stderr duplicates cover I/O.
+    drop(slave);
+    drop(master_file);
+    // SAFETY: reader_fd is the child's copy of the master-reader dup; closing it
+    // prevents the child from holding the master end open (which blocks parent EOF).
+    unsafe {
+        libc::close(reader_fd);
+    }
+
+    // Configure the environment: strip multiplexer vars, set TERM/COLORTERM/KURO_TERMINAL,
+    // and propagate initial PTY dimensions for shells that read COLUMNS/LINES at startup.
+    setup_child_env(rows, cols);
+
+    // Re-assert window size on fd 0 inside the child.
+    // Some readline builds call TIOCGWINSZ before the parent's SIGWINCH handler fires;
+    // without this they see 0 columns and permanently enter dumb/novis mode.
+    // SAFETY: fd 0 is the PTY slave we dup2'd above; winsize is stack-allocated.
+    unsafe {
+        let ws = libc::winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        libc::ioctl(0, libc::TIOCSWINSZ, &ws);
+    }
+
+    // Execute the shell via its absolute path so the exact validated binary is used
+    // (not whatever $PATH resolves first).  argv[0] = basename keeps ps/top readable.
+    let shell_full_cstr = std::ffi::CString::new(
+        shell_path
+            .to_str()
+            .ok_or_else(|| pty_spawn_error(command, "Shell path is not valid UTF-8"))?,
+    )
+    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell path: {e}")))?;
+
+    let shell_name = shell_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("sh");
+    let shell_name_cstr = std::ffi::CString::new(shell_name)
+        .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {e}")))?;
+
+    nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
+        .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {e}")))?;
+
+    // execv succeeded — process image was replaced; this line is unreachable.
+    Ok(())
+}
+
 /// PTY master handle with proper fork/exec implementation
 pub struct Pty {
     /// Master file descriptor
@@ -111,10 +249,6 @@ impl Pty {
     ///
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "PTY setup is inherently multi-step: open, dup, fork, exec, teardown — splitting into smaller fns would increase complexity without clarity"
-    )]
     pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
@@ -190,143 +324,19 @@ impl Pty {
                 })
             }
             Ok(ForkResult::Child) => {
-                // Child process: set up PTY and exec shell
-
-                // Create new session
-                nix::unistd::setsid().map_err(|e| {
-                    pty_operation_error("setsid", &format!("Failed to setsid: {e}"))
-                })?;
-
-                // Set slave PTY as controlling terminal
-                // TIOCSCTTY is required on all POSIX platforms after setsid()
-                // to establish the slave PTY as the controlling terminal.
-                // Without this, tcgetpgrp() fails in the shell.
-                // SAFETY: slave is a valid PTY slave fd; TIOCSCTTY is async-signal-safe
-                // after setsid(); the third arg (0) is a required no-op placeholder.
-                // TIOCSCTTY is u32 on macOS, u64 on Linux; .into() needed cross-platform
-                #[allow(clippy::useless_conversion)]
-                unsafe {
-                    if libc::ioctl(slave.as_raw_fd(), libc::TIOCSCTTY.into(), 0) == -1 {
-                        return Err(pty_operation_error(
-                            "TIOCSCTTY",
-                            &format!(
-                                "Failed to set controlling terminal: {}",
-                                std::io::Error::last_os_error()
-                            ),
-                        ));
-                    }
-                }
-
-                // Duplicate slave PTY to stdin, stdout, stderr
-                // SAFETY: slave.as_raw_fd() is a valid open fd; dup2 to 0/1/2 is
-                // async-signal-safe and valid in the child process after fork.
-                unsafe {
-                    if libc::dup2(slave.as_raw_fd(), 0) == -1 {
-                        return Err(pty_operation_error("dup2", "Failed to dup2 stdin"));
-                    }
-                    if libc::dup2(slave.as_raw_fd(), 1) == -1 {
-                        return Err(pty_operation_error("dup2", "Failed to dup2 stdout"));
-                    }
-                    if libc::dup2(slave.as_raw_fd(), 2) == -1 {
-                        return Err(pty_operation_error("dup2", "Failed to dup2 stderr"));
-                    }
-                }
-
-                // Close slave PTY (we have duplicates now)
-                drop(slave);
-
-                // Close master PTY fd in child — the child must not hold the master end.
-                // Inherited master fds interfere with process group management and can
-                // prevent the parent from detecting child exit (no EOF on master).
-                drop(master_file);
-                // SAFETY: reader_fd is a valid open fd in the child; all File handles for
-                // reader_fd exist only in the parent path; closing it prevents the child
-                // from holding the master end open (which would block parent EOF detection).
-                unsafe {
-                    libc::close(reader_fd);
-                }
-
-                // Clear terminal-multiplexer env vars so that programs such as tmux
-                // and GNU screen behave correctly when launched inside kuro.  Without
-                // this, inheriting $TMUX causes tmux to believe it is already nested
-                // inside an existing session and refuse to attach a new client.
-                std::env::remove_var("TMUX");
-                std::env::remove_var("STY");
-
-                // Remove Emacs-specific variables so that programs inside kuro
-                // do not detect the parent Emacs environment.  Without this,
-                // $INSIDE_EMACS causes emacsclient and other Emacs-aware tools
-                // to try talking to the parent Emacs server through the PTY,
-                // producing garbled output ("*ERROR*: Unknown message").
-                std::env::remove_var("INSIDE_EMACS");
-                std::env::remove_var("EMACS_SOCKET_NAME");
-                // Signal that we are running inside kuro, so programs can
-                // detect the kuro terminal environment if needed.
-                std::env::set_var("KURO_TERMINAL", "1");
-
-                // Set TERM so that readline/ncurses programs (bash, vim, etc.) know
-                // what escape sequences to use.  Without TERM set, bash readline will
-                // not handle cursor-movement keys correctly and may echo raw control
-                // characters such as ^B, ^F instead of moving the cursor.
-                std::env::set_var("TERM", "xterm-256color");
-                // COLORTERM signals 24-bit truecolor support to color-aware programs.
-                std::env::set_var("COLORTERM", "truecolor");
-                // Set COLUMNS and LINES so bash/readline uses the correct terminal
-                // dimensions even before it can call TIOCGWINSZ.  This is a belt-and-
-                // suspenders complement to passing winsize to openpty: some shells read
-                // these env vars first and only fall back to the ioctl if they are unset.
-                std::env::set_var("COLUMNS", cols.to_string());
-                std::env::set_var("LINES", rows.to_string());
-
-                // Set the window size on fd 0 (stdin = slave PTY) inside the child.
-                //
-                // Even though we already called openpty(Some(&winsize), ...) before
-                // the fork, calling TIOCSWINSZ again here on fd 0 is the most reliable
-                // guarantee that readline's very first TIOCGWINSZ call — which happens
-                // during terminal initialisation, before the shell's own SIGWINCH handler
-                // fires — returns non-zero columns.  Without this, some readline builds
-                // see 0 columns and permanently fall back to dumb/novis mode, causing
-                // C-b/C-f/C-e to be echoed as literal ^X characters instead of moving
-                // the cursor.
-                // SAFETY: fd 0 is the PTY slave we dup2'd above; TIOCSWINSZ reads a
-                // stack-allocated winsize struct that outlives the ioctl call.
-                unsafe {
-                    let ws = libc::winsize {
-                        ws_row: rows,
-                        ws_col: cols,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    };
-                    libc::ioctl(0, libc::TIOCSWINSZ, &ws);
-                }
-
-                // Execute shell using the full absolute path validated above.
-                //
-                // We intentionally use execv (not execvp) so the kernel runs exactly
-                // the binary that validate_shell() resolved — e.g. /bin/bash — rather
-                // than whatever "bash" $PATH resolves to first (which on a Homebrew
-                // macOS system can be a different version at /opt/homebrew/bin/bash).
-                // Using argv[0] = basename keeps ps/top output readable.
-                let shell_full_cstr =
-                    std::ffi::CString::new(shell_path.to_str().ok_or_else(|| {
-                        pty_spawn_error(command, "Shell path is not valid UTF-8")
-                    })?)
-                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell path: {e}")))?;
-
-                let shell_name = shell_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("sh");
-                let shell_name_cstr = std::ffi::CString::new(shell_name)
-                    .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {e}")))?;
-
-                // argv[0] = basename (e.g. "bash"), argv[1..] = empty (interactive login
-                // flags can be added here if needed, but the default is interactive mode
-                // because stdin is a TTY).
-                nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
-                    .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {e}")))?;
-
-                // execvp should not return, but if it does, exit
+                // Child process: delegate all setup to the helper.
+                // If the helper returns Err, the error propagates out of spawn() in the
+                // child process (the parent is in a separate address space and unaffected).
+                exec_in_child(
+                    slave,
+                    master_file,
+                    reader_fd,
+                    &shell_path,
+                    rows,
+                    cols,
+                    command,
+                )?;
+                // exec_in_child calls execv which replaces the process on success.
                 std::process::exit(1);
             }
             Err(errno) => Err(pty_spawn_error(

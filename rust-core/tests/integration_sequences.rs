@@ -160,3 +160,133 @@ fn test_get_cell_returns_printed_char() {
     assert_eq!(cell_y.char(), 'Y');
     assert_eq!(cell_z.char(), 'Z');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New tests: DECALN, VT52, character set, split-boundary advance()
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DECALN (`ESC # 8`) is not implemented in this emulator; it must be
+/// silently ignored without panicking and must leave the cursor in bounds.
+#[test]
+fn test_decaln_esc_hash_8_does_not_panic() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b#8"); // DECALN: DEC Screen Alignment Test
+                             // Must not panic and cursor must remain in bounds
+    assert!(
+        term.cursor_row() < 24,
+        "Row must stay within 24 after DECALN"
+    );
+    assert!(
+        term.cursor_col() < 80,
+        "Col must stay within 80 after DECALN"
+    );
+}
+
+/// VT52 mode entry sequence (`ESC [ ? 2 l`) is handled as a DEC private mode
+/// toggle, and the cursor must remain in bounds without panic.
+#[test]
+fn test_vt52_mode_entry_does_not_panic() {
+    let mut term = TerminalCore::new(24, 80);
+    // CSI ?2l — reset DECANM (switches to VT52 mode in real hardware;
+    // this emulator ignores the mode silently)
+    term.advance(b"\x1b[?2l");
+    assert!(term.cursor_row() < 24);
+    assert!(term.cursor_col() < 80);
+}
+
+/// Character set designation sequences (SCS: `ESC ( B`, `ESC ) 0`, etc.)
+/// are unimplemented and must be silently ignored without panicking.
+#[test]
+fn test_scs_charset_designation_does_not_panic() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b(B"); // G0 = USASCII
+    term.advance(b"\x1b)0"); // G1 = DEC Special
+    term.advance(b"\x1b*B"); // G2 = USASCII
+    term.advance(b"\x1b+0"); // G3 = DEC Special
+    assert!(term.cursor_row() < 24);
+    assert!(term.cursor_col() < 80);
+}
+
+/// NEL (`ESC E`) performs CR + LF (Next Line).  After printing a character
+/// at column >0, NEL must move the cursor to column 0 of the next row.
+#[test]
+fn test_nel_moves_to_column_zero_of_next_row() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"Hello"); // cursor now at col 5, row 0
+    assert_eq!(term.cursor_col(), 5);
+    assert_eq!(term.cursor_row(), 0);
+    term.advance(b"\x1bE"); // NEL: Next Line
+    assert_eq!(term.cursor_col(), 0, "NEL must reset column to 0");
+    assert_eq!(term.cursor_row(), 1, "NEL must advance row by 1");
+}
+
+/// RI (`ESC M`) moves the cursor up one line.  At the top of the scroll
+/// region a scroll-down must occur, keeping the cursor at the top row.
+#[test]
+fn test_ri_reverse_index_moves_cursor_up() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b[3;1H"); // move to row 3, col 1 (1-indexed → row 2, col 0)
+    assert_eq!(term.cursor_row(), 2);
+    term.advance(b"\x1bM"); // RI: Reverse Index
+    assert_eq!(term.cursor_row(), 1, "RI must move cursor up one row");
+    assert_eq!(term.cursor_col(), 0);
+}
+
+/// RI (`ESC M`) at the top of the scroll region must not push the cursor
+/// above row 0 — a scroll-down occurs instead.
+#[test]
+fn test_ri_at_top_of_screen_stays_within_bounds() {
+    let mut term = TerminalCore::new(24, 80);
+    // Cursor already at row 0 after construction
+    assert_eq!(term.cursor_row(), 0);
+    term.advance(b"\x1bM"); // RI at the very top — triggers scroll-down
+    assert_eq!(
+        term.cursor_row(),
+        0,
+        "Cursor must stay at row 0 after RI scroll"
+    );
+}
+
+/// A CSI sequence split exactly across two separate `advance()` calls must
+/// be parsed identically to delivering all bytes in one call.
+#[test]
+fn test_csi_split_across_two_advance_calls_is_equivalent() {
+    // Reference: one-shot delivery
+    let mut ref_term = TerminalCore::new(24, 80);
+    ref_term.advance(b"\x1b[5;10H"); // CSI 5;10H in one call
+
+    // Split at every byte boundary of the CSI sequence and verify
+    let seq = b"\x1b[5;10H";
+    for split in 1..seq.len() {
+        let mut split_term = TerminalCore::new(24, 80);
+        split_term.advance(&seq[..split]);
+        split_term.advance(&seq[split..]);
+        assert_eq!(
+            split_term.cursor_row(),
+            ref_term.cursor_row(),
+            "split at byte {split}: cursor row must match"
+        );
+        assert_eq!(
+            split_term.cursor_col(),
+            ref_term.cursor_col(),
+            "split at byte {split}: cursor col must match"
+        );
+    }
+}
+
+/// An SGR sequence split across two `advance()` calls must set attributes
+/// identically to the unsplit delivery.
+#[test]
+fn test_sgr_split_across_two_advance_calls_is_equivalent() {
+    let seq = b"\x1b[1;3m"; // bold + italic
+    for split in 1..seq.len() {
+        let mut t = TerminalCore::new(24, 80);
+        t.advance(&seq[..split]);
+        t.advance(&seq[split..]);
+        assert!(t.current_bold(), "split at byte {split}: bold must be set");
+        assert!(
+            t.current_italic(),
+            "split at byte {split}: italic must be set"
+        );
+    }
+}

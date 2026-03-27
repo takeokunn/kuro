@@ -29,15 +29,16 @@
 ;; Depends on `kuro-faces-color' for `kuro--decode-ffi-color', `kuro--rgb-to-emacs',
 ;; `kuro--color-to-emacs', and `kuro--ansi-color-names'.
 ;; Depends on `kuro-faces-attrs' for `kuro--attrs-to-face-props'.
+;; Depends on `kuro-char-width' for character width tables and glyph metrics.
 
 ;;; Code:
 
-(require 'seq)
 (require 'kuro-config)
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)
 (require 'kuro-faces-color)
 (require 'kuro-faces-attrs)
+(require 'kuro-char-width)
 
 ;; Core Emacs face remapping functions (provided by C core; suppress warnings)
 (declare-function face-remap-remove-relative "face-remap" (cookie))
@@ -58,18 +59,16 @@
 (defvar kuro--face-cache (make-hash-table :test 'equal)
   "Cache computed faces to avoid recreating them for same attribute combinations.")
 
-(defvar-local kuro--font-remap-cookie nil
+(kuro--defvar-permanent-local kuro--font-remap-cookie nil
   "Cookie returned by `face-remap-add-relative' for font customization.
 Stored per-buffer so the remap can be cleanly removed when settings change
 or when the buffer is killed.  Internal state; do not set directly.")
-(put 'kuro--font-remap-cookie 'permanent-local t)
 
-(defvar-local kuro--face-cache-lookup-key (vector 0 0 0 0)
+(kuro--defvar-permanent-local kuro--face-cache-lookup-key (vector 0 0 0 0)
   "Pre-allocated vector for face cache lookup, mutated in-place by
 `kuro--get-cached-face-raw' to avoid one cons allocation per cache hit.
 A fresh vector is created only on cache miss (when puthash is called),
 so the stored key is never the same object as this lookup vector.")
-(put 'kuro--face-cache-lookup-key 'permanent-local t)
 
 ;;; Font remapping
 
@@ -138,11 +137,10 @@ vector is created for puthash so stored keys are stable across future calls."
 
 ;;; Default color remapping (OSC 10/11/12)
 
-(defvar-local kuro--default-color-remap-cookie nil
+(kuro--defvar-permanent-local kuro--default-color-remap-cookie nil
   "Cookie from `face-remap-add-relative' for default color overrides.
 Stored per-buffer so the previous remap is removed before a new one is applied,
 preventing stacked face-remap layers from accumulating across color events.")
-(put 'kuro--default-color-remap-cookie 'permanent-local t)
 
 (defun kuro--remap-default-face (fg-str bg-str)
   "Set the buffer-local default face to FG-STR foreground and BG-STR background.
@@ -157,15 +155,6 @@ must be non-nil Emacs color strings.  No-op in non-graphical frames."
            'default
            :foreground fg-str
            :background bg-str))))
-
-(defun kuro--apply-initial-default-colors ()
-  "Set the initial terminal default colors on the current kuro buffer.
-Uses `kuro-color-white' as the default foreground and `kuro-color-black'
-as the default background.  This ensures that text with no explicit face
-property (Color::Default cells) is rendered with the terminal palette
-colors rather than the Emacs theme default face.
-OSC 10/11 events will override this via `kuro--apply-default-colors'."
-  (kuro--remap-default-face kuro-color-white kuro-color-black))
 
 (defun kuro--apply-default-colors ()
   "Apply OSC 10/11/12 default terminal colors to the current kuro buffer.
@@ -186,110 +175,27 @@ what the running application requested."
 
 ;;; Palette application (OSC 4)
 
+(defun kuro--merge-palette-entry (entry)
+  "Merge one OSC 4 palette ENTRY (INDEX R G B) into `kuro--named-colors'.
+Only entries with index 0-15 (the 16 ANSI named colors) are applied;
+higher indices are silently ignored.  No face-cache side effects."
+  (pcase entry
+    (`(,idx ,r ,g ,b)
+     (when (< idx 16)
+       (puthash (aref kuro--ansi-color-names idx)
+                (format "#%02x%02x%02x" r g b)
+                kuro--named-colors)))))
+
 (defun kuro--apply-palette-updates ()
-  "Apply OSC 4 palette overrides from the Rust core.
-Updates `kuro--named-colors' entries for indices 0-15 if overridden."
+  "Apply any pending OSC 4 palette overrides from the Rust core.
+Fetches all pending updates, merges them into the named-color cache,
+then flushes the face cache once — regardless of how many entries are
+in the update list."
   (when kuro--initialized
-    (let ((updates (kuro--get-palette-updates)))
+    (when-let ((updates (kuro--get-palette-updates)))
       (dolist (entry updates)
-        (let* ((idx  (nth 0 entry))
-               (r    (nth 1 entry))
-               (g    (nth 2 entry))
-               (b    (nth 3 entry))
-               (hex  (format "#%02x%02x%02x" r g b)))
-          ;; Update named-colors for indices 0-15
-          (when (< idx 16)
-            (let ((name (aref kuro--ansi-color-names idx)))
-              (puthash name hex kuro--named-colors)
-              ;; Clear face cache since colors changed
-              (kuro--clear-face-cache))))))))
-
-;;; Character width table
-
-(defun kuro--setup-char-width-table ()
-  "Set buffer-local `char-width-table' matching Rust unicode-width 0.2.2.
-This ensures Emacs display width agrees with the terminal grid column count,
-preventing cursor misalignment and face-range corruption for wide characters."
-  (let ((table (make-char-table nil)))
-    ;; Emoji: Miscellaneous Symbols and Pictographs, Emoticons, etc.
-    (set-char-table-range table '(#x1F300 . #x1F64F) 2)
-    (set-char-table-range table '(#x1F680 . #x1F6FF) 2)
-    (set-char-table-range table '(#x1F900 . #x1F9FF) 2)
-    (set-char-table-range table '(#x1FA00 . #x1FA6F) 2)
-    (set-char-table-range table '(#x1FA70 . #x1FAFF) 2)
-    (set-char-table-range table '(#x2702 . #x27B0) 2)
-    (set-char-table-range table '(#x2600 . #x26FF) 2)
-    ;; CJK Unified Ideographs (main block + extensions)
-    (set-char-table-range table '(#x4E00 . #x9FFF) 2)
-    (set-char-table-range table '(#x3400 . #x4DBF) 2)
-    (set-char-table-range table '(#x20000 . #x2A6DF) 2)
-    (set-char-table-range table '(#x2A700 . #x2B73F) 2)
-    (set-char-table-range table '(#x2B740 . #x2B81F) 2)
-    (set-char-table-range table '(#x2B820 . #x2CEAF) 2)
-    (set-char-table-range table '(#x2CEB0 . #x2EBEF) 2)
-    (set-char-table-range table '(#x30000 . #x3134F) 2)
-    (set-char-table-range table '(#x31350 . #x323AF) 2)
-    ;; CJK Compatibility Ideographs
-    (set-char-table-range table '(#xF900 . #xFAFF) 2)
-    ;; Fullwidth Forms
-    (set-char-table-range table '(#xFF01 . #xFF60) 2)
-    (set-char-table-range table '(#xFFE0 . #xFFE6) 2)
-    ;; Hangul Syllables
-    (set-char-table-range table '(#xAC00 . #xD7AF) 2)
-    ;; CJK Radicals, Kangxi, Bopomofo, Katakana, Hiragana, etc.
-    (set-char-table-range table '(#x2E80 . #x303E) 2)
-    (set-char-table-range table '(#x3041 . #x3096) 2)
-    (set-char-table-range table '(#x30A1 . #x30FA) 2)
-    (set-char-table-range table '(#x3105 . #x312F) 2)
-    (set-char-table-range table '(#x31A0 . #x31BF) 2)
-    (set-char-table-range table '(#x3200 . #x321E) 2)
-    (set-char-table-range table '(#x3220 . #x3247) 2)
-    (set-char-table-range table '(#x3250 . #x32FE) 2)
-    (set-char-table-range table '(#x3300 . #x33FF) 2)
-    ;; Nerd Font PUA: width 1 (explicitly, to override any system defaults)
-    (set-char-table-range table '(#xE000 . #xF8FF) 1)
-    ;; Supplementary PUA for Nerd Fonts v3
-    (set-char-table-range table '(#xF0000 . #xFFFFF) 1)
-    ;; Variation Selectors: width 0
-    (set-char-table-range table '(#xFE00 . #xFE0F) 0)
-    ;; Inherit everything else from the global table
-    (set-char-table-parent table char-width-table)
-    (setq-local char-width-table table)))
-
-;;; Fontset configuration
-
-(defun kuro--detect-nerd-font ()
-  "Detect a Nerd Font from the system font list.
-Returns the font family name string, preferring \"Symbols Nerd Font Mono\".
-Returns nil if no Nerd Font is found."
-  (when (display-graphic-p)
-    (let ((families (font-family-list))
-          (result nil))
-      (if (member "Symbols Nerd Font Mono" families)
-          (setq result "Symbols Nerd Font Mono")
-        (dolist (f families)
-          (when (and (not result) (string-match-p "Nerd Font Mono" f))
-            (setq result f)))
-        (unless result
-          (dolist (f families)
-            (when (and (not result) (string-match-p "Nerd Font" f))
-              (setq result f)))))
-      result)))
-
-(defun kuro--setup-fontset ()
-  "Configure fontset for emoji and Nerd Font icon display.
-Auto-detects available fonts; no-op if no suitable fonts are found.
-Only effective in graphical Emacs frames."
-  (when (display-graphic-p)
-    (when-let ((nerd-font (kuro--detect-nerd-font)))
-      (set-fontset-font t '(#xE000 . #xF8FF) nerd-font nil 'prepend)
-      (set-fontset-font t '(#xF0000 . #xFFFFF) nerd-font nil 'prepend))
-    (let ((emoji-font
-           (seq-find
-            (lambda (f) (member f (font-family-list)))
-            '("Apple Color Emoji" "Noto Color Emoji" "Segoe UI Emoji"))))
-      (when emoji-font
-        (set-fontset-font t 'emoji emoji-font nil 'prepend)))))
+        (kuro--merge-palette-entry entry))
+      (kuro--clear-face-cache))))
 
 (provide 'kuro-faces)
 

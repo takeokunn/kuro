@@ -48,6 +48,20 @@ enum SixelParseState {
     Raster,
 }
 
+/// Accumulate a decimal digit byte into a saturating `u32` buffer.
+///
+/// Used by all three numeric-argument handlers (`Color`, `Repeat`, `Raster`).
+/// The digit arm is structurally identical across all three state handlers;
+/// this macro eliminates the duplication while preserving the inline expansion.
+macro_rules! accumulate_digit {
+    ($self:expr, $byte:expr) => {{
+        $self.num_buf = $self
+            .num_buf
+            .saturating_mul(10)
+            .saturating_add(u32::from($byte - b'0'));
+    }};
+}
+
 impl SixelDecoder {
     /// Create a decoder using Sixel P2 behavior.
     #[must_use]
@@ -153,12 +167,7 @@ impl SixelDecoder {
 
     fn handle_color(&mut self, byte: u8) {
         match byte {
-            b'0'..=b'9' => {
-                self.num_buf = self
-                    .num_buf
-                    .saturating_mul(10)
-                    .saturating_add(u32::from(byte - b'0'));
-            }
+            b'0'..=b'9' => accumulate_digit!(self, byte),
             b';' => {
                 self.params.push(self.num_buf);
                 self.num_buf = 0;
@@ -177,12 +186,7 @@ impl SixelDecoder {
 
     fn handle_repeat(&mut self, byte: u8) {
         match byte {
-            b'0'..=b'9' => {
-                self.num_buf = self
-                    .num_buf
-                    .saturating_mul(10)
-                    .saturating_add(u32::from(byte - b'0'));
-            }
+            b'0'..=b'9' => accumulate_digit!(self, byte),
             0x3F..=0x7E => {
                 let count = self.num_buf.max(1);
                 self.paint_sixel(byte - 0x3F, count);
@@ -199,12 +203,7 @@ impl SixelDecoder {
 
     fn handle_raster(&mut self, byte: u8) {
         match byte {
-            b'0'..=b'9' => {
-                self.num_buf = self
-                    .num_buf
-                    .saturating_mul(10)
-                    .saturating_add(u32::from(byte - b'0'));
-            }
+            b'0'..=b'9' => accumulate_digit!(self, byte),
             b';' => {
                 self.params.push(self.num_buf);
                 self.num_buf = 0;

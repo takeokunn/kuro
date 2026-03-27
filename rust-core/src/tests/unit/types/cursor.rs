@@ -142,3 +142,134 @@ fn test_cursor_shape_param1_alias_maps_to_zero() {
         "canonical encoding of BlinkingBlock is 0"
     );
 }
+
+// -------------------------------------------------------------------------
+// New tests (Round 34B)
+// -------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    // BOUNDARY: move_by with a negative delta larger than the current position
+    // must clamp col/row to 0 via saturating_sub, never underflow to usize::MAX.
+    fn prop_move_by_clamps_to_zero(
+        col in 0usize..=500usize,
+        row in 0usize..=500usize,
+    ) {
+        let mut cursor = Cursor::new(col, row);
+        // Subtract more than the current position can hold.
+        cursor.move_by(i32::MIN, i32::MIN);
+        prop_assert_eq!(cursor.col, 0, "col must clamp to 0 for large negative dx");
+        prop_assert_eq!(cursor.row, 0, "row must clamp to 0 for large negative dy");
+    }
+
+    #[test]
+    // INVARIANT: move_to(col, row) stores the values exactly — no clamping,
+    // no offset, no side-effects on other fields.
+    fn prop_move_to_stores_exact_values(
+        col in 0usize..=100_000usize,
+        row in 0usize..=100_000usize,
+    ) {
+        let mut cursor = Cursor::new(0, 0);
+        cursor.move_to(col, row);
+        prop_assert_eq!(cursor.col, col);
+        prop_assert_eq!(cursor.row, row);
+    }
+
+    #[test]
+    // PANIC SAFETY: CursorShape::try_from(v) for v in 0..=6 must never panic.
+    // Values 0-6 are either Ok or… actually all in-range, so all must be Ok.
+    fn prop_try_from_valid_range(v in 0i64..=6i64) {
+        let result = CursorShape::try_from(v);
+        prop_assert!(result.is_ok(), "try_from({v}) must succeed for v in 0..=6");
+    }
+
+    #[test]
+    // INVARIANT: move_by(1, 1) increments both col and row by exactly 1,
+    // for any starting position where overflow is not a concern.
+    fn prop_move_by_positive_increments(
+        col in 0usize..=10_000usize,
+        row in 0usize..=10_000usize,
+    ) {
+        let mut cursor = Cursor::new(col, row);
+        cursor.move_by(1, 1);
+        prop_assert_eq!(cursor.col, col + 1, "col must increase by exactly 1");
+        prop_assert_eq!(cursor.row, row + 1, "row must increase by exactly 1");
+    }
+}
+
+#[test]
+// INVARIANT: Cursor::new(0, 0) has correct default field values:
+// visible=true, shape=BlinkingBlock, pending_wrap=false.
+fn test_cursor_default_values() {
+    let cursor = Cursor::new(0, 0);
+    assert_eq!(cursor.col, 0);
+    assert_eq!(cursor.row, 0);
+    assert!(cursor.visible, "new cursor must be visible by default");
+    assert_eq!(
+        cursor.shape,
+        CursorShape::BlinkingBlock,
+        "default shape is BlinkingBlock"
+    );
+    assert!(!cursor.pending_wrap, "pending_wrap must start false");
+}
+
+#[test]
+// ROUNDTRIP: After move_to(col, row) and a subsequent move_to back to the
+// previously recorded position, the cursor is restored to that position.
+// (Cursor has no save/restore methods; this tests the move_to symmetry.)
+fn test_cursor_save_restore() {
+    let mut cursor = Cursor::new(10, 20);
+    // Record the original position
+    let saved_col = cursor.col;
+    let saved_row = cursor.row;
+    // Move somewhere else
+    cursor.move_to(99, 99);
+    assert_eq!(cursor.col, 99);
+    assert_eq!(cursor.row, 99);
+    // Restore by moving back to the saved values
+    cursor.move_to(saved_col, saved_row);
+    assert_eq!(cursor.col, 10, "col must be restored to saved value");
+    assert_eq!(cursor.row, 20, "row must be restored to saved value");
+}
+
+#[test]
+// FIELD: The visible field can be toggled freely — setting it to false and
+// back to true must round-trip correctly.
+fn test_cursor_visibility_toggle() {
+    let mut cursor = Cursor::new(0, 0);
+    assert!(cursor.visible);
+    cursor.visible = false;
+    assert!(
+        !cursor.visible,
+        "visible must be false after setting to false"
+    );
+    cursor.visible = true;
+    assert!(cursor.visible, "visible must be true after restoring");
+}
+
+#[test]
+// INVARIANT: CursorShape::default() returns BlinkingBlock.  This is the
+// DECSCUSR 0/1 shape (blinking block), the canonical terminal default.
+// Also confirms that try_from(0) and try_from(1) both yield BlinkingBlock.
+fn test_cursor_shape_block_is_default() {
+    assert_eq!(CursorShape::default(), CursorShape::BlinkingBlock);
+    assert_eq!(
+        CursorShape::try_from(0i64).unwrap(),
+        CursorShape::BlinkingBlock
+    );
+    assert_eq!(
+        CursorShape::try_from(1i64).unwrap(),
+        CursorShape::BlinkingBlock
+    );
+}
+
+#[test]
+// INVARIANT: Cursor::new(5, 10) has col=5 and row=10 — position arguments
+// are stored in (col, row) order, not swapped.
+fn test_cursor_new_sets_position() {
+    let cursor = Cursor::new(5, 10);
+    assert_eq!(cursor.col, 5, "first argument is col");
+    assert_eq!(cursor.row, 10, "second argument is row");
+}

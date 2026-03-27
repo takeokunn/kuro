@@ -98,40 +98,39 @@ impl DecModes {
         }
     }
 
-    /// Set a DEC private mode
-    pub const fn set_mode(&mut self, mode: u16) {
+    /// Apply a DEC private mode — shared implementation for set (`value=true`) and reset (`value=false`).
+    ///
+    /// Mouse tracking modes (1000/1002/1003) are special: set stores the mode number;
+    /// reset always clears `mouse_mode` to 0 regardless of which mode number is given.
+    #[inline]
+    pub fn apply_mode(&mut self, mode: u16, value: bool) {
         match mode {
-            1 => self.app_cursor_keys = true,
-            6 => self.origin_mode = true,
-            7 => self.auto_wrap = true,
-            25 => self.cursor_visible = true,
-            1004 => self.focus_events = true,
-            1049 => self.alternate_screen = true,
-            2004 => self.bracketed_paste = true,
-            1000 | 1002 | 1003 => self.mouse_mode = mode,
-            1006 => self.mouse_sgr = true,
-            1016 => self.mouse_pixel = true,
-            2026 => self.synchronized_output = true,
+            1 => self.app_cursor_keys = value,
+            6 => self.origin_mode = value,
+            7 => self.auto_wrap = value,
+            25 => self.cursor_visible = value,
+            1004 => self.focus_events = value,
+            1006 => self.mouse_sgr = value,
+            1016 => self.mouse_pixel = value,
+            1049 => self.alternate_screen = value,
+            2004 => self.bracketed_paste = value,
+            2026 => self.synchronized_output = value,
+            // Mouse tracking: set stores the mode number; reset clears to 0.
+            1000 | 1002 | 1003 => self.mouse_mode = if value { mode } else { 0 },
             _ => {}
         }
     }
 
+    /// Set a DEC private mode
+    #[inline]
+    pub fn set_mode(&mut self, mode: u16) {
+        self.apply_mode(mode, true);
+    }
+
     /// Reset a DEC private mode
-    pub const fn reset_mode(&mut self, mode: u16) {
-        match mode {
-            1 => self.app_cursor_keys = false,
-            6 => self.origin_mode = false,
-            7 => self.auto_wrap = false,
-            25 => self.cursor_visible = false,
-            1004 => self.focus_events = false,
-            1049 => self.alternate_screen = false,
-            2004 => self.bracketed_paste = false,
-            1000 | 1002 | 1003 => self.mouse_mode = 0,
-            1006 => self.mouse_sgr = false,
-            1016 => self.mouse_pixel = false,
-            2026 => self.synchronized_output = false,
-            _ => {}
-        }
+    #[inline]
+    pub fn reset_mode(&mut self, mode: u16) {
+        self.apply_mode(mode, false);
     }
 
     /// Query a DEC private mode state
@@ -181,58 +180,69 @@ pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
     }
 }
 
-/// Handle DEC private mode sequences (CSI ? Pm h/l)
+/// Apply a single DEC private mode set (CSI ? Ps h) with its side effects.
 ///
-/// - CSI ? Pm h: Set DEC private mode(s)
-/// - CSI ? Pm l: Reset DEC private mode(s)
+/// Calls [`DecModes::set_mode`] first, then triggers the mode-specific side
+/// effect that requires the updated state to already be recorded.
+#[inline]
+fn apply_mode_set(term: &mut crate::TerminalCore, mode: u16) {
+    term.dec_modes.set_mode(mode);
+    match mode {
+        // DECOM (?6): cursor moves to top of scroll region on activation.
+        6 => {
+            let top = term.screen.get_scroll_region().top;
+            term.screen.move_cursor(top, 0);
+        }
+        // Alternate screen (?1049): save SGR state before switching buffers.
+        // Applications like vim/htop set colors before entering the alt screen;
+        // without saving/restoring the primary screen would inherit those colors.
+        1049 => {
+            term.saved_primary_attrs = Some(term.current_attrs);
+            term.screen.switch_to_alternate();
+        }
+        _ => {}
+    }
+}
+
+/// Apply a single DEC private mode reset (CSI ? Ps l) with its side effects.
+///
+/// Side effects that depend on reading the *current* (pre-reset) state are
+/// handled first; [`DecModes::reset_mode`] is called last to clear the bit.
+#[inline]
+fn apply_mode_reset(term: &mut crate::TerminalCore, mode: u16) {
+    match mode {
+        // DECOM (?6): cursor returns to absolute home position.
+        6 => term.screen.move_cursor(0, 0),
+        // Alternate screen (?1049): restore primary buffer and SGR state.
+        // Guard on `alternate_screen` being set so the switch only fires once.
+        // `.take()` ensures saved attrs are consumed and cannot be restored twice.
+        1049 if term.dec_modes.alternate_screen => {
+            term.screen.switch_to_primary();
+            if let Some(attrs) = term.saved_primary_attrs.take() {
+                term.current_attrs = attrs;
+            }
+        }
+        // Synchronized output (?2026): force a full redraw to flush the batch.
+        // Guard on the flag still being set so mark_all_dirty fires exactly once.
+        2026 if term.dec_modes.synchronized_output => {
+            term.screen.mark_all_dirty();
+        }
+        _ => {}
+    }
+    term.dec_modes.reset_mode(mode);
+}
+
+/// Handle DEC private mode sequences (CSI ? Pm h/l).
+///
+/// - CSI ? Pm h — set each mode in `params` via [`apply_mode_set`]
+/// - CSI ? Pm l — reset each mode in `params` via [`apply_mode_reset`]
 pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, set: bool) {
     for param_group in params {
         for &mode in param_group {
             if set {
-                term.dec_modes.set_mode(mode);
-
-                // Handle side effects for mode 6 (DECOM - origin mode)
-                // When set, move cursor to home position within scroll region
-                if mode == 6 {
-                    let top = term.screen.get_scroll_region().top;
-                    term.screen.move_cursor(top, 0);
-                }
-
-                // Handle side effects for mode 1049 (alternate screen)
-                if mode == 1049 {
-                    // Save SGR attributes before entering alternate screen.
-                    // Applications like vim/htop set colors before entering the alt screen;
-                    // without saving/restoring, the primary screen would inherit those colors
-                    // when the application exits.
-                    term.saved_primary_attrs = Some(term.current_attrs);
-                    term.screen.switch_to_alternate();
-                }
+                apply_mode_set(term, mode);
             } else {
-                // Handle side effects for mode 6 (DECOM - origin mode)
-                // When reset, move cursor to home position
-                if mode == 6 {
-                    term.screen.move_cursor(0, 0);
-                }
-
-                // Handle side effects for mode 1049 before resetting
-                if mode == 1049 && term.dec_modes.alternate_screen {
-                    term.screen.switch_to_primary();
-                    // Restore SGR attributes saved when entering alternate screen.
-                    // .take() ensures the saved state is consumed and cannot be restored twice.
-                    if let Some(attrs) = term.saved_primary_attrs.take() {
-                        term.current_attrs = attrs;
-                    }
-                }
-
-                // Handle side effects for mode 2026 (Synchronized Output)
-                // When disabled, the terminal has finished batch-updating; force
-                // a full redraw so all changes accumulated during the sync period
-                // are rendered in a single coherent frame.
-                if mode == 2026 && term.dec_modes.synchronized_output {
-                    term.screen.mark_all_dirty();
-                }
-
-                term.dec_modes.reset_mode(mode);
+                apply_mode_reset(term, mode);
             }
         }
     }

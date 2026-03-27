@@ -16,18 +16,29 @@
 
 ;;; Mouse Tracking State
 
-(defvar-local kuro--mouse-mode 0
+(kuro--defvar-permanent-local kuro--mouse-mode 0
   "Cached mouse tracking mode from Rust: 0=off, 1000/1002/1003=on.")
-(put 'kuro--mouse-mode 'permanent-local t)
 
-(defvar-local kuro--mouse-sgr nil
+(kuro--defvar-permanent-local kuro--mouse-sgr nil
   "Cached mouse SGR extended coordinates modifier state from Rust.")
-(put 'kuro--mouse-sgr 'permanent-local t)
 
-(defvar-local kuro--mouse-pixel-mode nil
+(kuro--defvar-permanent-local kuro--mouse-pixel-mode nil
   "Cached mouse pixel coordinate mode (?1016) state from Rust.
 When non-nil, mouse positions are reported in pixels instead of cells.")
-(put 'kuro--mouse-pixel-mode 'permanent-local t)
+
+
+;;; Mouse Coordinate Helper
+
+(defsubst kuro--mouse-coords (event)
+  "Return (COL1 . ROW1) for EVENT.
+Pixel mode: `posn-x-y' coordinates (0-based pixel coords, no +1 offset).
+Cell mode: `posn-col-row' coordinates incremented to 1-based."
+  (let ((pos (event-start event)))
+    (if kuro--mouse-pixel-mode
+        (let ((xy (posn-x-y pos)))
+          (cons (or (car xy) 0) (or (cdr xy) 0)))
+      (let ((cr (posn-col-row pos)))
+        (cons (1+ (car cr)) (1+ (cdr cr)))))))
 
 
 ;;; Mouse Encoding
@@ -38,18 +49,9 @@ BUTTON is 0=left, 1=middle, 2=right, 64=scroll-up, 65=scroll-down.
 PRESS is non-nil for button press, nil for button release.
 Returns the encoded string, or nil if mouse mode is off or position overflows."
   (when (> kuro--mouse-mode 0)
-    (let* ((pos (event-start event))
-           (col-row (if kuro--mouse-pixel-mode
-                        ;; Pixel mode: report pixel coordinates
-                        (let ((xy (posn-x-y pos)))
-                          (cons (or (car xy) 0) (or (cdr xy) 0)))
-                      ;; Cell mode: report 1-based cell coordinates
-                      (let ((cr (posn-col-row pos)))
-                        (cons (1+ (car cr)) (1+ (cdr cr))))))
-           (col1 (car col-row))
-           (row1 (cdr col-row)))
+    (pcase-let* ((`(,col1 . ,row1) (kuro--mouse-coords event)))
       (if (or kuro--mouse-sgr kuro--mouse-pixel-mode)
-          ;; SGR pixel format: ESC[<btn;px;pyM/m
+          ;; SGR / pixel format: ESC[<btn;col;rowM/m
           (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))
         ;; X10 format: ESC[M{btn+32}{col+32}{row+32} — discard if out of range
         (when (and (< col1 224) (< row1 224))
@@ -58,61 +60,61 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
 
 (defun kuro--encode-mouse-sgr (event button press)
   "Encode mouse EVENT in SGR format (used when kuro--mouse-sgr is set)."
-  (let* ((pos (event-start event))
-         (col-row (if kuro--mouse-pixel-mode
-                      ;; Pixel mode
-                      (let ((xy (posn-x-y pos)))
-                        (cons (or (car xy) 0) (or (cdr xy) 0)))
-                    (let ((cr (posn-col-row pos)))
-                      (cons (1+ (car cr)) (1+ (cdr cr))))))
-         (col1 (car col-row))
-         (row1 (cdr col-row)))
+  (pcase-let* ((`(,col1 . ,row1) (kuro--mouse-coords event)))
     (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))))
+
+
+;;; Mouse Event Dispatch
+
+(defmacro kuro--dispatch-mouse-event (btn press)
+  "When mouse tracking is active and BTN is non-nil, encode and forward the event.
+BTN is an integer button index (0/1/2/64/65) or nil to skip.
+PRESS is non-nil for press, nil for release.
+Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
+  `(when (and (> kuro--mouse-mode 0) ,btn)
+     (let ((seq (if kuro--mouse-sgr
+                    (kuro--encode-mouse-sgr last-input-event ,btn ,press)
+                  (kuro--encode-mouse last-input-event ,btn ,press))))
+       (when seq (kuro--send-key seq)))))
+
+
+;;; Mouse Event Handler Macro
+
+(defmacro kuro--def-mouse-cmd (name btn-form press doc)
+  "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to the PTY.
+BTN-FORM is evaluated at call time: a literal integer for scroll commands, or a
+pcase expression over `event-basic-type' for button commands.
+PRESS is t for press events, nil for release."
+  `(defun ,name ()
+     ,doc
+     (interactive)
+     (let ((btn ,btn-form))
+       (kuro--dispatch-mouse-event btn ,press))))
 
 
 ;;; Mouse Event Handlers
 
-(defun kuro--mouse-press ()
-  "Handle mouse button press and forward to PTY."
-  (interactive)
-  (when (> kuro--mouse-mode 0)
-    (let* ((btn (pcase (event-basic-type last-input-event)
-                  ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil)))
-           (seq (when btn
-                  (if kuro--mouse-sgr
-                      (kuro--encode-mouse-sgr last-input-event btn t)
-                    (kuro--encode-mouse last-input-event btn t)))))
-      (when seq (kuro--send-key seq)))))
+(kuro--def-mouse-cmd kuro--mouse-press
+  (pcase (event-basic-type last-input-event)
+    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  t
+  "Handle mouse button press and forward to PTY.")
 
-(defun kuro--mouse-release ()
-  "Handle mouse button release and forward to PTY."
-  (interactive)
-  (when (> kuro--mouse-mode 0)
-    (let* ((btn (pcase (event-basic-type last-input-event)
-                  ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil)))
-           (seq (when btn
-                  (if kuro--mouse-sgr
-                      (kuro--encode-mouse-sgr last-input-event btn nil)
-                    (kuro--encode-mouse last-input-event btn nil)))))
-      (when seq (kuro--send-key seq)))))
+(kuro--def-mouse-cmd kuro--mouse-release
+  (pcase (event-basic-type last-input-event)
+    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  nil
+  "Handle mouse button release and forward to PTY.")
 
-(defun kuro--mouse-scroll-up ()
-  "Handle scroll-up mouse event and forward to PTY."
-  (interactive)
-  (when (> kuro--mouse-mode 0)
-    (let ((seq (if kuro--mouse-sgr
-                   (kuro--encode-mouse-sgr last-input-event 64 t)
-                 (kuro--encode-mouse last-input-event 64 t))))
-      (when seq (kuro--send-key seq)))))
+(kuro--def-mouse-cmd kuro--mouse-scroll-up
+  64
+  t
+  "Handle scroll-up mouse event and forward to PTY.")
 
-(defun kuro--mouse-scroll-down ()
-  "Handle scroll-down mouse event and forward to PTY."
-  (interactive)
-  (when (> kuro--mouse-mode 0)
-    (let ((seq (if kuro--mouse-sgr
-                   (kuro--encode-mouse-sgr last-input-event 65 t)
-                 (kuro--encode-mouse last-input-event 65 t))))
-      (when seq (kuro--send-key seq)))))
+(kuro--def-mouse-cmd kuro--mouse-scroll-down
+  65
+  t
+  "Handle scroll-down mouse event and forward to PTY.")
 
 (provide 'kuro-input-mouse)
 

@@ -45,6 +45,11 @@
 (defconst kuro--sgr-underline-style-shift 9
   "Bit shift for underline style field. Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 
+(defsubst kuro--sgr-flag-set-p (attr-flags flag)
+  "Return t if FLAG bit is set in ATTR-FLAGS bitmask, nil otherwise.
+Uses (/= 0 ...) since 0 is truthy in Elisp — only nil is falsy."
+  (/= 0 (logand attr-flags flag)))
+
 ;;; SGR attribute decoding
 
 (defun kuro--decode-attrs (attr-flags)
@@ -62,15 +67,15 @@ ATTR-FLAGS is a bitmask matching Rust encode_attrs:
   bits 9-11 (0xE00, shift 9) = underline style:
     0 = None, 1 = Straight, 2 = Double, 3 = Curly, 4 = Dotted, 5 = Dashed
 Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is falsy."
-  (let ((bold           (/= 0 (logand attr-flags kuro--sgr-flag-bold)))
-        (dim            (/= 0 (logand attr-flags kuro--sgr-flag-dim)))
-        (italic         (/= 0 (logand attr-flags kuro--sgr-flag-italic)))
-        (underline      (/= 0 (logand attr-flags kuro--sgr-flag-underline)))
-        (blink-slow     (/= 0 (logand attr-flags kuro--sgr-flag-blink-slow)))
-        (blink-fast     (/= 0 (logand attr-flags kuro--sgr-flag-blink-fast)))
-        (inverse        (/= 0 (logand attr-flags kuro--sgr-flag-inverse)))
-        (hidden         (/= 0 (logand attr-flags kuro--sgr-flag-hidden)))
-        (strikethrough  (/= 0 (logand attr-flags kuro--sgr-flag-strikethrough)))
+  (let ((bold           (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-bold))
+        (dim            (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-dim))
+        (italic         (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-italic))
+        (underline      (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-underline))
+        (blink-slow     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-blink-slow))
+        (blink-fast     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-blink-fast))
+        (inverse        (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-inverse))
+        (hidden         (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-hidden))
+        (strikethrough  (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-strikethrough))
         ;; Underline style: bits 9-11 (mask 0xE00, shift right 9)
         (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask) (- kuro--sgr-underline-style-shift))))
     (list :bold bold
@@ -130,12 +135,12 @@ that `kuro--decode-attrs' would allocate on every call."
   (let* ((fg-color (kuro--color-to-emacs fg))
          (bg-color (kuro--color-to-emacs bg))
          ;; Inline bit-flag tests (same logic as kuro--decode-attrs)
-         (bold          (/= 0 (logand attr-flags kuro--sgr-flag-bold)))
-         (dim           (/= 0 (logand attr-flags kuro--sgr-flag-dim)))
-         (italic        (/= 0 (logand attr-flags kuro--sgr-flag-italic)))
-         (underline     (/= 0 (logand attr-flags kuro--sgr-flag-underline)))
-         (strikethrough (/= 0 (logand attr-flags kuro--sgr-flag-strikethrough)))
-         (inverse       (/= 0 (logand attr-flags kuro--sgr-flag-inverse)))
+         (bold          (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-bold))
+         (dim           (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-dim))
+         (italic        (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-italic))
+         (underline     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-underline))
+         (strikethrough (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-strikethrough))
+         (inverse       (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-inverse))
          (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask)
                                (- kuro--sgr-underline-style-shift)))
          ;; Build :underline value: prefer explicit style if underline bit is set

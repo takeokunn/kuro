@@ -34,9 +34,6 @@
 (declare-function kuro--start-render-loop "kuro-renderer" ())
 (declare-function kuro--stop-render-loop  "kuro-renderer" ())
 
-;; Forward-declare initial color setup defined in kuro-faces.el
-(declare-function kuro--apply-initial-default-colors "kuro-faces" ())
-
 ;; kuro--ensure-module-loaded is defined in kuro-module.el
 (declare-function kuro--ensure-module-loaded "kuro-module" ())
 
@@ -45,6 +42,99 @@
 
 (defconst kuro--startup-render-delay 0.05
   "Delay in seconds before the first render after terminal startup.")
+
+(defconst kuro--buffer-name-default "*kuro*"
+  "Default buffer name for new Kuro terminal instances.")
+
+(defconst kuro--buffer-name-sessions "*kuro-sessions*"
+  "Buffer name used by `kuro-list-sessions' to display session list.")
+
+(defmacro kuro--clear-session-state ()
+  "Reset buffer-local session identity after detach or error.
+Sets `kuro--initialized' to nil and `kuro--session-id' to 0."
+  `(setq kuro--initialized nil
+         kuro--session-id  0))
+
+(defun kuro--do-attach (session-id rows cols)
+  "Perform the core attach steps for SESSION-ID at terminal size ROWS x COLS.
+Assumes the calling buffer is already in `kuro-mode'.
+Signals on any failure; the caller is responsible for rollback."
+  (let ((inhibit-read-only t))
+    (kuro-core-attach session-id)
+    (setq kuro--session-id session-id
+          kuro--initialized t)
+    (kuro--prefill-buffer rows)
+    (kuro--init-session-buffer (current-buffer) rows cols)
+    (kuro--resize rows cols)
+    (kuro--start-render-loop)))
+
+(defun kuro--rollback-attach (session-id buffer err)
+  "Roll back a failed attach for SESSION-ID: log ERR, clear state, detach, kill BUFFER."
+  (message "Kuro: Failed to attach to session %d: %s" session-id err)
+  (kuro--clear-session-state)
+  (condition-case nil
+      (kuro-core-detach session-id)
+    (error nil))
+  (kill-buffer buffer)
+  nil)
+
+(defun kuro--teardown-session ()
+  "Detach or destroy the current session, prompting if the process is alive.
+Detached sessions remain reattachable via `kuro-attach'.
+Assumes `kuro--stop-render-loop' and `kuro--cleanup-render-state' have already run."
+  (if (and kuro--initialized
+           (kuro--is-process-alive)
+           (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it) ")))
+      ;; Detach: PTY keeps running; another buffer can attach later.
+      (condition-case nil
+          (progn
+            (kuro-core-detach kuro--session-id)
+            (kuro--clear-session-state))
+        (error
+         (kuro--clear-session-state)))
+    ;; Destroy: shutdown PTY and remove session from the HashMap.
+    (kuro--shutdown)))
+
+(defun kuro--prefill-buffer (rows)
+  "Erase the current buffer and insert ROWS blank lines.
+Leaves point at `point-min'.  Must be called with `inhibit-read-only' bound
+to t by the caller.  Used by both `kuro-create' and `kuro-attach' so that
+`kuro--update-line-full' can navigate to any row without hitting
+end-of-buffer."
+  (erase-buffer)
+  (dotimes (_ rows)
+    (insert "\n"))
+  (goto-char (point-min)))
+
+(defun kuro--schedule-initial-render (buf)
+  "Schedule an immediate render for BUF after the PTY session is started.
+Posts an idle timer so the shell prompt appears at once rather than
+waiting for the first periodic tick of the render loop (~8 ms at 120 fps).
+The timer is a one-shot: it fires once and is not rescheduled."
+  (run-with-idle-timer kuro--startup-render-delay nil
+                       (lambda (b)
+                         (when (buffer-live-p b)
+                           (with-current-buffer b
+                             (kuro--render-cycle))))
+                       buf))
+
+(defun kuro--init-session-buffer (buffer rows cols)
+  "Initialize BUFFER as a kuro session display with dimensions ROWS×COLS.
+Called from both `kuro-create' (new session) and `kuro-attach' (re-attach).
+Sets up scrollback, font remapping, char-width table, fontset, default
+colors, and resets all cursor cache state so the first render frame
+always computes fresh cursor position from Rust."
+  (with-current-buffer buffer
+    (setq kuro--cursor-marker (point-marker)
+          kuro--last-rows     rows
+          kuro--last-cols     cols
+          kuro--scroll-offset 0)
+    (kuro--set-scrollback-max-lines kuro-scrollback-size)
+    (kuro--apply-font-to-buffer buffer)
+    (kuro--setup-char-width-table)
+    (kuro--setup-fontset)
+    (kuro--remap-default-face kuro-color-white kuro-color-black)
+    (kuro--reset-cursor-cache)))
 
 ;; kuro--set-scrollback-max-lines is defined in kuro-ffi-osc.el (loaded via kuro-renderer)
 (declare-function kuro--set-scrollback-max-lines "kuro-ffi-osc" (max-lines))
@@ -58,12 +148,13 @@
 ;; byte-compiler visibility when kuro-attach calls it before the first render.
 (declare-function kuro--resize "kuro-ffi" (rows cols))
 
-;; kuro--apply-font-to-buffer is defined in kuro-faces.el
+;; kuro--apply-font-to-buffer and kuro--remap-default-face are defined in kuro-faces.el
 (declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
+(declare-function kuro--remap-default-face   "kuro-faces" (fg-str bg-str))
 
-;; kuro--setup-char-width-table and kuro--setup-fontset are defined in kuro-faces.el
-(declare-function kuro--setup-char-width-table "kuro-faces" ())
-(declare-function kuro--setup-fontset "kuro-faces" ())
+;; kuro--setup-char-width-table and kuro--setup-fontset are defined in kuro-char-width.el
+(declare-function kuro--setup-char-width-table "kuro-char-width" ())
+(declare-function kuro--setup-fontset "kuro-char-width" ())
 
 ;; kuro--clear-all-image-overlays is defined in kuro-overlays.el
 (declare-function kuro--clear-all-image-overlays "kuro-overlays" ())
@@ -88,13 +179,13 @@
 ;; kuro-overlays.el
 (defvar kuro--blink-overlays nil
   "Forward reference; defvar-local in kuro-overlays.el.")
-;; kuro-renderer.el (TUI mode state)
+;; kuro-tui-mode.el (TUI mode state)
 (defvar kuro--tui-mode-active nil
-  "Forward reference; defvar-local in kuro-renderer.el.")
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
 (defvar kuro--tui-mode-frame-count 0
-  "Forward reference; defvar-local in kuro-renderer.el.")
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
 (defvar kuro--last-dirty-count 0
-  "Forward reference; defvar-local in kuro-renderer.el.")
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
 ;; kuro-render-buffer.el
 (defvar kuro--last-cursor-row nil
   "Forward reference; defvar-local in kuro-render-buffer.el.")
@@ -122,10 +213,10 @@ Switches to the terminal buffer after creation."
   (interactive
    (list
     (read-string "Shell command: " kuro-shell)
-    (generate-new-buffer-name "*kuro*")))
+    (generate-new-buffer-name kuro--buffer-name-default)))
   (kuro--ensure-module-loaded)
   (let* ((cmd (or command kuro-shell))
-         (buffer (get-buffer-create (or buffer-name (generate-new-buffer-name "*kuro*")))))
+         (buffer (get-buffer-create (or buffer-name (generate-new-buffer-name kuro--buffer-name-default)))))
     ;; Display the buffer FIRST so window-body-height/width reflect the real window.
     ;; We need exact dimensions before spawning the PTY; otherwise the shell starts
     ;; with hardcoded 24×80 and full-screen programs (vim, htop, …) that run before
@@ -136,40 +227,13 @@ Switches to the terminal buffer after creation."
           (cols (if noninteractive kuro--default-cols (window-body-width))))
       (with-current-buffer buffer
         (kuro-mode)
-        ;; Pre-fill with blank lines so `kuro--update-line-full' can navigate
-        ;; via forward-line to any row without hitting end-of-buffer.
         (let ((inhibit-read-only t))
-          (erase-buffer)
-          (dotimes (_ rows)
-            (insert "\n"))
-          (goto-char (point-min)))
+          (kuro--prefill-buffer rows))
         ;; Spawn PTY with the correct dimensions from the start — no resize needed.
         (when (kuro--init cmd rows cols)
-          (setq kuro--cursor-marker (point-marker))
-          (setq kuro--last-rows rows)
-          (setq kuro--last-cols cols)
-          (kuro--set-scrollback-max-lines kuro-scrollback-size)
-          (setq kuro--scroll-offset 0)
-          (kuro--apply-font-to-buffer buffer)
-          (kuro--setup-char-width-table)
-          (kuro--setup-fontset)
-          (kuro--apply-initial-default-colors)
-          ;; Reset cursor cache so the first render frame always computes
-          ;; cursor position instead of hitting the unchanged-state fast path.
-          (setq kuro--last-cursor-row nil
-                kuro--last-cursor-col nil
-                kuro--last-cursor-visible nil
-                kuro--last-cursor-shape nil)
+          (kuro--init-session-buffer buffer rows cols)
           (kuro--start-render-loop)
-          ;; Schedule an immediate render so the shell prompt appears at once
-          ;; instead of waiting for the first periodic timer tick (~8ms at 120fps).
-          ;; This is what makes kuro feel as instant as kitty on startup.
-          (run-with-idle-timer kuro--startup-render-delay nil
-                               (lambda (buf)
-                                 (when (buffer-live-p buf)
-                                   (with-current-buffer buf
-                                     (kuro--render-cycle))))
-                               buffer)
+          (kuro--schedule-initial-render buffer)
           (message "Kuro: Started terminal with command: %s" cmd))))
     buffer))
 
@@ -179,23 +243,35 @@ Switches to the terminal buffer after creation."
   (interactive "sSend string: ")
   (kuro--send-key string))
 
-;;;###autoload
-(defun kuro-send-interrupt ()
-  "Send SIGINT (C-c) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-c]))
+(defmacro kuro--def-control-key (name sequence doc)
+  "Define an interactive command NAME that sends SEQUENCE to the terminal."
+  `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
 
 ;;;###autoload
-(defun kuro-send-sigstop ()
-  "Send SIGSTOP (C-z) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-z]))
-
+(kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal process.")
 ;;;###autoload
-(defun kuro-send-sigquit ()
-  "Send SIGQUIT (C-\\) to the terminal."
-  (interactive)
-  (kuro--send-key [?\C-\\]))
+(kuro--def-control-key kuro-send-sigstop  [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
+;;;###autoload
+(kuro--def-control-key kuro-send-sigquit  [?\C-\\] "Send quit signal (C-\\) to the terminal process.")
+
+(defun kuro--cleanup-render-state ()
+  "Reset all render-related buffer state for teardown.
+Called by `kuro-kill' immediately after stopping the render loop.
+Resets TUI mode counters, overlay lists, mouse state, scroll offset,
+and font remap cookie.  Idempotent: safe to call more than once."
+  (setq kuro--tui-mode-active     nil
+        kuro--tui-mode-frame-count 0
+        kuro--last-dirty-count    0)
+  (remove-overlays (point-min) (point-max) 'kuro-blink t)
+  (setq kuro--blink-overlays nil)
+  (kuro--clear-all-image-overlays)
+  (setq kuro--mouse-mode       0
+        kuro--mouse-sgr        nil
+        kuro--mouse-pixel-mode nil
+        kuro--scroll-offset    0)
+  (when (and (boundp 'kuro--font-remap-cookie) kuro--font-remap-cookie)
+    (face-remap-remove-relative kuro--font-remap-cookie)
+    (setq kuro--font-remap-cookie nil)))
 
 ;;;###autoload
 (defun kuro-kill ()
@@ -207,46 +283,9 @@ Detached sessions can be re-attached with `kuro-attach'."
   (interactive)
   (when (derived-mode-p 'kuro-mode)
     (kuro--stop-render-loop)
-    ;; Reset TUI mode state
-    (setq kuro--tui-mode-active nil)
-    (setq kuro--tui-mode-frame-count 0)
-    (setq kuro--last-dirty-count 0)
-    ;; Clean up blink overlays
-    (remove-overlays (point-min) (point-max) 'kuro-blink t)
-    (setq kuro--blink-overlays nil)
-    ;; Clean up image overlays
-    (kuro--clear-all-image-overlays)
-    ;; Reset mouse state
-    (setq kuro--mouse-mode 0)
-    (setq kuro--mouse-sgr nil)
-    (setq kuro--mouse-pixel-mode nil)
-    ;; Reset scroll offset
-    (setq kuro--scroll-offset 0)
-    ;; Clean up font remap
-    (when (and (boundp 'kuro--font-remap-cookie) kuro--font-remap-cookie)
-      (face-remap-remove-relative kuro--font-remap-cookie)
-      (setq kuro--font-remap-cookie nil))
-    ;; Shutdown or detach the PTY session.
-    ;; When the process is still alive, ask the user whether to destroy it or
-    ;; leave it running in a detached state (re-attachable via `kuro-attach').
-    ;; When the process has already exited (auto-kill path from the renderer),
-    ;; skip the prompt and shut down immediately.
-    (if (and kuro--initialized
-             (kuro--is-process-alive)
-             (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it) ")))
-        ;; Detach: PTY keeps running; another buffer can attach later.
-        (condition-case nil
-            (progn
-              (kuro-core-detach kuro--session-id)
-              (setq kuro--initialized nil)
-              (setq kuro--session-id 0))
-          (error
-           (setq kuro--initialized nil)
-           (setq kuro--session-id 0)))
-      ;; Destroy: shutdown PTY and remove session from the HashMap.
-      (kuro--shutdown))
-    (let ((buffer (current-buffer)))
-      (kill-buffer buffer))))
+    (kuro--cleanup-render-state)
+    (kuro--teardown-session)
+    (kill-buffer (current-buffer))))
 
 ;;;###autoload
 (defun kuro-list-sessions ()
@@ -260,19 +299,16 @@ detached session."
                     (error nil))))
     (if (null sessions)
         (message "No active Kuro sessions.")
-      (with-current-buffer (get-buffer-create "*kuro-sessions*")
+      (with-current-buffer (get-buffer-create kuro--buffer-name-sessions)
         (let ((inhibit-read-only t))
           (erase-buffer)
           (insert "Kuro Terminal Sessions\n")
           (insert "----------------------\n\n")
           (dolist (entry sessions)
-            (let* ((id         (nth 0 entry))
-                   (cmd        (nth 1 entry))
-                   (detached-p (nth 2 entry))
-                   (alive-p    (nth 3 entry))
-                   (status     (cond (detached-p "detached")
-                                     (alive-p    "running")
-                                     (t          "dead"))))
+            (pcase-let* ((`(,id ,cmd ,detached-p ,alive-p) entry)
+                         (status (cond (detached-p "detached")
+                                       (alive-p    "running")
+                                       (t          "dead"))))
               (insert (format "  ID %-4d  %-12s  %s\n" id status cmd))))
           (insert "\nUse M-x kuro-attach to reconnect to a detached session.\n")
           (goto-char (point-min)))
@@ -291,53 +327,14 @@ detached state (see `kuro-list-sessions' and `kuro-kill')."
       (switch-to-buffer buffer))
     (with-current-buffer buffer
       (kuro-mode)
-      (condition-case err
-          (let* ((rows (if noninteractive kuro--default-rows (window-body-height)))
-                 (cols (if noninteractive kuro--default-cols (window-body-width)))
-                 (inhibit-read-only t))
-            (kuro-core-attach session-id)
-            (setq kuro--session-id session-id)
-            (setq kuro--initialized t)
-            ;; Pre-fill with blank lines so `kuro--update-line-full' can reach any row.
-            (erase-buffer)
-            (dotimes (_ rows) (insert "\n"))
-            (goto-char (point-min))
-            (setq kuro--cursor-marker (point-marker))
-            (setq kuro--last-rows rows)
-            (setq kuro--last-cols cols)
-            (setq kuro--scroll-offset 0)
-            (kuro--set-scrollback-max-lines kuro-scrollback-size)
-            (kuro--apply-font-to-buffer buffer)
-            (kuro--setup-char-width-table)
-            (kuro--setup-fontset)
-            (kuro--apply-initial-default-colors)
-            ;; Reset cursor cache so the first render frame always computes
-            ;; cursor position instead of hitting the unchanged-state fast path.
-            (setq kuro--last-cursor-row nil
-                  kuro--last-cursor-col nil
-                  kuro--last-cursor-visible nil
-                  kuro--last-cursor-shape nil)
-            ;; Resize to match the new window — the detached PTY may have a
-            ;; different geometry from when it was last attached.
-            (kuro--resize rows cols)
-            (kuro--start-render-loop)
-            (message "Kuro: Attached to session %d" session-id))
-        (error
-         (message "Kuro: Failed to attach to session %d: %s" session-id err)
-         ;; Clear buffer-local state immediately so that any hook or timer firing
-         ;; before kill-buffer completes cannot observe kuro--initialized=t against
-         ;; a Detached or never-attached session.
-         (setq kuro--initialized nil)
-         (setq kuro--session-id 0)
-         ;; Roll back the Bound state so the session remains re-attachable.
-         ;; If kuro-core-attach succeeded before the error (e.g. kuro--resize failed),
-         ;; we must detach to prevent the session from being stranded as Bound with no buffer.
-         ;; If kuro-core-attach itself failed, this detach call will error and be swallowed.
-         (condition-case nil
-             (kuro-core-detach session-id)
-           (error nil))
-         (kill-buffer buffer)
-         nil)))
+      (let ((rows (if noninteractive kuro--default-rows (window-body-height)))
+            (cols (if noninteractive kuro--default-cols (window-body-width))))
+        (condition-case err
+            (progn
+              (kuro--do-attach session-id rows cols)
+              (message "Kuro: Attached to session %d" session-id))
+          (error
+           (kuro--rollback-attach session-id buffer err)))))
     buffer))
 
 (provide 'kuro-lifecycle)

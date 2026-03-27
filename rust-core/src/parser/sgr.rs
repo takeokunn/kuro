@@ -26,39 +26,49 @@ const RGB_GREEN_IDX: usize = 3;
 /// Sub-parameter index for the blue RGB component.
 const RGB_BLUE_IDX: usize = 4;
 
-/// Map a named-color parameter offset (0–7) to a `Color::Named` variant.
-/// `offset = param - base` where base is 30 or 40.
-#[inline]
-const fn named_color_from_offset(offset: u16) -> Color {
-    match offset {
-        0 => Color::Named(NamedColor::Black),
-        1 => Color::Named(NamedColor::Red),
-        2 => Color::Named(NamedColor::Green),
-        3 => Color::Named(NamedColor::Yellow),
-        4 => Color::Named(NamedColor::Blue),
-        5 => Color::Named(NamedColor::Magenta),
-        6 => Color::Named(NamedColor::Cyan),
-        7 => Color::Named(NamedColor::White),
-        _ => Color::Default,
-    }
+/// Generate a `const fn` that maps an offset (0–7) to a `Color::Named` variant.
+///
+/// Both `named_color_from_offset` and `bright_named_color_from_offset` share identical
+/// structure: 8 literal arms mapping an offset to a `NamedColor` variant, with a
+/// `_ => Color::Default` fallback.  The macro eliminates the structural duplication
+/// while keeping each generated function independently inlineable.
+macro_rules! color_mapper {
+    ($fn_name:ident, [ $( $i:literal => $color:ident ),* $(,)? ]) => {
+        #[inline]
+        const fn $fn_name(offset: u16) -> Color {
+            match offset {
+                $( $i => Color::Named(NamedColor::$color), )*
+                _ => Color::Default,
+            }
+        }
+    };
 }
 
-/// Map a bright named-color parameter offset (0–7) to a `Color::Named` bright variant.
-/// `offset = param - base` where base is 90 (foreground) or 100 (background).
-#[inline]
-const fn bright_named_color_from_offset(offset: u16) -> Color {
-    match offset {
-        0 => Color::Named(NamedColor::BrightBlack),
-        1 => Color::Named(NamedColor::BrightRed),
-        2 => Color::Named(NamedColor::BrightGreen),
-        3 => Color::Named(NamedColor::BrightYellow),
-        4 => Color::Named(NamedColor::BrightBlue),
-        5 => Color::Named(NamedColor::BrightMagenta),
-        6 => Color::Named(NamedColor::BrightCyan),
-        7 => Color::Named(NamedColor::BrightWhite),
-        _ => Color::Default,
-    }
-}
+// Map a named-color parameter offset (0–7) to a `Color::Named` variant.
+// `offset = param - base` where base is 30 or 40.
+color_mapper!(named_color_from_offset, [
+    0 => Black,
+    1 => Red,
+    2 => Green,
+    3 => Yellow,
+    4 => Blue,
+    5 => Magenta,
+    6 => Cyan,
+    7 => White,
+]);
+
+// Map a bright named-color parameter offset (0–7) to a `Color::Named` bright variant.
+// `offset = param - base` where base is 90 (foreground) or 100 (background).
+color_mapper!(bright_named_color_from_offset, [
+    0 => BrightBlack,
+    1 => BrightRed,
+    2 => BrightGreen,
+    3 => BrightYellow,
+    4 => BrightBlue,
+    5 => BrightMagenta,
+    6 => BrightCyan,
+    7 => BrightWhite,
+]);
 
 /// Handle SGR (Select Graphic Rendition) — CSI 'm' sequences only.
 ///

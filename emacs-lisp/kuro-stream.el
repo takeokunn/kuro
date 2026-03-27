@@ -53,21 +53,18 @@
 
 ;;; Internal state
 
-(defvar-local kuro--stream-idle-timer nil
+(kuro--defvar-permanent-local kuro--stream-idle-timer nil
   "One-shot idle timer for low-latency PTY output detection.
 Fires when Emacs is idle and PTY has pending data.
 Set to nil when streaming latency mode is disabled.")
-(put 'kuro--stream-idle-timer 'permanent-local t)
 
-(defvar-local kuro--stream-last-render-time 0.0
+(kuro--defvar-permanent-local kuro--stream-last-render-time 0.0
   "Float-time of last render triggered by the streaming idle timer.
 Used to rate-limit idle renders to at most `kuro-frame-rate' times/second.")
-(put 'kuro--stream-last-render-time 'permanent-local t)
 
-(defvar-local kuro--stream-min-interval nil
+(kuro--defvar-permanent-local kuro--stream-min-interval nil
   "Minimum seconds between idle-timer render cycles, derived from `kuro-frame-rate'.
 Computed lazily: nil means unset, will be computed on first idle render.")
-(put 'kuro--stream-min-interval 'permanent-local t)
 
 ;;; Low-latency idle timer
 

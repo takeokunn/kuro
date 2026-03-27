@@ -42,6 +42,38 @@
           (push buf result)))
       (nreverse result))))
 
+;;; Validation Primitives
+
+(defsubst kuro--positive-integer-p (val)
+  "Return non-nil if VAL is a positive integer (> 0)."
+  (and (integerp val) (> val 0)))
+
+(defmacro kuro--broadcast-to-buffers (fn &rest args)
+  "When FN is bound, call (FN ARGS...) in every live kuro-mode buffer."
+  `(when (fboundp ',fn)
+     (dolist (buf (kuro--kuro-buffers))
+       (with-current-buffer buf
+         (,fn ,@args)))))
+
+(defmacro kuro--check-positive-integer (var errors)
+  "Push an error string onto ERRORS if VAR is not a positive integer."
+  `(unless (kuro--positive-integer-p ,var)
+     (push (format "%s: must be a positive integer, got: %s" ',var ,var) ,errors)))
+
+(defmacro kuro--def-positive-int-setter (name err-msg doc &rest body)
+  "Define a defcustom :set handler NAME for a positive-integer setting.
+ERR-MSG is the user-error format string (receives VALUE as %s argument).
+DOC is the function docstring.
+Validates VALUE, sets SYMBOL via `set-default', then evaluates BODY.
+SYMBOL and VALUE are bound within BODY."
+  (declare (indent 3) (doc-string 3))
+  `(defun ,name (symbol value)
+     ,doc
+     (unless (kuro--positive-integer-p value)
+       (user-error ,err-msg value))
+     (set-default symbol value)
+     ,@body))
+
 ;;; :set handler functions
 
 (defun kuro--set-shell (symbol value)
@@ -50,21 +82,14 @@
     (user-error "kuro: shell executable not found: %s" value))
   (set-default symbol value))
 
-(defun kuro--set-scrollback-size (symbol value)
-  "Set SYMBOL to VALUE and propagate to all live Kuro buffers."
-  (unless (and (integerp value) (> value 0))
-    (user-error "kuro: scrollback-size must be a positive integer, got: %s" value))
-  (set-default symbol value)
-  (when (fboundp 'kuro--set-scrollback-max-lines)
-    (dolist (buf (kuro--kuro-buffers))
-      (with-current-buffer buf
-        (kuro--set-scrollback-max-lines value)))))
+(kuro--def-positive-int-setter kuro--set-scrollback-size
+    "kuro: scrollback-size must be a positive integer, got: %s"
+    "Set SYMBOL to VALUE and propagate to all live Kuro buffers."
+  (kuro--broadcast-to-buffers kuro--set-scrollback-max-lines value))
 
-(defun kuro--set-frame-rate (symbol value)
-  "Set SYMBOL to VALUE and restart render loops in all active Kuro buffers."
-  (unless (and (integerp value) (> value 0))
-    (user-error "kuro: frame-rate must be a positive integer, got: %s" value))
-  (set-default symbol value)
+(kuro--def-positive-int-setter kuro--set-frame-rate
+    "kuro: frame-rate must be a positive integer, got: %s"
+    "Set SYMBOL to VALUE and restart render loops in all active Kuro buffers."
   (when (and (fboundp 'kuro--stop-render-loop)
              (fboundp 'kuro--start-render-loop))
     (dolist (buf (kuro--kuro-buffers))
@@ -72,11 +97,9 @@
         (kuro--stop-render-loop)
         (kuro--start-render-loop)))))
 
-(defun kuro--set-tui-frame-rate (symbol value)
-  "Set SYMBOL to VALUE and switch render timer in active TUI-mode Kuro buffers."
-  (unless (and (integerp value) (> value 0))
-    (user-error "kuro: tui-frame-rate must be a positive integer, got: %s" value))
-  (set-default symbol value)
+(kuro--def-positive-int-setter kuro--set-tui-frame-rate
+    "kuro: tui-frame-rate must be a positive integer, got: %s"
+    "Set SYMBOL to VALUE and switch render timer in active TUI-mode Kuro buffers."
   (when (fboundp 'kuro--switch-render-timer)
     (dolist (buf (kuro--kuro-buffers))
       (with-current-buffer buf
@@ -86,9 +109,16 @@
 (defun kuro--set-font (symbol value)
   "Set SYMBOL to VALUE and apply font remap to all active Kuro buffers."
   (set-default symbol value)
-  (when (fboundp 'kuro--apply-font-to-buffer)
-    (dolist (buf (kuro--kuro-buffers))
-      (kuro--apply-font-to-buffer buf))))
+  (kuro--broadcast-to-buffers kuro--apply-font-to-buffer buf))
+
+(defun kuro--set-input-echo-delay (symbol value)
+  "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.
+VALUE must be a non-negative number."
+  (unless (numberp value)
+    (user-error "kuro-input-echo-delay must be a number"))
+  (when (< value 0)
+    (user-error "kuro-input-echo-delay must be non-negative"))
+  (set-default symbol value))
 
 ;;; Module Binary Path
 
@@ -102,6 +132,18 @@ Set this if the binary is installed in a non-standard location."
   :type '(choice (const :tag "Auto-detect" nil)
                  (file :tag "Custom path"))
   :group 'kuro)
+
+;;; Terminal dimension defaults
+
+(defconst kuro--default-rows 24
+  "Default terminal height in rows used when window dimensions are unavailable.
+Used in `kuro--init' when the ROWS argument is nil (e.g., noninteractive mode).
+See also `kuro--default-cols'.")
+
+(defconst kuro--default-cols 80
+  "Default terminal width in columns used when window dimensions are unavailable.
+Used in `kuro--init' when the COLS argument is nil (e.g., noninteractive mode).
+See also `kuro--default-rows'.")
 
 ;;; Core Settings
 
@@ -208,6 +250,17 @@ Set `kuro-typewriter-chars-per-second' to control the display speed."
   :type 'boolean
   :group 'kuro)
 
+(defcustom kuro-use-binary-ffi nil
+  "When non-nil, use the binary FFI protocol for polling terminal updates.
+In binary mode the native module returns a flat vector of byte values instead
+of nested Lisp cons cells, shifting cons allocation from the FFI layer to the
+Elisp decoder.  Enable this when `kuro-debug-perf' output shows the FFI
+allocation phase dominating per-frame time.  The visual output is identical
+to the default cons-cell protocol.
+Requires kuro native module >= 1.1."
+  :type 'boolean
+  :group 'kuro)
+
 (defcustom kuro-typewriter-chars-per-second 120
   "Number of characters to display per second in typewriter mode.
 Higher values look faster; lower values are more dramatic.
@@ -227,12 +280,7 @@ and no cursor movement until the next 120 fps periodic tick (~8 ms later).
 and Linux without adding perceptible latency to keystroke echo."
   :type 'float
   :group 'kuro
-  :set (lambda (sym val)
-         (unless (numberp val)
-           (user-error "kuro-input-echo-delay must be a number"))
-         (when (< val 0)
-           (user-error "kuro-input-echo-delay must be non-negative"))
-         (set-default sym val)))
+  :set #'kuro--set-input-echo-delay)
 
 (defcustom kuro-font-family nil
   "Font family for Kuro terminal buffers.
@@ -264,23 +312,11 @@ An empty list indicates that all settings are valid."
                 (string-empty-p kuro-shell)
                 (executable-find kuro-shell))
       (push (format "kuro-shell: executable not found: %s" kuro-shell) errors))
-    (unless (and (integerp kuro-scrollback-size) (> kuro-scrollback-size 0))
-      (push (format "kuro-scrollback-size: must be a positive integer, got: %s"
-                    kuro-scrollback-size)
-            errors))
-    (unless (and (integerp kuro-frame-rate) (> kuro-frame-rate 0))
-      (push (format "kuro-frame-rate: must be a positive integer, got: %s"
-                    kuro-frame-rate)
-            errors))
-    (unless (and (integerp kuro-tui-frame-rate) (> kuro-tui-frame-rate 0))
-      (push (format "kuro-tui-frame-rate: must be a positive integer, got: %s"
-                    kuro-tui-frame-rate)
-            errors))
+    (kuro--check-positive-integer kuro-scrollback-size errors)
+    (kuro--check-positive-integer kuro-frame-rate errors)
+    (kuro--check-positive-integer kuro-tui-frame-rate errors)
     (when kuro-font-size
-      (unless (and (integerp kuro-font-size) (> kuro-font-size 0))
-        (push (format "kuro-font-size: must be a positive integer or nil, got: %s"
-                      kuro-font-size)
-              errors)))
+      (kuro--check-positive-integer kuro-font-size errors))
     (dolist (color-var '(kuro-color-black
                          kuro-color-red
                          kuro-color-green
@@ -319,18 +355,6 @@ Displays results in the echo area."
 
 ;; Initialize the color table from current defcustom values at load time.
 (kuro--rebuild-named-colors)
-
-;;; Terminal dimension defaults
-
-(defconst kuro--default-rows 24
-  "Default terminal height in rows used when window dimensions are unavailable.
-Used in `kuro--init' when the ROWS argument is nil (e.g., noninteractive mode).
-See also `kuro--default-cols'.")
-
-(defconst kuro--default-cols 80
-  "Default terminal width in columns used when window dimensions are unavailable.
-Used in `kuro--init' when the COLS argument is nil (e.g., noninteractive mode).
-See also `kuro--default-rows'.")
 
 (provide 'kuro-config)
 

@@ -7,6 +7,7 @@
 #[cfg(unix)]
 use crate::pty::Pty;
 use crate::{Result, TerminalCore};
+use std::collections::HashMap;
 
 /// Lifecycle state of a terminal session.
 ///
@@ -47,6 +48,47 @@ pub struct TerminalSession {
     /// Buffered PTY data that exceeded `MAX_BYTES_PER_POLL` in the previous frame
     #[cfg(unix)]
     pub(super) pending_input: Vec<u8>,
+    /// Per-row hash cache for skip-unchanged-rows optimisation.
+    ///
+    /// Maps `row_index → (content_hash, palette_epoch)`.  A row is skipped in
+    /// `get_dirty_lines_with_faces` when both the content hash and the palette
+    /// epoch match the stored values, meaning neither cell content nor the
+    /// 256-color palette has changed since the last render.
+    pub(super) row_hashes: HashMap<usize, (u64, u64)>,
+    /// Monotonically increasing counter, bumped whenever the 256-color palette
+    /// changes (OSC 4 set, OSC 104 reset).  Stored alongside each row hash so
+    /// that a palette change invalidates every cached row without clearing the
+    /// entire `row_hashes` map.
+    pub(super) palette_epoch: u64,
+    /// Tracks whether the alternate screen was active at the end of the last
+    /// `get_dirty_lines_with_faces` call.  Used to detect DEC 1049 transitions
+    /// and clear `row_hashes` on alternate-screen enter/exit.
+    pub(super) was_alt_screen: bool,
+}
+
+/// Feed `data` into the terminal parser, limited by `budget`.
+///
+/// If `data.len() <= budget`, the entire slice is advanced and `budget` is
+/// decremented by `data.len()`.  Otherwise, only the first `budget` bytes are
+/// advanced, the remainder is appended to `overflow`, and `budget` is set to
+/// zero.  Empty `data` is a no-op.
+fn advance_with_budget(
+    core: &mut crate::TerminalCore,
+    data: &[u8],
+    budget: &mut usize,
+    overflow: &mut Vec<u8>,
+) {
+    if data.is_empty() {
+        return;
+    }
+    if data.len() <= *budget {
+        *budget -= data.len();
+        core.advance(data);
+    } else {
+        core.advance(&data[..*budget]);
+        overflow.extend_from_slice(&data[*budget..]);
+        *budget = 0;
+    }
 }
 
 // TerminalSession Facade
@@ -83,6 +125,9 @@ impl TerminalSession {
                 command: command.to_owned(),
                 state: SessionState::Bound,
                 pending_input: Vec::new(),
+                row_hashes: HashMap::new(),
+                palette_epoch: 0,
+                was_alt_screen: false,
             })
         }
 
@@ -91,6 +136,9 @@ impl TerminalSession {
             core,
             command: command.to_string(),
             state: SessionState::Bound,
+            row_hashes: HashMap::new(),
+            palette_epoch: 0,
+            was_alt_screen: false,
         })
     }
 
@@ -122,33 +170,23 @@ impl TerminalSession {
     pub fn poll_output(&mut self) -> Result<()> {
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
-            // Drain pending_input from previous frame first
             let mut budget = MAX_BYTES_PER_POLL;
+
+            // Drain pending_input from previous frame first
             if !self.pending_input.is_empty() {
                 let pending = std::mem::take(&mut self.pending_input);
-                if pending.len() <= budget {
-                    budget -= pending.len();
-                    self.core.advance(&pending);
-                } else {
-                    self.core.advance(&pending[..budget]);
-                    self.pending_input = pending[budget..].to_vec();
-                    budget = 0;
-                }
+                advance_with_budget(
+                    &mut self.core,
+                    &pending,
+                    &mut budget,
+                    &mut self.pending_input,
+                );
             }
 
             // Drain channel data up to the remaining budget
             if budget > 0 {
                 let data = pty.read()?;
-                if !data.is_empty() {
-                    if data.len() <= budget {
-                        budget -= data.len();
-                        self.core.advance(&data);
-                    } else {
-                        self.core.advance(&data[..budget]);
-                        self.pending_input.extend_from_slice(&data[budget..]);
-                        budget = 0;
-                    }
-                }
+                advance_with_budget(&mut self.core, &data, &mut budget, &mut self.pending_input);
             }
 
             // Second drain: yield to let the reader thread push any
@@ -157,14 +195,7 @@ impl TerminalSession {
             if budget > 0 {
                 std::thread::yield_now();
                 let more = pty.read()?;
-                if !more.is_empty() {
-                    if more.len() <= budget {
-                        self.core.advance(&more);
-                    } else {
-                        self.core.advance(&more[..budget]);
-                        self.pending_input.extend_from_slice(&more[budget..]);
-                    }
-                }
+                advance_with_budget(&mut self.core, &more, &mut budget, &mut self.pending_input);
             }
 
             // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
@@ -262,6 +293,9 @@ impl TerminalSession {
     /// Returns `Err` if the PTY window-size ioctl fails.
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         self.core.resize(rows, cols);
+        // Row hashes are invalidated by a resize because row count / col count
+        // may change, making the old per-row hashes stale.
+        self.row_hashes.clear();
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
             pty.set_winsize(rows, cols)?;
@@ -348,10 +382,10 @@ impl TerminalSession {
                 .is_some_and(crate::pty::posix::Pty::has_pending_data)
     }
 
-    #[cfg(not(unix))]
     /// Check if the PTY channel has pending unread data (without consuming it).
     ///
     /// Always returns `false` on non-Unix platforms where PTY support is unavailable.
+    #[cfg(not(unix))]
     pub fn has_pending_output(&self) -> bool {
         false
     }
@@ -372,7 +406,7 @@ impl TerminalSession {
     }
 
     #[cfg(not(unix))]
-    #[inline(always)]
+    #[inline]
     pub fn is_process_alive(&self) -> bool {
         true
     }
@@ -444,7 +478,10 @@ impl TerminalSession {
     #[must_use]
     pub fn get_default_colors(&self) -> (u32, u32, u32) {
         let encode = |color: &Option<crate::types::Color>| -> u32 {
-            color.as_ref().map_or(0xFF00_0000u32, Self::encode_color)
+            color.as_ref().map_or(
+                crate::ffi::codec::COLOR_DEFAULT_SENTINEL,
+                Self::encode_color,
+            )
         };
         (
             encode(&self.core.osc_data.default_fg),
@@ -558,5 +595,85 @@ impl TerminalSession {
     #[must_use]
     pub const fn get_synchronized_output(&self) -> bool {
         self.core.dec_modes.synchronized_output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::advance_with_budget;
+    use crate::ffi::codec::COLOR_DEFAULT_SENTINEL;
+
+    fn make_core() -> crate::TerminalCore {
+        crate::TerminalCore::new(24, 80)
+    }
+
+    #[test]
+    fn test_advance_with_budget_under_budget() {
+        let mut core = make_core();
+        let mut budget = 100usize;
+        let mut overflow = Vec::new();
+        advance_with_budget(&mut core, b"hello", &mut budget, &mut overflow);
+        assert_eq!(budget, 95);
+        assert!(overflow.is_empty());
+    }
+
+    #[test]
+    fn test_advance_with_budget_over_budget() {
+        let mut core = make_core();
+        let mut budget = 3usize;
+        let mut overflow = Vec::new();
+        advance_with_budget(&mut core, b"hello", &mut budget, &mut overflow);
+        assert_eq!(budget, 0);
+        assert_eq!(overflow, b"lo");
+    }
+
+    #[test]
+    fn test_advance_with_budget_exact_fit() {
+        let mut core = make_core();
+        let mut budget = 5usize;
+        let mut overflow = Vec::new();
+        advance_with_budget(&mut core, b"hello", &mut budget, &mut overflow);
+        assert_eq!(budget, 0);
+        assert!(overflow.is_empty(), "exact fit must not produce overflow");
+    }
+
+    #[test]
+    fn test_advance_with_budget_empty_data_is_noop() {
+        let mut core = make_core();
+        let mut budget = 100usize;
+        let mut overflow = Vec::new();
+        advance_with_budget(&mut core, &[], &mut budget, &mut overflow);
+        assert_eq!(budget, 100, "budget must be unchanged for empty data");
+        assert!(overflow.is_empty());
+    }
+
+    #[test]
+    fn test_color_default_sentinel_is_outside_rgb_space() {
+        // The sentinel must be outside the 24-bit RGB space (0x00FF_FFFF is the max).
+        // Top byte is 0xFF, which encode_color never produces for a real color.
+        assert_eq!(COLOR_DEFAULT_SENTINEL, 0xFF00_0000);
+        const { assert!(COLOR_DEFAULT_SENTINEL > 0x00FF_FFFF) };
+    }
+
+    #[test]
+    fn test_get_default_colors_unset_returns_sentinel() {
+        use super::{SessionState, TerminalSession};
+        let session = TerminalSession {
+            core: crate::TerminalCore::new(24, 80),
+            #[cfg(unix)]
+            pty: None,
+            command: String::new(),
+            state: SessionState::Bound,
+            #[cfg(unix)]
+            pending_input: Vec::new(),
+            row_hashes: std::collections::HashMap::new(),
+            palette_epoch: 0,
+            was_alt_screen: false,
+        };
+        let (fg, bg, cursor) = session.get_default_colors();
+        // Before any OSC 10/11/12, all three are unset → sentinel
+        assert_eq!(fg, COLOR_DEFAULT_SENTINEL);
+        assert_eq!(bg, COLOR_DEFAULT_SENTINEL);
+        assert_eq!(cursor, COLOR_DEFAULT_SENTINEL);
     }
 }

@@ -5,10 +5,22 @@
 //! invariants, bit-mapping correctness, and structural guarantees of the
 //! FFI wire format.
 
-use crate::ffi::codec::{encode_attrs, encode_color, encode_line};
+use crate::ffi::codec::{
+    compute_row_hash, encode_attrs, encode_color, encode_line, encode_screen_binary,
+};
+use crate::grid::line::Line;
 use crate::types::cell::{Cell, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::{Color, NamedColor};
 use proptest::prelude::*;
+
+/// Tuple type for a single binary-encoded screen row:
+/// `(row_index, text, face_ranges, col_to_buf)`.
+type ScreenLine = (
+    usize,
+    String,
+    Vec<(usize, usize, u32, u32, u64)>,
+    Vec<usize>,
+);
 
 // -------------------------------------------------------------------------
 // Arbitrary generators
@@ -405,4 +417,260 @@ fn test_encode_line_face_ranges_contiguous() {
             w[0].0, w[0].1, w[1].0, w[1].1
         );
     }
+}
+
+// -------------------------------------------------------------------------
+// encode_screen_binary example-based tests
+// -------------------------------------------------------------------------
+
+/// Helper: read a u32 LE from a byte slice at the given byte offset.
+fn read_u32(buf: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap())
+}
+
+/// Helper: read a u64 LE from a byte slice at the given byte offset.
+fn read_u64(buf: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(buf[offset..offset + 8].try_into().unwrap())
+}
+
+#[test]
+// INVARIANT: Empty input → exactly 4 bytes `[0,0,0,0]` (num_rows header only).
+fn test_encode_screen_binary_empty() {
+    let out = encode_screen_binary(&[]);
+    assert_eq!(
+        out,
+        [0u8, 0, 0, 0],
+        "empty input must produce 4-byte zero header"
+    );
+}
+
+#[test]
+// LAYOUT: Single row "A", no face ranges, col_to_buf=[0].
+// Expected layout:
+//   [0..4]   num_rows = 1
+//   [4..8]   row_index = 0
+//   [8..12]  num_face_ranges = 0
+//   [12..16] text_byte_len = 1
+//   [16]     b'A'
+//   [17..21] col_to_buf_len = 1
+//   [21..25] col_to_buf[0] = 0
+fn test_encode_screen_binary_one_row_no_faces() {
+    let lines: &[ScreenLine] = &[(0, "A".to_string(), vec![], vec![0])];
+    let out = encode_screen_binary(lines);
+
+    assert_eq!(
+        out.len(),
+        4 + 4 + 4 + 4 + 1 + 4 + 4,
+        "total byte count mismatch"
+    );
+    assert_eq!(read_u32(&out, 0), 1, "num_rows must be 1");
+    assert_eq!(read_u32(&out, 4), 0, "row_index must be 0");
+    assert_eq!(read_u32(&out, 8), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 12), 1, "text_byte_len must be 1");
+    assert_eq!(out[16], b'A', "text byte must be b'A'");
+    assert_eq!(read_u32(&out, 17), 1, "col_to_buf_len must be 1");
+    assert_eq!(read_u32(&out, 21), 0, "col_to_buf[0] must be 0");
+}
+
+#[test]
+// LAYOUT: row_index and text byte length are correctly encoded as u32 LE.
+fn test_encode_screen_binary_row_index_and_text_len() {
+    // Use row_index=42 and text "Hello" (5 bytes).
+    let lines: &[ScreenLine] = &[(42, "Hello".to_string(), vec![], vec![])];
+    let out = encode_screen_binary(lines);
+
+    assert_eq!(read_u32(&out, 0), 1, "num_rows must be 1");
+    assert_eq!(read_u32(&out, 4), 42, "row_index must be 42");
+    assert_eq!(read_u32(&out, 8), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 12), 5, "text_byte_len must be 5 for 'Hello'");
+    assert_eq!(&out[16..21], b"Hello", "text bytes must match 'Hello'");
+    // col_to_buf_len = 0 (empty vec)
+    assert_eq!(read_u32(&out, 21), 0, "col_to_buf_len must be 0");
+}
+
+#[test]
+// LAYOUT: 1 face range → 24 bytes of face range data; verify all 5 fields.
+fn test_encode_screen_binary_one_face_range() {
+    // row_index=0, text="AB" (2 bytes), 1 face range: (0,2, fg=1, bg=2, flags=3)
+    let lines: &[ScreenLine] = &[(0, "AB".to_string(), vec![(0, 2, 1, 2, 3)], vec![])];
+    let out = encode_screen_binary(lines);
+
+    // Offsets: 0=num_rows, 4=row_index, 8=num_face_ranges, 12=text_byte_len,
+    //          16+2=18 = face range start, then 4+4+4+4+8 = 24 bytes
+    assert_eq!(read_u32(&out, 8), 1, "num_face_ranges must be 1");
+    let fr_base = 4 + 4 + 4 + 4 + 2; // header + row_index + num_face_ranges + text_byte_len + 2 text bytes
+    assert_eq!(read_u32(&out, fr_base), 0, "face range start_buf must be 0");
+    assert_eq!(
+        read_u32(&out, fr_base + 4),
+        2,
+        "face range end_buf must be 2"
+    );
+    assert_eq!(read_u32(&out, fr_base + 8), 1, "face range fg must be 1");
+    assert_eq!(read_u32(&out, fr_base + 12), 2, "face range bg must be 2");
+    assert_eq!(
+        read_u64(&out, fr_base + 16),
+        3,
+        "face range flags must be 3"
+    );
+}
+
+#[test]
+// LAYOUT: col_to_buf length header and entries are correctly encoded.
+fn test_encode_screen_binary_col_to_buf_entries() {
+    // row_index=0, text="X" (1 byte), no faces, col_to_buf=[0, 0, 1] (3 entries)
+    let lines: &[ScreenLine] = &[(0, "X".to_string(), vec![], vec![0, 0, 1])];
+    let out = encode_screen_binary(lines);
+
+    // col_to_buf section starts at: 4 + 4 + 4 + 4 + 1 = 17
+    let ctb_base = 4 + 4 + 4 + 4 + 1;
+    assert_eq!(read_u32(&out, ctb_base), 3, "col_to_buf_len must be 3");
+    assert_eq!(read_u32(&out, ctb_base + 4), 0, "col_to_buf[0] must be 0");
+    assert_eq!(read_u32(&out, ctb_base + 8), 0, "col_to_buf[1] must be 0");
+    assert_eq!(read_u32(&out, ctb_base + 12), 1, "col_to_buf[2] must be 1");
+    assert_eq!(out.len(), ctb_base + 4 + 3 * 4, "total byte count mismatch");
+}
+
+#[test]
+// LAYOUT: 2 rows → num_rows header = 2, and both rows appear sequentially.
+fn test_encode_screen_binary_two_rows() {
+    let lines: &[ScreenLine] = &[
+        (0, "A".to_string(), vec![], vec![]),
+        (1, "B".to_string(), vec![], vec![]),
+    ];
+    let out = encode_screen_binary(lines);
+
+    assert_eq!(read_u32(&out, 0), 2, "num_rows must be 2");
+
+    // Row 0: bytes 4..17 (4 row_index + 4 num_fr + 4 text_len + 1 text + 4 ctb_len)
+    assert_eq!(read_u32(&out, 4), 0, "row 0 row_index must be 0");
+    assert_eq!(read_u32(&out, 8), 0, "row 0 num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 12), 1, "row 0 text_byte_len must be 1");
+    assert_eq!(out[16], b'A', "row 0 text must be b'A'");
+    assert_eq!(read_u32(&out, 17), 0, "row 0 col_to_buf_len must be 0");
+
+    // Row 1 starts at byte 21
+    assert_eq!(read_u32(&out, 21), 1, "row 1 row_index must be 1");
+    assert_eq!(read_u32(&out, 25), 0, "row 1 num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 29), 1, "row 1 text_byte_len must be 1");
+    assert_eq!(out[33], b'B', "row 1 text must be b'B'");
+    assert_eq!(read_u32(&out, 34), 0, "row 1 col_to_buf_len must be 0");
+}
+
+#[test]
+// LAYOUT: Unicode text "→" (3 UTF-8 bytes) → text_byte_len field must be 3.
+fn test_encode_screen_binary_unicode_text() {
+    let arrow = "→"; // U+2192, encodes to [0xE2, 0x86, 0x92] in UTF-8
+    assert_eq!(arrow.len(), 3, "sanity: '→' must be 3 bytes");
+    let lines: &[ScreenLine] = &[(0, arrow.to_string(), vec![], vec![])];
+    let out = encode_screen_binary(lines);
+
+    assert_eq!(read_u32(&out, 12), 3, "text_byte_len must be 3 for '→'");
+    assert_eq!(&out[16..19], arrow.as_bytes(), "text bytes must match '→'");
+}
+
+// -------------------------------------------------------------------------
+// compute_row_hash example-based tests
+// -------------------------------------------------------------------------
+
+#[test]
+// DETERMINISM: Same row + same col_to_buf → identical hash on two calls.
+fn test_compute_row_hash_deterministic() {
+    let mut line = Line::new(4);
+    line.update_cell(0, 'A', SgrAttributes::default());
+    line.update_cell(1, 'B', SgrAttributes::default());
+    let col_to_buf = vec![0usize, 1, 2, 3];
+
+    let h1 = compute_row_hash(&line, &col_to_buf);
+    let h2 = compute_row_hash(&line, &col_to_buf);
+    assert_eq!(h1, h2, "hash must be deterministic across two calls");
+}
+
+#[test]
+// SENSITIVITY: Two rows differing only in one character must hash differently.
+fn test_compute_row_hash_differs_by_char() {
+    let mut line_a = Line::new(4);
+    line_a.update_cell(0, 'A', SgrAttributes::default());
+    let mut line_b = Line::new(4);
+    line_b.update_cell(0, 'Z', SgrAttributes::default());
+    let col_to_buf: Vec<usize> = vec![];
+
+    let h_a = compute_row_hash(&line_a, &col_to_buf);
+    let h_b = compute_row_hash(&line_b, &col_to_buf);
+    assert_ne!(
+        h_a, h_b,
+        "rows differing in character must produce different hashes"
+    );
+}
+
+#[test]
+// SENSITIVITY: Same row content but different col_to_buf → different hashes.
+fn test_compute_row_hash_differs_by_col_to_buf() {
+    let mut line = Line::new(4);
+    line.update_cell(0, 'X', SgrAttributes::default());
+    let col_to_buf_a = vec![0usize, 1, 2, 3];
+    let col_to_buf_b = vec![0usize, 1, 2, 99]; // last entry differs
+
+    let h_a = compute_row_hash(&line, &col_to_buf_a);
+    let h_b = compute_row_hash(&line, &col_to_buf_b);
+    assert_ne!(
+        h_a, h_b,
+        "different col_to_buf must produce different hashes"
+    );
+}
+
+#[test]
+// SAFETY: Empty row (all blank cells) + empty col_to_buf → does not panic,
+// and returns the same value on repeated calls.
+fn test_compute_row_hash_empty_row() {
+    let line = Line::new(0); // zero-column line
+    let h1 = compute_row_hash(&line, &[]);
+    let h2 = compute_row_hash(&line, &[]);
+    assert_eq!(h1, h2, "hash of empty row must be consistent");
+}
+
+#[test]
+// SENSITIVITY: Same character but different foreground color → different hashes.
+fn test_compute_row_hash_differs_by_fg_color() {
+    let attrs_red = SgrAttributes {
+        foreground: Color::Rgb(255, 0, 0),
+        ..Default::default()
+    };
+    let attrs_blue = SgrAttributes {
+        foreground: Color::Rgb(0, 0, 255),
+        ..Default::default()
+    };
+
+    let mut line_red = Line::new(1);
+    line_red.update_cell(0, 'A', attrs_red);
+    let mut line_blue = Line::new(1);
+    line_blue.update_cell(0, 'A', attrs_blue);
+
+    let h_red = compute_row_hash(&line_red, &[]);
+    let h_blue = compute_row_hash(&line_blue, &[]);
+    assert_ne!(
+        h_red, h_blue,
+        "different fg color must produce different hashes"
+    );
+}
+
+#[test]
+// SENSITIVITY: Same char, different SGR flags (bold vs default) → different hashes.
+fn test_compute_row_hash_differs_by_attrs() {
+    let attrs_plain = SgrAttributes::default();
+    let attrs_bold = SgrAttributes {
+        flags: SgrFlags::BOLD,
+        ..Default::default()
+    };
+
+    let mut line_plain = Line::new(1);
+    line_plain.update_cell(0, 'A', attrs_plain);
+    let mut line_bold = Line::new(1);
+    line_bold.update_cell(0, 'A', attrs_bold);
+
+    let h_plain = compute_row_hash(&line_plain, &[]);
+    let h_bold = compute_row_hash(&line_bold, &[]);
+    assert_ne!(
+        h_plain, h_bold,
+        "bold vs plain must produce different hashes"
+    );
 }

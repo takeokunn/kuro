@@ -117,16 +117,18 @@ fn kuro_core_poll_updates_with_faces(env: &Env, session_id: u64) -> EmacsResult<
                 // Convert face ranges to Emacs list of flat (start-buf end-buf fg bg flags) lists
                 // NOTE: start/end are now buffer offsets (not grid column indices)
                 let mut face_list = false.into_lisp(env)?;
-                for (start_buf, end_buf, fg, bg, flags) in face_ranges {
+                for (start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
                     let start_val = (start_buf as i64).into_lisp(env)?;
                     let end_val = (end_buf as i64).into_lisp(env)?;
                     let fg_val = i64::from(fg).into_lisp(env)?;
                     let bg_val = i64::from(bg).into_lisp(env)?;
                     let flags_val = (flags as i64).into_lisp(env)?;
+                    let ul_color_val = i64::from(ul_color).into_lisp(env)?;
 
-                    // Build flat proper list: (start end fg bg flags)
+                    // Build flat proper list: (start end fg bg flags ul_color)
                     let nil = false.into_lisp(env)?;
-                    let range_list = env.cons(flags_val, nil)?;
+                    let range_list = env.cons(ul_color_val, nil)?;
+                    let range_list = env.cons(flags_val, range_list)?;
                     let range_list = env.cons(bg_val, range_list)?;
                     let range_list = env.cons(fg_val, range_list)?;
                     let range_list = env.cons(end_val, range_list)?;
@@ -192,6 +194,61 @@ fn kuro_core_poll_updates_binary(env: &Env, session_id: u64) -> EmacsResult<Valu
                 vec.set(i, i64::from(byte).into_lisp(env)?)?;
             }
             vec.into_lisp(env)
+        }
+        Err(e) => emit_error(env, &e),
+    }
+}
+
+/// Poll for terminal updates and return a cons `(text-strings . binary-face-data)`.
+///
+/// This is a text-decode-optimised companion to `kuro_core_poll_updates_binary`.
+/// Instead of embedding UTF-8 bytes in the binary frame (requiring the Elisp
+/// side to perform a `make-string` + `dotimes aset` loop + `decode-coding-string`
+/// triple-copy decode), this function:
+///
+/// - Returns row text as **native Emacs strings** via `env.into_lisp(text)`,
+///   crossing the FFI boundary without any extra byte-by-byte copy on the Lisp side.
+/// - Returns face/color/col-to-buf data in the same compact binary format as
+///   `kuro_core_poll_updates_binary`, so the optimised binary decoder continues
+///   to apply for those fields.
+///
+/// Return value: a cons cell `(TEXT-STRINGS . BINARY-DATA)` where:
+/// - `TEXT-STRINGS` is an Emacs vector of strings, one entry per dirty row,
+///   in the same order as the rows encoded in `BINARY-DATA`.
+/// - `BINARY-DATA` is an Emacs vector of byte fixnums identical to what
+///   `kuro_core_poll_updates_binary` would return, **except** the `text_byte_len`
+///   header field is always 0 and no text bytes are written for any row (the
+///   strings are provided via `TEXT-STRINGS` instead).
+///
+/// Returns `nil` (`false`) when no dirty lines are present.
+#[defun]
+fn kuro_core_poll_updates_binary_with_strings(
+    env: &Env,
+    session_id: u64,
+) -> EmacsResult<Value<'_>> {
+    let result = poll_encoded_lines(session_id, "panic in poll_updates_binary_with_strings");
+
+    match result {
+        Ok(lines) => {
+            if lines.is_empty() {
+                return false.into_lisp(env);
+            }
+
+            // Build the native-string vector: one Emacs string per dirty row.
+            let n = lines.len();
+            let strings_vec = env.make_vector(n, false.into_lisp(env)?)?;
+            for (i, (_, text, _, _)) in lines.iter().enumerate() {
+                strings_vec.set(i, text.as_str().into_lisp(env)?)?;
+            }
+
+            // Encode face/col-to-buf data into binary, with text_byte_len = 0 per row.
+            let bytes = crate::ffi::codec::encode_screen_binary_no_text(&lines);
+            let bytes_vec = env.make_vector(bytes.len(), 0i64.into_lisp(env)?)?;
+            for (i, &byte) in bytes.iter().enumerate() {
+                bytes_vec.set(i, i64::from(byte).into_lisp(env)?)?;
+            }
+
+            env.cons(strings_vec, bytes_vec)
         }
         Err(e) => emit_error(env, &e),
     }

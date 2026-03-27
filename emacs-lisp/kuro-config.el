@@ -250,7 +250,7 @@ Set `kuro-typewriter-chars-per-second' to control the display speed."
   :type 'boolean
   :group 'kuro)
 
-(defcustom kuro-use-binary-ffi nil
+(defcustom kuro-use-binary-ffi t
   "When non-nil, use the binary FFI protocol for polling terminal updates.
 In binary mode the native module returns a flat vector of byte values instead
 of nested Lisp cons cells, shifting cons allocation from the FFI layer to the

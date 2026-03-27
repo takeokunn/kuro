@@ -66,9 +66,20 @@ Returns the cached value from `kuro--blink-fast-frames-cached'."
 (kuro--defvar-permanent-local kuro--blink-overlays nil
   "List of active blink overlays in the current kuro buffer.")
 
+(kuro--defvar-permanent-local kuro--blink-overlays-by-row
+  (make-hash-table :test 'eql)
+  "Hash table mapping row index to a list of blink overlays on that row.
+Used by `kuro--clear-line-blink-overlays' to avoid scanning the full
+`kuro--blink-overlays' list for each dirty row update.")
+
 (kuro--defvar-permanent-local kuro--image-overlays nil
   "List of image display overlays in the current kuro buffer.
 Each overlay has a `kuro-image' property and a `display' image spec.")
+
+(kuro--defvar-permanent-local kuro--has-images nil
+  "Non-nil when the current buffer has at least one active image overlay.
+Used as a fast guard to skip `kuro--clear-row-image-overlays' on rows
+when no Kitty Graphics images are present.")
 
 (defvar kuro--face-prop-template (list 'face nil)
   "Reusable property list for face application to avoid per-call allocation.")
@@ -102,11 +113,15 @@ Modifies `kuro--blink-visible-slow' or `kuro--blink-visible-fast' in-place."
 BLINK-TYPE is the symbol `slow' or `fast', controlling which blink
 visibility state variable is consulted."
   (let* ((visible (kuro--blink-visible blink-type))
-         (ov (make-overlay start end)))
+         (ov (make-overlay start end))
+         ;; Derive row (0-based) from buffer position for the by-row index.
+         (row (1- (line-number-at-pos start))))
     (overlay-put ov 'kuro-blink t)
     (overlay-put ov 'kuro-blink-type blink-type)
     (overlay-put ov 'invisible (not visible))
-    (push ov kuro--blink-overlays)))
+    (push ov kuro--blink-overlays)
+    (puthash row (cons ov (gethash row kuro--blink-overlays-by-row))
+             kuro--blink-overlays-by-row)))
 
 (defun kuro--toggle-blink-phase (blink-type)
   "Toggle BLINK-TYPE (`slow' or `fast') visibility state and update matching overlays.
@@ -138,7 +153,8 @@ Called once per render cycle from `kuro--render-cycle'."
   (dolist (ov kuro--image-overlays)
     (when (overlay-buffer ov)
       (delete-overlay ov)))
-  (setq kuro--image-overlays nil))
+  (setq kuro--image-overlays nil)
+  (setq kuro--has-images nil))
 
 (defun kuro--clear-row-image-overlays (row)
   "Remove image overlays that overlap ROW.
@@ -156,7 +172,9 @@ and ends after row start."
                  (> (overlay-end ov) line-start))
             (delete-overlay ov)
           (push ov remaining)))
-      (setq kuro--image-overlays (nreverse remaining)))))
+      (setq kuro--image-overlays (nreverse remaining))
+      (unless kuro--image-overlays
+        (setq kuro--has-images nil)))))
 
 (defun kuro--decode-png-image (b64)
   "Decode base64 B64 and return an Emacs PNG image object.
@@ -181,7 +199,8 @@ onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
         (overlay-put ov 'kuro-image t)
         (overlay-put ov 'display    img)
         (overlay-put ov 'evaporate  t)   ; auto-delete if region deleted
-        (push ov kuro--image-overlays)))))
+        (push ov kuro--image-overlays)
+        (setq kuro--has-images t)))))
 
 (defun kuro--render-image-notification (notif)
   "Render a single Kitty Graphics image placement NOTIF in the terminal buffer.
@@ -199,24 +218,24 @@ Creates an overlay with a `display' image property at the correct grid position.
 
 ;;; FFI face application with blink and hidden support
 
-(defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags)
+(defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags ul-color-enc)
   "Apply FFI face data to the buffer region from START-POS to END-POS.
 FG-ENC and BG-ENC are encoded foreground/background colors (u32).
-FLAGS is the SGR attribute bitmask.  Applies the face, blink overlays
-(SGR 5/6), and invisible property (SGR 8) as appropriate.
+FLAGS is the SGR attribute bitmask.  UL-COLOR-ENC is the encoded underline
+color (u32) transmitted in the version-2 binary wire format.
+Applies the face, blink overlays (SGR 5/6), and invisible property (SGR 8).
 
-Fast-path: returns immediately when FG-ENC, BG-ENC, and FLAGS are all at
-their default/zero values (no color, no attributes).  Callers do not need
-to repeat this guard."
+Fast-path: returns immediately when FG-ENC, BG-ENC, FLAGS, and UL-COLOR-ENC
+are all at their default/zero values (no color, no attributes).  Callers do
+not need to repeat this guard."
   (unless (and (= fg-enc kuro--ffi-color-default)
                (= bg-enc kuro--ffi-color-default)
                (= flags 0))
-    ;; Fourth arg = underline-color (always 0: not yet encoded in FFI face ranges).
-    ;; TODO: extend encode_line_faces to emit underline_color as a 6th tuple element
-    ;; when SgrAttributes::underline_color != Color::Default, then decode here.
-    (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags 0)))
-      (setcar (cdr kuro--face-prop-template) face)
-      (add-text-properties start-pos end-pos kuro--face-prop-template))
+    (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags ul-color-enc)))
+      (if (>= emacs-major-version 29)
+          (add-face-text-property start-pos end-pos face)
+        (setcar (cdr kuro--face-prop-template) face)
+        (add-text-properties start-pos end-pos kuro--face-prop-template)))
     (when (/= 0 (logand flags (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)))
       (cond
        ((/= 0 (logand flags kuro--sgr-flag-blink-fast))

@@ -7,6 +7,11 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 pub mod error;
 pub mod ffi;
 pub mod grid;

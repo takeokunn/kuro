@@ -73,12 +73,13 @@ impl TerminalSession {
             self.palette_epoch = self.palette_epoch.wrapping_add(1);
         }
 
-        // Check if alternate screen was toggled since the last render and clear
-        // row_hashes to force a full re-render of all rows.
+        // Check if alternate screen was toggled since the last render and bump
+        // palette_epoch to implicitly invalidate all cached row hashes without
+        // clearing the Vec (avoids the O(rows) fill on every screen switch).
         let now_alt = self.core.screen.is_alternate_screen_active();
         if now_alt != self.was_alt_screen {
             self.was_alt_screen = now_alt;
-            self.row_hashes.clear();
+            self.palette_epoch = self.palette_epoch.wrapping_add(1);
         }
 
         // Fast path: full_dirty → iterate 0..rows directly without allocating a Vec.
@@ -92,13 +93,31 @@ impl TerminalSession {
         if self.core.screen.is_full_dirty() {
             let rows = self.core.screen.rows() as usize;
             self.core.screen.clear_dirty();
+            // Ensure Vec is sized to hold all rows.
+            if self.row_hashes.len() < rows {
+                self.row_hashes.resize(rows, None);
+            }
+            let epoch = self.palette_epoch;
             let mut result = Vec::with_capacity(rows);
+            let mut pool = crate::ffi::codec::EncodePool::new();
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
+                    // Fast path: version + epoch match → no hash needed, skip row.
+                    if let Some((stored_ver, stored_hash, stored_epoch)) =
+                        self.row_hashes[row]
+                    {
+                        if line.version == stored_ver && epoch == stored_epoch {
+                            // Re-emit with cached data to keep render state consistent.
+                            // We still need to send the row content because full_dirty
+                            // requires all rows to be returned.
+                            // (fall through to encode below)
+                            let _ = (stored_ver, stored_hash, stored_epoch);
+                        }
+                    }
                     let (text, face_ranges, col_to_buf) =
-                        crate::ffi::codec::encode_line(&line.cells);
+                        crate::ffi::codec::encode_line_with_pool(&line.cells, &mut pool);
                     let hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
-                    self.row_hashes.insert(row, (hash, self.palette_epoch));
+                    self.row_hashes[row] = Some((line.version, hash, epoch));
                     result.push((row, text, face_ranges, col_to_buf));
                 }
             }
@@ -108,21 +127,41 @@ impl TerminalSession {
         let dirty_indices = self.core.screen.take_dirty_lines();
         let mut result = Vec::with_capacity(dirty_indices.len());
         let epoch = self.palette_epoch;
+        let mut pool = crate::ffi::codec::EncodePool::new();
 
         for row in dirty_indices {
             if let Some(line) = self.core.screen.get_line(row) {
-                let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(&line.cells);
-                let new_hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
-
-                // Skip this row if both content hash and palette epoch match.
-                if let Some(&(stored_hash, stored_epoch)) = self.row_hashes.get(&row) {
-                    if stored_hash == new_hash && stored_epoch == epoch {
-                        // Unchanged row — do not include in output.
+                // Fast path: if version and palette epoch both match the stored
+                // values, the row content is guaranteed unchanged — skip hash.
+                if let Some((stored_ver, _stored_hash, stored_epoch)) =
+                    self.row_hashes.get(row).copied().flatten()
+                {
+                    if line.version == stored_ver && epoch == stored_epoch {
+                        // Unchanged row — skip without computing hash.
                         continue;
                     }
                 }
 
-                self.row_hashes.insert(row, (new_hash, epoch));
+                let (text, face_ranges, col_to_buf) =
+                    crate::ffi::codec::encode_line_with_pool(&line.cells, &mut pool);
+                let new_hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
+
+                // Slow path: check hash + epoch to guard against false positives
+                // (e.g. version counter wrapped, or palette changed without version bump).
+                if let Some((_stored_ver, stored_hash, stored_epoch)) =
+                    self.row_hashes.get(row).copied().flatten()
+                {
+                    if stored_hash == new_hash && stored_epoch == epoch {
+                        // Hash confirms unchanged — do not include in output.
+                        continue;
+                    }
+                }
+
+                // Grow Vec if needed (row index may exceed current len on first use).
+                if row >= self.row_hashes.len() {
+                    self.row_hashes.resize(row + 1, None);
+                }
+                self.row_hashes[row] = Some((line.version, new_hash, epoch));
                 result.push((row, text, face_ranges, col_to_buf));
             }
         }

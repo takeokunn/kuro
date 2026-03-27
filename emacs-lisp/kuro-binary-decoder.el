@@ -23,20 +23,31 @@
 ;; See `encode_screen_binary' in rust-core/src/ffi/codec.rs for the canonical
 ;; layout.  Each frame is a flat vector of byte integers (0–255) structured as:
 ;;
+;;   [format_version: u32 LE]  (version 1 = current; version 2 = 28-byte face ranges)
 ;;   [num_rows: u32 LE]
 ;;   For each row:
 ;;     [row_index: u32 LE] [num_face_ranges: u32 LE] [text_byte_len: u32 LE]
 ;;     [text: text_byte_len bytes (UTF-8)]
-;;     For each face range (24 bytes each):
+;;     For each face range (28 bytes, version 2; 24 bytes, version 1):
 ;;       [start_buf: u32 LE] [end_buf: u32 LE]
 ;;       [fg: u32 LE] [bg: u32 LE] [flags: u64 LE]
+;;       [ul_color: u32 LE]  (version 2 only)
 ;;     [col_to_buf_len: u32 LE]
 ;;     [col_to_buf entries: col_to_buf_len × u32 LE]
 
 ;;; Code:
 
-;; Declare the binary FFI function provided by the Rust dynamic module.
+;; Declare the binary FFI functions provided by the Rust dynamic module.
 (declare-function kuro-core-poll-updates-binary "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-updates-binary-with-strings "ext:kuro-core" (session-id))
+
+;;; Format version constants
+
+(defconst kuro--binary-format-version-v1 1
+  "Binary frame format version 1: 8-byte header, 24-byte face ranges.")
+
+(defconst kuro--binary-format-version-v2 2
+  "Binary frame format version 2: 8-byte header, 28-byte face ranges (adds underline_color).")
 
 ;;; Low-level byte readers
 
@@ -68,20 +79,26 @@ and NEW-POS is the byte offset after the text data."
     (cons (decode-coding-string text-bytes 'utf-8-unix)
           (+ pos text-byte-len))))
 
-(defun kuro--decode-face-ranges (vec pos num-face-ranges)
+(defun kuro--decode-face-ranges (vec pos num-face-ranges format-version)
   "Decode NUM-FACE-RANGES face tuples from VEC starting at byte offset POS.
-Each tuple is 24 bytes: start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64).
+FORMAT-VERSION controls the stride and presence of the ul-color field:
+  version 1: 24 bytes per range — start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64)
+  version 2: 28 bytes per range — adds ul-color(u32) at offset 24.
 Returns a cons cell (FACE-LIST . NEW-POS) where FACE-LIST is in original order."
-  (let (face-list)
+  (let ((result nil)
+        (stride (if (>= format-version 2) 28 24)))
     (dotimes (_ num-face-ranges)
-      (push (list (kuro--read-u32-le vec pos)
-                  (kuro--read-u32-le vec (+ pos 4))
-                  (kuro--read-u32-le vec (+ pos 8))
-                  (kuro--read-u32-le vec (+ pos 12))
-                  (kuro--read-u64-le vec (+ pos 16)))
-            face-list)
-      (setq pos (+ pos 24)))
-    (cons (nreverse face-list) pos)))
+      (let* ((start-buf (kuro--read-u32-le vec pos))
+             (end-buf   (kuro--read-u32-le vec (+ pos 4)))
+             (fg        (kuro--read-u32-le vec (+ pos 8)))
+             (bg        (kuro--read-u32-le vec (+ pos 12)))
+             (flags     (kuro--read-u64-le vec (+ pos 16)))
+             (ul-color  (if (>= format-version 2)
+                            (kuro--read-u32-le vec (+ pos 24))
+                          0)))
+        (push (list start-buf end-buf fg bg flags ul-color) result)
+        (setq pos (+ pos stride))))
+    (cons (nreverse result) pos)))
 
 (defun kuro--decode-col-to-buf (vec pos)
   "Decode a col-to-buf vector from VEC starting at byte offset POS.
@@ -105,29 +122,92 @@ when length is zero (no CJK wide characters on this row)."
 the same format as `kuro--poll-updates-with-faces' returns.
 
 Format: see `encode_screen_binary' in rust-core/src/ffi/codec.rs.
+The frame begins with an 8-byte header:
+  [format_version: u32 LE][num_rows: u32 LE]
+Versions 1 and 2 are accepted; any other version signals an error.
 Each element of the returned list has the structure:
   (((row . text) . face-list) . col-to-buf-vector)
 which is identical to what `kuro--apply-dirty-lines' expects."
-  (let ((num-rows (kuro--read-u32-le vec 0))
-        (pos 4)
-        result)
-    (dotimes (_ num-rows)
-      (let* ((row-index       (kuro--read-u32-le vec pos))
-             (num-face-ranges (kuro--read-u32-le vec (+ pos 4)))
-             (text-byte-len   (kuro--read-u32-le vec (+ pos 8))))
-        (setq pos (+ pos 12))
-        (let* ((text-pair (kuro--decode-row-text vec pos text-byte-len))
-               (text (car text-pair)))
-          (setq pos (cdr text-pair))
-          (let* ((face-pair (kuro--decode-face-ranges vec pos num-face-ranges))
+  (let* ((format-version (kuro--read-u32-le vec 0)))
+    (unless (or (= format-version kuro--binary-format-version-v1)
+                (= format-version kuro--binary-format-version-v2))
+      (error "kuro: unsupported binary format version %d" format-version))
+    (let* ((num-rows (kuro--read-u32-le vec 4))
+           (pos 8)
+           (result (make-vector num-rows nil))
+           (idx 0))
+      (dotimes (_ num-rows)
+        (let* ((row-index       (kuro--read-u32-le vec pos))
+               (num-face-ranges (kuro--read-u32-le vec (+ pos 4)))
+               (text-byte-len   (kuro--read-u32-le vec (+ pos 8))))
+          (setq pos (+ pos 12))
+          (let* ((text-pair (kuro--decode-row-text vec pos text-byte-len))
+                 (text (car text-pair)))
+            (setq pos (cdr text-pair))
+            (let* ((face-pair (kuro--decode-face-ranges vec pos num-face-ranges format-version))
+                   (face-list (car face-pair)))
+              (setq pos (cdr face-pair))
+              (let* ((ctb-pair (kuro--decode-col-to-buf vec pos))
+                     (col-to-buf (car ctb-pair)))
+                (setq pos (cdr ctb-pair))
+                (aset result idx
+                      (cons (cons (cons row-index text) face-list) col-to-buf))
+                (setq idx (1+ idx)))))))
+      (append result nil))))
+
+;;; Optimised decoder using native Emacs strings from Rust
+
+(defun kuro--decode-binary-updates-with-strings (text-strings vec)
+  "Decode a binary update VEC using pre-supplied native TEXT-STRINGS.
+TEXT-STRINGS is an Emacs vector of strings (one per dirty row) as returned
+by `kuro-core-poll-updates-binary-with-strings'.  VEC is the binary face/
+col-to-buf data with `text_byte_len' = 0 for every row.
+
+This avoids the triple-copy `make-string' + `dotimes aset' +
+`decode-coding-string' path in `kuro--decode-row-text': Rust has already
+handed us native Emacs strings via `env.into_lisp(text)'.
+
+The return value has the same structure as `kuro--decode-binary-updates':
+  (((row . text) . face-list) . col-to-buf-vector)"
+  (let* ((format-version (kuro--read-u32-le vec 0)))
+    (unless (or (= format-version kuro--binary-format-version-v1)
+                (= format-version kuro--binary-format-version-v2))
+      (error "kuro: unsupported binary format version %d" format-version))
+    (let* ((num-rows (kuro--read-u32-le vec 4))
+           (pos 8)
+           (result (make-vector num-rows nil))
+           (idx 0))
+      (dotimes (_ num-rows)
+        (let* ((row-index       (kuro--read-u32-le vec pos))
+               (num-face-ranges (kuro--read-u32-le vec (+ pos 4)))
+               ;; text_byte_len is always 0 in this variant; skip the 4-byte field.
+               (_text-byte-len  (kuro--read-u32-le vec (+ pos 8))))
+          (setq pos (+ pos 12))
+          ;; Text is supplied directly as a native Emacs string — no decoding loop.
+          (let* ((text (aref text-strings idx))
+                 (face-pair (kuro--decode-face-ranges vec pos num-face-ranges format-version))
                  (face-list (car face-pair)))
             (setq pos (cdr face-pair))
             (let* ((ctb-pair (kuro--decode-col-to-buf vec pos))
                    (col-to-buf (car ctb-pair)))
               (setq pos (cdr ctb-pair))
-              (push (cons (cons (cons row-index text) face-list) col-to-buf)
-                    result))))))
-    (nreverse result)))
+              (aset result idx
+                    (cons (cons (cons row-index text) face-list) col-to-buf))
+              (setq idx (1+ idx))))))
+      (append result nil))))
+
+(defun kuro--poll-updates-binary-optimised (session-id)
+  "Poll dirty lines for SESSION-ID using the text-string-optimised FFI path.
+Calls `kuro-core-poll-updates-binary-with-strings', which returns a cons
+cell `(TEXT-STRINGS . BINARY-DATA)', then decodes it with
+`kuro--decode-binary-updates-with-strings'.
+
+Returns nil when there are no dirty lines (FFI returned nil).
+Otherwise returns the decoded dirty-line list in the same format as
+`kuro--decode-binary-updates'."
+  (let ((result (kuro-core-poll-updates-binary-with-strings session-id)))
+    (when result
+      (kuro--decode-binary-updates-with-strings (car result) (cdr result)))))
 
 (provide 'kuro-binary-decoder)
 

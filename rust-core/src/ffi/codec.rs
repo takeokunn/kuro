@@ -86,12 +86,12 @@ pub const ATTRS_STYLE_SHIFT: u32 = 9;
 ///
 /// - `row`: grid row index
 /// - `text`: UTF-8 content with wide-placeholder cells removed
-/// - `face_ranges`: `(start_buf, end_buf, fg, bg, flags)` in buffer offsets
+/// - `face_ranges`: `(start_buf, end_buf, fg, bg, flags, ul_color)` in buffer offsets
 /// - `col_to_buf`: maps grid column → buffer char offset (empty = identity)
 pub(crate) type EncodedLine = (
     usize,
     String,
-    Vec<(usize, usize, u32, u32, u64)>,
+    Vec<(usize, usize, u32, u32, u64, u32)>,
     Vec<usize>,
 );
 
@@ -99,7 +99,39 @@ pub(crate) type EncodedLine = (
 ///
 /// Used as the return type of [`encode_line`]. [`EncodedLine`] prepends the
 /// row index (`usize`) to produce the full FFI transfer tuple.
-pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, Vec<usize>);
+pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64, u32)>, Vec<usize>);
+
+/// Reusable allocation pool for encoding dirty lines.
+///
+/// Holds a single `String`, `face_ranges` `Vec`, and `col_to_buf` `Vec` that
+/// are cleared and refilled on each call to [`encode_line_with_pool`].
+/// After encoding the caller clones the contents into the result `Vec`; the
+/// pool retains its heap capacity for the next row.  This eliminates one
+/// `String::with_capacity` + one `Vec::with_capacity` allocation per dirty
+/// line per frame.
+pub(crate) struct EncodePool {
+    pub text: String,
+    pub face_ranges: Vec<(usize, usize, u32, u32, u64, u32)>,
+    pub col_to_buf: Vec<usize>,
+}
+
+impl EncodePool {
+    #[inline]
+    pub(crate) fn new() -> Self {
+        Self {
+            text: String::new(),
+            face_ranges: Vec::new(),
+            col_to_buf: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.text.clear();
+        self.face_ranges.clear();
+        self.col_to_buf.clear();
+    }
+}
 
 /// Encode a `Color` value as a `u32` for FFI transfer.
 ///
@@ -109,7 +141,7 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64)>, V
 /// - `Color::Named(c)` → [`COLOR_NAMED_MARKER`] `| index`
 /// - `Color::Indexed(i)` → [`COLOR_INDEXED_MARKER`] `| i`
 /// - `Color::Rgb(r, g, b)` → `(r << RGB_R_SHIFT) | (g << RGB_G_SHIFT) | b` (can be 0 = true black)
-#[inline]
+#[inline(always)]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub fn encode_color(color: &Color) -> u32 {
     match color {
@@ -203,7 +235,7 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
 
     let mut text = String::with_capacity(cells.len());
     // face_ranges use buf_offset (not col) for start/end
-    let mut face_ranges: Vec<(usize, usize, u32, u32, u64)> = Vec::with_capacity(8);
+    let mut face_ranges: Vec<(usize, usize, u32, u32, u64, u32)> = Vec::with_capacity(8);
     // col_to_buf[col] = buffer char offset; lazily built on the first Wide cell.
     // Stays empty for pure-ASCII lines (identity mapping implied on Emacs side).
     let mut col_to_buf: Vec<usize> = Vec::new();
@@ -216,6 +248,7 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     let mut current_fg = u32::MAX;
     let mut current_bg = u32::MAX;
     let mut current_flags = u64::MAX;
+    let mut current_ul_color = u32::MAX;
     // Column counter for lazy col_to_buf backfill.
     let mut col = 0usize;
 
@@ -250,8 +283,9 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
         let fg = encode_color(&cell.attrs.foreground);
         let bg = encode_color(&cell.attrs.background);
         let flags = encode_attrs(&cell.attrs);
+        let ul_color = encode_color(&cell.attrs.underline_color);
 
-        if fg != current_fg || bg != current_bg || flags != current_flags {
+        if fg != current_fg || bg != current_bg || flags != current_flags || ul_color != current_ul_color {
             if buf_offset > current_start_buf {
                 face_ranges.push((
                     current_start_buf,
@@ -259,12 +293,14 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
                     current_fg,
                     current_bg,
                     current_flags,
+                    current_ul_color,
                 ));
                 current_start_buf = buf_offset;
             }
             current_fg = fg;
             current_bg = bg;
             current_flags = flags;
+            current_ul_color = ul_color;
         }
 
         // Advance by the number of Unicode scalar values in the grapheme cluster.
@@ -289,19 +325,138 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
             current_fg,
             current_bg,
             current_flags,
+            current_ul_color,
         ));
     }
 
     (text, face_ranges, col_to_buf)
 }
 
+/// Encode a slice of cells into the provided [`EncodePool`], then clone the
+/// results into an [`EncodedLine`].
+///
+/// This is a pool-aware variant of [`encode_line`].  The pool's `String` and
+/// `Vec` allocations are reused across calls (cleared then refilled), so only
+/// one clone-into-result allocation happens per line instead of one fresh
+/// allocation plus a clone.
+///
+/// # Panics
+///
+/// Does not panic; identical logic to [`encode_line`].
+#[inline]
+#[expect(
+    clippy::similar_names,
+    reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
+)]
+pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> EncodedLineData {
+    pool.clear();
+
+    if cells.is_empty() {
+        return (String::new(), Vec::new(), Vec::new());
+    }
+
+    pool.text.reserve(cells.len());
+    pool.face_ranges.reserve(8);
+
+    let mut buf_offset = 0usize;
+    let mut current_start_buf = 0usize;
+    let mut current_fg = u32::MAX;
+    let mut current_bg = u32::MAX;
+    let mut current_flags = u64::MAX;
+    let mut current_ul_color = u32::MAX;
+    let mut col = 0usize;
+
+    for cell in cells {
+        if cell.width == CellWidth::Wide {
+            if pool.col_to_buf.is_empty() {
+                pool.col_to_buf.reserve(cells.len());
+                pool.col_to_buf.extend(0..col);
+            }
+            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
+            pool.col_to_buf.push(buf_offset.saturating_sub(1));
+            col += 1;
+            continue;
+        }
+
+        if !pool.col_to_buf.is_empty() {
+            pool.col_to_buf.push(buf_offset);
+        }
+        col += 1;
+
+        pool.text.push_str(cell.grapheme.as_str());
+
+        let fg = encode_color(&cell.attrs.foreground);
+        let bg = encode_color(&cell.attrs.background);
+        let flags = encode_attrs(&cell.attrs);
+        let ul_color = encode_color(&cell.attrs.underline_color);
+
+        if fg != current_fg
+            || bg != current_bg
+            || flags != current_flags
+            || ul_color != current_ul_color
+        {
+            if buf_offset > current_start_buf {
+                pool.face_ranges.push((
+                    current_start_buf,
+                    buf_offset,
+                    current_fg,
+                    current_bg,
+                    current_flags,
+                    current_ul_color,
+                ));
+                current_start_buf = buf_offset;
+            }
+            current_fg = fg;
+            current_bg = bg;
+            current_flags = flags;
+            current_ul_color = ul_color;
+        }
+
+        buf_offset += if cell.grapheme.len() <= 1 {
+            1
+        } else {
+            cell.grapheme.chars().count().max(1)
+        };
+    }
+
+    if current_start_buf < buf_offset {
+        pool.face_ranges.push((
+            current_start_buf,
+            buf_offset,
+            current_fg,
+            current_bg,
+            current_flags,
+            current_ul_color,
+        ));
+    }
+
+    (
+        pool.text.clone(),
+        pool.face_ranges.clone(),
+        pool.col_to_buf.clone(),
+    )
+}
+
+/// Current binary frame format version.
+///
+/// Version 1: 8-byte header `[format_version: u32 LE][num_rows: u32 LE]`,
+/// with 24-byte face ranges: `start_buf(u32) end_buf(u32) fg(u32) bg(u32) flags(u64)`.
+///
+/// Version 2: extends each face range to 28 bytes by appending a 4-byte
+/// `underline_color` field: `start_buf(u32) end_buf(u32) fg(u32) bg(u32) flags(u64) ul_color(u32)`.
+/// The Emacs decoder validates this field and signals an error for any
+/// unrecognised version, preventing silent corruption when the `.so` and
+/// byte-compiled `.elc` are mismatched.
+pub(crate) const BINARY_FORMAT_VERSION: u32 = 2;
+
 /// Encode a list of dirty lines into a flat binary frame for FFI transfer.
 ///
 /// # Binary frame format
 ///
 /// ```text
-/// Header (4 bytes):
-///   [0..4]  num_rows: u32 LE
+/// Header (8 bytes):
+///   [0..4]  format_version: u32 LE  (always BINARY_FORMAT_VERSION = 2)
+///   [4..8]  num_rows: u32 LE
 ///
 /// Per row:
 ///   [0..4]   row_index: u32 LE
@@ -309,12 +464,13 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
 ///   [8..12]  text_byte_len: u32 LE
 ///   [12..12+text_byte_len]  UTF-8 text bytes
 ///
-///   Per face range (24 bytes each):
+///   Per face range (28 bytes each, version 2):
 ///     [0..4]   start_buf: u32 LE
 ///     [4..8]   end_buf: u32 LE
 ///     [8..12]  fg: u32 LE
 ///     [12..16] bg: u32 LE
 ///     [16..24] flags: u64 LE
+///     [24..28] ul_color: u32 LE
 ///
 ///   col_to_buf section:
 ///     [0..4]   col_to_buf_len: u32 LE
@@ -327,11 +483,11 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
 pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     // Pre-compute total capacity to avoid repeated reallocation.
     let capacity = {
-        let mut cap = 4usize; // num_rows header
+        let mut cap = 8usize; // format_version + num_rows header
         for (_, text, face_ranges, col_to_buf) in lines {
             cap += 12; // row_index + num_face_ranges + text_byte_len
             cap += text.len();
-            cap += face_ranges.len() * 24; // 24 bytes per face range
+            cap += face_ranges.len() * 28; // 28 bytes per face range (version 2)
             cap += 4; // col_to_buf_len
             cap += col_to_buf.len() * 4;
         }
@@ -339,7 +495,8 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     };
     let mut buf = Vec::with_capacity(capacity);
 
-    // Header: num_rows
+    // Header: format_version + num_rows
+    buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
     #[expect(
         clippy::cast_possible_truncation,
         reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
@@ -369,8 +526,8 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
         buf.extend_from_slice(&(text.len() as u32).to_le_bytes());
         buf.extend_from_slice(text.as_bytes());
 
-        // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64)
-        for &(start_buf, end_buf, fg, bg, flags) in face_ranges {
+        // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64), ul_color (u32)
+        for &(start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
@@ -382,6 +539,92 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
             buf.extend_from_slice(&fg.to_le_bytes());
             buf.extend_from_slice(&bg.to_le_bytes());
             buf.extend_from_slice(&flags.to_le_bytes());
+            buf.extend_from_slice(&ul_color.to_le_bytes());
+        }
+
+        // col_to_buf section: length header + u32 entries
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(col_to_buf.len() as u32).to_le_bytes());
+        for &offset in col_to_buf {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
+            )]
+            buf.extend_from_slice(&(offset as u32).to_le_bytes());
+        }
+    }
+
+    buf
+}
+
+/// Encode dirty lines into a flat binary frame, omitting UTF-8 text bytes.
+///
+/// Identical to [`encode_screen_binary`] except the `text_byte_len` field is
+/// written as 0 for every row and no text bytes follow it.  The text is
+/// supplied separately as native Emacs strings by the caller so the Lisp side
+/// can avoid the `make-string` + `dotimes aset` + `decode-coding-string`
+/// triple-copy decode path.
+///
+/// All face-range and `col_to_buf` fields are encoded exactly as in
+/// [`encode_screen_binary`] (version 2, 28-byte face ranges).
+#[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
+pub(crate) fn encode_screen_binary_no_text(lines: &[EncodedLine]) -> Vec<u8> {
+    // Pre-compute capacity without text bytes.
+    let capacity = {
+        let mut cap = 8usize; // format_version + num_rows header
+        for (_, _, face_ranges, col_to_buf) in lines {
+            cap += 12; // row_index + num_face_ranges + text_byte_len (always 0)
+            cap += face_ranges.len() * 28;
+            cap += 4; // col_to_buf_len
+            cap += col_to_buf.len() * 4;
+        }
+        cap
+    };
+    let mut buf = Vec::with_capacity(capacity);
+
+    // Header: format_version + num_rows
+    buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
+    )]
+    buf.extend_from_slice(&(lines.len() as u32).to_le_bytes());
+
+    for (row_index, _, face_ranges, col_to_buf) in lines {
+        // row_index
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "row index is a terminal row (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(*row_index as u32).to_le_bytes());
+
+        // num_face_ranges
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
+        )]
+        buf.extend_from_slice(&(face_ranges.len() as u32).to_le_bytes());
+
+        // text_byte_len = 0; no text bytes follow (supplied as native Emacs strings)
+        buf.extend_from_slice(&0u32.to_le_bytes());
+
+        // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64), ul_color (u32)
+        for &(start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
+            )]
+            {
+                buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
+                buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
+            }
+            buf.extend_from_slice(&fg.to_le_bytes());
+            buf.extend_from_slice(&bg.to_le_bytes());
+            buf.extend_from_slice(&flags.to_le_bytes());
+            buf.extend_from_slice(&ul_color.to_le_bytes());
         }
 
         // col_to_buf section: length header + u32 entries

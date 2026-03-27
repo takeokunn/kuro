@@ -134,7 +134,7 @@ proptest! {
                     window[0].1, window[1].0);
             }
 
-            for (start, end, _, _, _) in &face_ranges {
+            for (start, end, _, _, _, _) in &face_ranges {
                 prop_assert!(start < end,
                     "Empty range found: start={}, end={}", start, end);
             }
@@ -157,7 +157,7 @@ fn test_integration_bold_rgb_fg() {
     assert_eq!(text.trim_end(), "X");
     assert!(!face_ranges.is_empty());
 
-    let (start, end, fg, bg, flags) = face_ranges[0];
+    let (start, end, fg, bg, flags, _ul_color) = face_ranges[0];
     assert_eq!(start, 0);
     assert_eq!(end, 1);
     assert_eq!(
@@ -182,7 +182,7 @@ fn test_integration_named_color_red() {
     assert!(text.contains('A'));
     assert!(!face_ranges.is_empty());
 
-    let (start, end, fg, _bg, _flags) = face_ranges[0];
+    let (start, end, fg, _bg, _flags, _ul_color) = face_ranges[0];
     assert_eq!(start, 0);
     assert_eq!(end, 1);
     assert_eq!(fg, 0x8000_0001u32, "Named(Red) should encode as 0x80000001");
@@ -199,7 +199,7 @@ fn test_integration_indexed_color() {
     assert!(text.contains('B'));
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, _, _) = face_ranges[0];
+    let (_, _, fg, _, _, _) = face_ranges[0];
     assert_eq!(
         fg, 0x4000_002Au32,
         "Indexed(42) should encode as 0x4000002A"
@@ -216,7 +216,7 @@ fn test_integration_true_black_vs_default() {
     let (_row, _text, face_ranges, _col_to_buf) = &results[0];
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, bg, _) = face_ranges[0];
+    let (_, _, fg, bg, _, _) = face_ranges[0];
     assert_eq!(fg, 0u32, "Rgb(0,0,0) must encode as 0 (true black)");
     assert_eq!(
         bg, 0xFF00_0000u32,
@@ -234,7 +234,7 @@ fn test_integration_default_color_sentinel() {
     let (_row, _text, face_ranges, _col_to_buf) = &results[0];
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, bg, flags) = face_ranges[0];
+    let (_, _, fg, bg, flags, _ul_color) = face_ranges[0];
     assert_eq!(
         fg, 0xFF00_0000u32,
         "Default fg should be 0xFF00_0000 sentinel"
@@ -445,10 +445,10 @@ fn test_row_hash_skip_palette_epoch_invalidates_cache() {
 
     // Confirm row 0 is cached with epoch 0.
     assert!(
-        !session.row_hashes.is_empty(),
+        session.row_hashes.get(0).copied().flatten().is_some(),
         "row_hashes must be populated after the first poll"
     );
-    let (_, stored_epoch) = session.row_hashes[&0];
+    let (_, _, stored_epoch) = session.row_hashes[0].expect("row 0 must be cached");
     assert_eq!(
         stored_epoch, 0,
         "Stored epoch must be 0 before any palette change"

@@ -131,6 +131,7 @@ impl Screen {
             }
 
             line.is_dirty = true;
+            line.version = line.version.wrapping_add(1);
             screen.mark_dirty_range(cursor_row, cursor_row + 1);
         }
     }
@@ -170,6 +171,7 @@ impl Screen {
             line.cells.drain(cursor_col..drain_end);
             line.cells.resize(cols, Cell::default());
             line.is_dirty = true;
+            line.version = line.version.wrapping_add(1);
             screen.mark_dirty_range(cursor_row, cursor_row + 1);
         }
     }
@@ -211,6 +213,7 @@ impl Screen {
             blank.attrs.background = attrs.background;
             line.cells[erase_start..erase_end].fill(blank);
             line.is_dirty = true;
+            line.version = line.version.wrapping_add(1);
             screen.mark_dirty_range(cursor_row, cursor_row + 1);
         }
     }

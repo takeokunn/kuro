@@ -29,6 +29,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)
 (require 'kuro-input)
@@ -78,6 +79,7 @@
 (declare-function kuro--update-line-full        "kuro-render-buffer" (row text face-ranges col-to-buf))
 (declare-function kuro--resize                  "kuro-ffi"           (rows cols))
 (declare-function kuro--apply-buffer-scroll     "kuro-render-buffer" (up down))
+(declare-function kuro--init-row-positions      "kuro-render-buffer" (rows))
 (declare-function kuro--tick-blink-overlays     "kuro-overlays"      ())
 (declare-function kuro--recompute-blink-frame-intervals "kuro-overlays" ())
 (declare-function kuro--start-stream-idle-timer    "kuro-stream"        ())
@@ -221,6 +223,8 @@ resize calls concurrently."
         ;; Invalidate col-to-buf mappings: column count changed so every
         ;; row's grid-column → buffer-offset vector is stale.
         (clrhash kuro--col-to-buf-map)
+        ;; Reinitialize row-position cache for the new row count.
+        (kuro--init-row-positions new-rows)
         ;; Reset cursor cache so the first post-resize render recomputes
         ;; cursor position instead of hitting the unchanged-state fast path.
         (kuro--reset-cursor-cache)
@@ -327,8 +331,11 @@ all remaining rows after the first error."
 (defun kuro--core-render-pipeline ()
   "Execute the core render pipeline and return the dirty-line update list.
 Runs title update, scroll events, dirty-line polling, line rewrite, and
-cursor positioning under a single `inhibit-redisplay' block."
-  (let (updates)
+cursor positioning under a single `inhibit-redisplay' block.
+GC is suppressed during the render to reduce pause jitter."
+  (let ((gc-cons-threshold (* 64 1024 1024))
+        (gc-cons-percentage 0.6)
+        updates)
     (let ((inhibit-redisplay t))
       (kuro--apply-title-update)
       (kuro--process-scroll-events)
@@ -342,7 +349,9 @@ cursor positioning under a single `inhibit-redisplay' block."
 (defun kuro--core-render-pipeline-with-timing ()
   "Execute the core render pipeline with per-step timing and return updates.
 Appends one timing line to *kuro-perf* every `kuro--perf-sample-interval' frames."
-  (let ((t-total (float-time)) t-ffi t-apply t-cursor ffi-ms apply-ms cursor-ms updates)
+  (let ((gc-cons-threshold (* 64 1024 1024))
+        (gc-cons-percentage 0.6)
+        (t-total (float-time)) t-ffi t-apply t-cursor ffi-ms apply-ms cursor-ms updates)
     (let ((inhibit-redisplay t))
       (kuro--apply-title-update)
       (kuro--process-scroll-events)
@@ -388,19 +397,43 @@ Responsibilities:
      beyond 2x the current row count (hysteresis prevents churn).
   5. Store the dirty line count in `kuro--last-dirty-count' for TUI
      detection (performed outside the frame coalescing guard)."
-  (let ((updates (if kuro-debug-perf
-                     (kuro--core-render-pipeline-with-timing)
-                   (kuro--core-render-pipeline))))
+  (let* ((t0 (float-time))
+         (updates (if kuro-debug-perf
+                      (kuro--core-render-pipeline-with-timing)
+                    (kuro--core-render-pipeline))))
+    (kuro--update-frame-budget-ratio (- (float-time) t0))
     (kuro--finalize-dirty-updates updates)))
 
 ;;; Render cycle
 
-(defconst kuro--frame-budget-ratio 0.8
+(defvar kuro--frame-budget-ratio 0.8
   "Fraction of frame interval available for render work before yielding.
 When dirty-line updates consume more than this fraction of the frame
 interval, mode polling is deferred to the next frame.  This prevents
 high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
 loop.  Process-exit detection is always performed regardless of budget.")
+
+(defvar kuro--frame-duration-ring (make-vector 10 0.0)
+  "Ring buffer of the last 10 frame durations in seconds.")
+
+(defvar kuro--frame-duration-ring-index 0
+  "Current write index into `kuro--frame-duration-ring'.")
+
+(defun kuro--update-frame-budget-ratio (duration)
+  "Record frame DURATION and adjust `kuro--frame-budget-ratio' dynamically.
+Maintains a rolling average of the last 10 frame durations.  When
+consistently over-budget the ratio is nudged down; when consistently
+under-budget it is nudged back toward 0.8."
+  (aset kuro--frame-duration-ring kuro--frame-duration-ring-index duration)
+  (setq kuro--frame-duration-ring-index
+        (mod (1+ kuro--frame-duration-ring-index) 10))
+  (let ((avg (/ (cl-reduce #'+ kuro--frame-duration-ring) 10.0))
+        (budget (/ 1.0 kuro-frame-rate)))
+    (cond
+     ((> avg (* 0.9 budget))
+      (setq kuro--frame-budget-ratio (max 0.5 (- kuro--frame-budget-ratio 0.05))))
+     ((< avg (* 0.5 budget))
+      (setq kuro--frame-budget-ratio (min 0.8 (+ kuro--frame-budget-ratio 0.02)))))))
 
 (defun kuro--switch-render-timer (new-rate)
   "Cancel the current render timer and recreate it at NEW-RATE fps."

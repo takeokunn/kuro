@@ -296,6 +296,7 @@ impl Screen {
                         cell.width = CellWidth::Half;
                         cell.extras = None;
                         line.is_dirty = true;
+                        line.version = line.version.wrapping_add(1);
                         screen.dirty_set.insert(row);
                     }
                 }

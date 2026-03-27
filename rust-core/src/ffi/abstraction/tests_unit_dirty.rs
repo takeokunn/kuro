@@ -546,8 +546,8 @@ fn test_resize_clears_row_hashes() {
         .resize(30, 100)
         .expect("resize must not fail on test session");
     assert!(
-        session.row_hashes.is_empty(),
-        "resize must clear the row_hashes cache"
+        session.row_hashes.iter().all(|slot| slot.is_none()),
+        "resize must invalidate all row_hashes cache entries"
     );
 }
 
@@ -828,7 +828,7 @@ fn test_encode_line_faces_bold_cell_encodes_flag_in_attrs() {
     let cells = vec![Cell::with_char_and_width('X', attrs, CellWidth::Half)];
     let (_row, _text, face_ranges, _col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
     assert_eq!(face_ranges.len(), 1, "bold cell must produce exactly 1 face range");
-    let (_start, _end, _fg, _bg, flags) = face_ranges[0];
+    let (_start, _end, _fg, _bg, flags, _ul_color) = face_ranges[0];
     assert_ne!(flags, 0, "face-range flags must be non-zero for a bold cell");
     // Bit 0 of the encoded attrs corresponds to BOLD (SgrFlags::BOLD = bit 0, maps to encode bit 0).
     assert_eq!(flags & 1, 1, "bit 0 of face-range flags must be set for BOLD");

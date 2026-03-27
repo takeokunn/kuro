@@ -7,7 +7,6 @@
 #[cfg(unix)]
 use crate::pty::Pty;
 use crate::{Result, TerminalCore};
-use std::collections::HashMap;
 
 /// Lifecycle state of a terminal session.
 ///
@@ -50,19 +49,27 @@ pub struct TerminalSession {
     pub(super) pending_input: Vec<u8>,
     /// Per-row hash cache for skip-unchanged-rows optimisation.
     ///
-    /// Maps `row_index → (content_hash, palette_epoch)`.  A row is skipped in
-    /// `get_dirty_lines_with_faces` when both the content hash and the palette
-    /// epoch match the stored values, meaning neither cell content nor the
-    /// 256-color palette has changed since the last render.
-    pub(super) row_hashes: HashMap<usize, (u64, u64)>,
+    /// Indexed by `row_index → Some((line_version, content_hash, palette_epoch))`.
+    ///
+    /// Fast path: if `line.version == stored_version && palette_epoch == stored_epoch`,
+    /// the row is skipped without computing a hash — O(1) per unchanged row.
+    ///
+    /// Slow path: compute hash and compare `content_hash + palette_epoch` as before.
+    ///
+    /// Vec outperforms HashMap here because row indices are bounded integers
+    /// (≤ screen height, typically ≤ 200), making direct indexing O(1) with no
+    /// hash overhead.  The Vec is grown lazily on first insert and reset to all
+    /// `None` on resize or alt-screen switch.
+    pub(super) row_hashes: Vec<Option<(u64, u64, u64)>>,
     /// Monotonically increasing counter, bumped whenever the 256-color palette
     /// changes (OSC 4 set, OSC 104 reset).  Stored alongside each row hash so
     /// that a palette change invalidates every cached row without clearing the
-    /// entire `row_hashes` map.
+    /// entire `row_hashes` vec.
     pub(super) palette_epoch: u64,
     /// Tracks whether the alternate screen was active at the end of the last
     /// `get_dirty_lines_with_faces` call.  Used to detect DEC 1049 transitions
-    /// and clear `row_hashes` on alternate-screen enter/exit.
+    /// and bump `palette_epoch` on alternate-screen enter/exit, which logically
+    /// invalidates all cached row hashes without clearing the Vec.
     pub(super) was_alt_screen: bool,
 }
 
@@ -125,7 +132,7 @@ impl TerminalSession {
                 command: command.to_owned(),
                 state: SessionState::Bound,
                 pending_input: Vec::new(),
-                row_hashes: HashMap::new(),
+                row_hashes: Vec::new(),
                 palette_epoch: 0,
                 was_alt_screen: false,
             })
@@ -136,7 +143,7 @@ impl TerminalSession {
             core,
             command: command.to_string(),
             state: SessionState::Bound,
-            row_hashes: HashMap::new(),
+            row_hashes: Vec::new(),
             palette_epoch: 0,
             was_alt_screen: false,
         })
@@ -294,8 +301,11 @@ impl TerminalSession {
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         self.core.resize(rows, cols);
         // Row hashes are invalidated by a resize because row count / col count
-        // may change, making the old per-row hashes stale.
-        self.row_hashes.clear();
+        // may change, making the old per-row hashes stale.  Truncate to new row
+        // count (in case it shrank) then fill all slots with None.
+        let new_rows = rows as usize;
+        self.row_hashes.truncate(new_rows);
+        self.row_hashes.fill(None);
         #[cfg(unix)]
         if let Some(ref mut pty) = self.pty {
             pty.set_winsize(rows, cols)?;
@@ -666,7 +676,7 @@ mod tests {
             state: SessionState::Bound,
             #[cfg(unix)]
             pending_input: Vec::new(),
-            row_hashes: std::collections::HashMap::new(),
+            row_hashes: Vec::new(),
             palette_epoch: 0,
             was_alt_screen: false,
         };

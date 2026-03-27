@@ -12,6 +12,12 @@ pub struct Line {
     pub cells: Vec<Cell>,
     /// Whether this line has been modified since last render
     pub is_dirty: bool,
+    /// Monotonically increasing mutation counter (wrapping).
+    ///
+    /// Incremented on every cell write, clear, or resize so that the render
+    /// path can skip hash computation for rows that have not changed since the
+    /// last frame.  Version `0` is the initial value; any mutation produces `≥ 1`.
+    pub(crate) version: u64,
 }
 
 impl Line {
@@ -22,6 +28,7 @@ impl Line {
         Self {
             cells: vec![Cell::default(); cols],
             is_dirty: false,
+            version: 0,
         }
     }
 
@@ -38,6 +45,7 @@ impl Line {
         Self {
             cells: vec![cell; cols],
             is_dirty: false,
+            version: 0,
         }
     }
 
@@ -70,6 +78,7 @@ impl Line {
                     cell.attrs = attrs;
                 }
                 self.is_dirty = true;
+                self.version = self.version.wrapping_add(1);
             }
         }
     }
@@ -80,6 +89,7 @@ impl Line {
         if col < self.cells.len() && self.cells[col] != cell {
             self.cells[col] = cell;
             self.is_dirty = true;
+            self.version = self.version.wrapping_add(1);
         }
     }
 
@@ -90,6 +100,7 @@ impl Line {
             *cell = Cell::default();
         }
         self.is_dirty = true;
+        self.version = self.version.wrapping_add(1);
     }
 
     /// Clear all cells, setting background to specified color.
@@ -101,6 +112,7 @@ impl Line {
         blank.attrs.background = bg;
         self.cells.fill(blank);
         self.is_dirty = true;
+        self.version = self.version.wrapping_add(1);
     }
 
     /// Mark line as dirty
@@ -126,6 +138,7 @@ impl Line {
             self.cells.shrink_to_fit();
         }
         self.is_dirty = true;
+        self.version = self.version.wrapping_add(1);
     }
 }
 

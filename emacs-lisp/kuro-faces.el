@@ -52,12 +52,21 @@
 (declare-function kuro--attrs-to-face-props "kuro-faces-attrs" (fg bg attr-flags underline-color))
 
 (defconst kuro--face-cache-max-size 4096
-  "Maximum number of entries in the face cache before flushing.")
+  "Maximum number of entries in the face cache before LRU eviction.")
+
+(defconst kuro--face-cache-evict-fraction 0.25
+  "Fraction of face cache entries to evict when at capacity.")
 
 ;;; Face cache
 
 (defvar kuro--face-cache (make-hash-table :test 'equal)
   "Cache computed faces to avoid recreating them for same attribute combinations.")
+
+(defvar kuro--face-cache-access-counter 0
+  "Monotonically increasing counter; incremented on each cache access.")
+
+(defvar kuro--face-cache-access-times (make-hash-table :test 'equal)
+  "Maps face-cache keys to the access counter value at last use.")
 
 (kuro--defvar-permanent-local kuro--font-remap-cookie nil
   "Cookie returned by `face-remap-add-relative' for font customization.
@@ -117,23 +126,44 @@ vector is created for puthash so stored keys are stable across future calls."
     (aset kuro--face-cache-lookup-key 1 bg-enc)
     (aset kuro--face-cache-lookup-key 2 flags)
     (aset kuro--face-cache-lookup-key 3 ul-normalized)
-    (or (gethash kuro--face-cache-lookup-key kuro--face-cache)
-        (progn
-          (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
-            (clrhash kuro--face-cache))
-          (let* ((fg (kuro--decode-ffi-color fg-enc))
-                 (bg (kuro--decode-ffi-color bg-enc))
-                 (ul-color (when (/= ul-normalized 0)
-                             (kuro--rgb-to-emacs (logand ul-enc kuro--color-rgb-mask))))
-                 (face (kuro--make-face fg bg flags ul-color)))
-            ;; Store a fresh vector as the cache key so the lookup key can be
-            ;; mutated next call without corrupting the stored hash entry.
+    (let ((hit (gethash kuro--face-cache-lookup-key kuro--face-cache)))
+      (if hit
+          (progn
+            ;; Record access time for LRU tracking.
+            (setq kuro--face-cache-access-counter (1+ kuro--face-cache-access-counter))
             (puthash (vector fg-enc bg-enc flags ul-normalized)
-                     face kuro--face-cache))))))
+                     kuro--face-cache-access-counter
+                     kuro--face-cache-access-times)
+            hit)
+        (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
+          ;; Evict oldest 25% by access time rather than flushing everything.
+          (let* ((evict-count (round (* kuro--face-cache-max-size kuro--face-cache-evict-fraction)))
+                 (entries nil))
+            (maphash (lambda (k v) (push (cons (gethash k kuro--face-cache-access-times 0) k) entries))
+                     kuro--face-cache)
+            (setq entries (sort entries (lambda (a b) (< (car a) (car b)))))
+            (let ((n 0))
+              (dolist (entry entries)
+                (when (< n evict-count)
+                  (remhash (cdr entry) kuro--face-cache)
+                  (remhash (cdr entry) kuro--face-cache-access-times)
+                  (setq n (1+ n)))))))
+        (let* ((fg (kuro--decode-ffi-color fg-enc))
+               (bg (kuro--decode-ffi-color bg-enc))
+               (ul-color (when (/= ul-normalized 0)
+                           (kuro--rgb-to-emacs (logand ul-enc kuro--color-rgb-mask))))
+               (face (kuro--make-face fg bg flags ul-color))
+               (key (vector fg-enc bg-enc flags ul-normalized)))
+          ;; Store a fresh vector as the cache key so the lookup key can be
+          ;; mutated next call without corrupting the stored hash entry.
+          (setq kuro--face-cache-access-counter (1+ kuro--face-cache-access-counter))
+          (puthash key kuro--face-cache-access-counter kuro--face-cache-access-times)
+          (puthash key face kuro--face-cache))))))
 
 (defsubst kuro--clear-face-cache ()
-  "Clear the face cache to free memory."
-  (clrhash kuro--face-cache))
+  "Clear the face cache and access-time tracking to free memory."
+  (clrhash kuro--face-cache)
+  (clrhash kuro--face-cache-access-times))
 
 ;;; Default color remapping (OSC 10/11/12)
 
@@ -175,27 +205,26 @@ what the running application requested."
 
 ;;; Palette application (OSC 4)
 
-(defun kuro--merge-palette-entry (entry)
-  "Merge one OSC 4 palette ENTRY (INDEX R G B) into `kuro--named-colors'.
-Only entries with index 0-15 (the 16 ANSI named colors) are applied;
-higher indices are silently ignored.  No face-cache side effects."
-  (pcase entry
-    (`(,idx ,r ,g ,b)
-     (when (< idx 16)
-       (puthash (aref kuro--ansi-color-names idx)
-                (format "#%02x%02x%02x" r g b)
-                kuro--named-colors)))))
 
 (defun kuro--apply-palette-updates ()
   "Apply any pending OSC 4 palette overrides from the Rust core.
 Fetches all pending updates, merges them into the named-color cache,
-then flushes the face cache once — regardless of how many entries are
-in the update list."
+then flushes the face cache only if at least one entry actually changed."
   (when kuro--initialized
     (when-let ((updates (kuro--get-palette-updates)))
-      (dolist (entry updates)
-        (kuro--merge-palette-entry entry))
-      (kuro--clear-face-cache))))
+      (let ((changed nil))
+        (dolist (entry updates)
+          (pcase entry
+            (`(,idx ,r ,g ,b)
+             (when (< idx 16)
+               (let* ((name (aref kuro--ansi-color-names idx))
+                      (new-color (format "#%02x%02x%02x" r g b))
+                      (old-color (gethash name kuro--named-colors)))
+                 (unless (equal old-color new-color)
+                   (puthash name new-color kuro--named-colors)
+                   (setq changed t)))))))
+        (when changed
+          (kuro--clear-face-cache))))))
 
 (provide 'kuro-faces)
 

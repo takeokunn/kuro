@@ -53,7 +53,7 @@ macro_rules! attrs_underline {
 /// Usage: `assert_face_range!(ranges, 0: buf 0, 5, fg 0xFF000000, bg 0x00000000, flags 0x01)`
 macro_rules! assert_face_range {
     ($ranges:expr, $idx:literal: buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr) => {{
-        let (start, end, fg, bg, flags) = $ranges[$idx];
+        let (start, end, fg, bg, flags, _ul_color) = $ranges[$idx];
         assert_eq!(start, $s, "face_range[{}] start_buf", $idx);
         assert_eq!(end, $e, "face_range[{}] end_buf", $idx);
         assert_eq!(fg, $fg, "face_range[{}] fg", $idx);
@@ -76,6 +76,7 @@ macro_rules! assert_binary_face {
         assert_eq!(read_u32_le($buf, $base + 8), $fg, "binary face fg");
         assert_eq!(read_u32_le($buf, $base + 12), $bg, "binary face bg");
         assert_eq!(read_u64_le($buf, $base + 16), $f, "binary face flags");
+        // ul_color at offset +24 (version 2: 28 bytes per face range)
     }};
 }
 
@@ -432,7 +433,7 @@ fn test_encode_line_coverage_invariant() {
         assert_eq!(w[0].1, w[1].0, "ranges must be contiguous");
     }
     // Each range must be non-empty
-    for (s, e, _, _, _) in &ranges {
+    for (s, e, _, _, _, _) in &ranges {
         assert!(s < e, "empty range found: start={s}, end={e}");
     }
 }
@@ -521,7 +522,7 @@ fn test_encode_line_adjacent_identical_attrs_merged() {
         1,
         "identical adjacent attrs must be merged into one face range"
     );
-    let (start, end, _, _, _) = ranges[0];
+    let (start, end, _, _, _, _) = ranges[0];
     assert_eq!(start, 0);
     assert_eq!(end, 2);
 }
@@ -558,7 +559,7 @@ fn test_encode_line_combining_char_buf_offset() {
         "same default attrs: both cells collapse into one range"
     );
     // With identical attrs the single range covers [0, 3) — base(2) + X(1).
-    let (start, end, _, _, _) = ranges[0];
+    let (start, end, _, _, _, _) = ranges[0];
     assert_eq!(start, 0);
     assert_eq!(end, 3, "buf_offset after combining cell must be 2 + 1 = 3");
 }
@@ -601,33 +602,43 @@ fn test_encode_line_wide_char_at_last_column() {
 // -------------------------------------------------------------------------
 
 #[test]
-fn encode_screen_binary_empty_input_produces_4_byte_header() {
+fn encode_screen_binary_empty_input_produces_8_byte_header() {
     let result = encode_screen_binary(&[]);
     assert_eq!(
         result.len(),
-        4,
-        "empty input must produce a 4-byte header only"
+        8,
+        "empty input must produce an 8-byte header only (format_version + num_rows)"
     );
     assert_eq!(
         read_u32_le(&result, 0),
+        2,
+        "format_version must be 2"
+    );
+    assert_eq!(
+        read_u32_le(&result, 4),
         0,
         "num_rows header must be 0 for empty input"
     );
 }
 
-/// An explicit empty `Vec` (0 rows) must also produce only the 4-byte header,
+/// An explicit empty `Vec` (0 rows) must also produce only the 8-byte header,
 /// identical to passing an empty slice.  This covers the `Vec::new()` call site.
 #[test]
-fn encode_screen_binary_explicit_empty_vec_produces_4_byte_header() {
+fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
     let lines: Vec<EncodedLine> = Vec::new();
     let result = encode_screen_binary(&lines);
     assert_eq!(
         result.len(),
-        4,
-        "explicit empty Vec must produce a 4-byte header only"
+        8,
+        "explicit empty Vec must produce an 8-byte header only (format_version + num_rows)"
     );
     assert_eq!(
         read_u32_le(&result, 0),
+        2,
+        "format_version must be 2"
+    );
+    assert_eq!(
+        read_u32_le(&result, 4),
         0,
         "num_rows header must be 0 for empty Vec"
     );
@@ -639,14 +650,15 @@ fn encode_screen_binary_single_row_no_text_no_faces_no_col_to_buf() {
     let lines: &[EncodedLine] = &[(0usize, String::new(), vec![], vec![])];
     let result = encode_screen_binary(lines);
 
-    // Header (4) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + col_to_buf_len (4) = 20 bytes total
-    assert_eq!(result.len(), 20);
-    assert_eq!(read_u32_le(&result, 0), 1, "num_rows must be 1");
-    assert_eq!(read_u32_le(&result, 4), 0, "row_index must be 0");
-    assert_eq!(read_u32_le(&result, 8), 0, "num_face_ranges must be 0");
-    assert_eq!(read_u32_le(&result, 12), 0, "text_byte_len must be 0");
-    assert_eq!(read_u32_le(&result, 16), 0, "col_to_buf_len must be 0");
+    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + col_to_buf_len (4) = 24 bytes total
+    assert_eq!(result.len(), 24);
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_eq!(read_u32_le(&result, 8), 0, "row_index must be 0");
+    assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32_le(&result, 16), 0, "text_byte_len must be 0");
+    assert_eq!(read_u32_le(&result, 20), 0, "col_to_buf_len must be 0");
 }
 
 #[test]
@@ -657,39 +669,42 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
     let lines: &[EncodedLine] = &[(3usize, text, vec![], vec![])];
     let result = encode_screen_binary(lines);
 
-    // Header (4) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text_bytes (5) + col_to_buf_len (4) = 25 bytes total
-    assert_eq!(result.len(), 25);
-    assert_eq!(read_u32_le(&result, 0), 1, "num_rows must be 1");
-    assert_eq!(read_u32_le(&result, 4), 3, "row_index must be 3");
-    assert_eq!(read_u32_le(&result, 8), 0, "num_face_ranges must be 0");
+    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text_bytes (5) + col_to_buf_len (4) = 29 bytes total
+    assert_eq!(result.len(), 29);
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_eq!(read_u32_le(&result, 8), 3, "row_index must be 3");
+    assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
     assert_eq!(
-        read_u32_le(&result, 12),
+        read_u32_le(&result, 16),
         text_len as u32,
         "text_byte_len must match"
     );
-    assert_eq!(&result[16..21], b"Hello", "raw text bytes must be correct");
-    assert_eq!(read_u32_le(&result, 21), 0, "col_to_buf_len must be 0");
+    assert_eq!(&result[20..25], b"Hello", "raw text bytes must be correct");
+    assert_eq!(read_u32_le(&result, 25), 0, "col_to_buf_len must be 0");
 }
 
 #[test]
-fn encode_screen_binary_single_row_one_face_range_24_byte_encoding() {
-    // One face range: (start_buf=0, end_buf=5, fg=0xFF000000, bg=0x00000000, flags=0x01)
+fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
+    // One face range: (start_buf=0, end_buf=5, fg=0xFF000000, bg=0x00000000, flags=0x01, ul_color=0xFF000000)
     let fg: u32 = 0xFF00_0000;
     let bg: u32 = 0x0000_0000;
     let flags: u64 = 0x0000_0001;
-    let face_ranges = vec![(0usize, 5usize, fg, bg, flags)];
+    let ul_color: u32 = 0xFF00_0000; // Color::Default sentinel
+    let face_ranges = vec![(0usize, 5usize, fg, bg, flags, ul_color)];
     let lines: &[EncodedLine] = &[(0usize, String::from("Hello"), face_ranges, vec![])];
     let result = encode_screen_binary(lines);
 
-    // Header (4) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text (5) + face_range (24) + col_to_buf_len (4) = 49 bytes
-    assert_eq!(result.len(), 49);
-    assert_eq!(read_u32_le(&result, 0), 1, "num_rows must be 1");
-    assert_eq!(read_u32_le(&result, 8), 1, "num_face_ranges must be 1");
+    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text (5) + face_range (28) + col_to_buf_len (4) = 57 bytes
+    assert_eq!(result.len(), 57);
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_eq!(read_u32_le(&result, 12), 1, "num_face_ranges must be 1");
 
-    // Face range starts at offset 16 + 5 = 21
-    let face_base = 21usize;
+    // Face range starts at offset 8(header)+4(row_idx)+4(num_fr)+4(text_len)+5(text) = 25
+    let face_base = 25usize;
     assert_eq!(
         read_u32_le(&result, face_base),
         0,
@@ -715,10 +730,15 @@ fn encode_screen_binary_single_row_one_face_range_24_byte_encoding() {
         flags,
         "face flags must match"
     );
-
-    // col_to_buf_len follows at face_base + 24
     assert_eq!(
         read_u32_le(&result, face_base + 24),
+        ul_color,
+        "face ul_color must match"
+    );
+
+    // col_to_buf_len follows at face_base + 28
+    assert_eq!(
+        read_u32_le(&result, face_base + 28),
         0,
         "col_to_buf_len must be 0"
     );
@@ -731,12 +751,12 @@ fn encode_screen_binary_single_row_nonempty_col_to_buf() {
     let lines: &[EncodedLine] = &[(0usize, String::from("AB"), vec![], col_to_buf)];
     let result = encode_screen_binary(lines);
 
-    // Header (4) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text (2) + col_to_buf_len (4) + col_to_buf_entries (3*4=12) = 34 bytes
-    assert_eq!(result.len(), 34);
+    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text (2) + col_to_buf_len (4) + col_to_buf_entries (3*4=12) = 38 bytes
+    assert_eq!(result.len(), 38);
 
-    // col_to_buf_len is at offset 4+4+4+4+2 = 18
-    let ctb_base = 18usize;
+    // col_to_buf_len is at offset 8+4+4+4+2 = 22
+    let ctb_base = 22usize;
     assert_eq!(
         read_u32_le(&result, ctb_base),
         3,
@@ -765,7 +785,8 @@ fn encode_screen_binary_multiple_rows_num_rows_header() {
         .map(|i| (i, String::from("x"), vec![], vec![]))
         .collect();
     let result = encode_screen_binary(&lines);
-    assert_eq!(read_u32_le(&result, 0), 5, "num_rows must be 5");
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32_le(&result, 4), 5, "num_rows must be 5");
 }
 
 // -------------------------------------------------------------------------
@@ -984,12 +1005,13 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
     let fg: u32 = 0xFF00_0000; // Color::Default sentinel
     let bg: u32 = 0xFF00_0000;
     let flags: u64 = 0x0000_0001; // bold
-    let face_ranges = vec![(0usize, 3usize, fg, bg, flags)];
+    let ul_color: u32 = 0xFF00_0000; // Color::Default sentinel
+    let face_ranges = vec![(0usize, 3usize, fg, bg, flags, ul_color)];
     let lines: &[EncodedLine] = &[(0usize, String::from("ABC"), face_ranges, vec![])];
     let result = encode_screen_binary(lines);
 
-    // text_bytes start at offset 16, so face range starts at 16 + 3 = 19
-    assert_binary_face!(&result, 19, buf 0, 3, fg fg, bg bg, flags flags);
+    // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
+    assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags);
 }
 
 /// Two consecutive rows in one binary frame: row indices are written in order.
@@ -1000,12 +1022,13 @@ fn encode_screen_binary_two_rows_row_indices_in_order() {
         (15usize, String::from("Y"), vec![], vec![]),
     ];
     let result = encode_screen_binary(&lines);
-    // num_rows = 2
-    assert_eq!(read_u32_le(&result, 0), 2, "num_rows must be 2");
-    // First row header at offset 4: row_index = 7
-    assert_eq!(read_u32_le(&result, 4), 7, "first row_index must be 7");
-    // First row: 4(idx) + 4(ranges) + 4(text_len) + 1(text) + 4(ctb_len) = 17 bytes; next at 4+17=21
-    let row2_offset = 4 + 4 + 4 + 4 + 1 + 4;
+    // format_version at offset 0, num_rows at offset 4
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32_le(&result, 4), 2, "num_rows must be 2");
+    // First row header at offset 8: row_index = 7
+    assert_eq!(read_u32_le(&result, 8), 7, "first row_index must be 7");
+    // First row: 4(idx) + 4(ranges) + 4(text_len) + 1(text) + 4(ctb_len) = 17 bytes; next at 8+17=25
+    let row2_offset = 8 + 4 + 4 + 4 + 1 + 4;
     assert_eq!(
         read_u32_le(&result, row2_offset),
         15,
@@ -1200,9 +1223,9 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
     let lines: &[EncodedLine] = &[(0usize, text, vec![], col_to_buf)];
     let result = encode_screen_binary(lines);
 
-    // Header(4) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 31
-    assert_eq!(result.len(), 31);
-    let ctb_offset = 4 + 4 + 4 + 4 + text_len;
+    // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
+    assert_eq!(result.len(), 35);
+    let ctb_offset = 8 + 4 + 4 + 4 + text_len;
     assert_eq!(
         read_u32_le(&result, ctb_offset),
         2,
@@ -1256,7 +1279,7 @@ fn test_encode_line_first_cell_face_range_always_emitted() {
         1,
         "single cell must produce exactly one face range"
     );
-    let (start, end, _, _, _) = ranges[0];
+    let (start, end, _, _, _, _) = ranges[0];
     assert_eq!(start, 0, "face range must start at buf_offset 0");
     assert_eq!(
         end, 1,
@@ -1271,33 +1294,37 @@ fn encode_screen_binary_two_face_ranges_same_row() {
     let fg1: u32 = 0xFF00_0000;
     let bg1: u32 = 0xFF00_0000;
     let flags1: u64 = 0x0000_0001; // bold
+    let ul1: u32 = 0xFF00_0000; // Color::Default sentinel
     let fg2: u32 = 0x0000_0000; // Rgb true-black
     let bg2: u32 = 0xFF00_0000;
     let flags2: u64 = 0x0000_0004; // italic
+    let ul2: u32 = 0x00FF_0000; // Rgb red as underline color
     let face_ranges = vec![
-        (0usize, 2usize, fg1, bg1, flags1),
-        (2usize, 4usize, fg2, bg2, flags2),
+        (0usize, 2usize, fg1, bg1, flags1, ul1),
+        (2usize, 4usize, fg2, bg2, flags2, ul2),
     ];
     let lines: &[EncodedLine] = &[(0usize, String::from("ABCD"), face_ranges, vec![])];
     let result = encode_screen_binary(lines);
 
-    // num_face_ranges header (at byte 8) must be 2.
-    assert_eq!(read_u32_le(&result, 8), 2, "num_face_ranges must be 2");
+    // num_face_ranges header (at byte 12 = header[8]+row_idx[4]) must be 2.
+    assert_eq!(read_u32_le(&result, 12), 2, "num_face_ranges must be 2");
 
-    // First face range: header(4) + row_idx(4) + num_face(4) + text_len(4) + text(4) = offset 20
-    // Layout: start_buf(4) + end_buf(4) + fg(4) + bg(4) + flags(8) = 24 bytes per face range
-    assert_eq!(read_u32_le(&result, 20), 0u32, "face1 start_buf");
-    assert_eq!(read_u32_le(&result, 24), 2u32, "face1 end_buf");
-    assert_eq!(read_u32_le(&result, 28), fg1, "face1 fg");
-    assert_eq!(read_u32_le(&result, 32), bg1, "face1 bg");
-    assert_eq!(read_u64_le(&result, 36), flags1, "face1 flags");
+    // First face range: header(8) + row_idx(4) + num_face(4) + text_len(4) + text(4) = offset 24
+    // Layout: start_buf(4) + end_buf(4) + fg(4) + bg(4) + flags(8) + ul_color(4) = 28 bytes per face range
+    assert_eq!(read_u32_le(&result, 24), 0u32, "face1 start_buf");
+    assert_eq!(read_u32_le(&result, 28), 2u32, "face1 end_buf");
+    assert_eq!(read_u32_le(&result, 32), fg1, "face1 fg");
+    assert_eq!(read_u32_le(&result, 36), bg1, "face1 bg");
+    assert_eq!(read_u64_le(&result, 40), flags1, "face1 flags");
+    assert_eq!(read_u32_le(&result, 48), ul1, "face1 ul_color");
 
-    // Second face range starts at 20 + 24 = 44.
-    assert_eq!(read_u32_le(&result, 44), 2u32, "face2 start_buf");
-    assert_eq!(read_u32_le(&result, 48), 4u32, "face2 end_buf");
-    assert_eq!(read_u32_le(&result, 52), fg2, "face2 fg");
-    assert_eq!(read_u32_le(&result, 56), bg2, "face2 bg");
-    assert_eq!(read_u64_le(&result, 60), flags2, "face2 flags");
+    // Second face range starts at 24 + 28 = 52.
+    assert_eq!(read_u32_le(&result, 52), 2u32, "face2 start_buf");
+    assert_eq!(read_u32_le(&result, 56), 4u32, "face2 end_buf");
+    assert_eq!(read_u32_le(&result, 60), fg2, "face2 fg");
+    assert_eq!(read_u32_le(&result, 64), bg2, "face2 bg");
+    assert_eq!(read_u64_le(&result, 68), flags2, "face2 flags");
+    assert_eq!(read_u32_le(&result, 76), ul2, "face2 ul_color");
 }
 
 /// `compute_row_hash` must differ when only the underline color changes, because
@@ -1364,7 +1391,7 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
     assert_eq!(text, "Ae\u{0301}");
     // Both cells have default attrs → one merged range.
     assert_eq!(ranges.len(), 1, "identical attrs must merge into one range");
-    let (start, end, _, _, _) = ranges[0];
+    let (start, end, _, _, _, _) = ranges[0];
     assert_eq!(start, 0, "range must start at 0");
     // 'A' contributes 1, "e\u{0301}" contributes 2 scalars → end = 3
     assert_eq!(

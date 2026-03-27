@@ -81,7 +81,7 @@ pub(super) fn make_session() -> TerminalSession {
         state: SessionState::Bound,
         #[cfg(unix)]
         pending_input: Vec::new(),
-        row_hashes: std::collections::HashMap::new(),
+        row_hashes: Vec::new(),
         palette_epoch: 0,
         was_alt_screen: false,
     }

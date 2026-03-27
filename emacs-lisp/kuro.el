@@ -145,8 +145,14 @@ When PREV is a function it is called at the end; nil is ignored."
   "Major mode for Kuro terminal buffers."
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
+  (setq-local bidi-paragraph-direction 'left-to-right)
   (setq-local truncate-lines t)
   (setq-local auto-hscroll-mode nil)
+  ;; Disable syntax highlighting: terminal content is colored via text properties
+  ;; from the Rust FFI layer; font-lock and jit-lock add overhead with no benefit.
+  (font-lock-mode -1)
+  (when (fboundp 'jit-lock-mode)
+    (jit-lock-mode -1))
   ;; Normalise character display widths to match the Rust unicode-width 0.2 crate.
   ;; Must run before the first render so col_to_buf mappings stay consistent.
   (kuro--setup-char-width-table)

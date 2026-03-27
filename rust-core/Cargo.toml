@@ -24,6 +24,9 @@ base64.workspace = true
 png.workspace = true
 compact_str = { version = "0.8", features = ["serde"] }
 memchr.workspace = true
+ahash = "0.8"
+smallvec = { version = "1", features = ["union"] }
+mimalloc = { version = "0.1", default-features = false }
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]

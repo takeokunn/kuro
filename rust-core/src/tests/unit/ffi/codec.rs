@@ -18,7 +18,7 @@ use proptest::prelude::*;
 type ScreenLine = (
     usize,
     String,
-    Vec<(usize, usize, u32, u32, u64)>,
+    Vec<(usize, usize, u32, u32, u64, u32)>,
     Vec<usize>,
 );
 
@@ -206,7 +206,7 @@ proptest! {
         cells in proptest::collection::vec(arb_ascii_cell(), 1..=40),
     ) {
         let (_, face_ranges, _) = encode_line(&cells);
-        for (s, e, _, _, _) in &face_ranges {
+        for (s, e, _, _, _, _) in &face_ranges {
             prop_assert!(s < e, "face range [{},{}] must be non-empty", s, e);
         }
     }
@@ -434,42 +434,45 @@ fn read_u64(buf: &[u8], offset: usize) -> u64 {
 }
 
 #[test]
-// INVARIANT: Empty input → exactly 4 bytes `[0,0,0,0]` (num_rows header only).
+// INVARIANT: Empty input → exactly 8 bytes: format_version=2 LE then num_rows=0 LE.
 fn test_encode_screen_binary_empty() {
     let out = encode_screen_binary(&[]);
     assert_eq!(
         out,
-        [0u8, 0, 0, 0],
-        "empty input must produce 4-byte zero header"
+        [2u8, 0, 0, 0, // format_version = 2 LE
+         0u8, 0, 0, 0], // num_rows = 0 LE
+        "empty input must produce 8-byte header (version=2, num_rows=0)"
     );
 }
 
 #[test]
 // LAYOUT: Single row "A", no face ranges, col_to_buf=[0].
 // Expected layout:
-//   [0..4]   num_rows = 1
-//   [4..8]   row_index = 0
-//   [8..12]  num_face_ranges = 0
-//   [12..16] text_byte_len = 1
-//   [16]     b'A'
-//   [17..21] col_to_buf_len = 1
-//   [21..25] col_to_buf[0] = 0
+//   [0..4]   format_version = 2
+//   [4..8]   num_rows = 1
+//   [8..12]  row_index = 0
+//   [12..16] num_face_ranges = 0
+//   [16..20] text_byte_len = 1
+//   [20]     b'A'
+//   [21..25] col_to_buf_len = 1
+//   [25..29] col_to_buf[0] = 0
 fn test_encode_screen_binary_one_row_no_faces() {
     let lines: &[ScreenLine] = &[(0, "A".to_string(), vec![], vec![0])];
     let out = encode_screen_binary(lines);
 
     assert_eq!(
         out.len(),
-        4 + 4 + 4 + 4 + 1 + 4 + 4,
+        4 + 4 + 4 + 4 + 4 + 1 + 4 + 4,
         "total byte count mismatch"
     );
-    assert_eq!(read_u32(&out, 0), 1, "num_rows must be 1");
-    assert_eq!(read_u32(&out, 4), 0, "row_index must be 0");
-    assert_eq!(read_u32(&out, 8), 0, "num_face_ranges must be 0");
-    assert_eq!(read_u32(&out, 12), 1, "text_byte_len must be 1");
-    assert_eq!(out[16], b'A', "text byte must be b'A'");
-    assert_eq!(read_u32(&out, 17), 1, "col_to_buf_len must be 1");
-    assert_eq!(read_u32(&out, 21), 0, "col_to_buf[0] must be 0");
+    assert_eq!(read_u32(&out, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32(&out, 4), 1, "num_rows must be 1");
+    assert_eq!(read_u32(&out, 8), 0, "row_index must be 0");
+    assert_eq!(read_u32(&out, 12), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 16), 1, "text_byte_len must be 1");
+    assert_eq!(out[20], b'A', "text byte must be b'A'");
+    assert_eq!(read_u32(&out, 21), 1, "col_to_buf_len must be 1");
+    assert_eq!(read_u32(&out, 25), 0, "col_to_buf[0] must be 0");
 }
 
 #[test]
@@ -479,26 +482,27 @@ fn test_encode_screen_binary_row_index_and_text_len() {
     let lines: &[ScreenLine] = &[(42, "Hello".to_string(), vec![], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(read_u32(&out, 0), 1, "num_rows must be 1");
-    assert_eq!(read_u32(&out, 4), 42, "row_index must be 42");
-    assert_eq!(read_u32(&out, 8), 0, "num_face_ranges must be 0");
-    assert_eq!(read_u32(&out, 12), 5, "text_byte_len must be 5 for 'Hello'");
-    assert_eq!(&out[16..21], b"Hello", "text bytes must match 'Hello'");
+    assert_eq!(read_u32(&out, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32(&out, 4), 1, "num_rows must be 1");
+    assert_eq!(read_u32(&out, 8), 42, "row_index must be 42");
+    assert_eq!(read_u32(&out, 12), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 16), 5, "text_byte_len must be 5 for 'Hello'");
+    assert_eq!(&out[20..25], b"Hello", "text bytes must match 'Hello'");
     // col_to_buf_len = 0 (empty vec)
-    assert_eq!(read_u32(&out, 21), 0, "col_to_buf_len must be 0");
+    assert_eq!(read_u32(&out, 25), 0, "col_to_buf_len must be 0");
 }
 
 #[test]
-// LAYOUT: 1 face range → 24 bytes of face range data; verify all 5 fields.
+// LAYOUT: 1 face range → 28 bytes of face range data; verify all 6 fields.
 fn test_encode_screen_binary_one_face_range() {
-    // row_index=0, text="AB" (2 bytes), 1 face range: (0,2, fg=1, bg=2, flags=3)
-    let lines: &[ScreenLine] = &[(0, "AB".to_string(), vec![(0, 2, 1, 2, 3)], vec![])];
+    // row_index=0, text="AB" (2 bytes), 1 face range: (0,2, fg=1, bg=2, flags=3, ul_color=4)
+    let lines: &[ScreenLine] = &[(0, "AB".to_string(), vec![(0, 2, 1, 2, 3, 4)], vec![])];
     let out = encode_screen_binary(lines);
 
-    // Offsets: 0=num_rows, 4=row_index, 8=num_face_ranges, 12=text_byte_len,
-    //          16+2=18 = face range start, then 4+4+4+4+8 = 24 bytes
-    assert_eq!(read_u32(&out, 8), 1, "num_face_ranges must be 1");
-    let fr_base = 4 + 4 + 4 + 4 + 2; // header + row_index + num_face_ranges + text_byte_len + 2 text bytes
+    // Offsets: 0=format_version, 4=num_rows, 8=row_index, 12=num_face_ranges, 16=text_byte_len,
+    //          20+2=22 = face range start, then 4+4+4+4+8+4 = 28 bytes
+    assert_eq!(read_u32(&out, 12), 1, "num_face_ranges must be 1");
+    let fr_base = 8 + 4 + 4 + 4 + 2; // header(8) + row_index(4) + num_face_ranges(4) + text_byte_len(4) + 2 text bytes
     assert_eq!(read_u32(&out, fr_base), 0, "face range start_buf must be 0");
     assert_eq!(
         read_u32(&out, fr_base + 4),
@@ -512,6 +516,7 @@ fn test_encode_screen_binary_one_face_range() {
         3,
         "face range flags must be 3"
     );
+    assert_eq!(read_u32(&out, fr_base + 24), 4, "face range ul_color must be 4");
 }
 
 #[test]
@@ -521,8 +526,8 @@ fn test_encode_screen_binary_col_to_buf_entries() {
     let lines: &[ScreenLine] = &[(0, "X".to_string(), vec![], vec![0, 0, 1])];
     let out = encode_screen_binary(lines);
 
-    // col_to_buf section starts at: 4 + 4 + 4 + 4 + 1 = 17
-    let ctb_base = 4 + 4 + 4 + 4 + 1;
+    // col_to_buf section starts at: header(8) + row_index(4) + num_fr(4) + text_len(4) + 1 text = 21
+    let ctb_base = 8 + 4 + 4 + 4 + 1;
     assert_eq!(read_u32(&out, ctb_base), 3, "col_to_buf_len must be 3");
     assert_eq!(read_u32(&out, ctb_base + 4), 0, "col_to_buf[0] must be 0");
     assert_eq!(read_u32(&out, ctb_base + 8), 0, "col_to_buf[1] must be 0");
@@ -539,21 +544,22 @@ fn test_encode_screen_binary_two_rows() {
     ];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(read_u32(&out, 0), 2, "num_rows must be 2");
+    assert_eq!(read_u32(&out, 0), 2, "format_version must be 2");
+    assert_eq!(read_u32(&out, 4), 2, "num_rows must be 2");
 
-    // Row 0: bytes 4..17 (4 row_index + 4 num_fr + 4 text_len + 1 text + 4 ctb_len)
-    assert_eq!(read_u32(&out, 4), 0, "row 0 row_index must be 0");
-    assert_eq!(read_u32(&out, 8), 0, "row 0 num_face_ranges must be 0");
-    assert_eq!(read_u32(&out, 12), 1, "row 0 text_byte_len must be 1");
-    assert_eq!(out[16], b'A', "row 0 text must be b'A'");
-    assert_eq!(read_u32(&out, 17), 0, "row 0 col_to_buf_len must be 0");
+    // Row 0 starts at byte 8: header(8) + row_index(4) + num_fr(4) + text_len(4) + 1 text + ctb_len(4) = 25 bytes for row 0
+    assert_eq!(read_u32(&out, 8), 0, "row 0 row_index must be 0");
+    assert_eq!(read_u32(&out, 12), 0, "row 0 num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 16), 1, "row 0 text_byte_len must be 1");
+    assert_eq!(out[20], b'A', "row 0 text must be b'A'");
+    assert_eq!(read_u32(&out, 21), 0, "row 0 col_to_buf_len must be 0");
 
-    // Row 1 starts at byte 21
-    assert_eq!(read_u32(&out, 21), 1, "row 1 row_index must be 1");
-    assert_eq!(read_u32(&out, 25), 0, "row 1 num_face_ranges must be 0");
-    assert_eq!(read_u32(&out, 29), 1, "row 1 text_byte_len must be 1");
-    assert_eq!(out[33], b'B', "row 1 text must be b'B'");
-    assert_eq!(read_u32(&out, 34), 0, "row 1 col_to_buf_len must be 0");
+    // Row 1 starts at byte 8+17=25 (17 = row_index(4)+num_fr(4)+text_len(4)+text(1)+ctb_len(4))
+    assert_eq!(read_u32(&out, 25), 1, "row 1 row_index must be 1");
+    assert_eq!(read_u32(&out, 29), 0, "row 1 num_face_ranges must be 0");
+    assert_eq!(read_u32(&out, 33), 1, "row 1 text_byte_len must be 1");
+    assert_eq!(out[37], b'B', "row 1 text must be b'B'");
+    assert_eq!(read_u32(&out, 38), 0, "row 1 col_to_buf_len must be 0");
 }
 
 #[test]
@@ -564,8 +570,9 @@ fn test_encode_screen_binary_unicode_text() {
     let lines: &[ScreenLine] = &[(0, arrow.to_string(), vec![], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(read_u32(&out, 12), 3, "text_byte_len must be 3 for '→'");
-    assert_eq!(&out[16..19], arrow.as_bytes(), "text bytes must match '→'");
+    // header(8) + row_index(4) + num_face_ranges(4) = 16; text_byte_len at 16
+    assert_eq!(read_u32(&out, 16), 3, "text_byte_len must be 3 for '→'");
+    assert_eq!(&out[20..23], arrow.as_bytes(), "text bytes must match '→'");
 }
 
 // -------------------------------------------------------------------------

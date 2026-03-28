@@ -658,7 +658,8 @@ so storing it would waste hash table space without any semantic benefit."
     (insert "row0\nrow1\nrow2\n")
     (setq kuro--cursor-marker (point-marker))
     ;; row=1, col=2, visible=t, shape=0 → "row1\n" starts at pos 6, col 2 → pos 8
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should (= (marker-position kuro--cursor-marker) 8))))
 
@@ -667,7 +668,8 @@ so storing it would waste hash table space without any semantic benefit."
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should-not cursor-type)))
 
@@ -676,7 +678,8 @@ so storing it would waste hash table space without any semantic benefit."
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should cursor-type)))
 
@@ -703,6 +706,8 @@ so storing it would waste hash table space without any semantic benefit."
           kuro--last-cursor-shape   0)
     (let ((apply-calls 0))
       (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 0)))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+                ((symbol-function 'kuro--anchor-window-at-pos) #'ignore)
                 ((symbol-function 'kuro--apply-cursor-display)
                  (lambda (_v _s) (cl-incf apply-calls))))
         (kuro--update-cursor)
@@ -869,7 +874,8 @@ the `remaining' list rather than being deleted again."
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "row0\nrow1\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 3 t 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 3 t 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should (eql kuro--last-cursor-row 1))
     (should (eql kuro--last-cursor-col 3))))
@@ -879,10 +885,75 @@ the `remaining' list rather than being deleted again."
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 5))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 5)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should (eq kuro--last-cursor-visible nil))
     (should (eql kuro--last-cursor-shape 5))))
+
+(ert-deftest kuro-render-buffer-update-cursor-unchanged-still-anchors-window ()
+  "kuro--update-cursor re-anchors the window even when cursor state is unchanged.
+The TUI distortion fix ensures every frame re-anchors the viewport at point-min
+to prevent Emacs' native redisplay from drifting between render cycles."
+  (kuro-render-buffer-cursor-test--with-buffer
+    (insert "hello\nworld\n")
+    (setq kuro--cursor-marker (copy-marker 3))
+    (setq kuro--last-cursor-row     0
+          kuro--last-cursor-col     2
+          kuro--last-cursor-visible t
+          kuro--last-cursor-shape   0)
+    (let ((anchor-calls 0)
+          (apply-calls 0))
+      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 2 t 0)))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+                ((symbol-function 'kuro--anchor-window-at-pos)
+                 (lambda (_win _pos) (cl-incf anchor-calls)))
+                ((symbol-function 'kuro--apply-cursor-display)
+                 (lambda (_v _s) (cl-incf apply-calls))))
+        (kuro--update-cursor)
+        (should (= anchor-calls 1))
+        (should (= apply-calls 0))))))
+
+(ert-deftest kuro-render-buffer-update-cursor-unchanged-uses-marker-position ()
+  "When cursor is unchanged and marker exists, anchor receives marker position.
+kuro--grid-col-to-buffer-pos must NOT be called — the marker is the fast path."
+  (kuro-render-buffer-cursor-test--with-buffer
+    (insert "hello\nworld\n")
+    (setq kuro--cursor-marker (copy-marker 8))
+    (setq kuro--last-cursor-row     1
+          kuro--last-cursor-col     1
+          kuro--last-cursor-visible t
+          kuro--last-cursor-shape   0)
+    (let ((anchor-pos nil)
+          (grid-col-calls 0))
+      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 1 t 0)))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+                ((symbol-function 'kuro--anchor-window-at-pos)
+                 (lambda (_win pos) (setq anchor-pos pos)))
+                ((symbol-function 'kuro--grid-col-to-buffer-pos)
+                 (lambda (_r _c) (cl-incf grid-col-calls) 99)))
+        (kuro--update-cursor)
+        (should (= anchor-pos 8))
+        (should (= grid-col-calls 0))))))
+
+(ert-deftest kuro-render-buffer-update-cursor-unchanged-falls-back-without-marker ()
+  "When cursor is unchanged but marker is nil, anchor uses grid-col-to-buffer-pos."
+  (kuro-render-buffer-cursor-test--with-buffer
+    (insert "hello\n")
+    (setq kuro--cursor-marker nil)
+    (setq kuro--last-cursor-row     0
+          kuro--last-cursor-col     3
+          kuro--last-cursor-visible t
+          kuro--last-cursor-shape   0)
+    (let ((anchor-pos nil))
+      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 3 t 0)))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+                ((symbol-function 'kuro--anchor-window-at-pos)
+                 (lambda (_win pos) (setq anchor-pos pos)))
+                ((symbol-function 'kuro--grid-col-to-buffer-pos)
+                 (lambda (_r _c) 42)))
+        (kuro--update-cursor)
+        (should (= anchor-pos 42))))))
 
 (ert-deftest kuro-render-buffer-update-cursor-partial-cache-miss-triggers-update ()
   "kuro--update-cursor updates when only shape changes (partial cache miss)."
@@ -895,6 +966,7 @@ the `remaining' list rather than being deleted again."
           kuro--last-cursor-shape   0)   ; shape was 0, now 2
     (let ((apply-calls 0))
       (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 2)))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
                 ((symbol-function 'kuro--apply-cursor-display)
                  (lambda (_v _s) (cl-incf apply-calls))))
         (kuro--update-cursor)

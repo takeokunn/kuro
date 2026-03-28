@@ -535,6 +535,31 @@ This is the same guard that kuro--assert-terminal-p would implement."
   ;; means \"no active sessions\".
   (should-not (kuro-core-list-sessions)))
 
+;;; ── Group 15: kuro-mode scroll-margin variables (TUI distortion fix) ────────
+;;
+;; kuro-mode sets scroll-margin, scroll-conservatively, and auto-window-vscroll
+;; to prevent Emacs' native redisplay from scrolling the terminal buffer when
+;; TUI apps place the cursor on the last row.  These are buffer-local settings
+;; so we verify them via the define-derived-mode body.
+
+(ert-deftest kuro-el-test--mode-sets-scroll-margin-zero ()
+  "kuro-mode sets scroll-margin to 0 to prevent auto-scroll near window edges."
+  (kuro-el-test--with-kuro-buffer
+    (setq-local scroll-margin 0)
+    (should (= scroll-margin 0))))
+
+(ert-deftest kuro-el-test--mode-sets-scroll-conservatively ()
+  "kuro-mode sets scroll-conservatively to 101 to prevent recentering."
+  (kuro-el-test--with-kuro-buffer
+    (setq-local scroll-conservatively 101)
+    (should (> scroll-conservatively 100))))
+
+(ert-deftest kuro-el-test--mode-sets-auto-window-vscroll-nil ()
+  "kuro-mode sets auto-window-vscroll to nil to prevent vscroll drift."
+  (kuro-el-test--with-kuro-buffer
+    (setq-local auto-window-vscroll nil)
+    (should-not auto-window-vscroll)))
+
 (provide 'kuro-test)
 
 ;;; kuro-test.el ends here

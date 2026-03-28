@@ -25,6 +25,17 @@
 
 (require 'seq)
 
+;; Forward declarations for variables used by kuro--refine-glyph-widths
+;; to detect line-height changes after font rescaling.
+(defvar kuro--initialized nil
+  "Forward reference; defvar-local in kuro-ffi.el.")
+(defvar kuro--last-rows 0
+  "Forward reference; defvar-local in kuro.el.")
+(defvar kuro--last-cols 0
+  "Forward reference; defvar-local in kuro.el.")
+(defvar kuro--resize-pending nil
+  "Forward reference; defvar-permanent-local in kuro-ffi.el.")
+
 ;;; Character width table — data
 
 (defconst kuro--char-width-2-ranges
@@ -177,24 +188,27 @@ fluctuation) or horizontal misalignment in TUI applications.")
 
 (defun kuro--probe-glyph-metrics (probe-char)
   "Return (:font FONT :width W :height H) for PROBE-CHAR, or nil if unavailable.
-Inserts PROBE-CHAR into a temp buffer and calls `font-at' to find the font
-Emacs actually chose, then reads glyph metrics via `font-get-glyphs'.
-Returns nil on any error (non-graphical display, missing font, zero width)."
+Uses `internal-char-font' to determine which font Emacs would use for
+PROBE-CHAR in the current buffer's window, then reads glyph metrics via
+`font-get-glyphs'.  The buffer must be displayed in a window (always true
+when called from `kuro--refine-glyph-widths' 0.1s after session start).
+Returns nil on any error (non-graphical display, no window, missing font)."
   (condition-case nil
-      (let* ((probe-str (string probe-char))
-             (font-obj  (with-temp-buffer
-                          (insert probe-str)
-                          (font-at 0)))
-             (glyphs    (and font-obj (font-get-glyphs font-obj 0 1 probe-str)))
-             (glyph     (and glyphs (> (length glyphs) 0) (aref glyphs 0)))
-             (width     (and glyph (aref glyph 4)))
-             (ascent    (and glyph (> (length glyph) 7) (aref glyph 7)))
-             (descent   (and glyph (> (length glyph) 8) (aref glyph 8))))
-        (and width (> width 0)
-             (list :font   font-obj
-                   :width  width
-                   :height (and ascent descent
-                                (+ (abs ascent) (abs descent))))))
+      (when-let* ((win (get-buffer-window (current-buffer) t)))
+        (with-selected-window win
+          (let* ((char-font (internal-char-font (point-min) probe-char))
+                 (font-obj  (and char-font (car char-font)))
+                 (probe-str (string probe-char))
+                 (glyphs    (and font-obj (font-get-glyphs font-obj 0 1 probe-str)))
+                 (glyph     (and glyphs (> (length glyphs) 0) (aref glyphs 0)))
+                 (width     (and glyph (aref glyph 4)))
+                 (ascent    (and glyph (> (length glyph) 7) (aref glyph 7)))
+                 (descent   (and glyph (> (length glyph) 8) (aref glyph 8))))
+            (and width (> width 0)
+                 (list :font   font-obj
+                       :width  width
+                       :height (and ascent descent
+                                    (+ (abs ascent) (abs descent))))))))
     (error nil)))
 
 (defun kuro--rescale-font-for-glyph (probe-char range cell-width cell-height)
@@ -258,7 +272,20 @@ may still have taller ascent+descent, causing line-height fluctuation
                  char (cons char char) cell-width cell-height)
             (setq did-change t)))
         (when did-change
-          (redraw-display))))))
+          (redraw-display)
+          ;; Font rescaling may change effective line height (e.g. replacing a
+          ;; taller fallback font with a shorter one), which changes
+          ;; window-body-height without triggering window-size-change-functions
+          ;; (pixel size is unchanged).  Record a pending resize so the next
+          ;; render cycle sends the corrected dimensions to the PTY.
+          (when-let ((win (get-buffer-window (current-buffer) t)))
+            (let ((new-rows (window-body-height win))
+                  (new-cols (window-body-width win)))
+              (when (and (boundp 'kuro--initialized) kuro--initialized
+                         (or (/= new-rows kuro--last-rows)
+                             (/= new-cols kuro--last-cols)))
+                (setq kuro--resize-pending (cons new-rows new-cols))))))))))
+
 
 ;;; Character width table — logic
 

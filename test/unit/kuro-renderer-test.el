@@ -176,7 +176,8 @@
     (insert "row0\nrow1\nrow2\n")
     (setq kuro--cursor-marker (point-marker))
     ;; Stub consolidated FFI to return cursor at row=1, col=2, visible=t, shape=0
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     ;; Row 1, col 2 → "row1\n" starts at position 6, col 2 → pos 8
     (should (= (marker-position kuro--cursor-marker) 8))))
@@ -186,7 +187,8 @@
   (kuro-renderer-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0))))
+    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0)))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
       (kuro--update-cursor))
     (should-not cursor-type)))
 
@@ -199,7 +201,8 @@
                           (3 . (hbar . 2)) (4 . (hbar . 2))
                           (5 . (bar . 2)) (6 . (bar . 2))))
       (cl-letf (((symbol-function 'kuro--get-cursor-state)
-                 (lambda () (list 0 0 t (car shape-pair)))))
+                 (lambda () (list 0 0 t (car shape-pair))))
+                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
         (kuro--update-cursor))
       (should (equal cursor-type (cdr shape-pair))))))
 

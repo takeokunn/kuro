@@ -294,11 +294,18 @@ Falls back to COL when the mapping is absent or shorter than COL
 within the already-anchored viewport; together they prevent Emacs from
 scrolling when a full-screen app (vim, htop) moves the cursor to the
 last row.  Both calls are guarded by equality checks to avoid
-unnecessary redisplay triggers."
+unnecessary redisplay triggers.
+Also resets vscroll and hscroll to zero: tall image overlays
+\(Sixel/Kitty) can leave non-zero vscroll, and horizontal scroll
+drift can accumulate even with `auto-hscroll-mode' disabled."
   (unless (= (window-start win) (point-min))
     (set-window-start win (point-min)))
   (unless (= (window-point win) target-pos)
-    (set-window-point win target-pos)))
+    (set-window-point win target-pos))
+  (when (> (window-vscroll win) 0)
+    (set-window-vscroll win 0))
+  (when (> (window-hscroll win) 0)
+    (set-window-hscroll win 0)))
 
 (defun kuro--apply-cursor-display (visible shape)
   "Set buffer-local `cursor-type' from VISIBLE flag and SHAPE integer.
@@ -315,24 +322,30 @@ When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil."
   "Update cursor position and shape in buffer.
 Uses the consolidated `kuro--get-cursor-state' to fetch position,
 visibility, and shape in a single Mutex acquisition (PERF-004).
-Skips buffer position computation when cursor state is unchanged."
+Skips buffer position computation when cursor state is unchanged,
+but ALWAYS re-anchors the window at point-min to prevent Emacs'
+native redisplay from drifting the viewport between render cycles."
   (unless (> kuro--scroll-offset 0)
     (when-let ((state (kuro--get-cursor-state)))
       (pcase-let* ((`(,row ,col ,visible ,shape) state))
-        (unless (and (eql row kuro--last-cursor-row)
-                     (eql col kuro--last-cursor-col)
-                     (eq  visible kuro--last-cursor-visible)
-                     (eql shape kuro--last-cursor-shape))
-          (setq kuro--last-cursor-row     row
-                kuro--last-cursor-col     col
-                kuro--last-cursor-visible visible
-                kuro--last-cursor-shape   shape)
-          (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
-            (when kuro--cursor-marker
-              (set-marker kuro--cursor-marker target-pos))
-            (when-let ((win (get-buffer-window (current-buffer) t)))
-              (kuro--anchor-window-at-pos win target-pos))
-            (kuro--apply-cursor-display visible shape)))))))
+        (when-let ((win (get-buffer-window (current-buffer) t)))
+          (if (and (eql row kuro--last-cursor-row)
+                   (eql col kuro--last-cursor-col)
+                   (eq  visible kuro--last-cursor-visible)
+                   (eql shape kuro--last-cursor-shape))
+              ;; Cursor unchanged — still re-anchor to prevent viewport drift.
+              (kuro--anchor-window-at-pos win (or (and kuro--cursor-marker
+                                                       (marker-position kuro--cursor-marker))
+                                                  (kuro--grid-col-to-buffer-pos row col)))
+            (setq kuro--last-cursor-row     row
+                  kuro--last-cursor-col     col
+                  kuro--last-cursor-visible visible
+                  kuro--last-cursor-shape   shape)
+            (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
+              (when kuro--cursor-marker
+                (set-marker kuro--cursor-marker target-pos))
+              (kuro--anchor-window-at-pos win target-pos)
+              (kuro--apply-cursor-display visible shape))))))))
 
 (provide 'kuro-render-buffer)
 

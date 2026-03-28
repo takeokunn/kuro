@@ -174,6 +174,16 @@ When PREV is a function it is called at the end; nil is ignored."
   ;; (which we use to track the terminal cursor), causing the visual cursor to
   ;; jump unexpectedly.  vterm and eshell do not use cursor-intangible-mode either.
   (setq-local show-trailing-whitespace nil)
+  ;; Prevent Emacs' native redisplay from scrolling the terminal buffer.
+  ;; scroll-margin=0 stops auto-scroll when cursor is near window edges;
+  ;; scroll-conservatively=101 (any value >100) prevents recentering on any
+  ;; cursor movement; auto-window-vscroll=nil prevents vscroll drift from tall
+  ;; image overlays (Sixel/Kitty).  Without these, TUI apps (btop, bottom,
+  ;; gping) that place the cursor on the last row trigger Emacs scroll
+  ;; heuristics between render cycles, causing visible distortion.
+  (setq-local scroll-margin 0)
+  (setq-local scroll-conservatively 101)
+  (setq-local auto-window-vscroll nil)
   ;; Disable undo in terminal buffers.  Every render cycle replaces line content
   ;; via delete-region + insert (up to N*2 operations/frame); without this, the
   ;; undo ring grows unboundedly and `undo-boundary' calls inside buffer operations

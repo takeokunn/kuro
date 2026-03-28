@@ -223,10 +223,16 @@ Switches to the terminal buffer after creation."
     ;; the resize SIGWINCH arrives will lay out their UI with the wrong geometry.
     (unless noninteractive
       (switch-to-buffer buffer))
-    (let ((rows (if noninteractive kuro--default-rows (window-body-height)))
-          (cols (if noninteractive kuro--default-cols (window-body-width))))
-      (with-current-buffer buffer
-        (kuro-mode)
+    (with-current-buffer buffer
+      (kuro-mode)
+      ;; Measure AFTER kuro-mode: kuro--assign-mono-fonts changes the fontset
+      ;; via set-fontset-font, which can change effective line height (replacing
+      ;; taller fallback fonts with the ASCII monospace font).  This changes
+      ;; window-body-height without triggering window-size-change-functions
+      ;; (pixel size is unchanged).  Measuring before kuro-mode gives a stale
+      ;; row count, causing TUI apps to draw for the wrong terminal size.
+      (let ((rows (if noninteractive kuro--default-rows (window-body-height)))
+            (cols (if noninteractive kuro--default-cols (window-body-width))))
         (let ((inhibit-read-only t))
           (kuro--prefill-buffer rows))
         ;; Spawn PTY with the correct dimensions from the start — no resize needed.

@@ -715,8 +715,14 @@ fn test_sixel_placement_respects_cursor_position() {
         "exactly one sixel notification must be queued"
     );
     let notif = &core.kitty.pending_image_notifications[0];
-    assert_eq!(notif.row, 3, "sixel image row must match cursor row at hook time");
-    assert_eq!(notif.col, 5, "sixel image col must match cursor col at hook time");
+    assert_eq!(
+        notif.row, 3,
+        "sixel image row must match cursor row at hook time"
+    );
+    assert_eq!(
+        notif.col, 5,
+        "sixel image col must match cursor col at hook time"
+    );
 }
 
 /// A DCS with unknown intermediate b"!" and final 'q' must leave the DCS
@@ -740,7 +746,10 @@ fn test_dcs_unknown_intermediate_then_valid_xtgettcap() {
         "valid XTGETTCAP after unknown-intermediate sequence must produce one response"
     );
     let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "response must be a success response");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "response must be a success response"
+    );
 }
 
 /// XTGETTCAP for invalid hex (non-hex ASCII like "GG") must produce a failure

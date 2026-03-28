@@ -1,4 +1,4 @@
-.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate test-elisp
+.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate test-elisp run
 
 # Variables
 CARGO = cargo
@@ -98,6 +98,30 @@ check-all: fmt lint test
 # Benchmark (requires nightly Rust)
 bench:
 	$(CARGO) bench
+
+# Run Kuro as a macOS GUI application (Dock icon, Cmd+Tab, keyboard focus)
+run: build install
+ifeq ($(UNAME_S),Darwin)
+	@EMACS_PREFIX=$$(dirname $$(dirname $$(realpath $$(which $(EMACS))))); \
+	EMACS_APP="$$EMACS_PREFIX/Applications/Emacs.app"; \
+	if [ -d "$$EMACS_APP" ]; then \
+		open -n -a "$$EMACS_APP" --args -Q \
+			--eval "(add-to-list 'load-path \"$(CURDIR)/emacs-lisp\")" \
+			--eval "(setenv \"KURO_MODULE_PATH\" \"$(CURDIR)/$(TARGET_DIR)\")" \
+			--eval "(require 'kuro)" \
+			--eval "(kuro-create \"/bin/bash\")"; \
+	else \
+		echo "Error: Emacs.app not found at $$EMACS_APP" >&2; \
+		echo "Install Emacs with an .app bundle (e.g. via nix or homebrew)" >&2; \
+		exit 1; \
+	fi
+else
+	@exec $(EMACS) -Q \
+		--eval "(add-to-list 'load-path \"$(CURDIR)/emacs-lisp\")" \
+		--eval "(setenv \"KURO_MODULE_PATH\" \"$(CURDIR)/$(TARGET_DIR)\")" \
+		--eval "(require 'kuro)" \
+		--eval "(kuro-create \"/bin/bash\")"
+endif
 
 # Documentation
 doc:

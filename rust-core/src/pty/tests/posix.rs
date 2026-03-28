@@ -264,6 +264,14 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
 ///
 /// Each test helper forks, calls `setup_child_env` in the child, writes a result
 /// byte to a pipe, and the parent asserts on it.
+///
+/// **IMPORTANT**: `fork()` in a multi-threaded process (cargo test) copies only
+/// the calling thread.  Mutexes held by other threads (including Rust's internal
+/// env-var `RwLock`) remain permanently locked in the child, causing deadlocks.
+/// To avoid hanging the test runner:
+///   - The parent polls `waitpid(WNOHANG)` with a timeout, escalating to SIGKILL.
+///   - The child uses `libc::_exit()` (not `std::process::exit`) to skip atexit
+///     handlers that may also deadlock.
 #[cfg(unix)]
 fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> bool {
     use std::os::unix::io::FromRawFd as _;
@@ -273,8 +281,11 @@ fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> bool {
     assert_eq!(ret, 0, "pipe() failed");
     let (read_fd, write_fd) = (fds[0], fds[1]);
 
-    // SAFETY: fork() is safe before any threads are spawned; child executes
-    // only async-signal-safe and single-threaded code before _exit().
+    // SAFETY: fork() duplicates the current thread's state; the child must
+    // use only async-signal-safe calls before _exit().  Note: std::env::var
+    // and setup_child_env are NOT async-signal-safe (they acquire an env
+    // RwLock), so this can deadlock if another test thread holds that lock.
+    // The timeout below prevents the test runner from hanging in that case.
     match unsafe { nix::unistd::fork() }.expect("fork failed") {
         nix::unistd::ForkResult::Child => {
             // SAFETY: write_fd is a valid open fd from pipe above.
@@ -283,13 +294,40 @@ fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> bool {
             let ok = check();
             use std::io::Write as _;
             let _ = wf.write_all(&[ok as u8]);
-            std::process::exit(0);
+            // Use _exit to avoid running atexit handlers (unsafe after fork).
+            unsafe { libc::_exit(0) };
         }
         nix::unistd::ForkResult::Parent { child } => {
             unsafe { libc::close(write_fd) };
             // SAFETY: read_fd is a valid open fd from pipe above.
             let mut rf = unsafe { std::fs::File::from_raw_fd(read_fd) };
-            nix::sys::wait::waitpid(child, None).expect("waitpid failed");
+
+            // Poll with WNOHANG + timeout to avoid blocking forever if the
+            // child deadlocks on a poisoned mutex inherited from fork().
+            let mut reaped = false;
+            for _ in 0..200 {
+                // 200 × 10 ms = 2 s timeout
+                match nix::sys::wait::waitpid(child, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
+                    Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Ok(_) | Err(nix::errno::Errno::ECHILD) => {
+                        reaped = true;
+                        break;
+                    }
+                    Err(_) => {
+                        reaped = true;
+                        break;
+                    }
+                }
+            }
+            if !reaped {
+                // Child is stuck (likely deadlocked on env RwLock after fork).
+                let _ = nix::sys::signal::kill(child, nix::sys::signal::Signal::SIGKILL);
+                let _ = nix::sys::wait::waitpid(child, None);
+                return false; // Test fails gracefully instead of hanging.
+            }
+
             let mut buf = [0u8; 1];
             use std::io::Read as _;
             let _ = rf.read_exact(&mut buf);

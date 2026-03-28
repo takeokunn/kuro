@@ -1233,7 +1233,10 @@ fn test_dectcem_default_visible_reported_by_decrqm() {
     assert!(t.cursor_visible(), "cursor must be visible by default");
     t.advance(b"\x1b[?25$p"); // DECRQM query for mode 25
     let responses = common::read_responses(&t);
-    assert!(!responses.is_empty(), "DECRQM for ?25 must produce a response");
+    assert!(
+        !responses.is_empty(),
+        "DECRQM for ?25 must produce a response"
+    );
     let resp = &responses[0];
     // Status 1 = set (cursor visible)
     assert!(
@@ -1337,8 +1340,11 @@ fn test_decscusr_reset_after_ris() {
 fn test_decscusr_unknown_param_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[99 q"); // out-of-range parameter — must not panic
-    // Must not panic; cursor shape should be BlinkingBlock (fallback)
-    assert!(t.cursor_row() < 24, "cursor must be in bounds after unknown DECSCUSR");
+                             // Must not panic; cursor shape should be BlinkingBlock (fallback)
+    assert!(
+        t.cursor_row() < 24,
+        "cursor must be in bounds after unknown DECSCUSR"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1421,17 +1427,26 @@ fn test_focus_events_and_bracketed_paste_are_independent() {
     // Enable focus events only
     t.advance(b"\x1b[?1004h");
     assert!(t.dec_modes().focus_events, "focus_events must be on");
-    assert!(!t.dec_modes().bracketed_paste, "bracketed_paste must still be off");
+    assert!(
+        !t.dec_modes().bracketed_paste,
+        "bracketed_paste must still be off"
+    );
 
     // Now enable bracketed paste as well
     t.advance(b"\x1b[?2004h");
     assert!(t.dec_modes().focus_events, "focus_events must remain on");
-    assert!(t.dec_modes().bracketed_paste, "bracketed_paste must now be on");
+    assert!(
+        t.dec_modes().bracketed_paste,
+        "bracketed_paste must now be on"
+    );
 
     // Disable focus events — bracketed paste must remain
     t.advance(b"\x1b[?1004l");
     assert!(!t.dec_modes().focus_events, "focus_events must be off");
-    assert!(t.dec_modes().bracketed_paste, "bracketed_paste must remain on");
+    assert!(
+        t.dec_modes().bracketed_paste,
+        "bracketed_paste must remain on"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1472,39 +1487,45 @@ fn test_ris_resets_all_dec_modes() {
     let mut t = TerminalCore::new(24, 80);
 
     // Set everything that can be set
-    t.advance(b"\x1b[?1h");    // DECCKM
-    t.advance(b"\x1b[?7l");    // DECAWM off (default is on, so toggling)
-    t.advance(b"\x1b[?25l");   // DECTCEM hide
+    t.advance(b"\x1b[?1h"); // DECCKM
+    t.advance(b"\x1b[?7l"); // DECAWM off (default is on, so toggling)
+    t.advance(b"\x1b[?25l"); // DECTCEM hide
     t.advance(b"\x1b[?1004h"); // focus events
     t.advance(b"\x1b[?1006h"); // mouse SGR
     t.advance(b"\x1b[?1016h"); // mouse pixel
     t.advance(b"\x1b[?2004h"); // bracketed paste
     t.advance(b"\x1b[?2026h"); // synchronized output
     t.advance(b"\x1b[?1000h"); // mouse mode 1000
-    t.advance(b"\x1b[6 q");    // cursor shape SteadyBar (wait, 6 = SteadyBar)
-    t.advance(b"\x1b[>5u");    // kitty keyboard flags=5
+    t.advance(b"\x1b[6 q"); // cursor shape SteadyBar (wait, 6 = SteadyBar)
+    t.advance(b"\x1b[>5u"); // kitty keyboard flags=5
 
     // Full reset
     t.advance(b"\x1bc");
 
     // Verify all defaults restored
     let m = t.dec_modes();
-    assert!(!m.app_cursor_keys,    "app_cursor_keys must be off after RIS");
-    assert!(m.auto_wrap,           "auto_wrap must be on after RIS");
-    assert!(m.cursor_visible,      "cursor_visible must be on after RIS");
-    assert!(!m.focus_events,       "focus_events must be off after RIS");
-    assert!(!m.mouse_sgr,          "mouse_sgr must be off after RIS");
-    assert!(!m.mouse_pixel,        "mouse_pixel must be off after RIS");
-    assert!(!m.bracketed_paste,    "bracketed_paste must be off after RIS");
-    assert!(!m.synchronized_output, "synchronized_output must be off after RIS");
-    assert_eq!(m.mouse_mode, 0,    "mouse_mode must be 0 after RIS");
+    assert!(!m.app_cursor_keys, "app_cursor_keys must be off after RIS");
+    assert!(m.auto_wrap, "auto_wrap must be on after RIS");
+    assert!(m.cursor_visible, "cursor_visible must be on after RIS");
+    assert!(!m.focus_events, "focus_events must be off after RIS");
+    assert!(!m.mouse_sgr, "mouse_sgr must be off after RIS");
+    assert!(!m.mouse_pixel, "mouse_pixel must be off after RIS");
+    assert!(!m.bracketed_paste, "bracketed_paste must be off after RIS");
+    assert!(
+        !m.synchronized_output,
+        "synchronized_output must be off after RIS"
+    );
+    assert_eq!(m.mouse_mode, 0, "mouse_mode must be 0 after RIS");
     assert_eq!(
         m.cursor_shape,
         kuro_core::types::cursor::CursorShape::BlinkingBlock,
         "cursor_shape must be BlinkingBlock after RIS"
     );
     assert_eq!(m.keyboard_flags, 0, "keyboard_flags must be 0 after RIS");
-    assert!(!t.is_alternate_screen_active(), "alt screen must be off after RIS");
+    assert!(
+        !t.is_alternate_screen_active(),
+        "alt screen must be off after RIS"
+    );
 }
 
 /// Synchronized output and alt screen can both be active; each can be

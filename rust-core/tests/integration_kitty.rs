@@ -238,7 +238,10 @@ fn kitty_transmit_and_display_q2_queues_notification_not_response() {
         1,
         "a=T with q=2 must still queue a placement notification"
     );
-    assert_eq!(notifs[0].image_id, 80, "notification must reference image_id 80");
+    assert_eq!(
+        notifs[0].image_id, 80,
+        "notification must reference image_id 80"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -309,10 +312,7 @@ fn kitty_empty_payload_transmit_does_not_panic() {
 fn kitty_u32_max_image_id_accepted() {
     let mut t = TerminalCore::new(24, 80);
 
-    let apc = format!(
-        "\x1b_Ga=t,f=24,i={},s=1,v=1;AAAA\x1b\\",
-        u32::MAX
-    );
+    let apc = format!("\x1b_Ga=t,f=24,i={},s=1,v=1;AAAA\x1b\\", u32::MAX);
     t.advance(apc.as_bytes());
 
     let png = t.get_image_png_base64(u32::MAX);

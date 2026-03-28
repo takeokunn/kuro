@@ -93,7 +93,10 @@ fn test_version_29_0_is_below_minimum() {
     let (min_major, min_minor) = MIN_EMACS_VERSION;
     // (29, 0): major == min_major, but 0 < min_minor
     let is_below = 29 == min_major && 0 < min_minor;
-    assert!(is_below, "(29, 0) should be below the minimum (29, {min_minor})");
+    assert!(
+        is_below,
+        "(29, 0) should be below the minimum (29, {min_minor})"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +280,10 @@ fn test_not_initialized_differs_from_initialized() {
 fn test_get_init_state_some_after_any_initialize_call() {
     let _ = initialize((29, 1)); // Ok or AlreadyInitialized
     let state = get_init_state();
-    assert!(state.is_some(), "get_init_state must return Some after initialize()");
+    assert!(
+        state.is_some(),
+        "get_init_state must return Some after initialize()"
+    );
     assert_eq!(
         state,
         Some(InitializationState::Initialized),

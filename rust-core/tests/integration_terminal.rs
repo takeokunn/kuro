@@ -1019,7 +1019,9 @@ fn test_alt_screen_content_does_not_bleed_to_primary() {
     term.advance(b"\x1b[?1049l");
 
     // Primary screen row 0 must still start with 'P'
-    let cell = term.get_cell(0, 0).expect("cell (0,0) must exist on primary");
+    let cell = term
+        .get_cell(0, 0)
+        .expect("cell (0,0) must exist on primary");
     assert_eq!(
         cell.char(),
         'P',
@@ -1038,10 +1040,10 @@ fn test_ed0_erases_from_cursor_to_end() {
     // Write something on row 0 and row 1
     term.advance(b"AAAAAAAAAA"); // fills row 0
     term.advance(b"\nBBBBBBBBBB"); // fills row 1
-    // Move cursor to row 0, col 5
+                                   // Move cursor to row 0, col 5
     term.advance(b"\x1b[1;6H"); // 1-indexed → row 0, col 5
     term.advance(b"\x1b[0J"); // ED 0: erase from cursor to bottom
-    // col 0..4 on row 0 must still be 'A'
+                              // col 0..4 on row 0 must still be 'A'
     for col in 0..5 {
         let cell = term.get_cell(0, col).expect("cell must exist");
         assert_eq!(cell.char(), 'A', "cell (0,{col}) must survive ED 0");
@@ -1064,17 +1066,13 @@ fn test_ed1_erases_from_start_to_cursor() {
     // Move cursor to row 1, col 4
     term.advance(b"\x1b[2;5H"); // 1-indexed → row 1, col 4
     term.advance(b"\x1b[1J"); // ED 1: erase from top to cursor
-    // row 0 must be fully erased
+                              // row 0 must be fully erased
     let r0 = term.get_cell(0, 0).expect("cell (0,0) must exist");
     assert_eq!(r0.char(), ' ', "row 0 must be erased by ED 1");
     // row 1, cols 0–4 must be erased
     for col in 0..=4 {
         let cell = term.get_cell(1, col).expect("cell must exist");
-        assert_eq!(
-            cell.char(),
-            ' ',
-            "cell (1,{col}) must be erased by ED 1"
-        );
+        assert_eq!(cell.char(), ' ', "cell (1,{col}) must be erased by ED 1");
     }
     // row 1, cols 5–9 must still be 'B'
     let surviving = term.get_cell(1, 5).expect("cell (1,5) must exist");
@@ -1131,8 +1129,14 @@ fn test_resize_grow_preserves_visible_content() {
     term.advance(b"HELLO");
     term.resize(20, 80);
     // Row 0 content must survive the resize
-    let h = term.get_cell(0, 0).expect("cell (0,0) must exist after resize");
-    assert_eq!(h.char(), 'H', "cell (0,0) must still be 'H' after resize grow");
+    let h = term
+        .get_cell(0, 0)
+        .expect("cell (0,0) must exist after resize");
+    assert_eq!(
+        h.char(),
+        'H',
+        "cell (0,0) must still be 'H' after resize grow"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

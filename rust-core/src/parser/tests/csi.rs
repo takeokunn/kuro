@@ -668,8 +668,7 @@ fn test_dsr_param6_enqueues_cpr_response() {
         "DSR 6 must enqueue exactly one response"
     );
     assert_eq!(
-        term.meta.pending_responses[0],
-        b"\x1b[5;10R",
+        term.meta.pending_responses[0], b"\x1b[5;10R",
         "DSR 6 response must be ESC[row;colR (1-indexed)"
     );
 }
@@ -771,7 +770,7 @@ fn test_sequential_cup_then_cuu() {
     // CUP to (8,20) then CUU 3 → row 4, col 19 (0-indexed).
     let mut term = term!(24, 80);
     term.advance(b"\x1b[8;20H"); // → (7, 19)
-    term.advance(b"\x1b[3A");   // → (4, 19)
+    term.advance(b"\x1b[3A"); // → (4, 19)
     assert_cursor!(term, 4, 19);
 }
 

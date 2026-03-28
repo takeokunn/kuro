@@ -1208,7 +1208,11 @@ fn test_delete_sub_command_n_variant() {
     let mut chunk_state = None;
     let result = process_apc_payload(b"a=d,d=n,i=8", &mut chunk_state);
     match result.unwrap() {
-        KittyCommand::Delete { delete_sub, image_id, .. } => {
+        KittyCommand::Delete {
+            delete_sub,
+            image_id,
+            ..
+        } => {
             assert_eq!(delete_sub, 'n');
             assert_eq!(image_id, Some(8));
         }
@@ -1234,7 +1238,13 @@ fn test_transmit_rgb_2x2_image() {
     let payload = format!("a=t,f=24,i=50,s=2,v=2;{b64}");
     let result = process_apc_payload(payload.as_bytes(), &mut chunk_state);
     match result.unwrap() {
-        KittyCommand::Transmit { format, pixel_width, pixel_height, pixels, .. } => {
+        KittyCommand::Transmit {
+            format,
+            pixel_width,
+            pixel_height,
+            pixels,
+            ..
+        } => {
             assert_eq!(format, ImageFormat::Rgb);
             assert_eq!(pixel_width, 2);
             assert_eq!(pixel_height, 2);
@@ -1252,7 +1262,13 @@ fn test_transmit_rgba_2x2_image() {
     let payload = format!("a=t,f=32,i=51,s=2,v=2;{b64}");
     let result = process_apc_payload(payload.as_bytes(), &mut chunk_state);
     match result.unwrap() {
-        KittyCommand::Transmit { format, pixel_width, pixel_height, pixels, .. } => {
+        KittyCommand::Transmit {
+            format,
+            pixel_width,
+            pixel_height,
+            pixels,
+            ..
+        } => {
             assert_eq!(format, ImageFormat::Rgba);
             assert_eq!(pixel_width, 2);
             assert_eq!(pixel_height, 2);
@@ -1279,7 +1295,12 @@ fn test_place_command_no_c_r_keys_produces_none_cols_rows() {
     let mut chunk_state = None;
     let result = process_apc_payload(b"a=p,i=10", &mut chunk_state);
     match result.unwrap() {
-        KittyCommand::Place { image_id, columns, rows, placement_id } => {
+        KittyCommand::Place {
+            image_id,
+            columns,
+            rows,
+            placement_id,
+        } => {
             assert_eq!(image_id, 10);
             assert!(columns.is_none(), "missing c= must produce None columns");
             assert!(rows.is_none(), "missing r= must produce None rows");
@@ -1315,7 +1336,11 @@ fn test_kitty_png_rgb_black_pixel_round_trips() {
     match result.unwrap() {
         KittyCommand::Transmit { pixels, format, .. } => {
             assert_eq!(format, ImageFormat::Rgb);
-            assert_eq!(pixels, vec![0u8, 0u8, 0u8], "black pixel must round-trip as [0,0,0]");
+            assert_eq!(
+                pixels,
+                vec![0u8, 0u8, 0u8],
+                "black pixel must round-trip as [0,0,0]"
+            );
         }
         other => panic!("expected Transmit, got {other:?}"),
     }
@@ -1331,7 +1356,11 @@ fn test_kitty_png_rgba_white_pixel_round_trips() {
     match result.unwrap() {
         KittyCommand::Transmit { pixels, format, .. } => {
             assert_eq!(format, ImageFormat::Rgba);
-            assert_eq!(pixels, vec![0xFFu8, 0xFF, 0xFF, 0xFF], "white pixel must round-trip");
+            assert_eq!(
+                pixels,
+                vec![0xFFu8, 0xFF, 0xFF, 0xFF],
+                "white pixel must round-trip"
+            );
         }
         other => panic!("expected Transmit, got {other:?}"),
     }

@@ -54,8 +54,12 @@ impl TerminalSession {
             for row in 0..rows {
                 match self.core.screen.get_scrollback_viewport_line(row) {
                     Some(line) => {
-                        let text =
-                            crate::ffi::codec::encode_line_into_buf(&line.cells, &mut self.encode_pool, row, &mut buf);
+                        let text = crate::ffi::codec::encode_line_into_buf(
+                            &line.cells,
+                            &mut self.encode_pool,
+                            row,
+                            &mut buf,
+                        );
                         texts.push(text);
                     }
                     None => {
@@ -124,9 +128,14 @@ impl TerminalSession {
             texts.reserve(rows);
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
-                    let text =
-                        crate::ffi::codec::encode_line_into_buf(&line.cells, &mut self.encode_pool, row, &mut buf);
-                    let hash = crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
+                    let text = crate::ffi::codec::encode_line_into_buf(
+                        &line.cells,
+                        &mut self.encode_pool,
+                        row,
+                        &mut buf,
+                    );
+                    let hash =
+                        crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
                     self.row_hashes[row] = Some((line.version, hash, epoch));
                     texts.push(text);
                 }
@@ -152,9 +161,14 @@ impl TerminalSession {
                     let buf_snapshot = buf.len();
 
                     // Encode into pool and serialise to buf.
-                    let text =
-                        crate::ffi::codec::encode_line_into_buf(&line.cells, &mut self.encode_pool, row, &mut buf);
-                    let new_hash = crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
+                    let text = crate::ffi::codec::encode_line_into_buf(
+                        &line.cells,
+                        &mut self.encode_pool,
+                        row,
+                        &mut buf,
+                    );
+                    let new_hash =
+                        crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
 
                     // Hash-skip: roll back the partial write if row is unchanged.
                     if let Some((_stored_ver, stored_hash, stored_epoch)) =
@@ -268,9 +282,7 @@ impl TerminalSession {
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
                     // Fast path: version + epoch match → no hash needed, skip row.
-                    if let Some((stored_ver, stored_hash, stored_epoch)) =
-                        self.row_hashes[row]
-                    {
+                    if let Some((stored_ver, stored_hash, stored_epoch)) = self.row_hashes[row] {
                         if line.version == stored_ver && epoch == stored_epoch {
                             // Re-emit with cached data to keep render state consistent.
                             // We still need to send the row content because full_dirty
@@ -279,8 +291,10 @@ impl TerminalSession {
                             let _ = (stored_ver, stored_hash, stored_epoch);
                         }
                     }
-                    let (text, face_ranges, col_to_buf) =
-                        crate::ffi::codec::encode_line_with_pool(&line.cells, &mut self.encode_pool);
+                    let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line_with_pool(
+                        &line.cells,
+                        &mut self.encode_pool,
+                    );
                     let hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
                     self.row_hashes[row] = Some((line.version, hash, epoch));
                     result.push((row, text, face_ranges, col_to_buf));

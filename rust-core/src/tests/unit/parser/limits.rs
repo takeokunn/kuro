@@ -229,8 +229,8 @@ fn test_full_ordering_chain() {
     const {
         assert!(
             MAX_APC_PAYLOAD_BYTES > OSC8_MAX_URI_BYTES
-            && OSC8_MAX_URI_BYTES > OSC7_MAX_PATH_BYTES
-            && OSC7_MAX_PATH_BYTES > MAX_TITLE_BYTES
+                && OSC8_MAX_URI_BYTES > OSC7_MAX_PATH_BYTES
+                && OSC7_MAX_PATH_BYTES > MAX_TITLE_BYTES
         )
     };
 }

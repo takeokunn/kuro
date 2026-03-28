@@ -715,7 +715,13 @@ macro_rules! test_sgr_indexed_color_pair {
             assert_eq!(
                 term.current_attrs.foreground,
                 crate::types::Color::Indexed($idx),
-                concat!("SGR 38;5;", stringify!($idx), " must set foreground to Indexed(", stringify!($idx), ")")
+                concat!(
+                    "SGR 38;5;",
+                    stringify!($idx),
+                    " must set foreground to Indexed(",
+                    stringify!($idx),
+                    ")"
+                )
             );
         }
 
@@ -726,23 +732,21 @@ macro_rules! test_sgr_indexed_color_pair {
             assert_eq!(
                 term.current_attrs.background,
                 crate::types::Color::Indexed($idx),
-                concat!("SGR 48;5;", stringify!($idx), " must set background to Indexed(", stringify!($idx), ")")
+                concat!(
+                    "SGR 48;5;",
+                    stringify!($idx),
+                    " must set background to Indexed(",
+                    stringify!($idx),
+                    ")"
+                )
             );
         }
     };
 }
 
 // Boundary values: index 0 (first entry) and 255 (last entry).
-test_sgr_indexed_color_pair!(
-    test_sgr_256_fg_index_0,
-    test_sgr_256_bg_index_0,
-    0
-);
-test_sgr_indexed_color_pair!(
-    test_sgr_256_fg_index_255,
-    test_sgr_256_bg_index_255,
-    255
-);
+test_sgr_indexed_color_pair!(test_sgr_256_fg_index_0, test_sgr_256_bg_index_0, 0);
+test_sgr_indexed_color_pair!(test_sgr_256_fg_index_255, test_sgr_256_bg_index_255, 255);
 
 // ── New edge-case tests ───────────────────────────────────────────────────────
 
@@ -863,7 +867,7 @@ fn test_sgr_reset_clears_all_flags_and_colors() {
     term.advance(b"\x1b[31m"); // red fg
     term.advance(b"\x1b[41m"); // red bg
     term.advance(b"\x1b[58;2;255;0;255m"); // underline_color
-    // Now reset.
+                                           // Now reset.
     term.advance(b"\x1b[0m");
     assert!(
         term.current_attrs.flags.is_empty(),

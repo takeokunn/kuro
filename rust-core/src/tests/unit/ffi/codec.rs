@@ -439,8 +439,10 @@ fn test_encode_screen_binary_empty() {
     let out = encode_screen_binary(&[]);
     assert_eq!(
         out,
-        [2u8, 0, 0, 0, // format_version = 2 LE
-         0u8, 0, 0, 0], // num_rows = 0 LE
+        [
+            2u8, 0, 0, 0, // format_version = 2 LE
+            0u8, 0, 0, 0
+        ], // num_rows = 0 LE
         "empty input must produce 8-byte header (version=2, num_rows=0)"
     );
 }
@@ -516,7 +518,11 @@ fn test_encode_screen_binary_one_face_range() {
         3,
         "face range flags must be 3"
     );
-    assert_eq!(read_u32(&out, fr_base + 24), 4, "face range ul_color must be 4");
+    assert_eq!(
+        read_u32(&out, fr_base + 24),
+        4,
+        "face range ul_color must be 4"
+    );
 }
 
 #[test]

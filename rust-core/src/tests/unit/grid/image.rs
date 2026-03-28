@@ -543,5 +543,9 @@ fn image_data_byte_count_empty_pixels_is_zero() {
         pixel_width: 0,
         pixel_height: 0,
     };
-    assert_eq!(data.byte_count(), 0, "byte_count of empty ImageData must be 0");
+    assert_eq!(
+        data.byte_count(),
+        0,
+        "byte_count of empty ImageData must be 0"
+    );
 }

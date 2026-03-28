@@ -6,7 +6,7 @@ use crate::{
     Result,
 };
 use nix::pty::{openpty, OpenptyResult, Winsize};
-use nix::sys::wait::waitpid;
+use nix::sys::wait::{waitpid, WaitPidFlag};
 use nix::unistd::{fork, ForkResult, Pid};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
@@ -21,6 +21,14 @@ const ALLOWED_SHELLS: &[&str] = &["bash", "zsh", "sh", "fish"];
 
 /// Channel capacity for PTY data - prevents unbounded memory growth
 const CHANNEL_CAPACITY: usize = 100;
+
+/// Maximum time (in milliseconds) to wait for a child process to exit after
+/// SIGHUP before escalating to SIGKILL.  Each retry sleeps 10 ms, so this
+/// value divided by 10 gives the number of poll iterations.
+const DROP_WAITPID_TIMEOUT_MS: u64 = 500;
+
+/// Sleep interval between non-blocking waitpid polls during Pty::drop.
+const DROP_WAITPID_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Set child process environment variables for terminal operation.
 ///
@@ -207,7 +215,10 @@ impl Pty {
             // `PathBuf` is still the original input (symlink or real path), which is
             // correct — `execv(2)` resolves symlinks itself at execution time.
             if meta.permissions().mode() & 0o111 == 0 {
-                return Err(invalid_parameter_error("command", "Shell is not executable"));
+                return Err(invalid_parameter_error(
+                    "command",
+                    "Shell is not executable",
+                ));
             }
             p
         } else {
@@ -438,27 +449,65 @@ impl AsRawFd for Pty {
 impl Drop for Pty {
     /// Ensure child process is cleaned up when the Pty is dropped.
     ///
-    /// Sends SIGHUP to the child so it exits, which causes the slave PTY to
-    /// close and unblocks the reader thread.  Waits for the child to prevent
-    /// zombie processes.  The reader thread will detect EOF on the master fd
-    /// and exit on its own once the child has closed the slave side.
+    /// Strategy: SIGHUP → poll with WNOHANG (up to 500 ms) → SIGKILL → final reap.
+    /// This prevents the blocking waitpid that previously caused `cargo test` hangs
+    /// when a shell child did not exit promptly after SIGHUP.
+    ///
+    /// The reader thread will detect EOF on the master fd (closed by the
+    /// compiler-generated File drop after this function returns) and exit on its own.
     fn drop(&mut self) {
-        // Signal the reader thread to stop after its current read returns
+        // Signal the reader thread to stop after its current read returns.
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
-        // Send SIGHUP to the child process so it exits gracefully
+        // Send SIGHUP to the child process so it exits gracefully.
         if let Err(e) = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP) {
-            eprintln!("[PTY] Drop: failed to send SIGHUP: {e}");
+            // ESRCH = process already exited — not an error worth logging.
+            if e != nix::errno::Errno::ESRCH {
+                eprintln!("[PTY] Drop: failed to send SIGHUP: {e}");
+            }
+            // If the process already exited, still reap to prevent zombie.
         }
 
-        // Wait for the child to exit (prevents zombie processes)
-        match waitpid(self.child_pid, None) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("[PTY] Drop: waitpid failed: {e}");
+        // Poll with WNOHANG: give the child up to DROP_WAITPID_TIMEOUT_MS to exit.
+        let max_retries = DROP_WAITPID_TIMEOUT_MS / DROP_WAITPID_POLL_INTERVAL.as_millis() as u64;
+        let mut reaped = false;
+        for _ in 0..max_retries {
+            match waitpid(self.child_pid, Some(WaitPidFlag::WNOHANG)) {
+                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                    // Child still running — sleep briefly and retry.
+                    std::thread::sleep(DROP_WAITPID_POLL_INTERVAL);
+                }
+                Ok(_) => {
+                    // Child exited (any terminal status) — successfully reaped.
+                    reaped = true;
+                    break;
+                }
+                Err(nix::errno::Errno::ECHILD) => {
+                    // No such child — already reaped by someone else.
+                    reaped = true;
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("[PTY] Drop: waitpid(WNOHANG) failed: {e}");
+                    reaped = true; // Give up to avoid infinite loop.
+                    break;
+                }
             }
         }
+
+        if !reaped {
+            // Escalate to SIGKILL: the child did not exit after SIGHUP + timeout.
+            let _ = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGKILL);
+            // Final blocking reap — SIGKILL is unconditional, so this returns quickly.
+            match waitpid(self.child_pid, None) {
+                Ok(_) | Err(nix::errno::Errno::ECHILD) => {}
+                Err(e) => {
+                    eprintln!("[PTY] Drop: final waitpid after SIGKILL failed: {e}");
+                }
+            }
+        }
+
         // The master File is dropped next (by the compiler-generated cleanup),
         // which closes the master fd.  The reader thread, unblocked by EOF on
         // the master, will detect the shutdown flag or a channel-send error and

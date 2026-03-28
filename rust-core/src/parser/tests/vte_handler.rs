@@ -810,11 +810,7 @@ fn test_vte_sgr_blink_fast() {
 /// SGR concealed/hidden (CSI 8 m) must set the HIDDEN flag.
 #[test]
 fn test_vte_sgr_hidden() {
-    assert_sgr_flag!(
-        b"\x1b[8m",
-        SgrFlags::HIDDEN,
-        "SGR 8 must set HIDDEN flag"
-    );
+    assert_sgr_flag!(b"\x1b[8m", SgrFlags::HIDDEN, "SGR 8 must set HIDDEN flag");
 }
 
 /// CHA (CSI G) — Cursor Horizontal Absolute: moves cursor to column N (1-indexed).
@@ -848,7 +844,7 @@ fn test_csi_hpa_unimplemented_is_noop() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[5;1H"); // cursor to row 4, col 0
     term.advance(b"\x1b[15`"); // HPA 15 — silently ignored
-    // Column must not have changed (stays at 0)
+                               // Column must not have changed (stays at 0)
     assert_eq!(
         term.screen.cursor().col,
         0,
@@ -862,7 +858,7 @@ fn test_csi_decstr_clears_sgr_bold() {
     let mut term = term_with!(b"\x1b[1m"); // bold on
     assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b[!p"); // DECSTR
-    // After soft reset, bold should be cleared
+                              // After soft reset, bold should be cleared
     assert!(
         !term.current_attrs.flags.contains(SgrFlags::BOLD),
         "DECSTR must clear SGR BOLD"
@@ -875,7 +871,7 @@ fn test_csi_decstr_clears_sgr_bold() {
 #[test]
 fn test_csi_rep_unimplemented_is_noop() {
     let term = term_with!(b"A\x1b[3b"); // 'A' then REP 3 — silently ignored
-    // 'A' printed at col 0; cursor advanced to col 1
+                                        // 'A' printed at col 0; cursor advanced to col 1
     assert_cell_char!(term, row 0, col 0, 'A');
     // Cols 1-3 are blank — REP did nothing
     assert_cell_char!(term, row 0, col 1, ' ');
@@ -892,7 +888,7 @@ fn test_csi_il_inserts_blank_line() {
     // cursor is now at row 1; go back to row 0
     term.advance(b"\x1b[1;1H");
     term.advance(b"\x1b[1L"); // IL 1: insert blank line at row 0
-    // Row 0 must now be blank; row 1 must have 'A' content
+                              // Row 0 must now be blank; row 1 must have 'A' content
     assert_eq!(
         term.screen.get_cell(0, 0).unwrap().char(),
         ' ',
@@ -917,7 +913,7 @@ fn test_csi_dl_deletes_line() {
     term.advance(b"B");
     term.advance(b"\x1b[1;1H"); // cursor back to row 0
     term.advance(b"\x1b[1M"); // DL 1: delete row 0; row 1 shifts up
-    // Row 0 now holds what was row 1 ('B' at col 0)
+                              // Row 0 now holds what was row 1 ('B' at col 0)
     assert_eq!(
         term.screen.get_cell(0, 0).unwrap().char(),
         'B',
@@ -933,7 +929,7 @@ fn test_esc_decsc_saves_and_restores_sgr_attrs() {
     term.advance(b"\x1b[1m");
     assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b7"); // DECSC — save cursor + attrs
-    // Clear bold
+                            // Clear bold
     term.advance(b"\x1b[0m");
     assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b8"); // DECRC — restore

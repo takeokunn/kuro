@@ -243,9 +243,15 @@ fn test_decom_mode_set_reset() {
     let mut modes = DecModes::new();
     assert!(!modes.origin_mode, "origin_mode should default to false");
     modes.set_mode(6);
-    assert!(modes.origin_mode, "origin_mode should be set after set_mode(6)");
+    assert!(
+        modes.origin_mode,
+        "origin_mode should be set after set_mode(6)"
+    );
     modes.reset_mode(6);
-    assert!(!modes.origin_mode, "origin_mode should be cleared after reset_mode(6)");
+    assert!(
+        !modes.origin_mode,
+        "origin_mode should be cleared after reset_mode(6)"
+    );
 }
 
 #[test]
@@ -487,36 +493,16 @@ test_decrqm!(
     1000,
     "\x1b[?1000;1$y"
 );
-test_decrqm!(
-    test_decrqm_known_mode_disabled,
-    b"",
-    1000,
-    "\x1b[?1000;2$y"
-);
-test_decrqm!(
-    test_decrqm_unknown_mode,
-    b"",
-    9999,
-    "\x1b[?9999;0$y"
-);
+test_decrqm!(test_decrqm_known_mode_disabled, b"", 1000, "\x1b[?1000;2$y");
+test_decrqm!(test_decrqm_unknown_mode, b"", 9999, "\x1b[?9999;0$y");
 test_decrqm!(
     test_decrqm_bracketed_paste_enabled,
     b"\x1b[?2004h",
     2004,
     "\x1b[?2004;1$y"
 );
-test_decrqm!(
-    test_decrqm_cursor_visible_default,
-    b"",
-    25,
-    "\x1b[?25;1$y"
-);
-test_decrqm!(
-    test_decrqm_auto_wrap_default,
-    b"",
-    7,
-    "\x1b[?7;1$y"
-);
+test_decrqm!(test_decrqm_cursor_visible_default, b"", 25, "\x1b[?25;1$y");
+test_decrqm!(test_decrqm_auto_wrap_default, b"", 7, "\x1b[?7;1$y");
 
 // ── mouse_pixel (?1016) ────────────────────────────────────────────────────────
 
@@ -701,7 +687,7 @@ fn test_decom_cursor_moves_to_scroll_region_top_on_set() {
     let mut term = crate::TerminalCore::new(24, 80);
     // Set a scroll region (rows 3–20, 0-indexed) via DECSTBM
     term.advance(b"\x1b[4;20r"); // CSI 4 ; 20 r — sets scroll region rows 3..19
-    // Move cursor away first
+                                 // Move cursor away first
     term.advance(b"\x1b[10;5H");
     // Enable DECOM — must move cursor to scroll-region top (row 3)
     term.advance(b"\x1b[?6h");
@@ -725,8 +711,16 @@ fn test_decom_cursor_moves_to_absolute_home_on_reset() {
     term.advance(b"\x1b[?6h"); // enable DECOM
     term.advance(b"\x1b[5;5H"); // move cursor somewhere
     term.advance(b"\x1b[?6l"); // disable DECOM — cursor must go to (0,0)
-    assert_eq!(term.screen.cursor().row, 0, "DECOM reset must move cursor to row 0");
-    assert_eq!(term.screen.cursor().col, 0, "DECOM reset must move cursor to col 0");
+    assert_eq!(
+        term.screen.cursor().row,
+        0,
+        "DECOM reset must move cursor to row 0"
+    );
+    assert_eq!(
+        term.screen.cursor().col,
+        0,
+        "DECOM reset must move cursor to col 0"
+    );
 }
 
 #[test]
@@ -738,7 +732,10 @@ fn test_alt_screen_double_exit_is_noop() {
     term.advance(b"\x1b[?1049h"); // enter alt screen
     term.advance(b"\x1b[?1049l"); // exit alt screen
     term.advance(b"\x1b[?1049l"); // exit again — must be a no-op
-    assert!(!term.dec_modes.alternate_screen, "alternate_screen must be false after double exit");
+    assert!(
+        !term.dec_modes.alternate_screen,
+        "alternate_screen must be false after double exit"
+    );
 }
 
 #[test]
@@ -750,7 +747,10 @@ fn test_sync_output_reset_marks_all_dirty() {
     term.advance(b"\x1b[?2026h"); // enable sync output
     assert!(term.dec_modes.synchronized_output);
     term.advance(b"\x1b[?2026l"); // disable — must call mark_all_dirty()
-    assert!(!term.dec_modes.synchronized_output, "synchronized_output must be cleared");
+    assert!(
+        !term.dec_modes.synchronized_output,
+        "synchronized_output must be cleared"
+    );
 }
 
 #[test]

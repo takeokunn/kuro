@@ -507,10 +507,7 @@ fn test_mouse_mode_1000_enable_disable() {
 #[test]
 fn test_mouse_sgr_enable_disable() {
     let mut t = TerminalCore::new(24, 80);
-    assert!(
-        !t.dec_modes().mouse_sgr,
-        "mouse_sgr must default to false"
-    );
+    assert!(!t.dec_modes().mouse_sgr, "mouse_sgr must default to false");
     t.advance(b"\x1b[?1006h");
     assert!(
         t.dec_modes().mouse_sgr,
@@ -533,10 +530,7 @@ fn test_palette_dirty_set_and_cleared_by_reset() {
     let mut t = TerminalCore::new(24, 80);
     assert!(!t.palette_dirty(), "palette_dirty must start false");
     t.advance(b"\x1b]4;2;rgb:00/ff/00\x07"); // set palette index 2 to green
-    assert!(
-        t.palette_dirty(),
-        "palette_dirty must be true after OSC 4"
-    );
+    assert!(t.palette_dirty(), "palette_dirty must be true after OSC 4");
     t.reset();
     assert!(
         !t.palette_dirty(),

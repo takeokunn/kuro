@@ -185,5 +185,8 @@ fn test_global_register_unregister_roundtrip() {
 fn test_env_ref_count_stable_with_no_ops() {
     let c1 = env_ref_count();
     let c2 = env_ref_count();
-    assert_eq!(c1, c2, "env_ref_count must be stable with no intervening ops");
+    assert_eq!(
+        c1, c2,
+        "env_ref_count must be stable with no intervening ops"
+    );
 }

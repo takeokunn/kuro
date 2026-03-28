@@ -153,6 +153,12 @@ When PREV is a function it is called at the end; nil is ignored."
   (font-lock-mode -1)
   (when (fboundp 'jit-lock-mode)
     (jit-lock-mode -1))
+  ;; `font-lock-mode -1' and `jit-lock-mode -1' do not always remove
+  ;; `jit-lock-function' from `fontification-functions'.  The stale entry
+  ;; causes every redisplay to signal (wrong-type-argument number-or-marker-p nil)
+  ;; because `jit-lock-context-unfontify-pos' is nil after partial teardown.
+  ;; Nuke the hook entirely — terminal buffers never need fontification.
+  (setq-local fontification-functions nil)
   ;; Normalise character display widths to match the Rust unicode-width 0.2 crate.
   ;; Must run before the first render so col_to_buf mappings stay consistent.
   (kuro--setup-char-width-table)

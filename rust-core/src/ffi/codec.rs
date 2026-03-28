@@ -285,7 +285,11 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
         let flags = encode_attrs(&cell.attrs);
         let ul_color = encode_color(&cell.attrs.underline_color);
 
-        if fg != current_fg || bg != current_bg || flags != current_flags || ul_color != current_ul_color {
+        if fg != current_fg
+            || bg != current_bg
+            || flags != current_flags
+            || ul_color != current_ul_color
+        {
             if buf_offset > current_start_buf {
                 face_ranges.push((
                     current_start_buf,

@@ -609,11 +609,7 @@ fn encode_screen_binary_empty_input_produces_8_byte_header() {
         8,
         "empty input must produce an 8-byte header only (format_version + num_rows)"
     );
-    assert_eq!(
-        read_u32_le(&result, 0),
-        2,
-        "format_version must be 2"
-    );
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
     assert_eq!(
         read_u32_le(&result, 4),
         0,
@@ -632,11 +628,7 @@ fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
         8,
         "explicit empty Vec must produce an 8-byte header only (format_version + num_rows)"
     );
-    assert_eq!(
-        read_u32_le(&result, 0),
-        2,
-        "format_version must be 2"
-    );
+    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
     assert_eq!(
         read_u32_le(&result, 4),
         0,

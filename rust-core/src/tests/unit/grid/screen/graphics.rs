@@ -298,7 +298,10 @@ fn delete_by_id_removes_image_and_placement() {
         display_rows: 2,
     };
     let notif = s.active_graphics_mut().add_placement(placement);
-    assert!(notif.is_some(), "add_placement must succeed for stored id=5");
+    assert!(
+        notif.is_some(),
+        "add_placement must succeed for stored id=5"
+    );
 
     // delete_by_id removes the image.
     s.active_graphics_mut().delete_by_id(5);

@@ -243,7 +243,10 @@ fn test_error_conversions() {
 // INVARIANT: From<StateError::AlreadyInitialized> wraps into KuroError::State
 fn test_state_error_already_initialized_into_kuro_error() {
     let e: KuroError = StateError::AlreadyInitialized.into();
-    assert!(matches!(e, KuroError::State(StateError::AlreadyInitialized)));
+    assert!(matches!(
+        e,
+        KuroError::State(StateError::AlreadyInitialized)
+    ));
 }
 
 #[test]
@@ -253,7 +256,10 @@ fn test_runtime_ffi_error_into_kuro_error() {
         message: "test".to_owned(),
     }
     .into();
-    assert!(matches!(e, KuroError::Runtime(RuntimeError::FfiError { .. })));
+    assert!(matches!(
+        e,
+        KuroError::Runtime(RuntimeError::FfiError { .. })
+    ));
 }
 
 // ---- Helper functions ----
@@ -288,7 +294,10 @@ fn test_ffi_error_helper_produces_correct_variant() {
 fn test_pty_spawn_error_helper_display_contains_payload() {
     let e = pty_spawn_error("nvim", "permission denied");
     let s = format!("{e}");
-    assert!(s.contains("nvim"), "pty_spawn_error display must contain command");
+    assert!(
+        s.contains("nvim"),
+        "pty_spawn_error display must contain command"
+    );
     assert!(
         s.contains("permission denied"),
         "pty_spawn_error display must contain message"

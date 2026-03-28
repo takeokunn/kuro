@@ -1099,12 +1099,8 @@ fn vt_fullwidth_char_is_double_width() {
 fn vt_cuu_count_zero_treated_as_one() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[5;10H"); // row 4, col 9
-    t.advance(b"\x1b[0A");    // CUU 0 — treated as CUU 1
-    assert_eq!(
-        t.cursor_row(),
-        3,
-        "CUU 0 must move up by 1 (same as CUU 1)"
-    );
+    t.advance(b"\x1b[0A"); // CUU 0 — treated as CUU 1
+    assert_eq!(t.cursor_row(), 3, "CUU 0 must move up by 1 (same as CUU 1)");
     assert_eq!(t.cursor_col(), 9, "CUU must not change column");
 }
 
@@ -1113,7 +1109,7 @@ fn vt_cuu_count_zero_treated_as_one() {
 fn vt_cud_count_zero_treated_as_one() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[5;10H"); // row 4, col 9
-    t.advance(b"\x1b[0B");    // CUD 0 — treated as CUD 1
+    t.advance(b"\x1b[0B"); // CUD 0 — treated as CUD 1
     assert_eq!(
         t.cursor_row(),
         5,
@@ -1127,7 +1123,7 @@ fn vt_cud_count_zero_treated_as_one() {
 fn vt_cuf_count_zero_treated_as_one() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1;5H"); // row 0, col 4
-    t.advance(b"\x1b[0C");   // CUF 0 — treated as CUF 1
+    t.advance(b"\x1b[0C"); // CUF 0 — treated as CUF 1
     assert_eq!(
         t.cursor_col(),
         5,
@@ -1141,7 +1137,7 @@ fn vt_cuf_count_zero_treated_as_one() {
 fn vt_cub_count_zero_treated_as_one() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1;10H"); // row 0, col 9
-    t.advance(b"\x1b[0D");    // CUB 0 — treated as CUB 1
+    t.advance(b"\x1b[0D"); // CUB 0 — treated as CUB 1
     assert_eq!(
         t.cursor_col(),
         8,
@@ -1157,7 +1153,7 @@ fn vt_cub_count_zero_treated_as_one() {
 fn vt_cuu_clamped_at_top() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[3;10H"); // row 2
-    t.advance(b"\x1b[999A");  // CUU 999 — must clamp at row 0
+    t.advance(b"\x1b[999A"); // CUU 999 — must clamp at row 0
     assert_eq!(t.cursor_row(), 0, "CUU must clamp at row 0");
     assert_eq!(t.cursor_col(), 9, "CUU must not change column");
 }
@@ -1167,7 +1163,7 @@ fn vt_cuu_clamped_at_top() {
 fn vt_cud_clamped_at_bottom() {
     let mut t = TerminalCore::new(10, 40);
     t.advance(b"\x1b[5;10H"); // row 4
-    t.advance(b"\x1b[999B");  // CUD 999 — must clamp at last row (9)
+    t.advance(b"\x1b[999B"); // CUD 999 — must clamp at last row (9)
     assert_eq!(t.cursor_row(), 9, "CUD must clamp at last row");
     assert_eq!(t.cursor_col(), 9, "CUD must not change column");
 }
@@ -1176,8 +1172,8 @@ fn vt_cud_clamped_at_bottom() {
 #[test]
 fn vt_cuf_clamped_at_right() {
     let mut t = TerminalCore::new(24, 40);
-    t.advance(b"\x1b[1;5H");  // row 0, col 4
-    t.advance(b"\x1b[999C");  // CUF 999 — must clamp at last col (39)
+    t.advance(b"\x1b[1;5H"); // row 0, col 4
+    t.advance(b"\x1b[999C"); // CUF 999 — must clamp at last col (39)
     assert_eq!(t.cursor_col(), 39, "CUF must clamp at last column");
     assert_eq!(t.cursor_row(), 0, "CUF must not change row");
 }
@@ -1187,7 +1183,7 @@ fn vt_cuf_clamped_at_right() {
 fn vt_cub_clamped_at_left() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1;10H"); // row 0, col 9
-    t.advance(b"\x1b[999D");  // CUB 999 — must clamp at col 0
+    t.advance(b"\x1b[999D"); // CUB 999 — must clamp at col 0
     assert_eq!(t.cursor_col(), 0, "CUB must clamp at col 0");
     assert_eq!(t.cursor_row(), 0, "CUB must not change row");
 }
@@ -1199,7 +1195,7 @@ fn vt_cub_clamped_at_left() {
 fn vt_dsr_cursor_position_response() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[5;10H"); // row 4, col 9 (0-indexed) = row 5, col 10 (1-indexed)
-    t.advance(b"\x1b[6n");    // DSR
+    t.advance(b"\x1b[6n"); // DSR
     assert!(
         !t.pending_responses().is_empty(),
         "DSR must generate a CPR response"
@@ -1221,9 +1217,12 @@ fn vt_dsr_cursor_position_response() {
 #[test]
 fn vt_dsr_at_origin_responds_1_1() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[H");  // home
+    t.advance(b"\x1b[H"); // home
     t.advance(b"\x1b[6n"); // DSR
-    assert!(!t.pending_responses().is_empty(), "DSR must generate response");
+    assert!(
+        !t.pending_responses().is_empty(),
+        "DSR must generate response"
+    );
     let raw = &t.pending_responses()[0];
     let resp = String::from_utf8_lossy(raw);
     // Expect ESC [ 1 ; 1 R
@@ -1241,10 +1240,10 @@ fn vt_decsc_decrc_saves_and_restores_bold() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1m"); // set bold
     assert!(t.current_attrs().flags.contains(SgrFlags::BOLD));
-    t.advance(b"\x1b7");   // DECSC — save cursor + attrs
+    t.advance(b"\x1b7"); // DECSC — save cursor + attrs
     t.advance(b"\x1b[0m"); // reset bold
     assert!(!t.current_attrs().flags.contains(SgrFlags::BOLD));
-    t.advance(b"\x1b8");   // DECRC — restore cursor + attrs
+    t.advance(b"\x1b8"); // DECRC — restore cursor + attrs
     assert!(
         t.current_attrs().flags.contains(SgrFlags::BOLD),
         "DECRC must restore bold attribute"
@@ -1255,12 +1254,12 @@ fn vt_decsc_decrc_saves_and_restores_bold() {
 #[test]
 fn vt_decsc_decrc_restores_position_and_attrs_together() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[3m");    // set italic
+    t.advance(b"\x1b[3m"); // set italic
     t.advance(b"\x1b[8;15H"); // row 7, col 14
-    t.advance(b"\x1b7");      // DECSC
-    t.advance(b"\x1b[1;1H");  // move away
-    t.advance(b"\x1b[0m");    // clear attrs
-    t.advance(b"\x1b8");      // DECRC
+    t.advance(b"\x1b7"); // DECSC
+    t.advance(b"\x1b[1;1H"); // move away
+    t.advance(b"\x1b[0m"); // clear attrs
+    t.advance(b"\x1b8"); // DECRC
     assert_eq!(t.cursor_row(), 7, "DECRC must restore row to 7");
     assert_eq!(t.cursor_col(), 14, "DECRC must restore col to 14");
     assert!(
@@ -1273,14 +1272,22 @@ fn vt_decsc_decrc_restores_position_and_attrs_together() {
 #[test]
 fn vt_decsc_decrc_only_one_save_slot() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[3;5H");  // first position: row 2, col 4
-    t.advance(b"\x1b7");      // DECSC (first save)
+    t.advance(b"\x1b[3;5H"); // first position: row 2, col 4
+    t.advance(b"\x1b7"); // DECSC (first save)
     t.advance(b"\x1b[10;20H"); // second position: row 9, col 19
-    t.advance(b"\x1b7");      // DECSC (second save — overwrites first)
-    t.advance(b"\x1b[1;1H");  // move to origin
-    t.advance(b"\x1b8");      // DECRC — must restore second save, not first
-    assert_eq!(t.cursor_row(), 9, "DECRC must restore the most recent DECSC row");
-    assert_eq!(t.cursor_col(), 19, "DECRC must restore the most recent DECSC col");
+    t.advance(b"\x1b7"); // DECSC (second save — overwrites first)
+    t.advance(b"\x1b[1;1H"); // move to origin
+    t.advance(b"\x1b8"); // DECRC — must restore second save, not first
+    assert_eq!(
+        t.cursor_row(),
+        9,
+        "DECRC must restore the most recent DECSC row"
+    );
+    assert_eq!(
+        t.cursor_col(),
+        19,
+        "DECRC must restore the most recent DECSC col"
+    );
 }
 
 // === SGR 0 clears foreground and background colors to Default ===
@@ -1335,8 +1342,14 @@ fn vt_sgr_reset_clears_all_flags() {
 fn vt_ss2_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1bN"); // SS2
-    assert!(t.cursor_row() < 24, "cursor row must be in bounds after SS2");
-    assert!(t.cursor_col() < 80, "cursor col must be in bounds after SS2");
+    assert!(
+        t.cursor_row() < 24,
+        "cursor row must be in bounds after SS2"
+    );
+    assert!(
+        t.cursor_col() < 80,
+        "cursor col must be in bounds after SS2"
+    );
     // Terminal must remain functional after SS2
     t.advance(b"A");
     assert!(
@@ -1350,8 +1363,14 @@ fn vt_ss2_does_not_panic() {
 fn vt_ss3_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1bO"); // SS3 with no follow-on char
-    assert!(t.cursor_row() < 24, "cursor row must be in bounds after SS3");
-    assert!(t.cursor_col() < 80, "cursor col must be in bounds after SS3");
+    assert!(
+        t.cursor_row() < 24,
+        "cursor row must be in bounds after SS3"
+    );
+    assert!(
+        t.cursor_col() < 80,
+        "cursor col must be in bounds after SS3"
+    );
 }
 
 // SS3 followed by a letter (e.g., SS3 A = application cursor up) must not panic.
@@ -1359,10 +1378,16 @@ fn vt_ss3_does_not_panic() {
 fn vt_ss3_with_letter_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[5;10H"); // position away from home
-    t.advance(b"\x1bOA");     // SS3 A — application cursor up (used by app keypad)
-    // Must not panic; cursor stays in bounds
-    assert!(t.cursor_row() < 24, "cursor row must be in bounds after SS3 A");
-    assert!(t.cursor_col() < 80, "cursor col must be in bounds after SS3 A");
+    t.advance(b"\x1bOA"); // SS3 A — application cursor up (used by app keypad)
+                          // Must not panic; cursor stays in bounds
+    assert!(
+        t.cursor_row() < 24,
+        "cursor row must be in bounds after SS3 A"
+    );
+    assert!(
+        t.cursor_col() < 80,
+        "cursor col must be in bounds after SS3 A"
+    );
 }
 
 // === DCS passthrough forwarding ===
@@ -1374,8 +1399,14 @@ fn vt_dcs_unknown_passthrough_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     // DCS 1 $ r <param> ST — DECRQSS (request selection/setting) — not implemented
     t.advance(b"\x1bP1$r1m\x1b\\"); // DCS 1 $ r 1 m ST
-    assert!(t.cursor_row() < 24, "cursor must be in bounds after DCS passthrough");
-    assert!(t.cursor_col() < 80, "cursor must be in bounds after DCS passthrough");
+    assert!(
+        t.cursor_row() < 24,
+        "cursor must be in bounds after DCS passthrough"
+    );
+    assert!(
+        t.cursor_col() < 80,
+        "cursor must be in bounds after DCS passthrough"
+    );
 }
 
 // DCS with a long unrecognised payload must not panic (test APC/DCS size limit path).
@@ -1385,9 +1416,12 @@ fn vt_dcs_long_unknown_does_not_panic() {
     // Start a DCS sequence with a payload that doesn't match any handler
     let mut seq = b"\x1bP".to_vec();
     seq.extend(b"x".repeat(256)); // unrecognised 256-byte payload
-    seq.extend(b"\x1b\\");        // ST
+    seq.extend(b"\x1b\\"); // ST
     t.advance(&seq);
-    assert!(t.cursor_row() < 24, "cursor must be in bounds after long DCS");
+    assert!(
+        t.cursor_row() < 24,
+        "cursor must be in bounds after long DCS"
+    );
 }
 
 // === Attribute preservation: current_attrs reflects SGR 0 immediately ===
@@ -1398,7 +1432,7 @@ fn vt_dcs_long_unknown_does_not_panic() {
 fn vt_sgr_reset_changes_current_attrs_and_subsequent_cells_are_correct() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[1m"); // bold on
-    t.advance(b"AB");      // write 'A' and 'B' with bold
+    t.advance(b"AB"); // write 'A' and 'B' with bold
     assert!(
         t.current_attrs().flags.contains(SgrFlags::BOLD),
         "current_attrs must show bold while it is active"

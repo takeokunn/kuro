@@ -520,8 +520,14 @@ mod tests {
         ds.insert(8);
         ds.shift_left(2); // 4→2, 8→6
         ds.shift_right(2); // 2→4, 6→8
-        assert!(ds.contains(4), "row 4 must survive left-then-right round-trip");
-        assert!(ds.contains(8), "row 8 must survive left-then-right round-trip");
+        assert!(
+            ds.contains(4),
+            "row 4 must survive left-then-right round-trip"
+        );
+        assert!(
+            ds.contains(8),
+            "row 8 must survive left-then-right round-trip"
+        );
         assert_eq!(ds.len(), 2);
     }
 
@@ -540,7 +546,10 @@ mod tests {
     fn test_iter_on_empty_set_yields_nothing() {
         let ds = BitVecDirtySet::new(8);
         let rows: Vec<usize> = ds.iter().collect();
-        assert!(rows.is_empty(), "trait iter on empty set must yield nothing");
+        assert!(
+            rows.is_empty(),
+            "trait iter on empty set must yield nothing"
+        );
     }
 
     #[test]
@@ -575,8 +584,14 @@ mod tests {
         ds.insert(0); // row outside the range
         ds.insert(15); // row outside the range
         ds.insert_range(5, 10); // marks rows 5..10
-        assert!(ds.contains(0), "row 0 must still be dirty after insert_range");
-        assert!(ds.contains(15), "row 15 must still be dirty after insert_range");
+        assert!(
+            ds.contains(0),
+            "row 0 must still be dirty after insert_range"
+        );
+        assert!(
+            ds.contains(15),
+            "row 15 must still be dirty after insert_range"
+        );
         assert_eq!(ds.len(), 2 + 5, "total must be 2 pre-existing + 5 new");
     }
 
@@ -590,7 +605,10 @@ mod tests {
         ds.shift_left(1);
         // rows 1→0, 2→1, 3→2; row 3 becomes clean
         for row in 0..3 {
-            assert!(ds.contains(row), "row {row} must be dirty after shift_left(1)");
+            assert!(
+                ds.contains(row),
+                "row {row} must be dirty after shift_left(1)"
+            );
         }
         assert!(!ds.contains(3), "row 3 must be clean after shift_left(1)");
         assert_eq!(ds.len(), 3);
@@ -606,7 +624,10 @@ mod tests {
         ds.shift_right(1);
         assert!(!ds.contains(0), "row 0 must be clean after shift_right(1)");
         for row in 1..4 {
-            assert!(ds.contains(row), "row {row} must be dirty after shift_right(1)");
+            assert!(
+                ds.contains(row),
+                "row {row} must be dirty after shift_right(1)"
+            );
         }
         assert_eq!(ds.len(), 3);
     }
@@ -619,7 +640,10 @@ mod tests {
         assert_eq!(clone.len(), original.len());
         let orig_rows: Vec<usize> = original.iter().collect();
         let clone_rows: Vec<usize> = clone.iter().collect();
-        assert_eq!(orig_rows, clone_rows, "clone must match original after insert_range");
+        assert_eq!(
+            orig_rows, clone_rows,
+            "clone must match original after insert_range"
+        );
     }
 
     #[test]

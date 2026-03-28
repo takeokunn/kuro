@@ -275,7 +275,11 @@ mod tests {
             assert_eq!(line.cells[c].char(), ' ', "col {c} must be blank after ECH");
         }
         for c in 7..10 {
-            assert_eq!(line.cells[c].char(), 'X', "col {c} after erased range unchanged");
+            assert_eq!(
+                line.cells[c].char(),
+                'X',
+                "col {c} after erased range unchanged"
+            );
         }
         assert_eq!(screen.cursor().col, 3, "ECH must not move cursor");
     }

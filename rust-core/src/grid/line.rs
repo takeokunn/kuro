@@ -236,8 +236,7 @@ mod tests {
         assert!(!line.is_dirty, "new_with_bg line must start clean");
         for col in 0..6 {
             assert_eq!(
-                line.cells[col].attrs.background,
-                bg,
+                line.cells[col].attrs.background, bg,
                 "cell {col} must carry the specified BCE background"
             );
         }
@@ -249,8 +248,7 @@ mod tests {
         let line = Line::new_with_bg(4, bg);
         for col in 0..4 {
             assert_eq!(
-                line.cells[col].attrs.background,
-                bg,
+                line.cells[col].attrs.background, bg,
                 "indexed background color must propagate to cell {col}"
             );
         }
@@ -259,8 +257,14 @@ mod tests {
     #[test]
     fn test_get_cell_out_of_bounds_returns_none() {
         let line = Line::new(10);
-        assert!(line.get_cell(10).is_none(), "index 10 must be None for a 10-column line");
-        assert!(line.get_cell(usize::MAX).is_none(), "usize::MAX index must be None");
+        assert!(
+            line.get_cell(10).is_none(),
+            "index 10 must be None for a 10-column line"
+        );
+        assert!(
+            line.get_cell(usize::MAX).is_none(),
+            "usize::MAX index must be None"
+        );
     }
 
     #[test]
@@ -276,7 +280,11 @@ mod tests {
             cell.attrs.flags |= SgrFlags::BOLD;
         }
         assert!(
-            line.get_cell(2).unwrap().attrs.flags.contains(SgrFlags::BOLD),
+            line.get_cell(2)
+                .unwrap()
+                .attrs
+                .flags
+                .contains(SgrFlags::BOLD),
             "mutation through get_cell_mut must be visible on next read"
         );
     }
@@ -297,7 +305,10 @@ mod tests {
         let mut line = Line::new(5);
         // update_cell to an out-of-range column must not panic and must not dirty.
         line.update_cell(100, 'X', SgrAttributes::default());
-        assert!(!line.is_dirty, "out-of-bounds update_cell must not set dirty");
+        assert!(
+            !line.is_dirty,
+            "out-of-bounds update_cell must not set dirty"
+        );
     }
 
     #[test]
@@ -325,7 +336,10 @@ mod tests {
         let mut line = Line::new(5);
         let new_cell = Cell::new('Z');
         line.update_cell_with(3, new_cell.clone());
-        assert!(line.is_dirty, "update_cell_with differing cell must mark dirty");
+        assert!(
+            line.is_dirty,
+            "update_cell_with differing cell must mark dirty"
+        );
         assert_eq!(line.cells[3].char(), 'Z');
     }
 
@@ -334,7 +348,10 @@ mod tests {
         let mut line = Line::new(5);
         let cell = Cell::new('X');
         line.update_cell_with(99, cell);
-        assert!(!line.is_dirty, "out-of-bounds update_cell_with must not set dirty");
+        assert!(
+            !line.is_dirty,
+            "out-of-bounds update_cell_with must not set dirty"
+        );
     }
 
     #[test]
@@ -355,8 +372,7 @@ mod tests {
                 "cell {col} must be space after clear_with_bg"
             );
             assert_eq!(
-                line.cells[col].attrs.background,
-                bg,
+                line.cells[col].attrs.background, bg,
                 "cell {col} must carry BCE background after clear_with_bg"
             );
         }

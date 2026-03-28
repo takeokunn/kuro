@@ -301,9 +301,13 @@ fn test_sgr_split_across_two_advance_calls_is_equivalent() {
 fn test_decawm_off_suppresses_wrap() {
     let mut term = TerminalCore::new(10, 10);
     term.advance(b"\x1b[?7l"); // DECAWM off
-    // Print 15 characters; without wrap the cursor should stay on row 0
+                               // Print 15 characters; without wrap the cursor should stay on row 0
     term.advance(b"AAAAABBBBBCCCCC");
-    assert_eq!(term.cursor_row(), 0, "DECAWM off: cursor must stay on row 0");
+    assert_eq!(
+        term.cursor_row(),
+        0,
+        "DECAWM off: cursor must stay on row 0"
+    );
 }
 
 /// Re-enabling DECAWM (?7h) after it was disabled must restore wrap behaviour.
@@ -312,10 +316,12 @@ fn test_decawm_on_restores_wrap() {
     let mut term = TerminalCore::new(5, 5);
     term.advance(b"\x1b[?7l"); // DECAWM off
     term.advance(b"\x1b[?7h"); // DECAWM on
-    // 6 chars on a 5-col terminal: the 6th must wrap to row 1
+                               // 6 chars on a 5-col terminal: the 6th must wrap to row 1
     term.advance(b"XXXXXY");
     assert_eq!(term.cursor_row(), 1, "DECAWM on: cursor must wrap to row 1");
-    let cell = term.get_cell(1, 0).expect("cell (1,0) must exist after wrap");
+    let cell = term
+        .get_cell(1, 0)
+        .expect("cell (1,0) must exist after wrap");
     assert_eq!(cell.char(), 'Y', "'Y' must land at row 1, col 0 after wrap");
 }
 
@@ -370,7 +376,7 @@ fn test_el0_erases_to_end_of_line() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;3H"); // move to row 0, col 2 (1-indexed)
     term.advance(b"\x1b[0K"); // EL 0: erase from cursor to EOL
-    // Cells 0 and 1 must still hold 'A' and 'B'; cells from col 2 onward must be erased
+                              // Cells 0 and 1 must still hold 'A' and 'B'; cells from col 2 onward must be erased
     let a = term.get_cell(0, 0).expect("cell (0,0) must exist");
     let b = term.get_cell(0, 1).expect("cell (0,1) must exist");
     assert_eq!(a.char(), 'A', "cell (0,0) must be 'A' — not erased by EL 0");
@@ -386,7 +392,7 @@ fn test_el1_erases_to_start_of_line() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;4H"); // move to row 0, col 3 (1-indexed)
     term.advance(b"\x1b[1K"); // EL 1: erase from BOL to cursor
-    // Cols 0–3 must be spaces; col 4 must still hold 'E'
+                              // Cols 0–3 must be spaces; col 4 must still hold 'E'
     for col in 0..=3 {
         let cell = term.get_cell(0, col).expect("cell must exist");
         assert_eq!(
@@ -453,7 +459,10 @@ fn test_il_insert_lines_no_panic() {
     term.advance(b"line0\nline1\nline2");
     term.advance(b"\x1b[2;1H"); // move to row 1 (1-indexed)
     term.advance(b"\x1b[2L"); // IL 2: insert 2 blank lines
-    assert!(term.cursor_row() < 10, "cursor row must remain in bounds after IL");
+    assert!(
+        term.cursor_row() < 10,
+        "cursor row must remain in bounds after IL"
+    );
 }
 
 /// DL (CSI n M) deletes n lines at the cursor row, scrolling up within the region.
@@ -464,5 +473,8 @@ fn test_dl_delete_lines_no_panic() {
     term.advance(b"line0\nline1\nline2\nline3");
     term.advance(b"\x1b[2;1H"); // move to row 1 (1-indexed)
     term.advance(b"\x1b[2M"); // DL 2: delete 2 lines
-    assert!(term.cursor_row() < 10, "cursor row must remain in bounds after DL");
+    assert!(
+        term.cursor_row() < 10,
+        "cursor row must remain in bounds after DL"
+    );
 }

@@ -401,12 +401,7 @@ fn sgr_combined_bold_italic_underline_rgb_fg() {
 #[test]
 fn sgr_6_blink_fast_set_and_cleared_by_reset() {
     use kuro_core::types::cell::SgrFlags;
-    assert_flag_set_clear!(
-        b"\x1b[6m",
-        b"\x1b[0m",
-        SgrFlags::BLINK_FAST,
-        "BLINK_FAST"
-    );
+    assert_flag_set_clear!(b"\x1b[6m", b"\x1b[0m", SgrFlags::BLINK_FAST, "BLINK_FAST");
 }
 
 // SGR dim (2) sets the DIM flag; SGR 22 clears it (not SGR 0 only).

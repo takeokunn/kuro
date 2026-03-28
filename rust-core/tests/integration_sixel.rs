@@ -42,7 +42,9 @@ fn sixel_color_register_0_override_stores_image() {
         "image with register-0 override must be stored and retrievable"
     );
 
-    let decoded = BASE64_STANDARD.decode(&png_b64).expect("must be valid base64");
+    let decoded = BASE64_STANDARD
+        .decode(&png_b64)
+        .expect("must be valid base64");
     assert!(
         decoded.starts_with(b"\x89PNG"),
         "decoded image must be valid PNG"
@@ -76,12 +78,11 @@ fn sixel_multiband_y_offset_accumulates() {
 
     let id = notifs[0].image_id;
     let png_b64 = t.get_image_png_base64(id);
-    assert!(
-        !png_b64.is_empty(),
-        "multi-band sixel image must be stored"
-    );
+    assert!(!png_b64.is_empty(), "multi-band sixel image must be stored");
 
-    let decoded = BASE64_STANDARD.decode(&png_b64).expect("must be valid base64");
+    let decoded = BASE64_STANDARD
+        .decode(&png_b64)
+        .expect("must be valid base64");
     assert!(
         decoded.starts_with(b"\x89PNG"),
         "decoded multi-band image must be valid PNG"
@@ -185,9 +186,12 @@ fn sixel_unterminated_data_does_not_panic() {
     // process it without errors (VTE parser may be in DCS state, so this is
     // a graceful-degradation check).
     t.advance(b"\x1b\\"); // Explicit ST to close the dangling DCS
-    // After ST, the terminal is back in Ground state — normal input must work.
+                          // After ST, the terminal is back in Ground state — normal input must work.
     t.advance(b"\x1b[H"); // CUP home — must not panic
-    assert!(t.cursor_row() < 24, "terminal must be operational after ST close");
+    assert!(
+        t.cursor_row() < 24,
+        "terminal must be operational after ST close"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,10 +288,7 @@ fn sixel_and_kitty_coexist_independently() {
         !sixel_png_after.is_empty(),
         "sixel image must still be retrievable after Kitty transmit"
     );
-    assert!(
-        !kitty_png.is_empty(),
-        "Kitty image 300 must be stored"
-    );
+    assert!(!kitty_png.is_empty(), "Kitty image 300 must be stored");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,7 +320,9 @@ fn sixel_repeat_at_column_0_does_not_panic() {
         "image with leading !N repeat must be stored"
     );
 
-    let decoded = BASE64_STANDARD.decode(&png_b64).expect("must be valid base64");
+    let decoded = BASE64_STANDARD
+        .decode(&png_b64)
+        .expect("must be valid base64");
     assert!(
         decoded.starts_with(b"\x89PNG"),
         "decoded repeat-at-col-0 image must be valid PNG"

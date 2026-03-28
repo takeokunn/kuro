@@ -1142,7 +1142,11 @@ fn test_il_blank_line_has_default_background() {
         crate::Color::Default,
         "IL blank line must have Color::Default background (no BCE)"
     );
-    assert_eq!(char_at(&term, 2, 0), 'B', "former row 1 must shift to row 2");
+    assert_eq!(
+        char_at(&term, 2, 0),
+        'B',
+        "former row 1 must shift to row 2"
+    );
 }
 
 /// DL fills the bottom of the scroll region with blank lines (space character,
@@ -1203,7 +1207,11 @@ fn test_il_at_region_bottom_minus_one() {
     let params = vte::Params::default();
     csi_il(&mut term, &params); // IL 1
 
-    assert_eq!(char_at(&term, 4, 0), ' ', "row 4 must be blank after IL at last row");
+    assert_eq!(
+        char_at(&term, 4, 0),
+        ' ',
+        "row 4 must be blank after IL at last row"
+    );
     assert_eq!(char_at(&term, 0, 0), 'A');
     assert_eq!(char_at(&term, 1, 0), 'B');
     assert_eq!(char_at(&term, 3, 0), 'D');
@@ -1309,8 +1317,7 @@ fn test_dch_at_column_zero_shifts_row_left() {
     // Fill row 0 with '0'..'9'
     if let Some(line) = term.screen.get_line_mut(0) {
         for (i, cell) in line.cells.iter_mut().enumerate() {
-            cell.grapheme =
-                compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
+            cell.grapheme = compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
         }
     }
     term.screen.move_cursor(0, 0);
@@ -1334,8 +1341,7 @@ fn test_ich_at_column_zero_shifts_entire_row_right() {
     // Fill row 0 with '0'..'9'
     if let Some(line) = term.screen.get_line_mut(0) {
         for (i, cell) in line.cells.iter_mut().enumerate() {
-            cell.grapheme =
-                compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
+            cell.grapheme = compact_str::CompactString::new(((b'0' + i as u8) as char).to_string());
         }
     }
     term.screen.move_cursor(0, 0);
@@ -1517,8 +1523,7 @@ fn test_sd_shifts_content_into_visible_area() {
         "SD: row 1 must hold former row 0 content"
     );
     assert_eq!(
-        term.screen.scrollback_line_count,
-        before_scrollback,
+        term.screen.scrollback_line_count, before_scrollback,
         "SD must not change scrollback count"
     );
 }
@@ -1531,8 +1536,7 @@ fn test_ich_multi_char_insert() {
     // Fill row 0 with 'A'..'J'
     if let Some(line) = term.screen.get_line_mut(0) {
         for (i, cell) in line.cells.iter_mut().enumerate() {
-            cell.grapheme =
-                compact_str::CompactString::new(((b'A' + i as u8) as char).to_string());
+            cell.grapheme = compact_str::CompactString::new(((b'A' + i as u8) as char).to_string());
         }
     }
     term.screen.move_cursor(0, 2);

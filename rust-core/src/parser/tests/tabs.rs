@@ -600,7 +600,10 @@ fn test_clear_stop_no_stop_at_col_is_noop() {
     let before = tabs.get_stops();
     tabs.clear_stop(Some(5)); // col 5 has no stop by default
     let after = tabs.get_stops();
-    assert_eq!(before, after, "clear_stop of a non-existent stop must be a no-op");
+    assert_eq!(
+        before, after,
+        "clear_stop of a non-existent stop must be a no-op"
+    );
 }
 
 // ── multiple sequential HT calls ─────────────────────────────────────────
@@ -629,7 +632,8 @@ fn test_three_ht_from_col_zero_lands_at_24() {
     term.screen.move_cursor(0, 0);
     term.advance(b"\t\t\t"); // three HT bytes
     assert_eq!(
-        term.screen.cursor().col, 24,
+        term.screen.cursor().col,
+        24,
         "three HT calls from col 0 must land at the third default stop (col 24)"
     );
 }

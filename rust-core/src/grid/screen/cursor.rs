@@ -349,9 +349,15 @@ mod tests {
         let mut screen = Screen::new(5, 5);
         screen.move_cursor(0, 4);
         screen.print('X', SgrAttributes::default(), true);
-        assert!(screen.cursor.pending_wrap, "sanity: pending_wrap must be set");
+        assert!(
+            screen.cursor.pending_wrap,
+            "sanity: pending_wrap must be set"
+        );
         screen.move_cursor(0, 0);
-        assert!(!screen.cursor.pending_wrap, "move_cursor must clear pending_wrap");
+        assert!(
+            !screen.cursor.pending_wrap,
+            "move_cursor must clear pending_wrap"
+        );
     }
 
     // ── move_cursor_by (relative) ─────────────────────────────────────────────
@@ -380,7 +386,10 @@ mod tests {
         screen.print('X', SgrAttributes::default(), true);
         assert!(screen.cursor.pending_wrap);
         screen.move_cursor_by(0, -1);
-        assert!(!screen.cursor.pending_wrap, "move_cursor_by must clear pending_wrap");
+        assert!(
+            !screen.cursor.pending_wrap,
+            "move_cursor_by must clear pending_wrap"
+        );
     }
 
     // ── carriage_return ───────────────────────────────────────────────────────
@@ -400,7 +409,10 @@ mod tests {
         screen.print('X', SgrAttributes::default(), true);
         assert!(screen.cursor.pending_wrap);
         screen.carriage_return();
-        assert!(!screen.cursor.pending_wrap, "carriage_return must clear pending_wrap");
+        assert!(
+            !screen.cursor.pending_wrap,
+            "carriage_return must clear pending_wrap"
+        );
     }
 
     // ── tab ───────────────────────────────────────────────────────────────────
@@ -419,7 +431,11 @@ mod tests {
         screen.tab(); // 5 → 8
         assert_eq!(screen.cursor().col, 8);
         screen.tab(); // 8 → 16 clamped to 9 (cols-1)
-        assert_eq!(screen.cursor().col, 9, "tab past last col must clamp to cols-1");
+        assert_eq!(
+            screen.cursor().col,
+            9,
+            "tab past last col must clamp to cols-1"
+        );
     }
 
     // ── line_feed ─────────────────────────────────────────────────────────────
@@ -438,7 +454,10 @@ mod tests {
         screen.move_cursor(0, 9);
         screen.print('Z', SgrAttributes::default(), false);
         assert_cursor!(screen, row 0, col 9);
-        assert!(!screen.cursor.pending_wrap, "auto_wrap=false: no pending_wrap after last col");
+        assert!(
+            !screen.cursor.pending_wrap,
+            "auto_wrap=false: no pending_wrap after last col"
+        );
     }
 
     #[test]
@@ -446,7 +465,10 @@ mod tests {
         let mut screen = Screen::new(5, 10);
         screen.move_cursor(0, 9);
         screen.print('Z', SgrAttributes::default(), true);
-        assert!(screen.cursor.pending_wrap, "auto_wrap=true: pending_wrap must be set after printing at last col");
+        assert!(
+            screen.cursor.pending_wrap,
+            "auto_wrap=true: pending_wrap must be set after printing at last col"
+        );
     }
 
     // ── cursor getters ────────────────────────────────────────────────────────
@@ -462,7 +484,11 @@ mod tests {
     #[test]
     fn cursor_default_shape_is_blinking_block() {
         let screen = Screen::new(24, 80);
-        assert_eq!(screen.cursor().shape, CursorShape::BlinkingBlock, "default cursor shape must be BlinkingBlock");
+        assert_eq!(
+            screen.cursor().shape,
+            CursorShape::BlinkingBlock,
+            "default cursor shape must be BlinkingBlock"
+        );
     }
 
     // ── backspace ─────────────────────────────────────────────────────────────
@@ -474,6 +500,9 @@ mod tests {
         screen.print('X', SgrAttributes::default(), true);
         assert!(screen.cursor.pending_wrap);
         screen.backspace();
-        assert!(!screen.cursor.pending_wrap, "backspace must clear pending_wrap");
+        assert!(
+            !screen.cursor.pending_wrap,
+            "backspace must clear pending_wrap"
+        );
     }
 }

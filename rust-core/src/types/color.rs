@@ -277,7 +277,10 @@ mod tests {
     #[test]
     fn test_color_named_black_vs_red_unequal() {
         // NamedColor::Black = 0, NamedColor::Red = 1
-        assert_ne!(Color::Named(NamedColor::Black), Color::Named(NamedColor::Red));
+        assert_ne!(
+            Color::Named(NamedColor::Black),
+            Color::Named(NamedColor::Red)
+        );
     }
 
     #[test]

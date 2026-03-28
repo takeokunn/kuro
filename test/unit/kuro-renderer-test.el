@@ -572,6 +572,7 @@ kuro--detect-tui-mode with total-rows=0 in the real render loop."
     (insert "old text\n")
     (insert "other row\n")
     (let ((kuro--blink-overlays nil)
+          (kuro--blink-overlays-by-row nil)
           (kuro--image-overlays nil)
           (kuro--col-to-buf-map (make-hash-table :test 'eql)))
       ;; Create a blink overlay on row 0

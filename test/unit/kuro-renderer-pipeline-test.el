@@ -436,7 +436,8 @@ functions were called (and at what rate for switch)."
 (ert-deftest kuro-renderer-pipeline-core-pipeline-returns-updates ()
   "kuro--core-render-pipeline returns the list from kuro--poll-updates-with-faces."
   (kuro-renderer-pipeline-test--with-buffer
-    (let ((fake-updates '((((0 . "text") . nil) . nil))))
+    (let ((fake-updates '((((0 . "text") . nil) . nil)))
+          (kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--apply-title-update)      #'ignore)
                 ((symbol-function 'kuro--process-scroll-events)   #'ignore)
                 ((symbol-function 'kuro--poll-updates-with-faces) (lambda () fake-updates))
@@ -447,17 +448,19 @@ functions were called (and at what rate for switch)."
 (ert-deftest kuro-renderer-pipeline-core-pipeline-returns-nil-when-no-updates ()
   "kuro--core-render-pipeline returns nil when poll returns nil."
   (kuro-renderer-pipeline-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--apply-title-update)      #'ignore)
-              ((symbol-function 'kuro--process-scroll-events)   #'ignore)
-              ((symbol-function 'kuro--poll-updates-with-faces) (lambda () nil))
-              ((symbol-function 'kuro--apply-dirty-lines)       #'ignore)
-              ((symbol-function 'kuro--update-cursor)           #'ignore))
-      (should-not (kuro--core-render-pipeline)))))
+    (let ((kuro-use-binary-ffi nil))
+      (cl-letf (((symbol-function 'kuro--apply-title-update)      #'ignore)
+                ((symbol-function 'kuro--process-scroll-events)   #'ignore)
+                ((symbol-function 'kuro--poll-updates-with-faces) (lambda () nil))
+                ((symbol-function 'kuro--apply-dirty-lines)       #'ignore)
+                ((symbol-function 'kuro--update-cursor)           #'ignore))
+        (should-not (kuro--core-render-pipeline))))))
 
 (ert-deftest kuro-renderer-pipeline-core-pipeline-calls-all-steps ()
   "kuro--core-render-pipeline calls all 5 pipeline steps in order."
   (kuro-renderer-pipeline-test--with-buffer
-    (let (log)
+    (let (log
+          (kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--apply-title-update)      (lambda () (push 'title log)))
                 ((symbol-function 'kuro--process-scroll-events)   (lambda () (push 'scroll log)))
                 ((symbol-function 'kuro--poll-updates-with-faces) (lambda () (push 'poll log) '(x)))
@@ -471,15 +474,15 @@ functions were called (and at what rate for switch)."
 ;; This group retains only the renderer-level dispatch test.
 
 (ert-deftest kuro-renderer-pipeline-core-pipeline-dispatches-binary-when-flag-set ()
-  "kuro--core-render-pipeline calls kuro--poll-updates-binary when kuro-use-binary-ffi is t."
+  "kuro--core-render-pipeline calls kuro--poll-updates-binary-optimised when kuro-use-binary-ffi is t."
   (kuro-renderer-pipeline-test--with-buffer
     (let ((binary-called nil)
           (faces-called nil)
           (kuro-use-binary-ffi t))
       (cl-letf (((symbol-function 'kuro--apply-title-update)    #'ignore)
                 ((symbol-function 'kuro--process-scroll-events) #'ignore)
-                ((symbol-function 'kuro--poll-updates-binary)
-                 (lambda () (setq binary-called t) nil))
+                ((symbol-function 'kuro--poll-updates-binary-optimised)
+                 (lambda (_session-id) (setq binary-called t) nil))
                 ((symbol-function 'kuro--poll-updates-with-faces)
                  (lambda () (setq faces-called t) (error "should not be called")))
                 ((symbol-function 'kuro--apply-dirty-lines)     #'ignore)

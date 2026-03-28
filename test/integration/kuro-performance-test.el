@@ -101,7 +101,10 @@ Skips if the kuro-core Rust module is not available."
             kuro--initialized t
             kuro--last-rows rows
             kuro--last-cols cols)
-      ;; Stub all FFI calls so we measure only Elisp render work
+      ;; Stub all FFI calls so we measure only Elisp render work.
+      ;; Disable binary FFI so kuro--poll-updates-with-faces is used (it is
+      ;; already stubbed below; the binary path would require a live Rust module).
+      (let ((kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--poll-updates-with-faces)
                  (lambda () stub-updates))
                 ((symbol-function 'kuro-core-bell-pending)
@@ -136,7 +139,7 @@ Skips if the kuro-core Rust module is not available."
         (let ((t0 (float-time)))
           (dotimes (_ iterations)
             (kuro--render-cycle))
-          (setq elapsed-ms (* 1000.0 (- (float-time) t0)))))
+          (setq elapsed-ms (* 1000.0 (- (float-time) t0))))))
       (let ((per-frame-ms (/ elapsed-ms iterations)))
         (message "kuro render cycle: %.2fms/frame for %dx%d full-dirty (%d iterations)"
                  per-frame-ms rows cols iterations)

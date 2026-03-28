@@ -229,7 +229,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     ;; kuro--sgr-flag-blink-slow (bit 4) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-slow)
+    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-slow 0)
     (should (> (length kuro--blink-overlays) 0))
     (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'slow))))
 
@@ -238,7 +238,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     ;; kuro--sgr-flag-blink-fast (bit 5) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-fast)
+    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-fast 0)
     (should (> (length kuro--blink-overlays) 0))
     (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'fast))))
 
@@ -247,7 +247,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     ;; kuro--sgr-flag-hidden (bit 7) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden)
+    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden 0)
     (should (get-text-property 1 'invisible))))
 
 (ert-deftest kuro-overlays-apply-ffi-face-at-no-blink-no-overlay ()
@@ -255,7 +255,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     ;; flags=0, fg/bg both default — fast-path skips everything
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0)
+    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0 0)
     (should (null kuro--blink-overlays))))
 
 ;;; Group 6: kuro--render-image-notification
@@ -534,7 +534,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     ;; All three args are at their default zero/default-color values.
-    (kuro--apply-ffi-face-at 1 6 kuro--ffi-color-default kuro--ffi-color-default 0)
+    (kuro--apply-ffi-face-at 1 6 kuro--ffi-color-default kuro--ffi-color-default 0 0)
     (should (null kuro--blink-overlays))
     (should (null (get-text-property 1 'face)))
     (should (null (get-text-property 1 'invisible)))))
@@ -545,7 +545,7 @@ must be called to update the cached values."
     (insert "Hello\n")
     ;; 0 is pure black (#x00000000), distinct from kuro--ffi-color-default (#xFF000000).
     ;; Passing a non-default fg forces the face-apply branch.
-    (kuro--apply-ffi-face-at 1 6 0 kuro--ffi-color-default 0)
+    (kuro--apply-ffi-face-at 1 6 0 kuro--ffi-color-default 0 0)
     (should (get-text-property 1 'face))))
 
 (ert-deftest kuro-overlays-apply-ffi-face-at-blink-fast-takes-priority-over-slow ()
@@ -553,7 +553,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     (let ((flags (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow)))
-      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags))
+      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags 0))
     (should (= (length kuro--blink-overlays) 1))
     ;; The cond checks blink-fast first, so type must be 'fast.
     (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'fast))))
@@ -563,7 +563,7 @@ must be called to update the cached values."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
     (let ((flags (logior kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)))
-      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags))
+      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags 0))
     ;; A slow blink overlay must exist.
     (should (= (length kuro--blink-overlays) 1))
     (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'slow))
@@ -574,7 +574,7 @@ must be called to update the cached values."
   "kuro--apply-ffi-face-at sets invisible but creates no blink overlay for hidden-only."
   (kuro-overlays-test--with-buffer
     (insert "Hello\n")
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden)
+    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden 0)
     (should (null kuro--blink-overlays))
     (should (get-text-property 1 'invisible))))
 

@@ -29,7 +29,6 @@
 
 ;;; Code:
 
-(require 'cl-lib)
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)
 (require 'kuro-input)
@@ -88,12 +87,12 @@
 ;;; Binary FFI poll wrapper
 
 (defun kuro--poll-updates-binary ()
-  "Poll terminal updates via binary FFI protocol.
+  "Poll terminal updates via binary FFI protocol (with-strings optimised path).
 Returns the same format as `kuro--poll-updates-with-faces'."
-  (let ((raw (kuro--call nil (kuro-core-poll-updates-binary kuro--session-id))))
-    (when raw
+  (let ((result (kuro--call nil (kuro-core-poll-updates-binary-with-strings kuro--session-id))))
+    (when result
       (condition-case err
-          (kuro--decode-binary-updates raw)
+          (kuro--decode-binary-updates-with-strings (car result) (cdr result))
         (args-out-of-range
          (message "kuro: binary FFI decoder error (malformed frame): %S" err)
          nil)))))
@@ -340,7 +339,7 @@ GC is suppressed during the render to reduce pause jitter."
       (kuro--apply-title-update)
       (kuro--process-scroll-events)
       (setq updates (if kuro-use-binary-ffi
-                        (kuro--poll-updates-binary)
+                        (kuro--poll-updates-binary-optimised kuro--session-id)
                       (kuro--poll-updates-with-faces)))
       (when updates (kuro--apply-dirty-lines updates))
       (kuro--update-cursor))
@@ -357,7 +356,7 @@ Appends one timing line to *kuro-perf* every `kuro--perf-sample-interval' frames
       (kuro--process-scroll-events)
       (setq t-ffi    (float-time)
             updates  (if kuro-use-binary-ffi
-                         (kuro--poll-updates-binary)
+                         (kuro--poll-updates-binary-optimised kuro--session-id)
                        (kuro--poll-updates-with-faces))
             ffi-ms   (* 1000.0 (- (float-time) t-ffi))
             t-apply  (float-time))
@@ -427,7 +426,7 @@ under-budget it is nudged back toward 0.8."
   (aset kuro--frame-duration-ring kuro--frame-duration-ring-index duration)
   (setq kuro--frame-duration-ring-index
         (mod (1+ kuro--frame-duration-ring-index) 10))
-  (let ((avg (/ (cl-reduce #'+ kuro--frame-duration-ring) 10.0))
+  (let ((avg (/ (let ((s 0.0)) (dotimes (i 10 s) (setq s (+ s (aref kuro--frame-duration-ring i))))) 10.0))
         (budget (/ 1.0 kuro-frame-rate)))
     (cond
      ((> avg (* 0.9 budget))

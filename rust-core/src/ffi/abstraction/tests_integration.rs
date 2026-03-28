@@ -445,7 +445,7 @@ fn test_row_hash_skip_palette_epoch_invalidates_cache() {
 
     // Confirm row 0 is cached with epoch 0.
     assert!(
-        session.row_hashes.get(0).copied().flatten().is_some(),
+        session.row_hashes.first().copied().flatten().is_some(),
         "row_hashes must be populated after the first poll"
     );
     let (_, _, stored_epoch) = session.row_hashes[0].expect("row 0 must be cached");

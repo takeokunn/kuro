@@ -1229,7 +1229,7 @@ fn test_parse_params_r_and_c_keys() {
 fn test_transmit_rgb_2x2_image() {
     // "AAAAAAAAAAAAAAAA" = 12 zero bytes when decoded (4×3 RGB pixels = 12 bytes)
     // base64 of 12 zero bytes: AAAAAAAAAAAAAAAA
-    let b64 = BASE64_STANDARD.encode(&[0u8; 12]);
+    let b64 = BASE64_STANDARD.encode([0u8; 12]);
     let mut chunk_state = None;
     let payload = format!("a=t,f=24,i=50,s=2,v=2;{b64}");
     let result = process_apc_payload(payload.as_bytes(), &mut chunk_state);
@@ -1247,7 +1247,7 @@ fn test_transmit_rgb_2x2_image() {
 // A 2×2 RGBA image (4 pixels × 4 channels = 16 bytes)
 #[test]
 fn test_transmit_rgba_2x2_image() {
-    let b64 = BASE64_STANDARD.encode(&[0u8; 16]);
+    let b64 = BASE64_STANDARD.encode([0u8; 16]);
     let mut chunk_state = None;
     let payload = format!("a=t,f=32,i=51,s=2,v=2;{b64}");
     let result = process_apc_payload(payload.as_bytes(), &mut chunk_state);

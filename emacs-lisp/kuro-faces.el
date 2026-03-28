@@ -62,11 +62,6 @@
 (defvar kuro--face-cache (make-hash-table :test 'equal)
   "Cache computed faces to avoid recreating them for same attribute combinations.")
 
-(defvar kuro--face-cache-access-counter 0
-  "Monotonically increasing counter; incremented on each cache access.")
-
-(defvar kuro--face-cache-access-times (make-hash-table :test 'equal)
-  "Maps face-cache keys to the access counter value at last use.")
 
 (kuro--defvar-permanent-local kuro--font-remap-cookie nil
   "Cookie returned by `face-remap-add-relative' for font customization.
@@ -114,7 +109,11 @@ On cache miss, decodes all values and delegates to `kuro--make-face'.
 
 The pre-allocated `kuro--face-cache-lookup-key' vector is mutated in-place
 for the gethash call (avoiding one cons per call).  On cache miss a new
-vector is created for puthash so stored keys are stable across future calls."
+vector is created for puthash so stored keys are stable across future calls.
+
+Cache eviction uses FIFO order (hash-table iteration order) without per-entry
+access-time tracking.  This eliminates one heap allocation and one puthash
+per cache hit — the dominant cost on the 99%+ hit-rate hot path."
   ;; Normalize ul-enc: both 0 and #xFF000000 mean "no underline color".
   ;; Canonicalizing to 0 prevents duplicate cache entries for the common case.
   (let ((ul-normalized (if (or (null ul-enc)
@@ -128,26 +127,21 @@ vector is created for puthash so stored keys are stable across future calls."
     (aset kuro--face-cache-lookup-key 3 ul-normalized)
     (let ((hit (gethash kuro--face-cache-lookup-key kuro--face-cache)))
       (if hit
-          (progn
-            ;; Record access time for LRU tracking.
-            (setq kuro--face-cache-access-counter (1+ kuro--face-cache-access-counter))
-            (puthash (vector fg-enc bg-enc flags ul-normalized)
-                     kuro--face-cache-access-counter
-                     kuro--face-cache-access-times)
-            hit)
+          hit  ; hot path: no allocation, no bookkeeping
         (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
-          ;; Evict oldest 25% by access time rather than flushing everything.
-          (let* ((evict-count (round (* kuro--face-cache-max-size kuro--face-cache-evict-fraction)))
-                 (entries nil))
-            (maphash (lambda (k v) (push (cons (gethash k kuro--face-cache-access-times 0) k) entries))
+          ;; FIFO eviction: collect the first evict-count keys, then remove them.
+          ;; Collecting before removing avoids mutating the hash table during
+          ;; maphash iteration.  No sort needed — O(n) vs previous O(n log n).
+          (let ((evict-count (round (* kuro--face-cache-max-size kuro--face-cache-evict-fraction)))
+                (evict-keys nil)
+                (n 0))
+            (maphash (lambda (k _v)
+                       (when (< n evict-count)
+                         (push k evict-keys)
+                         (setq n (1+ n))))
                      kuro--face-cache)
-            (setq entries (sort entries (lambda (a b) (< (car a) (car b)))))
-            (let ((n 0))
-              (dolist (entry entries)
-                (when (< n evict-count)
-                  (remhash (cdr entry) kuro--face-cache)
-                  (remhash (cdr entry) kuro--face-cache-access-times)
-                  (setq n (1+ n)))))))
+            (dolist (k evict-keys)
+              (remhash k kuro--face-cache))))
         (let* ((fg (kuro--decode-ffi-color fg-enc))
                (bg (kuro--decode-ffi-color bg-enc))
                (ul-color (when (/= ul-normalized 0)
@@ -156,14 +150,11 @@ vector is created for puthash so stored keys are stable across future calls."
                (key (vector fg-enc bg-enc flags ul-normalized)))
           ;; Store a fresh vector as the cache key so the lookup key can be
           ;; mutated next call without corrupting the stored hash entry.
-          (setq kuro--face-cache-access-counter (1+ kuro--face-cache-access-counter))
-          (puthash key kuro--face-cache-access-counter kuro--face-cache-access-times)
           (puthash key face kuro--face-cache))))))
 
 (defsubst kuro--clear-face-cache ()
-  "Clear the face cache and access-time tracking to free memory."
-  (clrhash kuro--face-cache)
-  (clrhash kuro--face-cache-access-times))
+  "Clear the face cache to free memory."
+  (clrhash kuro--face-cache))
 
 ;;; Default color remapping (OSC 10/11/12)
 

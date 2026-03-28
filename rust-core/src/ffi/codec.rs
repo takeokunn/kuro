@@ -28,7 +28,7 @@
 use crate::grid::line::Line;
 use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
 use crate::types::color::Color;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 
 // -------------------------------------------------------------------------
 // Color encoding constants
@@ -437,6 +437,174 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
     )
 }
 
+/// Encode a cell slice into the pool, then serialise **face ranges and
+/// `col_to_buf`** directly into `buf` — without cloning either collection.
+///
+/// This is a single-pass, zero-intermediate-clone variant of
+/// [`encode_line_with_pool`] used by the Protocol-B `-with-strings` FFI path.
+/// Only the text `String` is cloned (once) and returned, because the caller
+/// must hand it to Emacs as a native string.  The two `Vec` clones that
+/// [`encode_line_with_pool`] performs are replaced by a direct serialisation
+/// loop into `buf`.
+///
+/// `buf` must already contain the global 8-byte header
+/// (`format_version + num_rows`).  Each call appends one complete row entry:
+///
+/// ```text
+/// row_index(u32) num_face_ranges(u32) text_byte_len(u32)=0
+/// [28-byte face ranges …]
+/// col_to_buf_len(u32) [u32 entries …]
+/// ```
+///
+/// # Panics
+///
+/// Does not panic; identical encoding logic to [`encode_line_with_pool`].
+#[inline]
+#[expect(
+    clippy::similar_names,
+    reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
+)]
+pub(crate) fn encode_line_into_buf(
+    cells: &[Cell],
+    pool: &mut EncodePool,
+    row_index: usize,
+    buf: &mut Vec<u8>,
+) -> String {
+    pool.clear();
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "row index is a terminal row (≤ 65535); fits u32"
+    )]
+    let row_index_u32 = row_index as u32;
+
+    if cells.is_empty() {
+        buf.extend_from_slice(&row_index_u32.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
+        buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
+        return String::new();
+    }
+
+    // Same encoding logic as encode_line_with_pool, filling pool.{text,face_ranges,col_to_buf}.
+    pool.text.reserve(cells.len());
+    pool.face_ranges.reserve(8);
+
+    let mut buf_offset = 0usize;
+    let mut current_start_buf = 0usize;
+    let mut current_fg = u32::MAX;
+    let mut current_bg = u32::MAX;
+    let mut current_flags = u64::MAX;
+    let mut current_ul_color = u32::MAX;
+    let mut col = 0usize;
+
+    for cell in cells {
+        if cell.width == CellWidth::Wide {
+            if pool.col_to_buf.is_empty() {
+                pool.col_to_buf.reserve(cells.len());
+                pool.col_to_buf.extend(0..col);
+            }
+            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
+            pool.col_to_buf.push(buf_offset.saturating_sub(1));
+            col += 1;
+            continue;
+        }
+
+        if !pool.col_to_buf.is_empty() {
+            pool.col_to_buf.push(buf_offset);
+        }
+        col += 1;
+
+        pool.text.push_str(cell.grapheme.as_str());
+
+        let fg = encode_color(&cell.attrs.foreground);
+        let bg = encode_color(&cell.attrs.background);
+        let flags = encode_attrs(&cell.attrs);
+        let ul_color = encode_color(&cell.attrs.underline_color);
+
+        if fg != current_fg
+            || bg != current_bg
+            || flags != current_flags
+            || ul_color != current_ul_color
+        {
+            if buf_offset > current_start_buf {
+                pool.face_ranges.push((
+                    current_start_buf,
+                    buf_offset,
+                    current_fg,
+                    current_bg,
+                    current_flags,
+                    current_ul_color,
+                ));
+                current_start_buf = buf_offset;
+            }
+            current_fg = fg;
+            current_bg = bg;
+            current_flags = flags;
+            current_ul_color = ul_color;
+        }
+
+        buf_offset += if cell.grapheme.len() <= 1 {
+            1
+        } else {
+            cell.grapheme.chars().count().max(1)
+        };
+    }
+
+    if current_start_buf < buf_offset {
+        pool.face_ranges.push((
+            current_start_buf,
+            buf_offset,
+            current_fg,
+            current_bg,
+            current_flags,
+            current_ul_color,
+        ));
+    }
+
+    // Serialise directly into buf — no clone of face_ranges or col_to_buf.
+    buf.extend_from_slice(&row_index_u32.to_le_bytes());
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
+    )]
+    buf.extend_from_slice(&(pool.face_ranges.len() as u32).to_le_bytes());
+
+    buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0 (text supplied as native Emacs strings)
+
+    for &(start_buf, end_buf, fg, bg, flags, ul_color) in &pool.face_ranges {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
+        )]
+        {
+            buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
+            buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
+        }
+        buf.extend_from_slice(&fg.to_le_bytes());
+        buf.extend_from_slice(&bg.to_le_bytes());
+        buf.extend_from_slice(&flags.to_le_bytes());
+        buf.extend_from_slice(&ul_color.to_le_bytes());
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
+    )]
+    buf.extend_from_slice(&(pool.col_to_buf.len() as u32).to_le_bytes());
+
+    for &offset in &pool.col_to_buf {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
+        )]
+        buf.extend_from_slice(&(offset as u32).to_le_bytes());
+    }
+
+    pool.text.clone()
+}
+
 /// Current binary frame format version.
 ///
 /// Version 1: 8-byte header `[format_version: u32 LE][num_rows: u32 LE]`,
@@ -560,91 +728,6 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     buf
 }
 
-/// Encode dirty lines into a flat binary frame, omitting UTF-8 text bytes.
-///
-/// Identical to [`encode_screen_binary`] except the `text_byte_len` field is
-/// written as 0 for every row and no text bytes follow it.  The text is
-/// supplied separately as native Emacs strings by the caller so the Lisp side
-/// can avoid the `make-string` + `dotimes aset` + `decode-coding-string`
-/// triple-copy decode path.
-///
-/// All face-range and `col_to_buf` fields are encoded exactly as in
-/// [`encode_screen_binary`] (version 2, 28-byte face ranges).
-#[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
-pub(crate) fn encode_screen_binary_no_text(lines: &[EncodedLine]) -> Vec<u8> {
-    // Pre-compute capacity without text bytes.
-    let capacity = {
-        let mut cap = 8usize; // format_version + num_rows header
-        for (_, _, face_ranges, col_to_buf) in lines {
-            cap += 12; // row_index + num_face_ranges + text_byte_len (always 0)
-            cap += face_ranges.len() * 28;
-            cap += 4; // col_to_buf_len
-            cap += col_to_buf.len() * 4;
-        }
-        cap
-    };
-    let mut buf = Vec::with_capacity(capacity);
-
-    // Header: format_version + num_rows
-    buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
-    )]
-    buf.extend_from_slice(&(lines.len() as u32).to_le_bytes());
-
-    for (row_index, _, face_ranges, col_to_buf) in lines {
-        // row_index
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "row index is a terminal row (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(*row_index as u32).to_le_bytes());
-
-        // num_face_ranges
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(face_ranges.len() as u32).to_le_bytes());
-
-        // text_byte_len = 0; no text bytes follow (supplied as native Emacs strings)
-        buf.extend_from_slice(&0u32.to_le_bytes());
-
-        // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64), ul_color (u32)
-        for &(start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
-            )]
-            {
-                buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
-                buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
-            }
-            buf.extend_from_slice(&fg.to_le_bytes());
-            buf.extend_from_slice(&bg.to_le_bytes());
-            buf.extend_from_slice(&flags.to_le_bytes());
-            buf.extend_from_slice(&ul_color.to_le_bytes());
-        }
-
-        // col_to_buf section: length header + u32 entries
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(col_to_buf.len() as u32).to_le_bytes());
-        for &offset in col_to_buf {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
-            )]
-            buf.extend_from_slice(&(offset as u32).to_le_bytes());
-        }
-    }
-
-    buf
-}
-
 /// Compute a stable 64-bit hash for a terminal row.
 ///
 /// Hashes every cell's grapheme bytes, encoded foreground/background colors,
@@ -652,11 +735,11 @@ pub(crate) fn encode_screen_binary_no_text(lines: &[EncodedLine]) -> Vec<u8> {
 /// by `get_dirty_lines_with_faces` to detect unchanged rows and skip re-encoding
 /// them (row-hash skip optimisation, Option A).
 ///
-/// A new `DefaultHasher` is created per call — this is the standard usage
-/// pattern when you need a one-shot hash of multiple values.
+/// A new [`ahash::AHasher`] is created per call — faster than `DefaultHasher`
+/// (SipHash) on the hot render path due to AES-NI acceleration.
 #[inline]
 pub(crate) fn compute_row_hash(row: &Line, col_to_buf: &[usize]) -> u64 {
-    let mut h = DefaultHasher::new();
+    let mut h = ahash::AHasher::default();
     for cell in &row.cells {
         // Hash the grapheme bytes directly — no allocation needed.
         cell.grapheme().as_bytes().hash(&mut h);

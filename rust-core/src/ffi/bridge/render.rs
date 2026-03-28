@@ -49,6 +49,27 @@ fn poll_encoded_lines(
     .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error(context)))
 }
 
+/// Poll dirty lines using the single-pass binary-direct encoding.
+///
+/// Used by `kuro_core_poll_updates_binary_with_strings` to avoid the
+/// intermediate `Vec<EncodedLine>` allocation and the two-pass encode.
+/// Returns `(Vec::new(), Vec::new())` when the session does not exist.
+#[inline]
+fn poll_binary_direct(
+    session_id: u64,
+    context: &'static str,
+) -> Result<(Vec<String>, Vec<u8>), KuroError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let mut global = lock_session!();
+        let Some(session) = global.get_mut(&session_id) else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        session.poll_output()?;
+        Ok(session.get_dirty_lines_binary_direct())
+    }))
+    .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error(context)))
+}
+
 /// Poll for terminal updates and return dirty lines
 #[defun]
 #[expect(
@@ -226,23 +247,22 @@ fn kuro_core_poll_updates_binary_with_strings(
     env: &Env,
     session_id: u64,
 ) -> EmacsResult<Value<'_>> {
-    let result = poll_encoded_lines(session_id, "panic in poll_updates_binary_with_strings");
+    let result = poll_binary_direct(session_id, "panic in poll_updates_binary_with_strings");
 
     match result {
-        Ok(lines) => {
-            if lines.is_empty() {
+        Ok((texts, bytes)) => {
+            if texts.is_empty() {
                 return false.into_lisp(env);
             }
 
             // Build the native-string vector: one Emacs string per dirty row.
-            let n = lines.len();
-            let strings_vec = env.make_vector(n, false.into_lisp(env)?)?;
-            for (i, (_, text, _, _)) in lines.iter().enumerate() {
+            let strings_vec = env.make_vector(texts.len(), false.into_lisp(env)?)?;
+            for (i, text) in texts.iter().enumerate() {
                 strings_vec.set(i, text.as_str().into_lisp(env)?)?;
             }
 
-            // Encode face/col-to-buf data into binary, with text_byte_len = 0 per row.
-            let bytes = crate::ffi::codec::encode_screen_binary_no_text(&lines);
+            // Binary face/col-to-buf frame (text_byte_len = 0 per row) — encoded
+            // directly without intermediate Vec<EncodedLine> allocation.
             let bytes_vec = env.make_vector(bytes.len(), 0i64.into_lisp(env)?)?;
             for (i, &byte) in bytes.iter().enumerate() {
                 bytes_vec.set(i, i64::from(byte).into_lisp(env)?)?;

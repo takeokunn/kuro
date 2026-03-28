@@ -91,15 +91,18 @@
 
 (ert-deftest kuro-binary-decoder-decode-updates-empty ()
   "kuro--decode-binary-updates with 0 rows returns nil."
-  ;; Frame: num_rows=0
-  (let ((v (apply #'vector (kuro-binary-decoder-test--make-u32-le 0))))
+  ;; Frame: format_version=1, num_rows=0
+  (let ((v (apply #'vector
+                  (append (kuro-binary-decoder-test--make-u32-le 1)
+                          (kuro-binary-decoder-test--make-u32-le 0)))))
     (should (null (kuro--decode-binary-updates v)))))
 
 (ert-deftest kuro-binary-decoder-decode-updates-one-row-no-faces ()
   "kuro--decode-binary-updates decodes one row with empty text and no face ranges."
-  ;; Build a frame: 1 row, row_index=0, 0 face ranges, text=\"\", 0 col_to_buf entries
+  ;; Build a frame: format_version=1, 1 row, row_index=0, 0 face ranges, text="", 0 col_to_buf entries
   (let* ((frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
            (kuro-binary-decoder-test--make-u32-le 0)   ; row_index
            (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
@@ -129,6 +132,7 @@
          (flags #x01) ; bold
          (frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
            (kuro-binary-decoder-test--make-u32-le 3)   ; row_index = 3
            (kuro-binary-decoder-test--make-u32-le 1)   ; num_face_ranges
@@ -178,7 +182,8 @@ Row 1: text \"CD\", 2 face ranges:
   (let* ((frame
           (apply #'vector
                  (append
-                  ;; Header: num_rows=2
+                  ;; Header: format_version=1, num_rows=2
+                  (kuro-binary-decoder-test--make-u32-le 1)
                   (kuro-binary-decoder-test--make-u32-le 2)
                   ;; Row 0: row_index=0, num_face_ranges=2, text_byte_len=2
                   (kuro-binary-decoder-test--make-u32-le 0)
@@ -265,9 +270,10 @@ Row 1: text \"CD\", 2 face ranges:
 
 (ert-deftest kuro-binary-decoder-decode-updates-non-zero-col-to-buf ()
   "kuro--decode-binary-updates decodes a non-empty col_to_buf mapping."
-  ;; Row 0: text \"X\" (1 byte), 0 face ranges, col_to_buf=[0 1] (2 entries)
+  ;; Row 0: text "X" (1 byte), 0 face ranges, col_to_buf=[0 1] (2 entries)
   (let* ((frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
            (kuro-binary-decoder-test--make-u32-le 0)   ; row_index
            (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
@@ -313,7 +319,7 @@ Row 1: text \"CD\", 2 face ranges:
 (ert-deftest kuro-binary-decoder-decode-face-ranges-empty ()
   "kuro--decode-face-ranges with 0 ranges returns nil list and unchanged pos."
   (let ((v (make-vector 0 0)))
-    (pcase-let ((`(,face-list . ,new-pos) (kuro--decode-face-ranges v 0 0)))
+    (pcase-let ((`(,face-list . ,new-pos) (kuro--decode-face-ranges v 0 0 kuro--binary-format-version-v1)))
       (should (null face-list))
       (should (= new-pos 0)))))
 
@@ -331,7 +337,7 @@ Row 1: text \"CD\", 2 face ranges:
                           (logand (ash fg -24) #xFF))       ; fg u32 LE
                     (list #x00 #x00 #x00 #xFF)              ; bg u32 LE (#xFF000000)
                     (list 0 0 0 0 0 0 0 0)))))              ; flags u64 LE
-    (pcase-let ((`(,face-list . ,new-pos) (kuro--decode-face-ranges v 0 1)))
+    (pcase-let ((`(,face-list . ,new-pos) (kuro--decode-face-ranges v 0 1 kuro--binary-format-version-v1)))
       (should (= (length face-list) 1))
       (should (= (nth 0 (car face-list)) start))
       (should (= (nth 1 (car face-list)) end))
@@ -448,7 +454,7 @@ Row 1: text \"CD\", 2 face ranges:
                     (kuro-binary-decoder-test--make-u32-le 0)   ; fg
                     (kuro-binary-decoder-test--make-u32-le 0)   ; bg
                     (kuro-binary-decoder-test--make-u64-le #xFFFFFFFFFFFFFFFF)))) ; flags
-         (result (kuro--decode-face-ranges v 0 1)))
+         (result (kuro--decode-face-ranges v 0 1 kuro--binary-format-version-v1)))
     (should (= (length (car result)) 1))
     (should (= (nth 4 (caar result)) #xFFFFFFFFFFFFFFFF))
     (should (= (cdr result) 24))))
@@ -464,7 +470,7 @@ Row 1: text \"CD\", 2 face ranges:
            (kuro-binary-decoder-test--make-u64-le 0)))
          ;; Three identical ranges
          (v (apply #'vector (append range-bytes range-bytes range-bytes)))
-         (result (kuro--decode-face-ranges v 0 3)))
+         (result (kuro--decode-face-ranges v 0 3 kuro--binary-format-version-v1)))
     (should (= (length (car result)) 3))
     (should (= (cdr result) 72))))    ; 3 × 24 bytes
 
@@ -512,6 +518,7 @@ Row 1: text \"CD\", 2 face ranges:
   ;; Row: index=5, text="A", 0 face ranges, col_to_buf=[0, 1, 2]
   (let* ((frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
            (kuro-binary-decoder-test--make-u32-le 5)   ; row_index = 5
            (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
@@ -545,6 +552,7 @@ Row 1: text \"CD\", 2 face ranges:
              (kuro-binary-decoder-test--make-u32-le 0)))) ; 0 col_to_buf
          (frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 3)
            (funcall make-row 10 ?A)
            (funcall make-row 20 ?B)
@@ -566,6 +574,7 @@ Row 1: text \"CD\", 2 face ranges:
   (let* ((row-idx #xFFFF)
          (frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)         ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)         ; num_rows
            (kuro-binary-decoder-test--make-u32-le row-idx)   ; row_index
            (kuro-binary-decoder-test--make-u32-le 0)         ; num_face_ranges
@@ -582,6 +591,7 @@ The encoder writes them in order; the decoder must not reverse them."
   ;; Two face ranges: range0 start=0, range1 start=5
   (let* ((frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)    ; format_version
            (kuro-binary-decoder-test--make-u32-le 1)    ; num_rows
            (kuro-binary-decoder-test--make-u32-le 0)    ; row_index
            (kuro-binary-decoder-test--make-u32-le 2)    ; num_face_ranges
@@ -623,6 +633,7 @@ The encoder writes them in order; the decoder must not reverse them."
                (mapcan #'kuro-binary-decoder-test--make-u32-le ctb-entries)))))
          (frame-bytes
           (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
            (kuro-binary-decoder-test--make-u32-le 3)
            (funcall make-row 0 '())
            (funcall make-row 1 '(42))

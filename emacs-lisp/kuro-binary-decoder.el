@@ -51,7 +51,7 @@
 
 ;;; Low-level byte readers
 
-(defun kuro--read-u32-le (vec offset)
+(defsubst kuro--read-u32-le (vec offset)
   "Read a u32 little-endian integer from VEC at byte OFFSET.
 VEC must be an Emacs vector of integer byte values (0–255).
 Returns a non-negative integer."
@@ -60,7 +60,7 @@ Returns a non-negative integer."
           (ash (aref vec (+ offset 2)) 16)
           (ash (aref vec (+ offset 3)) 24)))
 
-(defun kuro--read-u64-le (vec offset)
+(defsubst kuro--read-u64-le (vec offset)
   "Read a u64 little-endian integer from VEC at byte OFFSET.
 VEC must be an Emacs vector of integer byte values (0–255).
 Returns a non-negative integer (Emacs bignums handle values > 2^62)."
@@ -85,20 +85,31 @@ FORMAT-VERSION controls the stride and presence of the ul-color field:
   version 1: 24 bytes per range — start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64)
   version 2: 28 bytes per range — adds ul-color(u32) at offset 24.
 Returns a cons cell (FACE-LIST . NEW-POS) where FACE-LIST is in original order."
-  (let ((result nil)
-        (stride (if (>= format-version 2) 28 24)))
-    (dotimes (_ num-face-ranges)
-      (let* ((start-buf (kuro--read-u32-le vec pos))
-             (end-buf   (kuro--read-u32-le vec (+ pos 4)))
-             (fg        (kuro--read-u32-le vec (+ pos 8)))
-             (bg        (kuro--read-u32-le vec (+ pos 12)))
-             (flags     (kuro--read-u64-le vec (+ pos 16)))
-             (ul-color  (if (>= format-version 2)
-                            (kuro--read-u32-le vec (+ pos 24))
-                          0)))
-        (push (list start-buf end-buf fg bg flags ul-color) result)
-        (setq pos (+ pos stride))))
-    (cons (nreverse result) pos)))
+  (if (>= format-version 2)
+      ;; Fast path: v2 (always emitted by current Rust encoder).
+      ;; Stride and ul-color presence are constants — no per-iteration branching.
+      (let ((result nil))
+        (dotimes (_ num-face-ranges)
+          (let* ((start-buf (kuro--read-u32-le vec pos))
+                 (end-buf   (kuro--read-u32-le vec (+ pos 4)))
+                 (fg        (kuro--read-u32-le vec (+ pos 8)))
+                 (bg        (kuro--read-u32-le vec (+ pos 12)))
+                 (flags     (kuro--read-u64-le vec (+ pos 16)))
+                 (ul-color  (kuro--read-u32-le vec (+ pos 24))))
+            (push (list start-buf end-buf fg bg flags ul-color) result)
+            (setq pos (+ pos 28))))
+        (cons (nreverse result) pos))
+    ;; Slow path: v1 legacy frames (24-byte face ranges, no ul-color field).
+    (let ((result nil))
+      (dotimes (_ num-face-ranges)
+        (let* ((start-buf (kuro--read-u32-le vec pos))
+               (end-buf   (kuro--read-u32-le vec (+ pos 4)))
+               (fg        (kuro--read-u32-le vec (+ pos 8)))
+               (bg        (kuro--read-u32-le vec (+ pos 12)))
+               (flags     (kuro--read-u64-le vec (+ pos 16))))
+          (push (list start-buf end-buf fg bg flags 0) result)
+          (setq pos (+ pos 24))))
+      (cons (nreverse result) pos))))
 
 (defun kuro--decode-col-to-buf (vec pos)
   "Decode a col-to-buf vector from VEC starting at byte offset POS.

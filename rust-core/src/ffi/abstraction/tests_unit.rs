@@ -84,6 +84,7 @@ pub(super) fn make_session() -> TerminalSession {
         row_hashes: Vec::new(),
         palette_epoch: 0,
         was_alt_screen: false,
+        encode_pool: crate::ffi::codec::EncodePool::new(),
     }
 }
 

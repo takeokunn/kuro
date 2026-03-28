@@ -31,6 +31,7 @@
            (kuro--scroll-offset 0)
            (kuro--last-rows 24)
            (kuro--col-to-buf-map (make-hash-table :test 'eql))
+           (kuro--blink-overlays-by-row nil)
            kuro--blink-overlays
            kuro--image-overlays)
        ,@body)))
@@ -343,9 +344,9 @@ because the last inserted line is the partial line at point-max."
     (insert "hello\n")
     (let ((calls nil))
       (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl) (push (list s e fg bg fl) calls))))
-        ;; range (0 3 1 0 0): start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
-        (kuro--apply-face-ranges '((0 3 1 0 0)) 1 6)
+                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
+        ;; range (0 3 1 0 0 0): start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
+        (kuro--apply-face-ranges '((0 3 1 0 0 0)) 1 6)
         (should (= (length calls) 1))
         (should (equal (car calls) '(1 4 1 0 0)))))))
 
@@ -355,9 +356,9 @@ because the last inserted line is the partial line at point-max."
     (insert "hello\n")
     (let ((calls nil))
       (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl) (push (list s e fg bg fl) calls))))
+                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
         ;; start-buf=3 end-buf=3 → start-pos=end-pos → no call
-        (kuro--apply-face-ranges '((3 3 1 0 0)) 1 6)
+        (kuro--apply-face-ranges '((3 3 1 0 0 0)) 1 6)
         (should (null calls))))))
 
 (ert-deftest kuro-render-buffer-apply-face-ranges-clamps-to-line-end ()
@@ -367,9 +368,9 @@ because the last inserted line is the partial line at point-max."
     ;; line-start=1, line-end=3 ("ab" occupies positions 1-2, newline at 3)
     (let ((calls nil))
       (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl) (push (list s e fg bg fl) calls))))
-        ;; range (0 99 1 0 0): end-pos = min(1+99, 3) = 3
-        (kuro--apply-face-ranges '((0 99 1 0 0)) 1 3)
+                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
+        ;; range (0 99 1 0 0 0): end-pos = min(1+99, 3) = 3
+        (kuro--apply-face-ranges '((0 99 1 0 0 0)) 1 3)
         (should (= (length calls) 1))
         (should (= (nth 1 (car calls)) 3))))))
 
@@ -522,12 +523,14 @@ because the last inserted line is the partial line at point-max."
     (should (null (gethash 2 kuro--col-to-buf-map)))))
 
 (ert-deftest kuro-render-buffer-store-col-to-buf-removes-empty-vector ()
-  "kuro--store-col-to-buf stores an empty vector (vectorp [] is t)."
-  ;; Note: (vectorp []) => t, so an empty vector is stored, not removed.
-  ;; This matches the original behavior: the if-branch uses (vectorp col-to-buf).
+  "kuro--store-col-to-buf removes an existing entry when given an empty vector.
+An empty vector is functionally equivalent to absent (identity fallback),
+so storing it would waste hash table space without any semantic benefit."
   (kuro-render-buffer-test--with-buffer
+    ;; Pre-populate so we can confirm the remhash actually fires.
+    (puthash 5 [1 2 3] kuro--col-to-buf-map)
     (kuro--store-col-to-buf 5 [])
-    (should (equal (gethash 5 kuro--col-to-buf-map) []))))
+    (should (null (gethash 5 kuro--col-to-buf-map)))))
 
 ;;; Group 14: kuro--with-buffer-edit
 
@@ -607,10 +610,10 @@ because the last inserted line is the partial line at point-max."
     (insert "hello\n")
     (let ((face-calls 0))
       (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (_s _e _fg _bg _fl) (cl-incf face-calls)))
+                 (lambda (_s _e _fg _bg _fl _ul) (cl-incf face-calls)))
                 ((symbol-function 'kuro--clear-row-image-overlays) #'ignore))
-        ;; A single face range: start=0, end=5, fg=0, bg=0, flags=0
-        (kuro--update-line-full 0 "hello" '((0 5 0 0 0)) nil))
+        ;; A single face range: start=0, end=5, fg=0, bg=0, flags=0, ul=0
+        (kuro--update-line-full 0 "hello" '((0 5 0 0 0 0)) nil))
       (should (= face-calls 1)))))
 
 (ert-deftest kuro-render-buffer-update-line-full-stores-col-to-buf ()

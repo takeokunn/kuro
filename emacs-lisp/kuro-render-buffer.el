@@ -210,9 +210,9 @@ for the blink-overlay bounds check."
   "Store or remove the COL-TO-BUF mapping for ROW in `kuro--col-to-buf-map'.
 If COL-TO-BUF is a non-empty vector, stores it.  If nil or empty, removes any
 existing entry so stale CJK mappings do not persist after an ASCII redraw."
-  (if (vectorp col-to-buf)
+  (if (and (vectorp col-to-buf) (> (length col-to-buf) 0))
       (puthash row col-to-buf kuro--col-to-buf-map)
-    (when (and (integerp row) (null col-to-buf))
+    (when (integerp row)
       (remhash row kuro--col-to-buf-map))))
 
 (defun kuro--update-line-full (row text face-ranges col-to-buf)
@@ -239,16 +239,21 @@ delete+insert so face ranges use the new content offsets, not cached old ones."
         (kuro--clear-row-overlays row)
         (delete-region line-start old-end)
         (insert text)
-        ;; When line length changed, buffer positions for rows after this one
-        ;; are shifted; invalidate cached positions from row+1 onward.
-        (unless (= (length text) old-len)
-          (when (and kuro--row-positions (< (1+ row) (length kuro--row-positions)))
-            (let ((len (length kuro--row-positions)))
-              (cl-loop for i from (1+ row) below len
-                       do (aset kuro--row-positions i nil)))))
-        ;; line-end MUST be recomputed after insert: multi-byte text means
-        ;; (+ line-start (length text)) would be wrong.
-        (kuro--apply-face-ranges face-ranges line-start (line-end-position))))))
+        ;; Capture new line-end once; used for both face application and cache update.
+        (let ((new-line-end (line-end-position)))
+          ;; When line length changed, buffer positions for rows after this one
+          ;; are shifted.  Row+1's start is exactly (1+ new-line-end), which we
+          ;; can cache directly; rows +2 and beyond are unknown and cleared.
+          (unless (= (length text) old-len)
+            (when (and kuro--row-positions (< (1+ row) (length kuro--row-positions)))
+              (let ((len (length kuro--row-positions)))
+                ;; Cache row+1's exact start position instead of invalidating it.
+                (aset kuro--row-positions (1+ row) (1+ new-line-end))
+                (cl-loop for i from (+ row 2) below len
+                         do (aset kuro--row-positions i nil)))))
+          ;; line-end MUST be recomputed after insert: multi-byte text means
+          ;; (+ line-start (length text)) would be wrong.
+                              (kuro--apply-face-ranges face-ranges line-start new-line-end))))))
 
 (kuro--defvar-permanent-local kuro--last-cursor-row nil
   "Cached cursor row from the previous render frame.

@@ -71,6 +71,14 @@ pub struct TerminalSession {
     /// and bump `palette_epoch` on alternate-screen enter/exit, which logically
     /// invalidates all cached row hashes without clearing the Vec.
     pub(super) was_alt_screen: bool,
+    /// Reusable scratch buffer for per-row encoding.
+    ///
+    /// `encode_line_into_buf` and `encode_line_with_pool` both call `pool.clear()`
+    /// at the start of each row, so this field never needs to be reset between
+    /// frames.  Persisting it here eliminates three heap allocations per frame
+    /// (`String` + two `Vec`s) that were previously created by `EncodePool::new()`
+    /// on every call to `get_dirty_lines_binary_direct` / `get_dirty_lines_with_faces`.
+    pub(super) encode_pool: crate::ffi::codec::EncodePool,
 }
 
 /// Feed `data` into the terminal parser, limited by `budget`.
@@ -135,6 +143,7 @@ impl TerminalSession {
                 row_hashes: Vec::new(),
                 palette_epoch: 0,
                 was_alt_screen: false,
+                encode_pool: crate::ffi::codec::EncodePool::new(),
             })
         }
 
@@ -146,6 +155,7 @@ impl TerminalSession {
             row_hashes: Vec::new(),
             palette_epoch: 0,
             was_alt_screen: false,
+            encode_pool: crate::ffi::codec::EncodePool::new(),
         })
     }
 
@@ -679,6 +689,7 @@ mod tests {
             row_hashes: Vec::new(),
             palette_epoch: 0,
             was_alt_screen: false,
+            encode_pool: crate::ffi::codec::EncodePool::new(),
         };
         let (fg, bg, cursor) = session.get_default_colors();
         // Before any OSC 10/11/12, all three are unset → sentinel

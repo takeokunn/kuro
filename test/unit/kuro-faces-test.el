@@ -363,7 +363,7 @@ without an extra font-metric recomputation pass."
       (insert "Hello World")
       (kuro--clear-face-cache)
       ;; all-zero args = default colors, no attributes
-      (kuro--apply-ffi-face-at 1 6 0 0 0)
+      (kuro--apply-ffi-face-at 1 6 0 0 0 0)
       (let ((prop (get-text-property 1 'face)))
         (should prop)))))
 
@@ -406,8 +406,10 @@ without an extra font-metric recomputation pass."
 (ert-deftest kuro-test-apply-palette-updates-clears-face-cache ()
   "kuro--apply-palette-updates clears the face cache when a color changes."
   (let ((kuro--initialized t))
+    ;; Use index 0 (black) with a non-default color (R=1,G=2,B=3) to force a change.
     (cl-letf (((symbol-function 'kuro--get-palette-updates)
-               (lambda () '((0 0 0 0)))))
+               (lambda () '((0 1 2 3)))))
+      (kuro--rebuild-named-colors)         ; reset to defaults first
       (kuro--get-cached-face-raw 0 0 0 0)  ; populate cache
       (kuro--apply-palette-updates)
       (should (= (hash-table-count kuro--face-cache) 0)))))
@@ -455,36 +457,50 @@ With three palette entries the cache must be flushed once, not three times."
       (kuro--apply-palette-updates)
       (should (= flush-count 0)))))
 
-;;; Group 12: kuro--merge-palette-entry
+;;; Group 12: palette entry application via kuro--apply-palette-updates
 
 (ert-deftest kuro-test-merge-palette-entry-valid-index ()
-  "kuro--merge-palette-entry writes the correct hex color for a valid index."
-  (kuro--rebuild-named-colors)
-  ;; Index 4 = \"blue\" in kuro--ansi-color-names
-  (kuro--merge-palette-entry '(4 0 0 255))
-  (should (equal (gethash "blue" kuro--named-colors) "#0000ff")))
+  "kuro--apply-palette-updates writes the correct hex color for a valid index."
+  (let ((kuro--initialized t))
+    (kuro--rebuild-named-colors)
+    ;; Index 4 = "blue" in kuro--ansi-color-names; default is #492ee1, not #0000ff
+    (cl-letf (((symbol-function 'kuro--get-palette-updates)
+               (lambda () '((4 0 0 255)))))
+      (kuro--apply-palette-updates)
+      (should (equal (gethash "blue" kuro--named-colors) "#0000ff")))))
 
 (ert-deftest kuro-test-merge-palette-entry-index-15 ()
-  "kuro--merge-palette-entry handles the last valid index (15 = bright-white)."
-  (kuro--rebuild-named-colors)
-  (kuro--merge-palette-entry '(15 200 210 220))
-  (should (equal (gethash "bright-white" kuro--named-colors) "#c8d2dc")))
+  "kuro--apply-palette-updates handles the last valid index (15 = bright-white)."
+  (let ((kuro--initialized t))
+    (kuro--rebuild-named-colors)
+    (cl-letf (((symbol-function 'kuro--get-palette-updates)
+               (lambda () '((15 200 210 220)))))
+      (kuro--apply-palette-updates)
+      (should (equal (gethash "bright-white" kuro--named-colors) "#c8d2dc")))))
 
 (ert-deftest kuro-test-merge-palette-entry-index-16-ignored ()
-  "kuro--merge-palette-entry silently ignores index 16 (out of ANSI range)."
-  (kuro--rebuild-named-colors)
-  (let ((before (gethash "black" kuro--named-colors)))
-    (kuro--merge-palette-entry '(16 1 2 3))
-    ;; The named-colors table should be unchanged for all 16 ANSI names.
-    (should (equal (gethash "black" kuro--named-colors) before))))
+  "kuro--apply-palette-updates silently ignores index 16 (out of ANSI range)."
+  (let ((kuro--initialized t))
+    (kuro--rebuild-named-colors)
+    (let ((before (gethash "black" kuro--named-colors)))
+      (cl-letf (((symbol-function 'kuro--get-palette-updates)
+                 (lambda () '((16 1 2 3)))))
+        (kuro--apply-palette-updates)
+        ;; The named-colors table should be unchanged for all 16 ANSI names.
+        (should (equal (gethash "black" kuro--named-colors) before))))))
 
 (ert-deftest kuro-test-merge-palette-entry-no-face-cache-side-effect ()
-  "kuro--merge-palette-entry never touches the face cache."
-  (kuro--clear-face-cache)
-  (kuro--get-cached-face-raw 0 0 0 0)  ; seed one entry
-  (let ((count-before (hash-table-count kuro--face-cache)))
-    (kuro--merge-palette-entry '(0 255 0 0))
-    (should (= (hash-table-count kuro--face-cache) count-before))))
+  "kuro--apply-palette-updates does not flush the face cache when no color changes."
+  (let ((kuro--initialized t))
+    (kuro--rebuild-named-colors)
+    (kuro--clear-face-cache)
+    (kuro--get-cached-face-raw 0 0 0 0)  ; seed one entry
+    (let ((count-before (hash-table-count kuro--face-cache)))
+      ;; Use the default black color (#000000) so no change occurs and cache is preserved.
+      (cl-letf (((symbol-function 'kuro--get-palette-updates)
+                 (lambda () '((0 0 0 0)))))
+        (kuro--apply-palette-updates)
+        (should (= (hash-table-count kuro--face-cache) count-before))))))
 
 ;;; Group 13: kuro--make-face
 

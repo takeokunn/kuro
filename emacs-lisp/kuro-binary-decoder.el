@@ -47,7 +47,8 @@
   "Binary frame format version 1: 8-byte header, 24-byte face ranges.")
 
 (defconst kuro--binary-format-version-v2 2
-  "Binary frame format version 2: 8-byte header, 28-byte face ranges (adds underline_color).")
+  "Binary frame format version 2: 8-byte header, 28-byte face ranges.
+Adds underline_color field compared to v1.")
 
 ;;; Low-level byte readers
 

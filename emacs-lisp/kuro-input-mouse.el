@@ -12,9 +12,6 @@
 
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)
-;; kuro--def-scroll-command is defined in kuro-input.el, which is always
-;; loaded before this file at runtime via:
-;;   kuro-input.el → kuro-input-keymap.el → kuro-input-mouse.el
 
 (declare-function kuro--send-key "kuro-ffi" (data))
 (declare-function kuro--render-cycle "kuro-renderer" ())
@@ -119,6 +116,28 @@ PRESS is t for press events, nil for release."
   "Forward reference; defined in kuro-lifecycle.el.")
 (defvar kuro--scroll-offset 0
   "Forward reference; defined in kuro-input.el.")
+
+;;; Scroll-command macro
+;; Defined here (not in kuro-input.el) so that this file is self-contained at
+;; byte-compile time.  kuro-input-keymap.el → kuro-input-mouse.el is compiled
+;; before kuro-input.el in alphabetical order, so the macro must be present in
+;; this file.  kuro-input.el requires this file at the top to inherit the macro.
+
+(defmacro kuro--def-scroll-command (name doc scroll-form offset-form)
+  "Define interactive scroll command NAME with docstring DOC.
+SCROLL-FORM is the FFI call (e.g. `(kuro--scroll-up lines)').
+OFFSET-FORM is the expression assigned to `kuro--scroll-offset' after the
+call.  The generated function is guarded by `kuro--initialized', calls
+`kuro--render-cycle', and calls `kuro--update-scroll-indicator'."
+  (declare (indent 1))
+  `(defun ,name ()
+     ,doc
+     (interactive)
+     (when kuro--initialized
+       ,scroll-form
+       (setq kuro--scroll-offset ,offset-form)
+       (kuro--render-cycle)
+       (kuro--update-scroll-indicator))))
 
 (kuro--def-scroll-command kuro--mouse-scroll-up--scrollback
   "Scroll terminal scrollback up by `kuro--mouse-scroll-lines' lines."

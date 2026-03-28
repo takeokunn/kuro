@@ -17,6 +17,10 @@
 
 (require 'kuro-colors)
 
+;; Forward declaration for kuro--keymap, defined in kuro-input-keymap.el.
+(defvar kuro--keymap nil
+  "Forward reference; defvar in kuro-input-keymap.el.")
+
 ;;; Customization Groups
 
 (defgroup kuro nil
@@ -209,6 +213,9 @@ with `setq', call `(kuro--build-keymap)' afterwards to rebuild the keymap."
   :group 'kuro
   :set #'kuro--set-keymap-exceptions)
 
+(defvaralias 'kuro-default-shell 'kuro-shell
+  "Backward-compatibility alias for `kuro-shell'.")
+
 (defcustom kuro-shell (or (getenv "SHELL") "/bin/bash")
   "Shell program to run in the Kuro terminal.
 Must be an executable accessible via PATH.
@@ -217,9 +224,6 @@ Also accessible via the alias `kuro-default-shell' for backward compatibility."
   :type 'string
   :group 'kuro
   :set #'kuro--set-shell)
-
-(defvaralias 'kuro-default-shell 'kuro-shell
-  "Backward-compatibility alias for `kuro-shell'.")
 
 (defcustom kuro-scrollback-size 10000
   "Maximum number of lines retained in the scrollback buffer.

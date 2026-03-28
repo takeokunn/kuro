@@ -97,7 +97,7 @@ during `defcustom' initialization before all 16 colors are defined)."
 LABEL is the color name string; INDEX is the palette index integer."
   `(defcustom ,(intern (concat "kuro-color-" suffix)) ,default
      ,(concat "Color for ANSI " label " (palette index " (number-to-string index)
-              ").  Value must be a 6-digit hex string, e.g. #rrggbb.")
+              ").\nValue must be a 6-digit hex string, e.g. #rrggbb.")
      :type '(string :tag "Hex color (#rrggbb)")
      :group 'kuro-colors
      :set #'kuro--set-color))

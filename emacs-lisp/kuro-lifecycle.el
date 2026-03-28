@@ -146,6 +146,7 @@ always computes fresh cursor position from Rust."
 (declare-function kuro-core-detach        "ext:kuro-core" (session-id))
 (declare-function kuro-core-attach        "ext:kuro-core" (session-id))
 (declare-function kuro-core-list-sessions "ext:kuro-core" ())
+(declare-function kuro-core-shutdown      "ext:kuro-core" (session-id))
 
 ;; kuro--resize is defined in kuro-ffi.el (required above); declared here for
 ;; byte-compiler visibility when kuro-attach calls it before the first render.

@@ -108,7 +108,7 @@ only nil is falsy."
   "Vector mapping underline style integers (0–5) to Emacs face :style symbols.
 Index 0 (None) maps to nil; indices 1–5 map to the symbol used in Emacs face
 :underline property lists.  Style 1 (Straight) is special: without a color it
-becomes the atom t (plain underline) rather than `(list :style 'line)'.")
+becomes the atom t (plain underline) rather than `(list :style \='line)'.")
 
 (defun kuro--underline-style-to-face-prop (style underline-color)
   "Convert underline STYLE integer and UNDERLINE-COLOR to an :underline value.
@@ -138,7 +138,7 @@ ATTR-FLAGS is the SGR bitmask integer.  UNDERLINE-COLOR is an Emacs
 color string or nil.
 
 Only non-default attributes are included in the returned plist.  Omitting
-:weight 'normal and :slant 'normal lets text inherit those properties from the
+:weight \='normal and :slant \='normal lets text inherit those properties from the
 buffer's default face, which is both more correct and faster to render —
 Emacs does not need to recompute font metrics for every cell.
 

@@ -25,6 +25,11 @@
 
 (require 'seq)
 
+;; set-fontset-font is defined in src/fontset.c (graphical builds only).
+;; Declare it so the byte-compiler does not warn when compiling in --batch mode.
+(declare-function set-fontset-font "fontset"
+                  (name target font-spec &optional frame add))
+
 ;; Forward declarations for variables used by kuro--refine-glyph-widths
 ;; to detect line-height changes after font rescaling.
 (defvar kuro--initialized nil

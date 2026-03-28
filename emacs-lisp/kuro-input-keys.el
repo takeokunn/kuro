@@ -69,8 +69,8 @@ DOC is the function docstring."
 
 ;;; Modifier Combinations
 
-(defun kuro--ctrl-modified (char modifier)
-  "Send Ctrl+CHAR.  MODIFIER is ignored (reserved for future use)."
+(defun kuro--ctrl-modified (char _modifier)
+  "Send Ctrl+CHAR.  _MODIFIER is ignored (reserved for future use)."
   (interactive "nChar: \nModifier: ")
   (kuro--send-special (logand char 31)))
 ;; Note: kuro--send-special already calls kuro--schedule-immediate-render.

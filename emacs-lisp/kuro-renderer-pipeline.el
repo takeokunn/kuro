@@ -55,6 +55,10 @@
 ;; Functions provided by kuro-ffi.el (loaded via (require 'kuro-ffi)).
 (declare-function kuro--resize "kuro-ffi" (rows cols))
 
+;; External C function used via kuro-binary-decoder.el.
+(declare-function kuro-core-poll-updates-binary-with-strings
+                  "ext:kuro-core" (session-id))
+
 ;; Forward references: defvar-local symbols defined in other modules.
 ;; kuro-ffi.el
 (defvar kuro--initialized nil

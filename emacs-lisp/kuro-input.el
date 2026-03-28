@@ -123,25 +123,10 @@ Always schedules an immediate render so cursor movement feels instant."
 ;; kuro--send-special are defined — so that those functions are available
 ;; when kuro-input-keys.el is loaded.
 (require 'kuro-input-keys)
+(require 'kuro-input-mouse)
 
 (defconst kuro--scroll-to-bottom-sentinel 999999
   "Sentinel value for `kuro-scroll-to-bottom': scrolls past any real content.")
-
-(defmacro kuro--def-scroll-command (name doc scroll-form offset-form)
-  "Define interactive scroll command NAME with docstring DOC.
-SCROLL-FORM is the FFI call (e.g. `(kuro--scroll-up lines)').
-OFFSET-FORM is the expression assigned to `kuro--scroll-offset' after the call.
-The generated function is guarded by `kuro--initialized', calls
-`kuro--render-cycle', and calls `kuro--update-scroll-indicator'."
-  (declare (indent 1))
-  `(defun ,name ()
-     ,doc
-     (interactive)
-     (when kuro--initialized
-       ,scroll-form
-       (setq kuro--scroll-offset ,offset-form)
-       (kuro--render-cycle)
-       (kuro--update-scroll-indicator))))
 
 (defun kuro--scroll-aware-ctrl-v ()
   "Send C-v to PTY when at live view; scroll down when in scrollback.
@@ -187,8 +172,8 @@ At live view (offset 0), ESC + v is sent to the PTY."
   (or (kuro--get-scroll-offset) 0))
 
 
-(defun kuro--ctrl-alt-modified (char modifier)
-  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  Ignores MODIFIER."
+(defun kuro--ctrl-alt-modified (char _modifier)
+  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  Ignores _MODIFIER."
   (interactive "nChar: \nModifier: ")
   (kuro--send-key (concat (string ?\e) (string (logand char 31))))
   (kuro--schedule-immediate-render))

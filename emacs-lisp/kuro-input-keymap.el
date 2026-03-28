@@ -140,7 +140,7 @@ the bash readline Alt bindings most frequently used:
 
 The loop runs FIRST so that explicit overrides below take precedence.
 Use (kbd (format \"M-%c\" char)) — this produces the correct event descriptor
-in both terminal and GUI Emacs.  (vector (list 'meta char)) is NOT equivalent
+in both terminal and GUI Emacs.  (vector (list \='meta char)) is NOT equivalent
 and would be silently ignored in GUI frames."
   ;; Bind ALL M-a … M-z, M-A … M-Z, M-0 … M-9 via loop.
   (dolist (char (append (number-sequence ?a ?z) (number-sequence ?A ?Z)
@@ -180,9 +180,9 @@ because Emacs does not generate a distinct [S-M-up] event.")
 (defconst kuro--xterm-arrow-codes
   '((up . ?A) (down . ?B) (right . ?C) (left . ?D))
   "xterm CSI final-byte characters for arrow directions in \\e[1;Nm sequences.
-The letters A/B/C/D are the original VT100 cursor movement codes (CUU/CUD/CUF/CUB).
-Used with `kuro--xterm-modifier-codes' to build the 12 modifier+arrow sequences
-like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
+The letters A/B/C/D are the original VT100 cursor movement codes
+\(CUU/CUD/CUF/CUB).  Used with `kuro--xterm-modifier-codes' to build the 12
+modifier+arrow sequences like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
 
 (defconst kuro--fkey-handlers
   '((f1  . kuro--F1)  (f2  . kuro--F2)  (f3  . kuro--F3)  (f4  . kuro--F4)

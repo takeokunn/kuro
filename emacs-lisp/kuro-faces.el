@@ -33,6 +33,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'kuro-config)
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)

@@ -76,7 +76,7 @@ M-x package-install RET kuro RET
 
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 993 tests (938 unit + 55 integration) and the Emacs Lisp layer passes 943 ERT tests (701 unit + 148 integration + 94 e2e). Clippy runs in pedantic + nursery mode with 0 warnings. CI covers Linux, macOS, and WSL2 across Emacs 29.1/29.4/30.1 with Rust stable. The project includes 4 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2597 ERT tests. Clippy runs in pedantic + nursery mode with 0 warnings. CI covers Linux, macOS, and WSL2 across Emacs 29.1/29.4/30.1 with Rust stable. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 
@@ -100,7 +100,7 @@ graph LR
 
 ### Emacs Lisp (`emacs-lisp/`)
 
-23 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation).
+28 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-renderer-pipeline`, `kuro-binary-decoder`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation), `kuro-poll-modes`, `kuro-typewriter`, `kuro-tui-mode`.
 
 ## Development
 

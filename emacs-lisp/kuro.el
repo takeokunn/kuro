@@ -53,6 +53,7 @@
     (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
     ;; Copy mode: suspend PTY input and enable normal Emacs navigation/selection
     (define-key map [?\C-c ?\C-t] #'kuro-copy-mode)
+    (define-key map (kbd "C-c C-SPC") #'kuro-copy-mode)
     ;; Send next key directly to PTY, bypassing kuro-keymap-exceptions
     (define-key map [?\C-c ?\C-q] #'kuro-send-next-key)
     map)
@@ -84,19 +85,37 @@ cycle independently call `kuro--resize'."
 In copy mode the PTY keymap parent is detached so standard Emacs
 navigation and text-selection commands work in the terminal buffer.")
 
+(defcustom kuro-copy-mode-auto-exit t
+  "When non-nil, exit copy mode automatically after M-w (`kill-ring-save').
+This streamlines the copy workflow: enter copy mode with C-c C-t,
+select a region, press M-w to copy and return to terminal mode."
+  :type 'boolean
+  :group 'kuro)
+
+(defun kuro--copy-mode-save-and-exit ()
+  "Copy the region with `kill-ring-save', optionally exiting copy mode.
+When `kuro-copy-mode-auto-exit' is non-nil, also exits copy mode."
+  (interactive)
+  (call-interactively #'kill-ring-save)
+  (when kuro-copy-mode-auto-exit
+    (kuro--exit-copy-mode)))
+
 (defun kuro--enter-copy-mode ()
   "Enter Kuro copy mode: suspend PTY input and enable Emacs navigation.
 Uses `use-local-map' so only the current buffer is affected; other Kuro
 buffers keep their normal terminal keymaps."
   (setq-local kuro--copy-mode t)
-  ;; Install a minimal buffer-local keymap: only C-c C-t to exit.
-  ;; No parent → the global keymap applies, giving full Emacs navigation.
+  ;; Install a minimal buffer-local keymap: C-c C-t to exit, M-w to
+  ;; copy-and-optionally-exit.  No parent → the global keymap applies,
+  ;; giving full Emacs navigation.
   (let ((copy-map (make-sparse-keymap)))
     (define-key copy-map [?\C-c ?\C-t] #'kuro-copy-mode)
+    (define-key copy-map (kbd "C-c C-SPC") #'kuro-copy-mode)
+    (define-key copy-map (kbd "M-w") #'kuro--copy-mode-save-and-exit)
     (use-local-map copy-map))
-  (setq mode-name "Kuro[Copy]")
+  (setq mode-name (propertize "Kuro[Copy]" 'face 'font-lock-warning-face))
   (force-mode-line-update)
-  (message "Kuro copy mode on (C-c C-t to exit)"))
+  (message "Kuro copy mode on (C-c C-t or C-c C-SPC to exit)"))
 
 (defun kuro--exit-copy-mode ()
   "Exit Kuro copy mode: restore PTY input keymap."
@@ -116,7 +135,7 @@ buffers keep their normal terminal keymaps."
 In copy mode the PTY keymap is suspended and standard Emacs cursor
 movement, region selection, and copy commands (M-w, C-w, C-s…) become
 available.  The buffer remains read-only; only navigation and selection
-are enabled.  Press C-c C-t again to return to terminal mode."
+are enabled.  Press C-c C-t or C-c C-SPC again to return to terminal mode."
   (interactive)
   (unless (derived-mode-p 'kuro-mode)
     (user-error "kuro-copy-mode: not in a Kuro terminal buffer"))
@@ -148,6 +167,8 @@ When PREV is a function it is called at the end; nil is ignored."
   (setq-local bidi-paragraph-direction 'left-to-right)
   (setq-local truncate-lines t)
   (setq-local auto-hscroll-mode nil)
+  ;; No header-line by default; kuro--update-scroll-indicator sets it when scrolling.
+  (setq-local header-line-format nil)
   ;; Disable syntax highlighting: terminal content is colored via text properties
   ;; from the Rust FFI layer; font-lock and jit-lock add overhead with no benefit.
   (font-lock-mode -1)

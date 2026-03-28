@@ -93,22 +93,41 @@ width 1, plus Nerd Font PUA ranges.")
 Variation Selectors modify the preceding character's rendering (e.g., VS16
 forces emoji presentation) without consuming a grid column themselves.")
 
+;;; Fontset-assignment macro
+
+(defmacro kuro--set-fontset-font-both (range spec)
+  "Register SPEC for RANGE in both the current frame and the default fontset.
+Both nil (current frame) and t (default template) are updated because
+frame creation copies the default fontset — modifying only t would not
+update existing frames, and modifying only nil would not affect new frames."
+  `(progn
+     (set-fontset-font nil ,range ,spec nil 'prepend)
+     (set-fontset-font t   ,range ,spec nil 'prepend)))
+
 ;;; EA-Ambiguous font assignment and glyph-metric refinement
 
+(defconst kuro--ea-range-probe-table
+  '(((#x2190 . #x21FF) . #x2192)    ; Arrows — EA Width A (↑↓←→): probe →
+    ((#x2200 . #x22FF) . #x2200)    ; Mathematical Operators — EA Width A (×÷∞√): probe ∀
+    ((#x2300 . #x23FF) . #x2302)    ; Miscellaneous Technical — EA Width A: probe ⌂
+    ((#x2500 . #x257F) . #x2502)    ; Box Drawing — ncurses borders: probe │
+    ((#x2580 . #x259F) . #x2588)    ; Block Elements — btop/htop bars: probe █
+    ((#x25A0 . #x25FF) . #x25A0)    ; Geometric Shapes — TUI indicators: probe ■
+    ((#x2600 . #x26FF) . #x2605)    ; Miscellaneous Symbols — EA Width A: probe ★
+    ((#x2700 . #x27BF) . #x2714)    ; Dingbats — EA Width A: probe ✔
+    ((#x2800 . #x28FF) . #x28C0))   ; Braille Patterns — pinned to 1: probe ⣀
+  "Canonical table of EA-Ambiguous Unicode ranges with their probe characters.
+Each entry is ((range-start . range-end) . probe-char).
+The range is forced to display-width 1 in kuro buffers; the probe char is used
+by `kuro--refine-glyph-widths' to detect and correct font metrics.
+Unifies the old parallel `kuro--char-width-overrides' + `kuro--glyph-probe-chars'.")
+
 (defconst kuro--char-width-overrides
-  '((#x2190 . #x21FF)    ; Arrows — EA Width A (↑↓←→ sort/nav indicators)
-    (#x2200 . #x22FF)    ; Mathematical Operators — EA Width A (×÷∞√)
-    (#x2300 . #x23FF)    ; Miscellaneous Technical — EA Width A
-    (#x2500 . #x257F)    ; Box Drawing — used by ncurses borders
-    (#x2580 . #x259F)    ; Block Elements — EA Width A (btop/htop bars)
-    (#x25A0 . #x25FF)    ; Geometric Shapes — EA Width A (■● TUI indicators)
-    (#x2600 . #x26FF)    ; Miscellaneous Symbols — EA Width A
-    (#x2700 . #x27BF)    ; Dingbats — EA Width A
-    (#x2800 . #x28FF))   ; Braille Patterns — pin to 1 for safety
+  (mapcar #'car kuro--ea-range-probe-table)
   "Unicode ranges forced to display-width 1 in kuro terminal buffers.
-These ranges are East-Asian-Ambiguous (or pinned for safety).  CJK language
-environments set them to width 2, but terminal applications and the Rust
-unicode-width crate treat them as width 1.")
+Derived from `kuro--ea-range-probe-table'.  CJK language environments promote
+these EA-Ambiguous ranges to width 2, but terminal apps and Rust unicode-width
+treat them as width 1.")
 
 (defun kuro--apply-char-width-overrides ()
   "Force all `kuro--char-width-overrides' ranges to width 1 in the current buffer.
@@ -155,24 +174,9 @@ lacks a glyph for a given codepoint Emacs falls back to the original
                              ascii-family)))
           (dolist (range kuro--char-width-overrides)
             (condition-case nil
-                (let ((spec (font-spec :family family-name)))
-                  (set-fontset-font nil range spec nil 'prepend)
-                  (set-fontset-font t   range spec nil 'prepend))
+                (kuro--set-fontset-font-both range (font-spec :family family-name))
               (error nil))))))))
 
-(defconst kuro--glyph-probe-chars
-  '((#x2190 . #x2192)    ; Arrows: →
-    (#x2200 . #x2200)    ; Math Operators: ∀
-    (#x2300 . #x2302)    ; Misc Technical: ⌂
-    (#x2500 . #x2502)    ; Box Drawing: │
-    (#x2580 . #x2588)    ; Block Elements: █
-    (#x25A0 . #x25A0)    ; Geometric Shapes: ■
-    (#x2600 . #x2605)    ; Misc Symbols: ★
-    (#x2700 . #x2714)    ; Dingbats: ✔
-    (#x2800 . #x28C0))   ; Braille Patterns: ⣀
-  "Alist mapping range-start to a probe character for glyph width detection.
-Each probe character is a representative glyph from the corresponding
-`kuro--char-width-overrides' range.")
 
 (defconst kuro--glyph-extra-probes
   '(#x23FA    ; ⏺ — record symbol (Claude Code status indicator)
@@ -232,8 +236,7 @@ Returns non-nil if a rescaling was applied."
                (new-size (* (font-get font-obj :size) (/ 1.0 max-ratio)))
                (rescaled (font-spec :family (if (symbolp fname) (symbol-name fname) fname)
                                     :size new-size)))
-          (set-fontset-font nil range rescaled nil 'prepend)
-          (set-fontset-font t   range rescaled nil 'prepend)
+          (kuro--set-fontset-font-both range rescaled)
           t)))))
 
 (defun kuro--refine-glyph-widths ()
@@ -257,15 +260,10 @@ may still have taller ascent+descent, causing line-height fluctuation
            (cell-height (frame-char-height))
            (did-change nil))
       (when (and cell-width (> cell-width 0) cell-height (> cell-height 0))
-        ;; Pass 1: per-range probing (existing behavior, now with height check)
-        (dolist (entry kuro--char-width-overrides)
-          (let* ((range-start (car entry))
-                 (probe-assoc (assq range-start kuro--glyph-probe-chars))
-                 (probe-char (and probe-assoc (cdr probe-assoc))))
-            (when (and probe-char
-                       (kuro--rescale-font-for-glyph
-                        probe-char entry cell-width cell-height))
-              (setq did-change t))))
+        ;; Pass 1: per-range probing — range and probe-char from unified table.
+        (dolist (entry kuro--ea-range-probe-table)
+          (when (kuro--rescale-font-for-glyph (cdr entry) (car entry) cell-width cell-height)
+            (setq did-change t)))
         ;; Pass 2: per-character probing for known-problematic glyphs
         (dolist (char kuro--glyph-extra-probes)
           (when (kuro--rescale-font-for-glyph

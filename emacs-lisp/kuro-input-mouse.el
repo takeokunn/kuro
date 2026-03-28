@@ -11,8 +11,14 @@
 ;;; Code:
 
 (require 'kuro-ffi)
+(require 'kuro-ffi-osc)
+;; kuro--def-scroll-command is defined in kuro-input.el, which is always
+;; loaded before this file at runtime via:
+;;   kuro-input.el → kuro-input-keymap.el → kuro-input-mouse.el
 
 (declare-function kuro--send-key "kuro-ffi" (data))
+(declare-function kuro--render-cycle "kuro-renderer" ())
+(declare-function kuro--update-scroll-indicator "kuro-render-buffer" ())
 
 ;;; Mouse Tracking State
 
@@ -106,15 +112,43 @@ PRESS is t for press events, nil for release."
   nil
   "Handle mouse button release and forward to PTY.")
 
-(kuro--def-mouse-cmd kuro--mouse-scroll-up
-  64
-  t
-  "Handle scroll-up mouse event and forward to PTY.")
+(defconst kuro--mouse-scroll-lines 5
+  "Number of lines to scroll per mouse wheel event when mouse tracking is off.")
 
-(kuro--def-mouse-cmd kuro--mouse-scroll-down
-  65
-  t
-  "Handle scroll-down mouse event and forward to PTY.")
+(defvar kuro--initialized nil
+  "Forward reference; defined in kuro-lifecycle.el.")
+(defvar kuro--scroll-offset 0
+  "Forward reference; defined in kuro-input.el.")
+
+(kuro--def-scroll-command kuro--mouse-scroll-up--scrollback
+  "Scroll terminal scrollback up by `kuro--mouse-scroll-lines' (internal helper)."
+  (kuro--scroll-up kuro--mouse-scroll-lines)
+  (max 0 (or (kuro--get-scroll-offset) (+ kuro--scroll-offset kuro--mouse-scroll-lines))))
+
+(defun kuro--mouse-scroll-up ()
+  "Handle scroll-up (wheel up) mouse event.
+When mouse tracking is active, forward to PTY as button 64.
+Otherwise, scroll the terminal scrollback up by `kuro--mouse-scroll-lines'."
+  (interactive)
+  (if (> kuro--mouse-mode 0)
+      (let ((btn 64))
+        (kuro--dispatch-mouse-event btn t))
+    (kuro--mouse-scroll-up--scrollback)))
+
+(kuro--def-scroll-command kuro--mouse-scroll-down--scrollback
+  "Scroll terminal scrollback down by `kuro--mouse-scroll-lines' (internal helper)."
+  (kuro--scroll-down kuro--mouse-scroll-lines)
+  (max 0 (or (kuro--get-scroll-offset) (- kuro--scroll-offset kuro--mouse-scroll-lines))))
+
+(defun kuro--mouse-scroll-down ()
+  "Handle scroll-down (wheel down) mouse event.
+When mouse tracking is active, forward to PTY as button 65.
+Otherwise, scroll the terminal scrollback down by `kuro--mouse-scroll-lines'."
+  (interactive)
+  (if (> kuro--mouse-mode 0)
+      (let ((btn 65))
+        (kuro--dispatch-mouse-event btn t))
+    (kuro--mouse-scroll-down--scrollback)))
 
 (provide 'kuro-input-mouse)
 

@@ -55,10 +55,25 @@
        (with-current-buffer buf
          (,fn ,@args)))))
 
+(defmacro kuro--in-all-buffers (&rest body)
+  "Evaluate BODY with each live kuro buffer current."
+  `(dolist (buf (kuro--kuro-buffers))
+     (with-current-buffer buf
+       ,@body)))
+
 (defmacro kuro--check-positive-integer (var errors)
   "Push an error string onto ERRORS if VAR is not a positive integer."
   `(unless (kuro--positive-integer-p ,var)
      (push (format "%s: must be a positive integer, got: %s" ',var ,var) ,errors)))
+
+(defmacro kuro--check-hex-color (var errors)
+  "Push an error string onto ERRORS if VAR is not a 6-digit hex color string."
+  `(let ((val (symbol-value ,var)))
+     (unless (and (stringp val)
+                  (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val))
+       (push (format "%s: must be a 6-digit hex string like #rrggbb, got: %s"
+                     ,var val)
+             ,errors))))
 
 (defmacro kuro--def-positive-int-setter (name err-msg doc &rest body)
   "Define a defcustom :set handler NAME for a positive-integer setting.
@@ -92,24 +107,33 @@ SYMBOL and VALUE are bound within BODY."
     "Set SYMBOL to VALUE and restart render loops in all active Kuro buffers."
   (when (and (fboundp 'kuro--stop-render-loop)
              (fboundp 'kuro--start-render-loop))
-    (dolist (buf (kuro--kuro-buffers))
-      (with-current-buffer buf
-        (kuro--stop-render-loop)
-        (kuro--start-render-loop)))))
+    (kuro--in-all-buffers
+      (kuro--stop-render-loop)
+      (kuro--start-render-loop))))
 
 (kuro--def-positive-int-setter kuro--set-tui-frame-rate
     "kuro: tui-frame-rate must be a positive integer, got: %s"
     "Set SYMBOL to VALUE and switch render timer in active TUI-mode Kuro buffers."
   (when (fboundp 'kuro--switch-render-timer)
-    (dolist (buf (kuro--kuro-buffers))
-      (with-current-buffer buf
-        (when (bound-and-true-p kuro--tui-mode-active)
-          (kuro--switch-render-timer value))))))
+    (kuro--in-all-buffers
+      (when (bound-and-true-p kuro--tui-mode-active)
+        (kuro--switch-render-timer value)))))
 
 (defun kuro--set-font (symbol value)
   "Set SYMBOL to VALUE and apply font remap to all active Kuro buffers."
   (set-default symbol value)
   (kuro--broadcast-to-buffers kuro--apply-font-to-buffer buf))
+
+(defun kuro--set-keymap-exceptions (symbol value)
+  "Set SYMBOL to VALUE and rebuild the Kuro input keymap.
+Propagates the new keymap to all live `kuro-mode' buffers by updating
+the parent of their local `kuro-mode-map'."
+  (set-default-toplevel-value symbol value)
+  (when (fboundp 'kuro--build-keymap)
+    (kuro--build-keymap)
+    (kuro--in-all-buffers
+      (when (boundp 'kuro-mode-map)
+        (set-keymap-parent kuro-mode-map kuro--keymap)))))
 
 (defun kuro--set-input-echo-delay (symbol value)
   "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.
@@ -119,6 +143,18 @@ VALUE must be a non-negative number."
   (when (< value 0)
     (user-error "kuro-input-echo-delay must be non-negative"))
   (set-default symbol value))
+
+;;; Color variable enumeration
+
+(defconst kuro--color-defcustom-vars
+  '(kuro-color-black     kuro-color-red     kuro-color-green   kuro-color-yellow
+    kuro-color-blue      kuro-color-magenta kuro-color-cyan    kuro-color-white
+    kuro-color-bright-black   kuro-color-bright-red
+    kuro-color-bright-green   kuro-color-bright-yellow
+    kuro-color-bright-blue    kuro-color-bright-magenta
+    kuro-color-bright-cyan    kuro-color-bright-white)
+  "All 16 ANSI color defcustom variables in standard terminal order.
+Used by `kuro--validate-config' and any code needing to enumerate all colors.")
 
 ;;; Module Binary Path
 
@@ -166,11 +202,12 @@ The default list mirrors `vterm-keymap-exceptions' from emacs-libvterm:
   C-y  yank (with bracketed-paste support via `kuro--yank')
   M-y  yank-pop
 
-Changes do NOT take effect automatically.  After modifying this variable
-you must call `(kuro--build-keymap)' to rebuild the keymap; the next Kuro
-buffer you open will then use the updated binding set."
+Changes via Customize take effect immediately: the keymap is rebuilt and
+propagated to all live Kuro buffers.  If you set this variable directly
+with `setq', call `(kuro--build-keymap)' afterwards to rebuild the keymap."
   :type '(repeat string)
-  :group 'kuro)
+  :group 'kuro
+  :set #'kuro--set-keymap-exceptions)
 
 (defcustom kuro-shell (or (getenv "SHELL") "/bin/bash")
   "Shell program to run in the Kuro terminal.
@@ -317,28 +354,8 @@ An empty list indicates that all settings are valid."
     (kuro--check-positive-integer kuro-tui-frame-rate errors)
     (when kuro-font-size
       (kuro--check-positive-integer kuro-font-size errors))
-    (dolist (color-var '(kuro-color-black
-                         kuro-color-red
-                         kuro-color-green
-                         kuro-color-yellow
-                         kuro-color-blue
-                         kuro-color-magenta
-                         kuro-color-cyan
-                         kuro-color-white
-                         kuro-color-bright-black
-                         kuro-color-bright-red
-                         kuro-color-bright-green
-                         kuro-color-bright-yellow
-                         kuro-color-bright-blue
-                         kuro-color-bright-magenta
-                         kuro-color-bright-cyan
-                         kuro-color-bright-white))
-      (let ((val (symbol-value color-var)))
-        (unless (and (stringp val)
-                     (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val))
-          (push (format "%s: must be a 6-digit hex string like #rrggbb, got: %s"
-                        color-var val)
-                errors))))
+    (dolist (color-var kuro--color-defcustom-vars)
+      (kuro--check-hex-color color-var errors))
     (nreverse errors)))
 
 ;;;###autoload

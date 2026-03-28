@@ -61,7 +61,7 @@ In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
 
 (defun kuro--yank (&optional arg)
   "Yank from kill ring, wrapping with bracketed paste sequences when active."
-  (interactive "*P")
+  (interactive "P")
   (let* ((n (if (numberp arg) (1- arg) 0))
          (text (current-kill n)))
     (kuro--send-paste-or-raw text))

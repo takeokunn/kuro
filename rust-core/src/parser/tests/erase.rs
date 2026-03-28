@@ -376,71 +376,113 @@ fn test_ed_mode1_splits_wide_char() {
     assert_cell!(term, row 0, col 5, char ' ', width CellWidth::Half);
 }
 
-#[test]
-fn test_el_mode1_with_colored_bg_applies_bce() {
-    let mut term = crate::TerminalCore::new(5, 10);
-    let attrs = SgrAttributes {
-        background: Color::Named(NamedColor::Red),
-        ..Default::default()
-    };
-    term.current_attrs = attrs;
-
-    let row = 2;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('Q'));
+/// Test that an EL sequence with a non-default SGR background applies BCE.
+///
+/// Sets `current_attrs` to the given color, fills `$row` with `$fill_ch`,
+/// positions the cursor at (`$row`, `$cursor_col`), advances `$seq`, then
+/// runs `$assertions` (a block receiving `term` and `row`).
+macro_rules! test_el_bce {
+    (
+        $name:ident,
+        color $color:expr,
+        row $row:expr, fill $fill_ch:expr,
+        cursor_col $cursor_col:expr,
+        seq $seq:expr,
+        $assertions:expr
+    ) => {
+        #[test]
+        fn $name() {
+            let mut term = crate::TerminalCore::new(5, 10);
+            let attrs = SgrAttributes {
+                background: Color::Named($color),
+                ..Default::default()
+            };
+            term.current_attrs = attrs;
+            let row = $row;
+            for c in 0..10 {
+                if let Some(line) = term.screen.get_line_mut(row) {
+                    line.update_cell_with(c, Cell::new($fill_ch));
+                }
+            }
+            term.screen.move_cursor(row, $cursor_col);
+            term.advance($seq);
+            $assertions(&term, row);
         }
-    }
-    term.screen.move_cursor(row, 5);
-    term.advance(b"\x1b[1K");
-
-    assert_line_bg!(term, row row, cols 0..=5, Color::Named(NamedColor::Red), "EL mode 1: Red bg for cleared cols");
-    assert_line_char!(term, row row, cols 0..=5, ' ', "EL mode 1: cleared cells are blank");
-    assert_line_char!(term, row row, cols 6..10, 'Q', "EL mode 1: untouched cols keep 'Q'");
-}
-
-#[test]
-fn test_el_mode2_with_colored_bg_applies_bce() {
-    let mut term = crate::TerminalCore::new(5, 10);
-    let attrs = SgrAttributes {
-        background: Color::Named(NamedColor::Green),
-        ..Default::default()
     };
-    term.current_attrs = attrs;
+}
 
-    let row = 1;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('P'));
-        }
+test_el_bce!(
+    test_el_mode1_with_colored_bg_applies_bce,
+    color NamedColor::Red,
+    row 2, fill 'Q',
+    cursor_col 5,
+    seq b"\x1b[1K",
+    |term: &crate::TerminalCore, row: usize| {
+        assert_line_bg!(term, row row, cols 0..=5, Color::Named(NamedColor::Red), "EL mode 1: Red bg for cleared cols");
+        assert_line_char!(term, row row, cols 0..=5, ' ', "EL mode 1: cleared cells are blank");
+        assert_line_char!(term, row row, cols 6..10, 'Q', "EL mode 1: untouched cols keep 'Q'");
     }
-    term.screen.move_cursor(row, 3);
-    term.advance(b"\x1b[2K");
+);
 
-    assert_line_bg!(term, row row, cols 0..10, Color::Named(NamedColor::Green), "EL mode 2: Green bg");
-    assert_line_char!(term, row row, cols 0..10, ' ', "EL mode 2: all blank");
+test_el_bce!(
+    test_el_mode2_with_colored_bg_applies_bce,
+    color NamedColor::Green,
+    row 1, fill 'P',
+    cursor_col 3,
+    seq b"\x1b[2K",
+    |term: &crate::TerminalCore, row: usize| {
+        assert_line_bg!(term, row row, cols 0..10, Color::Named(NamedColor::Green), "EL mode 2: Green bg");
+        assert_line_char!(term, row row, cols 0..10, ' ', "EL mode 2: all blank");
+    }
+);
+
+/// Fill a `term_filled!($rows x $cols, $fill_ch)` screen, set the current
+/// background to `Color::Named($color)`, position the cursor at
+/// `($cursor_row, $cursor_col)`, advance `$seq`, then run `$assertions` (a
+/// closure receiving `&term`).  Used to consolidate ED BCE background tests.
+macro_rules! test_ed_bce {
+    (
+        $name:ident,
+        grid $rows:literal x $cols:literal, fill $fill_ch:expr,
+        color $color:expr,
+        cursor ($cursor_row:expr, $cursor_col:expr),
+        seq $seq:expr,
+        $assertions:expr
+    ) => {
+        #[test]
+        fn $name() {
+            let mut term = term_filled!($rows x $cols, $fill_ch);
+            term.current_attrs.background = Color::Named($color);
+            term.screen.move_cursor($cursor_row, $cursor_col);
+            term.advance($seq);
+            $assertions(&term);
+        }
+    };
 }
 
-#[test]
-fn test_ed_mode1_with_colored_bg_applies_bce() {
-    let mut term = term_filled!(5 x 10, 'M');
-    term.current_attrs.background = Color::Named(NamedColor::Cyan);
-    term.screen.move_cursor(2, 5);
-    term.advance(b"\x1b[1J");
+test_ed_bce!(
+    test_ed_mode1_with_colored_bg_applies_bce,
+    grid 5 x 10, fill 'M',
+    color NamedColor::Cyan,
+    cursor (2, 5),
+    seq b"\x1b[1J",
+    |term: &crate::TerminalCore| {
+        assert_row_range_bg!(term, rows 0..2, cols 0..10, Color::Named(NamedColor::Cyan), "ED mode 1: fully-erased rows have Cyan bg");
+        assert_line_bg!(term, row 2, cols 0..=5, Color::Named(NamedColor::Cyan), "ED mode 1: partial row 2 has Cyan bg");
+    }
+);
 
-    assert_row_range_bg!(term, rows 0..2, cols 0..10, Color::Named(NamedColor::Cyan), "ED mode 1: fully-erased rows have Cyan bg");
-    assert_line_bg!(term, row 2, cols 0..=5, Color::Named(NamedColor::Cyan), "ED mode 1: partial row 2 has Cyan bg");
-}
-
-#[test]
-fn test_ed_mode2_with_colored_bg_applies_bce() {
-    let mut term = term_filled!(3 x 8, 'N');
-    term.current_attrs.background = Color::Named(NamedColor::Magenta);
-    term.advance(b"\x1b[2J");
-
-    assert_row_range_bg!(term, rows 0..3, cols 0..8, Color::Named(NamedColor::Magenta), "ED mode 2: Magenta bg");
-    assert_row_range_char!(term, rows 0..3, cols 0..8, ' ', "ED mode 2: all blank");
-}
+test_ed_bce!(
+    test_ed_mode2_with_colored_bg_applies_bce,
+    grid 3 x 8, fill 'N',
+    color NamedColor::Magenta,
+    cursor (0, 0),
+    seq b"\x1b[2J",
+    |term: &crate::TerminalCore| {
+        assert_row_range_bg!(term, rows 0..3, cols 0..8, Color::Named(NamedColor::Magenta), "ED mode 2: Magenta bg");
+        assert_row_range_char!(term, rows 0..3, cols 0..8, ' ', "ED mode 2: all blank");
+    }
+);
 
 /// ED mode 0 with cursor at (0, 0) must clear the entire screen.
 #[test]
@@ -497,277 +539,7 @@ fn test_el_mode1_at_column_zero() {
     assert_line_char!(term, row row, cols 1..10, 'T', "EL mode 1 at col 0: cols 1-9 unchanged");
 }
 
-// ── New edge-case tests (made feasible by macros) ──────────────────────────
-
-/// ED mode 2 on a 1×1 terminal must not panic and leaves a blank cell.
-#[test]
-fn test_ed_mode2_minimal_terminal() {
-    let mut term = crate::TerminalCore::new(1, 1);
-    if let Some(line) = term.screen.get_line_mut(0) {
-        line.update_cell_with(0, Cell::new('X'));
-    }
-    term.advance(b"\x1b[2J");
-    assert_cell!(term, row 0, col 0, char ' ');
-}
-
-/// EL mode 2 on a 1-column terminal must not panic and leaves a blank cell.
-#[test]
-fn test_el_mode2_single_column() {
-    let mut term = crate::TerminalCore::new(3, 1);
-    if let Some(line) = term.screen.get_line_mut(1) {
-        line.update_cell_with(0, Cell::new('Z'));
-    }
-    term.screen.move_cursor(1, 0);
-    term.advance(b"\x1b[2K");
-    assert_cell!(term, row 1, col 0, char ' ');
-}
-
-/// ED mode 0 from the last cell of the last row must erase exactly that cell.
-#[test]
-fn test_ed_mode0_at_last_cell() {
-    let mut term = term_filled!(3 x 5, 'L');
-    term.screen.move_cursor(2, 4); // last row, last col
-    let params = vte::Params::default();
-    csi_ed(&mut term, &params);
-
-    // All cells before last must still be 'L'
-    assert_row_range_char!(term, rows 0..2, cols 0..5, 'L', "rows above unchanged");
-    assert_line_char!(term, row 2, cols 0..4, 'L', "row 2 cols 0-3 unchanged");
-    assert_cell!(term, row 2, col 4, char ' ');
-}
-
-/// ED mode 1 from the first cell of the first row erases exactly that one cell (inclusive).
-#[test]
-fn test_ed_mode1_at_first_cell_clears_origin_only() {
-    let mut term = term_filled!(3 x 5, 'M');
-    term.screen.move_cursor(0, 0);
-    term.advance(b"\x1b[1J");
-
-    // Only cell (0,0) is erased; all other cells remain 'M'
-    assert_cell!(term, row 0, col 0, char ' ');
-    assert_line_char!(term, row 0, cols 1..5, 'M', "ED 1 at origin: cols 1+ unchanged on row 0");
-    assert_row_range_char!(term, rows 1..3, cols 0..5, 'M', "ED 1 at origin: rows 1-2 unchanged");
-}
-
-/// EL mode 0 on a freshly-created (already blank) line must be a no-op
-/// (no panic, cells remain blank).
-#[test]
-fn test_el_mode0_on_blank_line_is_noop() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    term.screen.move_cursor(1, 3);
-    let params = vte::Params::default();
-    csi_el(&mut term, &params);
-
-    assert_line_char!(term, row 1, cols 0..10, ' ', "blank line stays blank after EL 0");
-}
-
-/// EL mode 2 applied to multiple rows in succession — each is independently cleared.
-#[test]
-fn test_el_mode2_successive_rows() {
-    let mut term = term_filled!(4 x 8, 'K');
-
-    for row in 0..4usize {
-        term.screen.move_cursor(row, 4);
-        term.advance(b"\x1b[2K");
-    }
-
-    assert_row_range_char!(term, rows 0..4, cols 0..8, ' ', "all rows cleared by successive EL 2");
-}
-
-/// ED mode 0 with a non-default background color (BCE) — only the erased region
-/// gets the color; the region above the cursor retains default background.
-#[test]
-fn test_ed_mode0_bce_does_not_taint_above_cursor() {
-    let mut term = term_filled!(4 x 6, 'F');
-    term.current_attrs.background = Color::Named(NamedColor::Yellow);
-    term.screen.move_cursor(2, 0);
-    term.advance(b"\x1b[J");
-
-    // Rows above cursor must still have default (not Yellow) background
-    assert_row_range_bg!(term, rows 0..2, cols 0..6, Color::Default, "rows above cursor have default bg");
-    // Erased region (rows 2-3) must have Yellow background
-    assert_row_range_bg!(term, rows 2..4, cols 0..6, Color::Named(NamedColor::Yellow), "erased rows have Yellow bg");
-}
-
-/// EL mode 1 cursor at the last column erases the entire line.
-#[test]
-fn test_el_mode1_at_last_column_clears_entire_line() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    let row = 0;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('U'));
-        }
-    }
-    term.screen.move_cursor(row, 9);
-    term.advance(b"\x1b[1K");
-
-    assert_line_char!(term, row row, cols 0..10, ' ', "EL mode 1 at last col clears whole line");
-}
-
-// ── New edge-case tests: boundaries, round-trips, ECH/REP interactions ────────
-
-/// EL mode 0 with cursor at column 0 must erase the entire line (all cols).
-#[test]
-fn test_el_mode0_at_column_zero_clears_entire_line() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    let row = 1;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('G'));
-        }
-    }
-    term.screen.move_cursor(row, 0);
-    let params = vte::Params::default();
-    csi_el(&mut term, &params);
-
-    assert_line_char!(term, row row, cols 0..10, ' ', "EL mode 0 at col 0: entire line cleared");
-}
-
-/// EL mode 0 / mode 1 / mode 2 round-trip on the same row: after each erase,
-/// re-fill and re-verify so the modes are tested in sequence against the same line.
-#[test]
-fn test_el_modes_round_trip_on_same_row() {
-    let row = 0;
-
-    // Mode 0: erase from cursor (col 4) to end of line.
-    let mut term = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('A'));
-        }
-    }
-    term.screen.move_cursor(row, 4);
-    term.advance(b"\x1b[K"); // EL 0
-    assert_line_char!(term, row row, cols 0..4, 'A', "EL0: before cursor unchanged");
-    assert_line_char!(term, row row, cols 4..10, ' ', "EL0: from cursor cleared");
-
-    // Mode 1: erase from start to cursor (col 4 inclusive) on a freshly-filled line.
-    let mut term2 = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term2.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('B'));
-        }
-    }
-    term2.screen.move_cursor(row, 4);
-    term2.advance(b"\x1b[1K"); // EL 1
-    assert_line_char!(term2, row row, cols 0..=4, ' ', "EL1: up to cursor cleared");
-    assert_line_char!(term2, row row, cols 5..10, 'B', "EL1: after cursor unchanged");
-
-    // Mode 2: entire line erased regardless of cursor position.
-    let mut term3 = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term3.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('C'));
-        }
-    }
-    term3.screen.move_cursor(row, 7);
-    term3.advance(b"\x1b[2K"); // EL 2
-    assert_line_char!(term3, row row, cols 0..10, ' ', "EL2: entire line cleared");
-}
-
-/// ED mode 0 / mode 1 / mode 2 round-trip: each mode tested on a fresh terminal.
-#[test]
-fn test_ed_modes_round_trip() {
-    // Mode 0: erase from (1,5) to end of screen.
-    let mut t0 = term_filled!(3 x 10, 'D');
-    t0.screen.move_cursor(1, 5);
-    t0.advance(b"\x1b[J"); // ED 0
-    assert_row_range_char!(t0, rows 0..1, cols 0..10, 'D', "ED0: row 0 unchanged");
-    assert_line_char!(t0, row 1, cols 0..5, 'D', "ED0: row 1 before cursor unchanged");
-    assert_line_char!(t0, row 1, cols 5..10, ' ', "ED0: row 1 from cursor cleared");
-    assert_row_range_char!(t0, rows 2..3, cols 0..10, ' ', "ED0: row 2 cleared");
-
-    // Mode 1: erase from start of screen to (1,5) inclusive.
-    let mut t1 = term_filled!(3 x 10, 'E');
-    t1.screen.move_cursor(1, 5);
-    t1.advance(b"\x1b[1J"); // ED 1
-    assert_row_range_char!(t1, rows 0..1, cols 0..10, ' ', "ED1: row 0 cleared");
-    assert_line_char!(t1, row 1, cols 0..=5, ' ', "ED1: row 1 up to cursor cleared");
-    assert_line_char!(t1, row 1, cols 6..10, 'E', "ED1: row 1 after cursor unchanged");
-    assert_row_range_char!(t1, rows 2..3, cols 0..10, 'E', "ED1: row 2 unchanged");
-
-    // Mode 2: entire screen cleared.
-    let mut t2 = term_filled!(3 x 10, 'F');
-    t2.advance(b"\x1b[2J"); // ED 2
-    assert_row_range_char!(t2, rows 0..3, cols 0..10, ' ', "ED2: all cells blank");
-}
-
-/// ECH (CSI n X) clears n cells from the cursor position without moving the cursor.
-/// Verify that erased cells are blank and the cursor position is unchanged.
-#[test]
-fn test_ech_clears_cells_from_cursor() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    let row = 0;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('H'));
-        }
-    }
-    term.screen.move_cursor(row, 3);
-    term.advance(b"\x1b[4X"); // ECH 4: erase cols 3, 4, 5, 6
-    assert_line_char!(term, row row, cols 0..3, 'H', "ECH: before cursor unchanged");
-    assert_line_char!(term, row row, cols 3..7, ' ', "ECH: erased region blank");
-    assert_line_char!(term, row row, cols 7..10, 'H', "ECH: after erased region unchanged");
-    assert_eq!(term.screen.cursor().col, 3, "ECH must not move cursor");
-}
-
-/// ECH with a BCE background color: erased cells carry the current SGR background.
-#[test]
-fn test_ech_bce_applies_background_color() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    term.current_attrs.background = Color::Named(NamedColor::Red);
-    let row = 1;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('I'));
-        }
-    }
-    term.screen.move_cursor(row, 2);
-    term.advance(b"\x1b[3X"); // ECH 3: erase cols 2, 3, 4
-    assert_line_char!(term, row row, cols 2..5, ' ', "ECH BCE: erased region blank");
-    assert_line_bg!(term, row row, cols 2..5, Color::Named(NamedColor::Red), "ECH BCE: erased region has Red bg");
-    assert_line_char!(term, row row, cols 0..2, 'I', "ECH BCE: before cursor unchanged");
-    assert_line_char!(term, row row, cols 5..10, 'I', "ECH BCE: after erased region unchanged");
-}
-
-/// Writing multiple characters then EL 0 erases from cursor to end; the previously-
-/// written region before the cursor is preserved.  This also verifies that the
-/// EL erase boundary is exactly at the cursor column, not offset by one.
-#[test]
-fn test_written_chars_followed_by_el0_preserves_prefix() {
-    let mut term = crate::TerminalCore::new(3, 20);
-    // Print 6 'J's at cols 0-5; cursor lands at col 6.
-    term.advance(b"JJJJJJ");
-    assert_line_char!(term, row 0, cols 0..6, 'J', "print: cols 0-5 should be 'J'");
-    assert_eq!(
-        term.screen.cursor().col,
-        6,
-        "cursor must be at col 6 after printing 6 chars"
-    );
-    // Erase from cursor (col 6) to end of line.
-    term.advance(b"\x1b[K"); // EL 0
-                             // Cols 0-5 were written before cursor — unchanged.
-    assert_line_char!(term, row 0, cols 0..6, 'J', "after EL0: written region unchanged");
-    // Cols 6-19 should be blank.
-    assert_line_char!(term, row 0, cols 6..20, ' ', "after EL0: from cursor to EOL cleared");
-}
-
-/// EL unknown mode (e.g. mode 5) must be silently ignored — no panic, line unchanged.
-#[test]
-fn test_el_unknown_mode_is_noop() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    let row = 0;
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            line.update_cell_with(c, Cell::new('K'));
-        }
-    }
-    term.screen.move_cursor(row, 5);
-    term.advance(b"\x1b[5K"); // EL 5: unknown mode
-
-    assert_line_char!(term, row row, cols 0..10, 'K', "EL unknown mode: all cells unchanged");
-}
+include!("erase_minimal_terminal.rs");
 
 use proptest::prelude::*;
 
@@ -823,219 +595,5 @@ proptest! {
     }
 }
 
-// ── New tests (Round 34) ──────────────────────────────────────────────────────
+include!("erase_character_fill.rs");
 
-// ED 0 erases from cursor to end of screen; rows above cursor and cols left
-// of cursor on the cursor row are untouched.
-#[test]
-fn test_ed0_erases_from_cursor_to_end_of_screen() {
-    let mut term = term_filled!(4 x 8, 'P');
-    term.screen.move_cursor(1, 3);
-    let params = vte::Params::default();
-    csi_ed(&mut term, &params); // ED 0
-
-    // Rows above cursor: all untouched
-    assert_row_range_char!(term, rows 0..1, cols 0..8, 'P', "row 0 fully unchanged");
-    // Cursor row: cols before cursor unchanged; from cursor cleared
-    assert_line_char!(term, row 1, cols 0..3, 'P', "row 1 before cursor unchanged");
-    assert_line_char!(term, row 1, cols 3..8, ' ', "row 1 from cursor cleared");
-    // Rows below cursor: all cleared
-    assert_row_range_char!(term, rows 2..4, cols 0..8, ' ', "rows 2-3 cleared");
-}
-
-// ED 1 erases from start of screen to cursor (inclusive); rows below cursor
-// and cols right of cursor on the cursor row are untouched.
-#[test]
-fn test_ed1_erases_from_start_to_cursor() {
-    let mut term = term_filled!(4 x 8, 'Q');
-    term.screen.move_cursor(2, 4);
-    term.advance(b"\x1b[1J");
-
-    // Rows fully above cursor: all cleared
-    assert_row_range_char!(term, rows 0..2, cols 0..8, ' ', "rows 0-1 fully cleared");
-    // Cursor row: up to and including cursor cleared; after cursor unchanged
-    assert_line_char!(term, row 2, cols 0..=4, ' ', "row 2 up to cursor cleared");
-    assert_line_char!(term, row 2, cols 5..8, 'Q', "row 2 after cursor unchanged");
-    // Row below cursor: untouched
-    assert_row_range_char!(term, rows 3..4, cols 0..8, 'Q', "row 3 unchanged");
-}
-
-// ED 2 erases the entire screen; cursor position is NOT changed.
-#[test]
-fn test_ed2_erases_entire_screen_without_moving_cursor() {
-    let mut term = term_filled!(4 x 8, 'R');
-    term.screen.move_cursor(2, 5);
-    term.advance(b"\x1b[2J");
-
-    assert_row_range_char!(term, rows 0..4, cols 0..8, ' ', "all cells cleared");
-    // Cursor must remain at (2, 5)
-    assert_eq!(term.screen.cursor().row, 2, "ED 2 must not move cursor row");
-    assert_eq!(term.screen.cursor().col, 5, "ED 2 must not move cursor col");
-}
-
-// EL 0 erases from cursor to end of line; cells to the left are untouched;
-// cursor position is unchanged.
-#[test]
-fn test_el0_erases_from_cursor_to_end_of_line() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(1) {
-            line.update_cell_with(c, Cell::new('S'));
-        }
-    }
-    term.screen.move_cursor(1, 4);
-    let params = vte::Params::default();
-    csi_el(&mut term, &params);
-
-    assert_line_char!(term, row 1, cols 0..4, 'S', "cols before cursor unchanged");
-    assert_line_char!(term, row 1, cols 4..10, ' ', "cols from cursor cleared");
-    assert_eq!(term.screen.cursor().col, 4, "EL 0 must not move cursor");
-}
-
-// EL 1 erases from start of line to cursor (inclusive); cells after cursor
-// are untouched; cursor position is unchanged.
-#[test]
-fn test_el1_erases_from_start_to_cursor() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(0) {
-            line.update_cell_with(c, Cell::new('T'));
-        }
-    }
-    term.screen.move_cursor(0, 5);
-    term.advance(b"\x1b[1K");
-
-    assert_line_char!(term, row 0, cols 0..=5, ' ', "cols 0..=5 cleared");
-    assert_line_char!(term, row 0, cols 6..10, 'T', "cols after cursor unchanged");
-    assert_eq!(term.screen.cursor().col, 5, "EL 1 must not move cursor");
-}
-
-// EL 2 erases the entire line regardless of cursor position; cursor is NOT moved.
-#[test]
-fn test_el2_erases_entire_line_without_moving_cursor() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(2) {
-            line.update_cell_with(c, Cell::new('U'));
-        }
-    }
-    term.screen.move_cursor(2, 7);
-    term.advance(b"\x1b[2K");
-
-    assert_line_char!(term, row 2, cols 0..10, ' ', "entire line cleared");
-    assert_eq!(term.screen.cursor().row, 2, "EL 2 must not move cursor row");
-    assert_eq!(term.screen.cursor().col, 7, "EL 2 must not move cursor col");
-}
-
-// ECH erases exactly N characters at the cursor position; cells to the
-// left and right of the erased range are untouched; cursor does not move.
-#[test]
-fn test_ech_erases_n_chars_at_cursor() {
-    let mut term = crate::TerminalCore::new(3, 12);
-    for c in 0..12 {
-        if let Some(line) = term.screen.get_line_mut(0) {
-            line.update_cell_with(c, Cell::new('V'));
-        }
-    }
-    term.screen.move_cursor(0, 4);
-    term.advance(b"\x1b[3X"); // ECH 3: erase cols 4, 5, 6
-
-    assert_line_char!(term, row 0, cols 0..4, 'V', "before erased range unchanged");
-    assert_line_char!(term, row 0, cols 4..7, ' ', "erased range is blank");
-    assert_line_char!(term, row 0, cols 7..12, 'V', "after erased range unchanged");
-    assert_eq!(term.screen.cursor().col, 4, "ECH must not move cursor");
-}
-
-// ECH with count exceeding the line width from cursor: all cols from cursor
-// to end of line are erased; no panic; cursor stays at its position.
-#[test]
-fn test_ech_count_exceeds_line_width_clamps_to_end() {
-    let mut term = crate::TerminalCore::new(3, 10);
-    for c in 0..10 {
-        if let Some(line) = term.screen.get_line_mut(0) {
-            line.update_cell_with(c, Cell::new('W'));
-        }
-    }
-    term.screen.move_cursor(0, 6);
-    term.advance(b"\x1b[999X"); // ECH 999: clamped to 4 (cols 6..10)
-
-    assert_line_char!(term, row 0, cols 0..6, 'W', "before cursor unchanged");
-    assert_line_char!(term, row 0, cols 6..10, ' ', "cols 6..10 erased");
-    assert_eq!(term.screen.cursor().col, 6, "ECH must not move cursor");
-    assert_eq!(term.screen.get_line(0).unwrap().cells.len(), 10);
-}
-
-// ED 0 with a non-default SGR background (BCE): erased cells carry the
-// current background; cells above the cursor retain their default background.
-#[test]
-fn test_ed0_with_bce_colors_erased_region() {
-    let mut term = term_filled!(4 x 6, 'X');
-    term.current_attrs.background = Color::Named(NamedColor::Yellow);
-    term.screen.move_cursor(2, 3);
-    term.advance(b"\x1b[J"); // ED 0
-
-    // Cells above cursor row retain original content and default background
-    assert_row_range_char!(term, rows 0..2, cols 0..6, 'X', "above cursor: content unchanged");
-    assert_row_range_bg!(
-        term,
-        rows 0..2,
-        cols 0..6,
-        Color::Default,
-        "above cursor: default bg"
-    );
-    // Cursor row (partial) and rows below: BCE background applied
-    assert_line_char!(term, row 2, cols 3..6, ' ', "cursor row from cursor: cleared");
-    assert_line_bg!(
-        term,
-        row 2,
-        cols 3..6,
-        Color::Named(NamedColor::Yellow),
-        "cursor row from cursor: BCE bg"
-    );
-    assert_row_range_bg!(
-        term,
-        rows 3..4,
-        cols 0..6,
-        Color::Named(NamedColor::Yellow),
-        "below cursor: BCE bg"
-    );
-}
-
-// EL 2 with a non-default SGR background (BCE): the entire line gets erased
-// and each erased cell carries the current SGR background color.
-#[test]
-fn test_el2_with_bce_colors_entire_line() {
-    let mut term = crate::TerminalCore::new(3, 8);
-    for c in 0..8 {
-        if let Some(line) = term.screen.get_line_mut(1) {
-            line.update_cell_with(c, Cell::new('Y'));
-        }
-    }
-    term.current_attrs.background = Color::Named(NamedColor::Magenta);
-    term.screen.move_cursor(1, 3);
-    term.advance(b"\x1b[2K"); // EL 2
-
-    assert_line_char!(term, row 1, cols 0..8, ' ', "entire line cleared");
-    assert_line_bg!(
-        term,
-        row 1,
-        cols 0..8,
-        Color::Named(NamedColor::Magenta),
-        "entire line has BCE bg"
-    );
-    // Other rows must be unaffected (default bg)
-    assert_row_range_bg!(
-        term,
-        rows 0..1,
-        cols 0..8,
-        Color::Default,
-        "row 0 has default bg"
-    );
-    assert_row_range_bg!(
-        term,
-        rows 2..3,
-        cols 0..8,
-        Color::Default,
-        "row 2 has default bg"
-    );
-}

@@ -9,9 +9,7 @@ use proptest::prelude::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
+use super::make_screen;
 
 // ── Property-based tests ──────────────────────────────────────────────────────
 

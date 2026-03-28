@@ -4,17 +4,15 @@
 //! `Screen::get_image_png_base64` across primary-active and alternate-active states.
 
 use crate::grid::image::{ImageData, ImagePlacement};
-use crate::grid::screen::Screen;
 use crate::parser::kitty::ImageFormat;
 use proptest::prelude::*;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
+use super::make_screen;
 
 /// Build a minimal 1×1 RGB `ImageData` carrying the given pixel byte.
+#[inline]
 fn tiny_rgb_image(byte: u8) -> ImageData {
     ImageData {
         pixels: vec![byte, byte, byte],
@@ -24,17 +22,47 @@ fn tiny_rgb_image(byte: u8) -> ImageData {
     }
 }
 
+/// Construct an `ImagePlacement` with explicit fields; remaining fields default to 0/1.
+macro_rules! make_placement {
+    ($id:expr, row=$r:expr, col=$c:expr, cols=$w:expr, rows=$h:expr) => {
+        ImagePlacement {
+            image_id: $id,
+            row: $r,
+            col: $c,
+            display_cols: $w,
+            display_rows: $h,
+        }
+    };
+}
+
+/// Assert that `get_image_png_base64(id)` returns a non-empty string.
+macro_rules! assert_image_present {
+    ($store:expr, $id:expr, $msg:literal) => {
+        assert!(
+            !$store.get_image_png_base64($id).is_empty(),
+            $msg
+        );
+    };
+}
+
+/// Assert that `get_image_png_base64(id)` returns an empty string.
+macro_rules! assert_image_absent {
+    ($store:expr, $id:expr, $msg:literal) => {
+        assert_eq!(
+            $store.get_image_png_base64($id),
+            String::new(),
+            $msg
+        );
+    };
+}
+
 // ── active_graphics on primary screen ────────────────────────────────────────
 
 #[test]
 fn active_graphics_primary_starts_empty() {
     let s = make_screen();
     // A freshly constructed screen must have no images stored.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(1),
-        String::new(),
-        "primary graphics store must be empty on construction"
-    );
+    assert_image_absent!(s.active_graphics(), 1, "primary graphics store must be empty on construction");
 }
 
 #[test]
@@ -44,21 +72,13 @@ fn active_graphics_mut_primary_stores_and_retrieves_image() {
     let id = s.active_graphics_mut().store_image(Some(42), data);
     assert_eq!(id, 42);
     // A non-empty base64 string confirms the image was stored.
-    let png_b64 = s.active_graphics().get_image_png_base64(42);
-    assert!(
-        !png_b64.is_empty(),
-        "stored image must return a non-empty base64 PNG"
-    );
+    assert_image_present!(s.active_graphics(), 42, "stored image must return a non-empty base64 PNG");
 }
 
 #[test]
 fn active_graphics_primary_unknown_id_returns_empty() {
     let s = make_screen();
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(999),
-        String::new(),
-        "unknown image ID must return empty string"
-    );
+    assert_image_absent!(s.active_graphics(), 999, "unknown image ID must return empty string");
 }
 
 // ── active_graphics dispatches to alternate screen when active ───────────────
@@ -79,16 +99,9 @@ fn active_graphics_returns_alternate_store_when_alternate_active() {
 
     // While alternate is active, active_graphics should reflect the alternate store.
     // Image 1 was only in primary; it must not be visible via active_graphics.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(1),
-        String::new(),
-        "alternate store must not expose primary-only image ID 1"
-    );
+    assert_image_absent!(s.active_graphics(), 1, "alternate store must not expose primary-only image ID 1");
     // Image 2 was stored in alternate; it must be visible.
-    assert!(
-        !s.active_graphics().get_image_png_base64(2).is_empty(),
-        "alternate store must return image 2 when alternate is active"
-    );
+    assert_image_present!(s.active_graphics(), 2, "alternate store must return image 2 when alternate is active");
 }
 
 #[test]
@@ -108,16 +121,9 @@ fn active_graphics_returns_primary_store_after_switching_back() {
     s.switch_to_primary();
 
     // Image 7 must now be accessible again.
-    assert!(
-        !s.active_graphics().get_image_png_base64(7).is_empty(),
-        "primary store must expose image 7 after returning from alternate"
-    );
+    assert_image_present!(s.active_graphics(), 7, "primary store must expose image 7 after returning from alternate");
     // Image 8 was only stored in alternate; it must not be visible on primary.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(8),
-        String::new(),
-        "primary store must not expose alternate-only image 8"
-    );
+    assert_image_absent!(s.active_graphics(), 8, "primary store must not expose alternate-only image 8");
 }
 
 // ── get_image_png_base64 — primary-first search + alternate fallback ──────────
@@ -125,7 +131,7 @@ fn active_graphics_returns_primary_store_after_switching_back() {
 #[test]
 fn get_image_png_base64_returns_empty_for_unknown_id() {
     let s = make_screen();
-    assert_eq!(s.get_image_png_base64(123), String::new());
+    assert_image_absent!(s, 123, "unknown id must return empty");
 }
 
 #[test]
@@ -133,12 +139,7 @@ fn get_image_png_base64_returns_primary_image_when_primary_active() {
     let mut s = make_screen();
     s.active_graphics_mut()
         .store_image(Some(5), tiny_rgb_image(0x55));
-
-    let result = s.get_image_png_base64(5);
-    assert!(
-        !result.is_empty(),
-        "get_image_png_base64 must return primary image when primary is active"
-    );
+    assert_image_present!(s, 5, "get_image_png_base64 must return primary image when primary is active");
 }
 
 #[test]
@@ -153,11 +154,7 @@ fn get_image_png_base64_searches_primary_first_when_alternate_active() {
     s.switch_to_alternate();
 
     // The method should find image 3 in the primary store even while alternate is active.
-    let result = s.get_image_png_base64(3);
-    assert!(
-        !result.is_empty(),
-        "get_image_png_base64 must find primary-store image while alternate is active"
-    );
+    assert_image_present!(s, 3, "get_image_png_base64 must find primary-store image while alternate is active");
 }
 
 #[test]
@@ -168,12 +165,7 @@ fn get_image_png_base64_falls_back_to_alternate_when_not_in_primary() {
     s.switch_to_alternate();
     s.active_graphics_mut()
         .store_image(Some(9), tiny_rgb_image(0x99));
-
-    let result = s.get_image_png_base64(9);
-    assert!(
-        !result.is_empty(),
-        "get_image_png_base64 must fall back to alternate store when primary lacks the image"
-    );
+    assert_image_present!(s, 9, "get_image_png_base64 must fall back to alternate store when primary lacks the image");
 }
 
 #[test]
@@ -181,11 +173,7 @@ fn get_image_png_base64_returns_empty_when_id_absent_in_both_stores() {
     let mut s = make_screen();
     s.switch_to_alternate();
     // No image stored anywhere.
-    assert_eq!(
-        s.get_image_png_base64(42),
-        String::new(),
-        "must return empty when image ID is absent from both stores"
-    );
+    assert_image_absent!(s, 42, "must return empty when image ID is absent from both stores");
 }
 
 // ── active_graphics_mut — auto-id assignment ──────────────────────────────────
@@ -216,13 +204,7 @@ fn active_graphics_mut_auto_id_increments() {
 #[test]
 fn active_graphics_mut_add_placement_returns_none_for_unknown_image() {
     let mut s = make_screen();
-    let placement = ImagePlacement {
-        image_id: 99,
-        row: 0,
-        col: 0,
-        display_cols: 10,
-        display_rows: 5,
-    };
+    let placement = make_placement!(99, row=0, col=0, cols=10, rows=5);
     let notif = s.active_graphics_mut().add_placement(placement);
     assert!(
         notif.is_none(),
@@ -236,13 +218,7 @@ fn active_graphics_mut_add_placement_returns_notification_for_known_image() {
     s.active_graphics_mut()
         .store_image(Some(11), tiny_rgb_image(0x11));
 
-    let placement = ImagePlacement {
-        image_id: 11,
-        row: 2,
-        col: 4,
-        display_cols: 8,
-        display_rows: 3,
-    };
+    let placement = make_placement!(11, row=2, col=4, cols=8, rows=3);
     let notif = s.active_graphics_mut().add_placement(placement);
     assert!(
         notif.is_some(),
@@ -268,17 +244,9 @@ fn store_image_duplicate_id_replaces_existing() {
     s.active_graphics_mut().store_image(Some(10), data1);
     s.active_graphics_mut().store_image(Some(10), data2);
     // Image id=10 must still be retrievable (replaced, not deleted).
-    let b64 = s.active_graphics().get_image_png_base64(10);
-    assert!(
-        !b64.is_empty(),
-        "overwritten image id=10 must still be retrievable after replacement"
-    );
+    assert_image_present!(s.active_graphics(), 10, "overwritten image id=10 must still be retrievable after replacement");
     // Id=11 was never stored; must return empty.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(11),
-        String::new(),
-        "image id=11 was never stored; must return empty string"
-    );
+    assert_image_absent!(s.active_graphics(), 11, "image id=11 was never stored; must return empty string");
 }
 
 // ── delete_by_id removes image and prevents placement ────────────────────────
@@ -290,14 +258,7 @@ fn delete_by_id_removes_image_and_placement() {
         .store_image(Some(5), tiny_rgb_image(0x55));
 
     // add_placement succeeds while the image exists.
-    let placement = ImagePlacement {
-        image_id: 5,
-        row: 0,
-        col: 0,
-        display_cols: 4,
-        display_rows: 2,
-    };
-    let notif = s.active_graphics_mut().add_placement(placement);
+    let notif = s.active_graphics_mut().add_placement(make_placement!(5, row=0, col=0, cols=4, rows=2));
     assert!(
         notif.is_some(),
         "add_placement must succeed for stored id=5"
@@ -307,20 +268,9 @@ fn delete_by_id_removes_image_and_placement() {
     s.active_graphics_mut().delete_by_id(5);
 
     // Image must no longer be retrievable.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(5),
-        String::new(),
-        "image id=5 must not be retrievable after delete_by_id"
-    );
+    assert_image_absent!(s.active_graphics(), 5, "image id=5 must not be retrievable after delete_by_id");
     // add_placement must also return None after deletion (image gone).
-    let placement2 = ImagePlacement {
-        image_id: 5,
-        row: 1,
-        col: 1,
-        display_cols: 2,
-        display_rows: 1,
-    };
-    let notif2 = s.active_graphics_mut().add_placement(placement2);
+    let notif2 = s.active_graphics_mut().add_placement(make_placement!(5, row=1, col=1, cols=2, rows=1));
     assert!(
         notif2.is_none(),
         "add_placement must return None after delete_by_id"
@@ -337,45 +287,18 @@ fn clear_all_placements_removes_placements_images_survive() {
     s.active_graphics_mut()
         .store_image(Some(2), tiny_rgb_image(0x22));
 
-    let p1 = ImagePlacement {
-        image_id: 1,
-        row: 0,
-        col: 0,
-        display_cols: 2,
-        display_rows: 1,
-    };
-    let p2 = ImagePlacement {
-        image_id: 2,
-        row: 1,
-        col: 0,
-        display_cols: 3,
-        display_rows: 2,
-    };
-    s.active_graphics_mut().add_placement(p1);
-    s.active_graphics_mut().add_placement(p2);
+    s.active_graphics_mut().add_placement(make_placement!(1, row=0, col=0, cols=2, rows=1));
+    s.active_graphics_mut().add_placement(make_placement!(2, row=1, col=0, cols=3, rows=2));
 
     // clear_all_placements must remove placement records but keep images.
     s.active_graphics_mut().clear_all_placements();
 
     // Images must still be retrievable after placement clear.
-    assert!(
-        !s.active_graphics().get_image_png_base64(1).is_empty(),
-        "image id=1 must still be retrievable after clear_all_placements"
-    );
-    assert!(
-        !s.active_graphics().get_image_png_base64(2).is_empty(),
-        "image id=2 must still be retrievable after clear_all_placements"
-    );
+    assert_image_present!(s.active_graphics(), 1, "image id=1 must still be retrievable after clear_all_placements");
+    assert_image_present!(s.active_graphics(), 2, "image id=2 must still be retrievable after clear_all_placements");
 
     // A subsequent add_placement must succeed (images are still in store).
-    let p3 = ImagePlacement {
-        image_id: 1,
-        row: 5,
-        col: 5,
-        display_cols: 1,
-        display_rows: 1,
-    };
-    let notif = s.active_graphics_mut().add_placement(p3);
+    let notif = s.active_graphics_mut().add_placement(make_placement!(1, row=5, col=5, cols=1, rows=1));
     assert!(
         notif.is_some(),
         "add_placement must succeed after clear_all_placements (images intact)"
@@ -394,17 +317,10 @@ fn active_graphics_count_matches_store_image_calls() {
             .store_image(Some(id), tiny_rgb_image(id as u8));
     }
     for &id in &ids {
-        assert!(
-            !s.active_graphics().get_image_png_base64(id).is_empty(),
-            "image id={id} must be retrievable after store_image"
-        );
+        assert_image_present!(s.active_graphics(), id, "image must be retrievable after store_image");
     }
     // An id that was never stored must still be absent.
-    assert_eq!(
-        s.active_graphics().get_image_png_base64(99),
-        String::new(),
-        "image id=99 was never stored; must return empty string"
-    );
+    assert_image_absent!(s.active_graphics(), 99, "image id=99 was never stored; must return empty string");
 }
 
 // ── PBT — T2 tier (128 cases) ────────────────────────────────────────────────

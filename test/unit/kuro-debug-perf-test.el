@@ -296,6 +296,30 @@
   (should (boundp 'kuro--perf-sample-interval))
   (should (= kuro--perf-sample-interval 10)))
 
+;;; Group 9: kuro-debug-state and kuro-debug-line-widths guard
+
+(ert-deftest kuro-debug-state--requires-kuro-mode ()
+  "kuro-debug-state signals user-error when called outside a kuro buffer."
+  (with-temp-buffer
+    (should-error (kuro-debug-state) :type 'user-error)))
+
+(ert-deftest kuro-debug-state--error-message-contains-context ()
+  "kuro-debug-state error is a user-error (not a plain error)."
+  (with-temp-buffer
+    (let ((err (should-error (kuro-debug-state) :type 'user-error)))
+      (should (stringp (cadr err))))))
+
+(ert-deftest kuro-debug-line-widths--requires-kuro-mode ()
+  "kuro-debug-line-widths signals user-error when called outside a kuro buffer."
+  (with-temp-buffer
+    (should-error (kuro-debug-line-widths) :type 'user-error)))
+
+(ert-deftest kuro-debug-line-widths--error-is-user-error ()
+  "kuro-debug-line-widths error is a user-error (not a plain error)."
+  (with-temp-buffer
+    (let ((err (should-error (kuro-debug-line-widths) :type 'user-error)))
+      (should (stringp (cadr err))))))
+
 (provide 'kuro-debug-perf-test)
 
 ;;; kuro-debug-perf-test.el ends here

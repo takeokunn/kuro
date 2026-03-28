@@ -141,9 +141,9 @@ Frame intervals are computed dynamically from `kuro-frame-rate' so that
 blink timing is correct at any frame rate (not just 30 fps).
 Called once per render cycle from `kuro--render-cycle'."
   (setq kuro--blink-frame-count (1+ kuro--blink-frame-count))
-  (when (zerop (mod kuro--blink-frame-count (kuro--blink-slow-frames)))
+  (kuro--when-divisible kuro--blink-frame-count (kuro--blink-slow-frames)
     (kuro--toggle-blink-phase 'slow))
-  (when (zerop (mod kuro--blink-frame-count (kuro--blink-fast-frames)))
+  (kuro--when-divisible kuro--blink-frame-count (kuro--blink-fast-frames)
     (kuro--toggle-blink-phase 'fast)))
 
 ;;; Image overlays (Kitty Graphics Protocol)

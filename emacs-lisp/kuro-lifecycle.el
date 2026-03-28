@@ -20,6 +20,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'seq)
 (require 'kuro-ffi)
 (require 'kuro-renderer)
 (require 'kuro-faces)
@@ -244,6 +246,10 @@ Switches to the terminal buffer after creation."
     buffer))
 
 ;;;###autoload
+(defalias 'kuro #'kuro-create
+  "Alias for `kuro-create'. Launch a new Kuro terminal.")
+
+;;;###autoload
 (defun kuro-send-string (string)
   "Send STRING to the terminal."
   (interactive "sSend string: ")
@@ -275,9 +281,7 @@ and font remap cookie.  Idempotent: safe to call more than once."
         kuro--mouse-sgr        nil
         kuro--mouse-pixel-mode nil
         kuro--scroll-offset    0)
-  (when (and (boundp 'kuro--font-remap-cookie) kuro--font-remap-cookie)
-    (face-remap-remove-relative kuro--font-remap-cookie)
-    (setq kuro--font-remap-cookie nil)))
+  (kuro--with-face-remap kuro--font-remap-cookie))
 
 ;;;###autoload
 (defun kuro-kill ()
@@ -293,32 +297,85 @@ Detached sessions can be re-attached with `kuro-attach'."
     (kuro--teardown-session)
     (kill-buffer (current-buffer))))
 
-;;;###autoload
-(defun kuro-list-sessions ()
-  "Display all active Kuro terminal sessions in a dedicated buffer.
-Each entry shows the session ID, shell command, and current status
-(running, detached, or dead).  Use `kuro-attach' to reconnect to a
-detached session."
-  (interactive)
+(defun kuro--session-status (detached-p alive-p)
+  "Return a human-readable status string from DETACHED-P and ALIVE-P flags."
+  (cond (detached-p "detached")
+        (alive-p    "running")
+        (t          "dead")))
+
+(defun kuro-sessions--entries ()
+  "Return `tabulated-list-entries' for the current Kuro sessions.
+Each entry is (SESSION-ID [ID-STRING COMMAND STATUS])."
   (let ((sessions (condition-case nil
                       (kuro-core-list-sessions)
                     (error nil))))
-    (if (null sessions)
-        (message "No active Kuro sessions.")
-      (with-current-buffer (get-buffer-create kuro--buffer-name-sessions)
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert "Kuro Terminal Sessions\n")
-          (insert "----------------------\n\n")
-          (dolist (entry sessions)
-            (pcase-let* ((`(,id ,cmd ,detached-p ,alive-p) entry)
-                         (status (cond (detached-p "detached")
-                                       (alive-p    "running")
-                                       (t          "dead"))))
-              (insert (format "  ID %-4d  %-12s  %s\n" id status cmd))))
-          (insert "\nUse M-x kuro-attach to reconnect to a detached session.\n")
-          (goto-char (point-min)))
-        (display-buffer (current-buffer))))))
+    (cl-remove-if #'null
+      (mapcar (lambda (entry)
+                (when (and (listp entry) (>= (length entry) 4))
+                  (pcase-let ((`(,id ,cmd ,detached-p ,alive-p) entry))
+                    (list id (vector (number-to-string id)
+                                     cmd
+                                     (kuro--session-status detached-p alive-p))))))
+              (or sessions nil)))))
+
+(defun kuro-sessions-attach ()
+  "Attach to the session at point in the `kuro-sessions-mode' buffer."
+  (interactive)
+  (let ((id (tabulated-list-get-id))
+        (entry (tabulated-list-get-entry)))
+    (unless id
+      (user-error "No session at point"))
+    (unless (and entry (string= (aref entry 2) "detached"))
+      (user-error "Session %d is not detached" id))
+    (kuro-attach id)))
+
+(defun kuro-sessions-destroy ()
+  "Destroy the session at point after confirmation."
+  (interactive)
+  (let ((id (tabulated-list-get-id)))
+    (unless id
+      (user-error "No session at point"))
+    (when (y-or-n-p (format "Destroy session %d? " id))
+      (kuro-core-shutdown id)
+      (tabulated-list-revert))))
+
+(defun kuro-sessions-refresh ()
+  "Refresh the session list."
+  (interactive)
+  (tabulated-list-revert))
+
+(defvar kuro-sessions-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'kuro-sessions-attach)
+    (define-key map (kbd "a")   #'kuro-sessions-attach)
+    (define-key map (kbd "d")   #'kuro-sessions-destroy)
+    (define-key map (kbd "g")   #'kuro-sessions-refresh)
+    (define-key map (kbd "q")   #'quit-window)
+    map)
+  "Keymap for `kuro-sessions-mode'.")
+
+(define-derived-mode kuro-sessions-mode tabulated-list-mode "Kuro Sessions"
+  "Major mode for listing Kuro terminal sessions.
+\\{kuro-sessions-mode-map}"
+  (setq tabulated-list-format [("ID" 6 t)
+                                ("Command" 30 t)
+                                ("Status" 12 t)]
+        tabulated-list-entries #'kuro-sessions--entries
+        tabulated-list-padding 2)
+  (tabulated-list-init-header))
+
+;;;###autoload
+(defun kuro-list-sessions ()
+  "Display all active Kuro terminal sessions in a `tabulated-list-mode' buffer.
+Each entry shows the session ID, shell command, and current status
+\(running, detached, or dead).  Press RET or `a' to attach, `d' to
+destroy, `g' to refresh, `q' to quit."
+  (interactive)
+  (with-current-buffer (get-buffer-create kuro--buffer-name-sessions)
+    (kuro-sessions-mode)
+    (tabulated-list-print t)
+    (goto-char (point-min)))
+  (display-buffer (get-buffer kuro--buffer-name-sessions)))
 
 ;;;###autoload
 (defun kuro-attach (session-id)
@@ -326,7 +383,25 @@ detached session."
 Creates a new buffer in `kuro-mode', associates it with the existing
 PTY session, and starts the render loop.  The session must be in the
 detached state (see `kuro-list-sessions' and `kuro-kill')."
-  (interactive "nSession ID to attach: ")
+  (interactive
+   (let* ((sessions (condition-case nil
+                        (kuro-core-list-sessions)
+                      (error nil)))
+          (detached (seq-filter (lambda (e) (nth 2 e)) sessions)))
+     (cond
+      ((null sessions)
+       (user-error "No active Kuro sessions"))
+      ((null detached)
+       (user-error "No detached Kuro sessions available for attach"))
+      (t
+       (let* ((candidates
+               (mapcar (lambda (e)
+                         (pcase-let ((`(,id ,cmd ,_detached-p ,_alive-p) e))
+                           (cons (format "Session %d: %s" id cmd) id)))
+                       detached))
+              (choice (completing-read "Attach to session: " candidates nil t))
+              (id (cdr (assoc choice candidates))))
+         (list id))))))
   (kuro--ensure-module-loaded)
   (let ((buffer (generate-new-buffer (format "*kuro<%d>*" session-id))))
     (unless noninteractive

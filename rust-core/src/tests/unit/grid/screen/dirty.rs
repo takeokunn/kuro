@@ -12,9 +12,7 @@
 use crate::grid::screen::Screen;
 use proptest::prelude::*;
 
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
+use super::make_screen;
 
 // ---------------------------------------------------------------------------
 // attach_combining

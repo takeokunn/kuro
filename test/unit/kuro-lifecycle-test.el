@@ -4,7 +4,8 @@
 
 ;;; Commentary:
 
-;; ERT tests for kuro-lifecycle.el public API.
+;; ERT tests for kuro-lifecycle.el public API — Groups 1–8.
+;; Groups 9–16 are in kuro-lifecycle-ext-test.el.
 ;; Tests run without the Rust dynamic module: all FFI primitives are stubbed
 ;; before `kuro-lifecycle' is loaded.  When loaded after kuro-test.el
 ;; (as the Makefile does), the stubs in kuro-test.el are already present;
@@ -24,7 +25,6 @@
 ;;   Group 6: kuro-kill detach branch (yes-or-no-p nil → kuro-core-detach, not shutdown)
 ;;   Group 7: kuro--cleanup-render-state
 ;;   Group 8: kuro--clear-session-state macro
-;;   Group 9: kuro--def-control-key macro
 
 ;;; Code:
 
@@ -294,33 +294,32 @@ We verify kuro-create does not succeed silently when the stub errors."
     (should-error (kuro-create "echo hello" "*kuro-test*")
                   :type 'error)))
 
-;;; ── Group 5: kuro-list-sessions ─────────────────────────────────────────────
+;;; ── Group 5: kuro-list-sessions (tabulated-list-mode) ──────────────────────
 ;;
 ;; kuro-list-sessions calls kuro-core-list-sessions and formats results into a
-;; *kuro-sessions* buffer.  Each entry from Rust is (SESSION-ID COMMAND
-;; DETACHED-P ALIVE-P) — indices 0, 1, 2, 3 respectively.  The critical
-;; regression test covers the historical nth-index bug where alive-p and
-;; detached-p were bound to the wrong indices.
+;; *kuro-sessions* buffer using tabulated-list-mode.  Each entry from Rust is
+;; (SESSION-ID COMMAND DETACHED-P ALIVE-P) — indices 0, 1, 2, 3.
 
 (ert-deftest kuro-lifecycle--list-sessions-no-sessions ()
-  "kuro-list-sessions prints a message when kuro-core-list-sessions returns nil."
-  (let ((messages nil))
-    (cl-letf (((symbol-function 'kuro-core-list-sessions)
-               (lambda () nil))
-              ((symbol-function 'message)
-               (lambda (fmt &rest args)
-                 (push (apply #'format fmt args) messages))))
-      (kuro-list-sessions)
-      (should (cl-some (lambda (m) (string-match-p "No active" m)) messages)))))
+  "kuro-list-sessions shows an empty table when kuro-core-list-sessions returns nil."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () nil))
+            ((symbol-function 'display-buffer) #'ignore))
+    (kuro-list-sessions)
+    (let ((buf (get-buffer kuro--buffer-name-sessions)))
+      (unwind-protect
+          (progn
+            (should (bufferp buf))
+            (with-current-buffer buf
+              (should (eq major-mode 'kuro-sessions-mode))
+              (should (null (tabulated-list-get-id)))))
+        (when buf (kill-buffer buf))))))
 
 (ert-deftest kuro-lifecycle--list-sessions-nth-index-regression ()
   "Regression: entry (id cmd nil t) must show 'running' in the table row.
 With swapped nth indices the original bug made (nth 3 entry)=t feed
 detached-p, producing 'detached' for a live session.  This test pins
-the correct mapping: index 2 = is_detached, index 3 = is_alive.
-
-Note: the footer text always contains the word 'detached', so we use a
-row-scoped regex (matching 'ID N ... status') instead of a buffer-wide check."
+the correct mapping: index 2 = is_detached, index 3 = is_alive."
   (cl-letf (((symbol-function 'kuro-core-list-sessions)
              ;; id=0, cmd="bash", detached=nil(idx2), alive=t(idx3)
              (lambda () '((0 "bash" nil t))))
@@ -328,11 +327,12 @@ row-scoped regex (matching 'ID N ... status') instead of a buffer-wide check."
              (lambda (_buf) nil)))
     (kuro-list-sessions)
     (with-current-buffer "*kuro-sessions*"
-      ;; The table row for ID 0 must show "running" in the status column.
-      (should (string-match-p "ID 0.*running" (buffer-string)))
-      ;; The table row must NOT show "detached" as the status for ID 0.
-      ;; (Swapped bug: alive-p=t at index 3 → detached-p=t → wrong "detached".)
-      (should-not (string-match-p "ID 0.*detached" (buffer-string))))))
+      (let ((s (buffer-string)))
+        ;; The table row for ID 0 must show "running" in the status column.
+        (should (string-match-p "running" s))
+        ;; Must NOT show "detached" anywhere in the data rows.
+        ;; Header line is separate from buffer-string in tabulated-list-mode.
+        (should-not (string-match-p "detached" s))))))
 
 (ert-deftest kuro-lifecycle--list-sessions-detached-status ()
   "A session with detached-p=t (index 2) shows status 'detached'."
@@ -511,167 +511,6 @@ kuro--shutdown must NOT be called."
                   (error err)))
     (should-not kuro--initialized)
     (should (= kuro--session-id 0))))
-
-;;; ── Group 9: kuro--def-control-key macro ────────────────────────────────────
-
-(ert-deftest kuro-lifecycle-def-control-key-generates-interactive-command ()
-  "kuro--def-control-key generates a bound, interactive defun."
-  (should (fboundp 'kuro-send-interrupt))
-  (should (fboundp 'kuro-send-sigstop))
-  (should (fboundp 'kuro-send-sigquit))
-  (should (commandp 'kuro-send-interrupt))
-  (should (commandp 'kuro-send-sigstop))
-  (should (commandp 'kuro-send-sigquit)))
-
-(ert-deftest kuro-lifecycle-def-control-key-sends-correct-sequence ()
-  "kuro-send-interrupt sends [?\\C-c] to the terminal."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (seq) (setq sent seq))))
-      (kuro-send-interrupt)
-      (should (equal sent [?\C-c])))))
-
-;;; ── Group 10: kuro-list-sessions additional coverage ────────────────────────
-;;
-;; Covers the error path (kuro-core-list-sessions signals), multiple sessions,
-;; and correct use of kuro--buffer-name-sessions.
-
-(ert-deftest kuro-lifecycle--list-sessions-error-path-shows-no-sessions-message ()
-  "kuro-list-sessions treats an error from kuro-core-list-sessions as empty.
-When the FFI call signals, condition-case catches it and returns nil,
-so the code displays the 'No active' message rather than propagating."
-  (let ((messages nil))
-    (cl-letf (((symbol-function 'kuro-core-list-sessions)
-               (lambda () (error "module not loaded")))
-              ((symbol-function 'message)
-               (lambda (fmt &rest args)
-                 (push (apply #'format fmt args) messages))))
-      (kuro-list-sessions)
-      (should (cl-some (lambda (m) (string-match-p "No active" m)) messages)))))
-
-(ert-deftest kuro-lifecycle--list-sessions-multiple-sessions-all-present ()
-  "kuro-list-sessions renders all entries when multiple sessions are returned."
-  (cl-letf (((symbol-function 'kuro-core-list-sessions)
-             (lambda ()
-               '((0 "bash"    nil t)
-                 (1 "fish"    t   t)
-                 (2 "/bin/sh" nil nil))))
-            ((symbol-function 'display-buffer)
-             (lambda (_buf) nil)))
-    (kuro-list-sessions)
-    (with-current-buffer "*kuro-sessions*"
-      (let ((s (buffer-string)))
-        (should (string-match-p "bash"    s))
-        (should (string-match-p "fish"    s))
-        (should (string-match-p "/bin/sh" s))
-        (should (string-match-p "running"  s))
-        (should (string-match-p "detached" s))
-        (should (string-match-p "dead"     s))))))
-
-(ert-deftest kuro-lifecycle--list-sessions-uses-correct-buffer-name ()
-  "kuro-list-sessions writes into the buffer named by kuro--buffer-name-sessions."
-  (cl-letf (((symbol-function 'kuro-core-list-sessions)
-             (lambda () '((0 "bash" nil t))))
-            ((symbol-function 'display-buffer)
-             (lambda (_buf) nil)))
-    (kuro-list-sessions)
-    ;; The sessions buffer must exist and carry the expected name.
-    (should (get-buffer kuro--buffer-name-sessions))
-    (should (string= (buffer-name (get-buffer kuro--buffer-name-sessions))
-                     kuro--buffer-name-sessions))))
-
-(ert-deftest kuro-lifecycle--list-sessions-point-at-min-after ()
-  "kuro-list-sessions leaves point at the beginning of the sessions buffer."
-  (cl-letf (((symbol-function 'kuro-core-list-sessions)
-             (lambda () '((0 "bash" nil t))))
-            ((symbol-function 'display-buffer)
-             (lambda (_buf) nil)))
-    (kuro-list-sessions)
-    (with-current-buffer "*kuro-sessions*"
-      (should (= (point) (point-min))))))
-
-;;; ── Group 11: kuro-kill teardown ordering and kill-buffer ────────────────────
-;;
-;; Verifies that kuro-kill tears down in the correct sequence and that
-;; kill-buffer is called on the current buffer at the end.
-
-(ert-deftest kuro-lifecycle--kill-calls-kill-buffer-on-current ()
-  "kuro-kill calls kill-buffer with the current buffer."
-  (with-temp-buffer
-    (setq major-mode 'kuro-mode)
-    (let ((killed-buf nil)
-          (this-buf   (current-buffer)))
-      (kuro-lifecycle-test--with-kill-stubs
-        (cl-letf (((symbol-function 'kill-buffer)
-                   (lambda (buf) (setq killed-buf buf))))
-          (kuro-kill)
-          (should (eq killed-buf this-buf)))))))
-
-(ert-deftest kuro-lifecycle--kill-teardown-before-kill-buffer ()
-  "kuro-kill calls kuro--teardown-session before kill-buffer."
-  (with-temp-buffer
-    (setq major-mode 'kuro-mode)
-    (let ((order nil))
-      (cl-letf (((symbol-function 'kuro--stop-render-loop)     (lambda ()      nil))
-                ((symbol-function 'kuro--cleanup-render-state) (lambda ()      nil))
-                ((symbol-function 'kuro--clear-all-image-overlays) (lambda ()  nil))
-                ((symbol-function 'kuro--teardown-session)
-                 (lambda () (push 'teardown order)))
-                ((symbol-function 'kill-buffer)
-                 (lambda (_buf) (push 'kill order))))
-        (kuro-kill)
-        (let ((seq (nreverse order)))
-          (should (eq (nth 0 seq) 'teardown))
-          (should (eq (nth 1 seq) 'kill)))))))
-
-(ert-deftest kuro-lifecycle--kill-cleanup-before-teardown ()
-  "kuro-kill calls kuro--cleanup-render-state before kuro--teardown-session."
-  (with-temp-buffer
-    (setq major-mode 'kuro-mode)
-    (let ((order nil))
-      (cl-letf (((symbol-function 'kuro--stop-render-loop)
-                 (lambda () (push 'stop order)))
-                ((symbol-function 'kuro--cleanup-render-state)
-                 (lambda () (push 'cleanup order)))
-                ((symbol-function 'kuro--clear-all-image-overlays) (lambda () nil))
-                ((symbol-function 'kuro--teardown-session)
-                 (lambda () (push 'teardown order)))
-                ((symbol-function 'kill-buffer) (lambda (_buf) nil)))
-        (kuro-kill)
-        (let ((seq (nreverse order)))
-          (should (equal (list 'stop 'cleanup 'teardown) seq)))))))
-
-;;; ── Group 12: kuro--cleanup-render-state — image overlays and idempotency ────
-;;
-;; Covers kuro--clear-all-image-overlays being called and the idempotent
-;; second-call behaviour.
-
-(ert-deftest kuro-lifecycle--cleanup-render-state-calls-clear-image-overlays ()
-  "kuro--cleanup-render-state always calls kuro--clear-all-image-overlays."
-  (with-temp-buffer
-    (let ((clear-called nil))
-      (cl-letf (((symbol-function 'kuro--clear-all-image-overlays)
-                 (lambda () (setq clear-called t))))
-        (kuro--cleanup-render-state)
-        (should clear-called)))))
-
-(ert-deftest kuro-lifecycle--cleanup-render-state-idempotent ()
-  "kuro--cleanup-render-state called twice leaves state at nil/0 with no error."
-  (with-temp-buffer
-    (setq-local kuro--tui-mode-active      t
-                kuro--tui-mode-frame-count 3
-                kuro--last-dirty-count     7
-                kuro--mouse-mode           1
-                kuro--mouse-sgr            t
-                kuro--mouse-pixel-mode     t
-                kuro--scroll-offset        5
-                kuro--font-remap-cookie    nil)
-    (cl-letf (((symbol-function 'kuro--clear-all-image-overlays) (lambda () nil)))
-      (kuro--cleanup-render-state)
-      (kuro--cleanup-render-state)   ; second call — must not error
-      (should-not kuro--tui-mode-active)
-      (should (= kuro--mouse-mode 0))
-      (should (= kuro--scroll-offset 0)))))
 
 (provide 'kuro-lifecycle-test)
 

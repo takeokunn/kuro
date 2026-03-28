@@ -51,6 +51,8 @@
 (declare-function kuro--send-key  "kuro-ffi"   (key))
 (declare-function kuro--send-meta "kuro-input" (char))
 (declare-function kuro--schedule-immediate-render "kuro-input" ())
+(declare-function kuro--scroll-aware-ctrl-v "kuro-input" ())
+(declare-function kuro--scroll-aware-meta-v "kuro-input" ())
 
 
 ;;; Keymap Variable
@@ -85,7 +87,7 @@
     ("C-d"  .  4) ("C-e"  .  5) ("C-f"  .  6) ("C-g"  .  7)
     ("C-k"  . 11) ("C-l"  . 12) ("C-n"  . 14) ("C-o"  . 15)
     ("C-p"  . 16) ("C-q"  . 17) ("C-r"  . 18) ("C-s"  . 19)
-    ("C-t"  . 20) ("C-u"  . 21) ("C-v"  . 22) ("C-w"  . 23)
+    ("C-t"  . 20) ("C-u"  . 21)               ("C-w"  . 23)
     ("C-x"  . 24) ("C-y"  . 25) ("C-z"  . 26)
     ("C-\\" . 28) ("C-]"  . 29) ("C-_"  . 31))
   "Mapping of Emacs Ctrl+key strings to their ASCII control-byte values.
@@ -101,6 +103,8 @@ Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
           (byte (cdr entry)))
       (define-key map (kbd key)
         (lambda () (interactive) (kuro--send-ctrl byte)))))
+  ;; C-v: scroll-aware — scrolls when in scrollback, sends ctrl byte when at live view.
+  (define-key map (kbd "C-v") #'kuro--scroll-aware-ctrl-v)
   ;; ESC must use [escape] (not kbd "ESC") to avoid shadowing all ESC-prefixed bindings.
   (define-key map [escape] (lambda () (interactive) (kuro--send-ctrl 27))))
 
@@ -158,6 +162,9 @@ and would be silently ignored in GUI frames."
     (let ((c (cdr entry)))
       (define-key map (kbd (car entry))
         (lambda () (interactive) (kuro--send-meta c)))))
+  ;; M-v: scroll-aware — scrolls when in scrollback, sends ESC+v when at live view.
+  (define-key map (kbd "M-v") #'kuro--scroll-aware-meta-v)
+  (define-key map (vector ?\e ?v) #'kuro--scroll-aware-meta-v)
   ;; M-DEL — delete word backward (sends ESC + DEL = ESC + 127)
   (define-key map (kbd "M-DEL")        #'kuro--send-meta-backspace)
   ;; M-<backspace> — same as M-DEL on many keyboards

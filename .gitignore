@@ -6,6 +6,7 @@
 *.elc
 .dir-locals.el
 .elisp/
+emacs-lisp/kuro-pkg.el
 
 # IDE
 .vscode/

@@ -285,41 +285,33 @@
 
 ;;; Group 8: kuro--underline-style-to-face-prop — remaining styles
 
-(ert-deftest kuro-faces-attrs--underline-style-double-no-color ()
-  "Style 2 (double-line) without color → (:style double-line)."
-  (let ((result (kuro--underline-style-to-face-prop 2 nil)))
-    (should (eq (plist-get result :style) 'double-line))
-    (should-not (plist-get result :color))))
+(defmacro kuro-faces-attrs-test--ul-no-color (test-name style style-sym desc)
+  "Define a no-color ert-deftest for kuro--underline-style-to-face-prop.
+TEST-NAME is the ert-deftest symbol, STYLE is the integer style index,
+STYLE-SYM is the expected :style symbol, DESC is the docstring."
+  `(ert-deftest ,test-name ()
+     ,desc
+     (let ((result (kuro--underline-style-to-face-prop ,style nil)))
+       (should (eq (plist-get result :style) ',style-sym))
+       (should-not (plist-get result :color)))))
 
-(ert-deftest kuro-faces-attrs--underline-style-double-with-color ()
-  "Style 2 with color → (:color ... :style line) — same as straight with color."
-  (let ((result (kuro--underline-style-to-face-prop 2 "#0000ff")))
-    (should (equal (plist-get result :color) "#0000ff"))
-    (should (eq (plist-get result :style) 'line))))
+(defmacro kuro-faces-attrs-test--ul-with-color (test-name style color style-sym desc)
+  "Define a with-color ert-deftest for kuro--underline-style-to-face-prop.
+TEST-NAME is the ert-deftest symbol, STYLE is the integer style index,
+COLOR is the hex color string, STYLE-SYM is the expected :style symbol,
+DESC is the docstring."
+  `(ert-deftest ,test-name ()
+     ,desc
+     (let ((result (kuro--underline-style-to-face-prop ,style ,color)))
+       (should (equal (plist-get result :color) ,color))
+       (should (eq (plist-get result :style) ',style-sym)))))
 
-(ert-deftest kuro-faces-attrs--underline-style-dotted-no-color ()
-  "Style 4 (dotted) without color → (:style dots)."
-  (let ((result (kuro--underline-style-to-face-prop 4 nil)))
-    (should (eq (plist-get result :style) 'dots))
-    (should-not (plist-get result :color))))
-
-(ert-deftest kuro-faces-attrs--underline-style-dotted-with-color ()
-  "Style 4 (dotted) with color → (:color ... :style dots)."
-  (let ((result (kuro--underline-style-to-face-prop 4 "#aabbcc")))
-    (should (equal (plist-get result :color) "#aabbcc"))
-    (should (eq (plist-get result :style) 'dots))))
-
-(ert-deftest kuro-faces-attrs--underline-style-dashed-no-color ()
-  "Style 5 (dashed) without color → (:style dashes)."
-  (let ((result (kuro--underline-style-to-face-prop 5 nil)))
-    (should (eq (plist-get result :style) 'dashes))
-    (should-not (plist-get result :color))))
-
-(ert-deftest kuro-faces-attrs--underline-style-dashed-with-color ()
-  "Style 5 (dashed) with color → (:color ... :style dashes)."
-  (let ((result (kuro--underline-style-to-face-prop 5 "#112233")))
-    (should (equal (plist-get result :color) "#112233"))
-    (should (eq (plist-get result :style) 'dashes))))
+(kuro-faces-attrs-test--ul-no-color   kuro-faces-attrs--underline-style-double-no-color   2 double-line "Style 2 (double-line) without color → (:style double-line).")
+(kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-double-with-color 2 "#0000ff" line   "Style 2 with color → (:color ... :style line) — same as straight with color.")
+(kuro-faces-attrs-test--ul-no-color   kuro-faces-attrs--underline-style-dotted-no-color   4 dots      "Style 4 (dotted) without color → (:style dots).")
+(kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dotted-with-color 4 "#aabbcc" dots   "Style 4 (dotted) with color → (:color ... :style dots).")
+(kuro-faces-attrs-test--ul-no-color   kuro-faces-attrs--underline-style-dashed-no-color   5 dashes    "Style 5 (dashed) without color → (:style dashes).")
+(kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dashed-with-color 5 "#112233" dashes "Style 5 (dashed) with color → (:color ... :style dashes).")
 
 ;;; Group 10: kuro--attrs-to-face-props — untested paths
 
@@ -462,17 +454,8 @@ kuro--attrs-to-face-props silently ignores them — they have no Emacs face equi
   (should (eq t (kuro--underline-style-to-face-prop 42 "#aabbcc")))
   (should (eq t (kuro--underline-style-to-face-prop 6 "#123456"))))
 
-(ert-deftest kuro-faces-attrs--underline-style-dashed-color-preserves-style ()
-  "Style 5 with color has :style dashes (not line or wave)."
-  (let ((result (kuro--underline-style-to-face-prop 5 "#001122")))
-    (should (eq (plist-get result :style) 'dashes))
-    (should (equal (plist-get result :color) "#001122"))))
-
-(ert-deftest kuro-faces-attrs--underline-style-dotted-color-preserves-style ()
-  "Style 4 with color has :style dots (not line)."
-  (let ((result (kuro--underline-style-to-face-prop 4 "#334455")))
-    (should (eq (plist-get result :style) 'dots))
-    (should (equal (plist-get result :color) "#334455"))))
+(kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dashed-color-preserves-style 5 "#001122" dashes "Style 5 with color has :style dashes (not line or wave).")
+(kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dotted-color-preserves-style 4 "#334455" dots   "Style 4 with color has :style dots (not line).")
 
 ;;; Group 12: kuro--attrs-to-face-props — bold+dim cond priority and named colors
 
@@ -532,6 +515,33 @@ kuro--attrs-to-face-props silently ignores them — they have no Emacs face equi
       (should ul)
       (should (equal (plist-get ul :color) "#667788"))
       (should (eq (plist-get ul :style) 'line)))))
+
+;;; Group 13: kuro--underline-style-face-symbols — data vector coverage
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-is-vector ()
+  (should (vectorp kuro--underline-style-face-symbols)))
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-length ()
+  (should (= 6 (length kuro--underline-style-face-symbols))))
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-0-nil ()
+  (should-not (aref kuro--underline-style-face-symbols 0)))
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-1-line ()
+  (should (eq 'line (aref kuro--underline-style-face-symbols 1))))
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-2-double-line ()
+  (should (eq 'double-line (aref kuro--underline-style-face-symbols 2))))
+
+(ert-deftest kuro-faces-attrs--underline-style-face-symbols-all-styles-no-color ()
+  (should-not (kuro--underline-style-to-face-prop 0 nil))
+  (should (eq t (kuro--underline-style-to-face-prop 1 nil)))
+  (cl-loop for style from 2 to 5
+           do (let* ((result (kuro--underline-style-to-face-prop style nil))
+                     (sym (plist-get result :style)))
+                (should (consp result))
+                (should (symbolp sym))
+                (should sym))))
 
 (provide 'kuro-faces-attrs-test)
 

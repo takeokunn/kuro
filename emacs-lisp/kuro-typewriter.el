@@ -29,6 +29,7 @@
 
 (require 'kuro-config)
 (require 'kuro-ffi)
+(require 'kuro-render-buffer)
 
 ;;; Configuration (defcustoms live in kuro-config.el)
 
@@ -98,12 +99,12 @@ Called by `kuro--typewriter-timer' at `kuro-typewriter-chars-per-second' Hz."
         (kuro--typewriter-write-partial
          row (substring kuro--typewriter-current-text 0 next-len))
         (setq kuro--typewriter-written-len next-len)))
-     ((kuro--typewriter-queue-next))  ; advance to next queued row
      (t
-      ;; Current row fully written or queue empty: reset state
-      (setq kuro--typewriter-current-row nil
-            kuro--typewriter-current-text nil
-            kuro--typewriter-written-len 0)))))
+      ;; Try to advance to the next queued row; if none, reset state
+      (or (kuro--typewriter-queue-next)
+          (setq kuro--typewriter-current-row nil
+                kuro--typewriter-current-text nil
+                kuro--typewriter-written-len 0))))))
 
 (defun kuro--typewriter-queue-next ()
   "Pop the next item from the typewriter queue and begin writing it.
@@ -119,16 +120,14 @@ Returns non-nil if an item was dequeued."
 
 (defun kuro--typewriter-write-partial (row text)
   "Write partial TEXT to ROW in the buffer (without triggering a full render)."
-  (save-excursion
-    (goto-char (point-min))
-    (let ((not-moved (forward-line row)))
-      (when (= not-moved 0)
-        (let ((inhibit-read-only t)
-              (inhibit-modification-hooks t))
-          (let ((line-start (point))
-                (line-end (line-end-position)))
-            (delete-region line-start line-end)
-            (insert text)))))))
+  (kuro--with-buffer-edit
+   (goto-char (point-min))
+   (let ((not-moved (forward-line row)))
+     (when (= not-moved 0)
+       (let ((line-start (point))
+             (line-end (line-end-position)))
+         (delete-region line-start line-end)
+         (insert text))))))
 
 (provide 'kuro-typewriter)
 

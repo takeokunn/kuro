@@ -5,16 +5,72 @@
 
 use super::*;
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Assert that an OSC title command stores `$title` and sets `title_dirty`.
+macro_rules! assert_osc_title_accepted {
+    ($code:literal, $title:literal, $test_name:expr) => {{
+        let mut core = crate::TerminalCore::new(24, 80);
+        let params: &[&[u8]] = &[$code, $title];
+        handle_osc(&mut core, params, false);
+        assert_eq!(
+            core.meta.title,
+            std::str::from_utf8($title).unwrap(),
+            "{}: title must be stored",
+            $test_name
+        );
+        assert!(
+            core.meta.title_dirty,
+            "{}: title_dirty must be set",
+            $test_name
+        );
+    }};
+}
+
+/// Assert that an OSC 7 command with a `file://` URL stores `$expected_cwd` and sets `cwd_dirty`.
+macro_rules! assert_osc7_cwd_accepted {
+    ($url:literal, $expected_cwd:literal) => {{
+        let mut core = crate::TerminalCore::new(24, 80);
+        let params: &[&[u8]] = &[b"7", $url];
+        handle_osc(&mut core, params, false);
+        assert_eq!(
+            core.osc_data.cwd.as_deref(),
+            Some($expected_cwd),
+            "OSC 7 with {:?} must set CWD to {:?}",
+            $url,
+            $expected_cwd
+        );
+        assert!(
+            core.osc_data.cwd_dirty,
+            "cwd_dirty must be set after accepting OSC 7 url {:?}",
+            $url
+        );
+    }};
+}
+
+/// Assert that an OSC 7 command is rejected: CWD stays `None` and `cwd_dirty` stays `false`.
+macro_rules! assert_osc7_rejected {
+    ($url:literal, $reason:literal) => {{
+        let mut core = crate::TerminalCore::new(24, 80);
+        let params: &[&[u8]] = &[b"7", $url];
+        handle_osc(&mut core, params, false);
+        assert!(
+            core.osc_data.cwd.is_none(),
+            "OSC 7 {} must leave CWD as None",
+            $reason
+        );
+        assert!(
+            !core.osc_data.cwd_dirty,
+            "cwd_dirty must not be set when OSC 7 is rejected ({})",
+            $reason
+        );
+    }};
+}
+
 /// OSC 0 sets the window title on the terminal core.
 #[test]
 fn test_osc0_sets_title() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"0", b"myterm"];
-    handle_osc(&mut core, params, false);
-
-    assert_eq!(core.meta.title, "myterm", "OSC 0 must set the window title");
-    assert!(core.meta.title_dirty, "title_dirty must be set after OSC 0");
+    assert_osc_title_accepted!(b"0", b"myterm", "OSC 0");
 }
 
 /// OSC 0 with a title longer than 1024 bytes must be silently rejected
@@ -41,53 +97,22 @@ fn test_osc0_oversized_title_is_rejected() {
 /// it in `osc_data.cwd`.
 #[test]
 fn test_osc7_extracts_path() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"7", b"file://hostname/home/user"];
-    handle_osc(&mut core, params, false);
-
-    assert_eq!(
-        core.osc_data.cwd.as_deref(),
-        Some("/home/user"),
-        "OSC 7 must extract the path component from the file:// URL"
-    );
-    assert!(core.osc_data.cwd_dirty, "cwd_dirty must be set after OSC 7");
+    assert_osc7_cwd_accepted!(b"file://hostname/home/user", "/home/user");
 }
 
 /// OSC 2 must behave identically to OSC 0 for window title setting:
 /// the title is stored and `title_dirty` is set.
 #[test]
 fn test_osc2_sets_title_same_as_osc0() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"2", b"window-title"];
-    handle_osc(&mut core, params, false);
-
-    assert_eq!(
-        core.meta.title, "window-title",
-        "OSC 2 must set the window title identically to OSC 0"
-    );
-    assert!(core.meta.title_dirty, "title_dirty must be set after OSC 2");
+    assert_osc_title_accepted!(b"2", b"window-title", "OSC 2");
 }
 
 /// OSC 7 with a URL that does NOT start with `file://` must be silently
 /// ignored — the CWD field must remain unset.
 #[test]
 fn test_osc7_rejects_non_file_url() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
     // An SSH URL does not match the `file://` guard in the handler.
-    let params: &[&[u8]] = &[b"7", b"ssh://host/path"];
-    handle_osc(&mut core, params, false);
-
-    assert!(
-        core.osc_data.cwd.is_none(),
-        "non-file:// URL in OSC 7 must leave CWD unset"
-    );
-    assert!(
-        !core.osc_data.cwd_dirty,
-        "cwd_dirty must not be set when OSC 7 URL is rejected"
-    );
+    assert_osc7_rejected!(b"ssh://host/path", "non-file:// URL");
 }
 
 /// OSC 8 lifecycle: opening a hyperlink sets uri; closing it (empty
@@ -307,20 +332,7 @@ fn test_osc4_query_palette_entry() {
 /// so `path = &after_scheme[0..]` == `"/"`.
 #[test]
 fn test_osc7_root_path_accepted() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"7", b"file:///"];
-    handle_osc(&mut core, params, false);
-
-    assert_eq!(
-        core.osc_data.cwd.as_deref(),
-        Some("/"),
-        "OSC 7 with file:/// must set CWD to \"/\""
-    );
-    assert!(
-        core.osc_data.cwd_dirty,
-        "cwd_dirty must be set after accepting OSC 7 root path"
-    );
+    assert_osc7_cwd_accepted!(b"file:///", "/");
 }
 
 /// OSC 7 with a bare empty string (no `file://` prefix) must be silently rejected.
@@ -329,19 +341,7 @@ fn test_osc7_root_path_accepted() {
 /// must remain `None` and `cwd_dirty` must stay `false`.
 #[test]
 fn test_osc7_empty_string_rejected() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"7", b""];
-    handle_osc(&mut core, params, false);
-
-    assert!(
-        core.osc_data.cwd.is_none(),
-        "OSC 7 with empty string must leave CWD as None"
-    );
-    assert!(
-        !core.osc_data.cwd_dirty,
-        "cwd_dirty must not be set when OSC 7 payload is an empty string"
-    );
+    assert_osc7_rejected!(b"", "empty string");
 }
 
 /// OSC 0 with an empty title byte slice must be silently rejected.
@@ -447,19 +447,7 @@ fn test_osc4_set_entry_with_rgb_keyword() {
 /// stored verbatim — the handler does not sanitise title content.
 #[test]
 fn test_osc2_title_with_special_chars() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    let params: &[&[u8]] = &[b"2", b"Hello World!"];
-    handle_osc(&mut core, params, false);
-
-    assert_eq!(
-        core.meta.title, "Hello World!",
-        "OSC 2 must store the title verbatim including spaces and punctuation"
-    );
-    assert!(
-        core.meta.title_dirty,
-        "title_dirty must be set after OSC 2 with a valid title"
-    );
+    assert_osc_title_accepted!(b"2", b"Hello World!", "OSC 2 special chars");
 }
 
 /// OSC 8 URI of exactly `OSC8_MAX_URI_BYTES` bytes must be accepted.

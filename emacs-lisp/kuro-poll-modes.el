@@ -67,6 +67,14 @@ At 30 fps this yields approximately 333 ms between polls.")
   "Poll rare OSC events (color palette, default colors) every N render frames.
 At 30 fps this yields approximately 1 second between polls.")
 
+;;; Cadence-gating macro (CPS continuation dispatch)
+
+(defmacro kuro--gated-poll (cadence fn)
+  "Invoke FN when `kuro--mode-poll-frame-count' is an exact multiple of CADENCE.
+Built on `kuro--when-divisible': the function FN is only called at intervals
+of CADENCE frames, reducing per-frame Mutex acquisitions."
+  `(kuro--when-divisible kuro--mode-poll-frame-count ,cadence (funcall ,fn)))
+
 (defconst kuro--max-prompt-positions 1000
   "Maximum number of prompt positions to track.")
 
@@ -197,10 +205,8 @@ Tier-1 (`kuro--poll-tier1-modes') fires every `kuro--mode-poll-cadence'
 frames; tier-2 (`kuro--poll-osc-events') fires every
 `kuro--osc-rare-poll-cadence' frames.  Tiering reduces per-frame Mutex
 acquisitions from ~11 to ~5, cutting lock contention with the PTY reader."
-  (when (zerop (mod kuro--mode-poll-frame-count kuro--mode-poll-cadence))
-    (kuro--poll-tier1-modes))
-  (when (zerop (mod kuro--mode-poll-frame-count kuro--osc-rare-poll-cadence))
-    (kuro--poll-osc-events)))
+  (kuro--gated-poll kuro--mode-poll-cadence     #'kuro--poll-tier1-modes)
+  (kuro--gated-poll kuro--osc-rare-poll-cadence #'kuro--poll-osc-events))
 
 (provide 'kuro-poll-modes)
 

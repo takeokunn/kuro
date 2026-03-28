@@ -97,6 +97,27 @@ jobs:
             -f package-lint-batch-and-exit \
             emacs-lisp/kuro.el
 
+      - name: Byte-compile all Elisp files
+        run: |
+          emacs -Q --batch \
+            -L emacs-lisp \
+            --eval "(setq byte-compile-error-on-warn t)" \
+            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
+                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
+                       (unless (byte-compile-file f)
+                         (kill-emacs 1))))"
+
+      - name: Run checkdoc
+        run: |
+          emacs -Q --batch \
+            -L emacs-lisp \
+            --eval "(require 'checkdoc)" \
+            --eval "(setq sentence-end-double-space nil)" \
+            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
+                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
+                       (checkdoc-file f)))"
+        continue-on-error: true
+
       - name: Install tmux
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then

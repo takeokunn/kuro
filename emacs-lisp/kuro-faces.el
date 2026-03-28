@@ -74,6 +74,22 @@ or when the buffer is killed.  Internal state; do not set directly.")
 A fresh vector is created only on cache miss (when puthash is called),
 so the stored key is never the same object as this lookup vector.")
 
+;;; Face remap lifecycle macro
+
+(defmacro kuro--with-face-remap (cookie-var &rest remap-body)
+  "Remove the existing face-remap cookie in COOKIE-VAR, then evaluate REMAP-BODY.
+COOKIE-VAR is a symbol whose value holds the cookie returned by
+`face-remap-add-relative', or nil when no remap is active.
+The old cookie is removed and COOKIE-VAR set to nil before REMAP-BODY runs.
+REMAP-BODY is typically a `setq' form that stores the new cookie back into
+COOKIE-VAR.  When REMAP-BODY is empty the macro acts as a pure remove."
+  (declare (indent 1))
+  `(progn
+     (when ,cookie-var
+       (face-remap-remove-relative ,cookie-var)
+       (setq ,cookie-var nil))
+     ,@remap-body))
+
 ;;; Font remapping
 
 (defun kuro--apply-font-to-buffer (buf)
@@ -83,16 +99,14 @@ Removes any previously installed remap cookie before applying a new one.
 This function is a no-op in non-graphical (terminal) Emacs frames."
   (when (display-graphic-p)
     (with-current-buffer buf
-      (when kuro--font-remap-cookie
-        (face-remap-remove-relative kuro--font-remap-cookie)
-        (setq kuro--font-remap-cookie nil))
-      (when (or kuro-font-family kuro-font-size)
-        (setq kuro--font-remap-cookie
-              (apply #'face-remap-add-relative
-                     'default
-                     (append
-                      (when kuro-font-family (list :family kuro-font-family))
-                      (when kuro-font-size   (list :height (* 10 kuro-font-size))))))))))
+      (kuro--with-face-remap kuro--font-remap-cookie
+        (when (or kuro-font-family kuro-font-size)
+          (setq kuro--font-remap-cookie
+                (apply #'face-remap-add-relative
+                       'default
+                       (append
+                        (when kuro-font-family (list :family kuro-font-family))
+                        (when kuro-font-size   (list :height (* 10 kuro-font-size)))))))))))
 
 ;;; Face caching
 
@@ -168,14 +182,12 @@ preventing stacked face-remap layers from accumulating across color events.")
 Removes any existing remap cookie before applying.  Both FG-STR and BG-STR
 must be non-nil Emacs color strings.  No-op in non-graphical frames."
   (when (display-graphic-p)
-    (when kuro--default-color-remap-cookie
-      (face-remap-remove-relative kuro--default-color-remap-cookie)
-      (setq kuro--default-color-remap-cookie nil))
-    (setq kuro--default-color-remap-cookie
-          (face-remap-add-relative
-           'default
-           :foreground fg-str
-           :background bg-str))))
+    (kuro--with-face-remap kuro--default-color-remap-cookie
+      (setq kuro--default-color-remap-cookie
+            (face-remap-add-relative
+             'default
+             :foreground fg-str
+             :background bg-str)))))
 
 (defun kuro--apply-default-colors ()
   "Apply OSC 10/11/12 default terminal colors to the current kuro buffer.
@@ -196,26 +208,28 @@ what the running application requested."
 
 ;;; Palette application (OSC 4)
 
+(defun kuro--apply-palette-entry (idx r g b)
+  "Apply one OSC 4 palette entry (IDX, R, G, B) to the named-color cache.
+Only indices 0–15 are accepted (standard ANSI palette).
+Returns non-nil if the color for IDX actually changed, nil otherwise."
+  (when (< idx 16)
+    (let* ((name      (aref kuro--ansi-color-names idx))
+           (new-color (format "#%02x%02x%02x" r g b))
+           (old-color (gethash name kuro--named-colors)))
+      (unless (equal old-color new-color)
+        (puthash name new-color kuro--named-colors)
+        t))))
 
 (defun kuro--apply-palette-updates ()
   "Apply any pending OSC 4 palette overrides from the Rust core.
-Fetches all pending updates, merges them into the named-color cache,
-then flushes the face cache only if at least one entry actually changed."
+Fetches all pending updates, applies each via `kuro--apply-palette-entry',
+then flushes the face cache if at least one entry actually changed."
   (when kuro--initialized
     (when-let ((updates (kuro--get-palette-updates)))
-      (let ((changed nil))
-        (dolist (entry updates)
-          (pcase entry
-            (`(,idx ,r ,g ,b)
-             (when (< idx 16)
-               (let* ((name (aref kuro--ansi-color-names idx))
-                      (new-color (format "#%02x%02x%02x" r g b))
-                      (old-color (gethash name kuro--named-colors)))
-                 (unless (equal old-color new-color)
-                   (puthash name new-color kuro--named-colors)
-                   (setq changed t)))))))
-        (when changed
-          (kuro--clear-face-cache))))))
+      (when (cl-some (pcase-lambda (`(,idx ,r ,g ,b))
+                       (kuro--apply-palette-entry idx r g b))
+                     updates)
+        (kuro--clear-face-cache)))))
 
 (provide 'kuro-faces)
 

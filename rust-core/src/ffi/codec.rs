@@ -133,6 +133,12 @@ impl EncodePool {
     }
 }
 
+impl Default for EncodePool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Encode a `Color` value as a `u32` for FFI transfer.
 ///
 /// The encoding uses sentinel/marker bits to distinguish color variants
@@ -223,142 +229,22 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
 ///
 /// Trailing spaces are preserved so that the cursor can be placed at any
 /// column, including past the last visible character.
-#[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
-#[expect(
-    clippy::similar_names,
-    reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
-)]
 pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
-    if cells.is_empty() {
-        return (String::new(), Vec::new(), Vec::new());
-    }
-
-    let mut text = String::with_capacity(cells.len());
-    // face_ranges use buf_offset (not col) for start/end
-    let mut face_ranges: Vec<(usize, usize, u32, u32, u64, u32)> = Vec::with_capacity(8);
-    // col_to_buf[col] = buffer char offset; lazily built on the first Wide cell.
-    // Stays empty for pure-ASCII lines (identity mapping implied on Emacs side).
-    let mut col_to_buf: Vec<usize> = Vec::new();
-    let mut buf_offset = 0usize;
-    let mut current_start_buf = 0usize;
-    // Sentinel values that cannot match any valid encoded color/flags.
-    // This ensures the very first cell always triggers a face-range boundary,
-    // correctly starting accumulation with the cell's actual attributes.
-    // Previously 0 (true black) — which collided with Color::Rgb(0,0,0).
-    let mut current_fg = u32::MAX;
-    let mut current_bg = u32::MAX;
-    let mut current_flags = u64::MAX;
-    let mut current_ul_color = u32::MAX;
-    // Column counter for lazy col_to_buf backfill.
-    let mut col = 0usize;
-
-    for cell in cells {
-        // Any CellWidth::Wide cell is a placeholder for the second column of a wide
-        // (CJK/emoji) character.  Skip it: the base character was already emitted and
-        // advances the Emacs buffer by exactly one char position.
-        if cell.width == CellWidth::Wide {
-            // Lazily initialise col_to_buf on the first Wide cell encountered.
-            // Backfill identity mappings (0,1,2,…) for all columns already processed.
-            if col_to_buf.is_empty() {
-                col_to_buf.reserve(cells.len());
-                col_to_buf.extend(0..col);
-            }
-            // Map this grid column to the same buf_offset as the wide char (one behind).
-            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
-            col_to_buf.push(buf_offset.saturating_sub(1));
-            col += 1;
-            // Do NOT advance buf_offset or write to text.
-            continue;
-        }
-
-        // Record col → buf mapping for this cell (only when col_to_buf was activated).
-        if !col_to_buf.is_empty() {
-            col_to_buf.push(buf_offset);
-        }
-        col += 1;
-
-        // Push the full grapheme cluster (covers combining chars too)
-        text.push_str(cell.grapheme.as_str());
-
-        let fg = encode_color(&cell.attrs.foreground);
-        let bg = encode_color(&cell.attrs.background);
-        let flags = encode_attrs(&cell.attrs);
-        let ul_color = encode_color(&cell.attrs.underline_color);
-
-        if fg != current_fg
-            || bg != current_bg
-            || flags != current_flags
-            || ul_color != current_ul_color
-        {
-            if buf_offset > current_start_buf {
-                face_ranges.push((
-                    current_start_buf,
-                    buf_offset,
-                    current_fg,
-                    current_bg,
-                    current_flags,
-                    current_ul_color,
-                ));
-                current_start_buf = buf_offset;
-            }
-            current_fg = fg;
-            current_bg = bg;
-            current_flags = flags;
-            current_ul_color = ul_color;
-        }
-
-        // Advance by the number of Unicode scalar values in the grapheme cluster.
-        // A plain ASCII/CJK cell has grapheme.chars().count() == 1.
-        // A cell with an attached combining character (e.g. "é" = U+0065 U+0301)
-        // has count == 2, which is exactly the number of Emacs buffer positions
-        // that `(insert grapheme)` will consume.  Using a hard-coded 1 here caused
-        // col_to_buf entries after any combining-char cell to point to the wrong
-        // buffer position, corrupting cursor placement and face application.
-        buf_offset += if cell.grapheme.len() <= 1 {
-            1
-        } else {
-            cell.grapheme.chars().count().max(1)
-        };
-    }
-
-    // Push the final face segment
-    if current_start_buf < buf_offset {
-        face_ranges.push((
-            current_start_buf,
-            buf_offset,
-            current_fg,
-            current_bg,
-            current_flags,
-            current_ul_color,
-        ));
-    }
-
-    (text, face_ranges, col_to_buf)
+    let mut pool = EncodePool::new();
+    encode_line_with_pool(cells, &mut pool)
 }
 
-/// Encode a slice of cells into the provided [`EncodePool`], then clone the
-/// results into an [`EncodedLine`].
+/// Core cell-encoding kernel: populate `pool` from `cells`.
 ///
-/// This is a pool-aware variant of [`encode_line`].  The pool's `String` and
-/// `Vec` allocations are reused across calls (cleared then refilled), so only
-/// one clone-into-result allocation happens per line instead of one fresh
-/// allocation plus a clone.
-///
-/// # Panics
-///
-/// Does not panic; identical logic to [`encode_line`].
+/// Caller is responsible for calling `pool.clear()` and handling the empty
+/// fast path before invoking this function.  Both `encode_line_with_pool`
+/// and `encode_line_into_buf` satisfy those preconditions.
 #[inline]
 #[expect(
     clippy::similar_names,
     reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
 )]
-pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> EncodedLineData {
-    pool.clear();
-
-    if cells.is_empty() {
-        return (String::new(), Vec::new(), Vec::new());
-    }
-
+fn fill_encode_pool(cells: &[Cell], pool: &mut EncodePool) {
     pool.text.reserve(cells.len());
     pool.face_ranges.reserve(8);
 
@@ -369,6 +255,11 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
     let mut current_flags = u64::MAX;
     let mut current_ul_color = u32::MAX;
     let mut col = 0usize;
+    // Track the buf_offset where the most recent wide character started.
+    // Used by wide placeholder cells to point back to the correct position,
+    // which matters for multi-codepoint characters (e.g. emoji ZWJ sequences)
+    // where buf_offset.saturating_sub(1) would be wrong.
+    let mut last_wide_char_start = 0usize;
 
     for cell in cells {
         if cell.width == CellWidth::Wide {
@@ -377,9 +268,13 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
                 pool.col_to_buf.extend(0..col);
             }
             debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
-            pool.col_to_buf.push(buf_offset.saturating_sub(1));
+            pool.col_to_buf.push(last_wide_char_start);
             col += 1;
             continue;
+        }
+
+        if cell.width == CellWidth::Full {
+            last_wide_char_start = buf_offset;
         }
 
         if !pool.col_to_buf.is_empty() {
@@ -433,12 +328,27 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
             current_ul_color,
         ));
     }
+}
 
-    (
-        pool.text.clone(),
-        pool.face_ranges.clone(),
-        pool.col_to_buf.clone(),
-    )
+/// Encode a slice of cells into the provided [`EncodePool`], then clone the
+/// results into an [`EncodedLine`].
+///
+/// This is a pool-aware variant of [`encode_line`].  The pool's `String` and
+/// `Vec` allocations are reused across calls (cleared then refilled), so only
+/// one clone-into-result allocation happens per line instead of one fresh
+/// allocation plus a clone.
+///
+/// # Panics
+///
+/// Does not panic; identical logic to [`encode_line`].
+#[inline]
+pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> EncodedLineData {
+    pool.clear();
+    if cells.is_empty() {
+        return (String::new(), Vec::new(), Vec::new());
+    }
+    fill_encode_pool(cells, pool);
+    (pool.text.clone(), pool.face_ranges.clone(), pool.col_to_buf.clone())
 }
 
 /// Encode a cell slice into the pool, then serialise **face ranges and
@@ -464,10 +374,6 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
 ///
 /// Does not panic; identical encoding logic to [`encode_line_with_pool`].
 #[inline]
-#[expect(
-    clippy::similar_names,
-    reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
-)]
 pub(crate) fn encode_line_into_buf(
     cells: &[Cell],
     pool: &mut EncodePool,
@@ -490,81 +396,7 @@ pub(crate) fn encode_line_into_buf(
         return String::new();
     }
 
-    // Same encoding logic as encode_line_with_pool, filling pool.{text,face_ranges,col_to_buf}.
-    pool.text.reserve(cells.len());
-    pool.face_ranges.reserve(8);
-
-    let mut buf_offset = 0usize;
-    let mut current_start_buf = 0usize;
-    let mut current_fg = u32::MAX;
-    let mut current_bg = u32::MAX;
-    let mut current_flags = u64::MAX;
-    let mut current_ul_color = u32::MAX;
-    let mut col = 0usize;
-
-    for cell in cells {
-        if cell.width == CellWidth::Wide {
-            if pool.col_to_buf.is_empty() {
-                pool.col_to_buf.reserve(cells.len());
-                pool.col_to_buf.extend(0..col);
-            }
-            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
-            pool.col_to_buf.push(buf_offset.saturating_sub(1));
-            col += 1;
-            continue;
-        }
-
-        if !pool.col_to_buf.is_empty() {
-            pool.col_to_buf.push(buf_offset);
-        }
-        col += 1;
-
-        pool.text.push_str(cell.grapheme.as_str());
-
-        let fg = encode_color(&cell.attrs.foreground);
-        let bg = encode_color(&cell.attrs.background);
-        let flags = encode_attrs(&cell.attrs);
-        let ul_color = encode_color(&cell.attrs.underline_color);
-
-        if fg != current_fg
-            || bg != current_bg
-            || flags != current_flags
-            || ul_color != current_ul_color
-        {
-            if buf_offset > current_start_buf {
-                pool.face_ranges.push((
-                    current_start_buf,
-                    buf_offset,
-                    current_fg,
-                    current_bg,
-                    current_flags,
-                    current_ul_color,
-                ));
-                current_start_buf = buf_offset;
-            }
-            current_fg = fg;
-            current_bg = bg;
-            current_flags = flags;
-            current_ul_color = ul_color;
-        }
-
-        buf_offset += if cell.grapheme.len() <= 1 {
-            1
-        } else {
-            cell.grapheme.chars().count().max(1)
-        };
-    }
-
-    if current_start_buf < buf_offset {
-        pool.face_ranges.push((
-            current_start_buf,
-            buf_offset,
-            current_fg,
-            current_bg,
-            current_flags,
-            current_ul_color,
-        ));
-    }
+    fill_encode_pool(cells, pool);
 
     // Serialise directly into buf — no clone of face_ranges or col_to_buf.
     buf.extend_from_slice(&row_index_u32.to_le_bytes());

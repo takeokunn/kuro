@@ -38,6 +38,53 @@ fn make_placement(image_id: u32, row: usize, col: usize) -> ImagePlacement {
     }
 }
 
+fn min_placement(image_id: u32, row: usize, col: usize) -> ImagePlacement {
+    ImagePlacement {
+        image_id,
+        row,
+        col,
+        display_cols: 1,
+        display_rows: 1,
+    }
+}
+
+// ── Macros ────────────────────────────────────────────────────────────────────
+
+/// Assert that `store_image` + the given operations leave the image still
+/// retrievable (non-empty base64).  Pattern used by every scroll/survive test.
+///
+/// Both `$setup` and `$op` are closures receiving `&mut GraphicsStore`; use
+/// `|s|` as the argument name so the test body can call `s.method(...)`.
+macro_rules! assert_image_survives {
+    ($name:ident, $id:expr, $img:expr, $setup:expr, $op:expr, $msg:expr) => {
+        #[test]
+        fn $name() {
+            let mut store = GraphicsStore::new();
+            store.store_image(Some($id), $img);
+            let setup_fn: &dyn Fn(&mut GraphicsStore) = &$setup;
+            setup_fn(&mut store);
+            let op_fn: &dyn Fn(&mut GraphicsStore) = &$op;
+            op_fn(&mut store);
+            assert!(
+                !store.get_image_png_base64($id).is_empty(),
+                $msg
+            );
+        }
+    };
+}
+
+/// Assert that `ImageData::to_png_base64()` produces a non-empty string.
+macro_rules! assert_to_png_base64_non_empty {
+    ($name:ident, $img:expr, $msg:expr) => {
+        #[test]
+        fn $name() {
+            let data = $img;
+            let b64 = data.to_png_base64();
+            assert!(!b64.is_empty(), $msg);
+        }
+    };
+}
+
 // ── GraphicsStore::new() — empty state ───────────────────────────────────────
 
 #[test]
@@ -221,74 +268,38 @@ fn clear_all_placements_empties_the_placement_list() {
 
 // ── scroll_up ─────────────────────────────────────────────────────────────────
 
-#[test]
-fn scroll_up_shifts_placement_rows_up_by_n() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 5,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    // Scroll up by 3: row 5 → 2.  The placement must survive (row >= 3).
-    store.scroll_up(3);
-    // Store an image at a new position to confirm state is consistent.
-    let notif = store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 2,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    assert!(
-        notif.is_some(),
-        "image must still be present after scroll_up"
-    );
-}
+assert_image_survives!(
+    scroll_up_shifts_placement_rows_up_by_n,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 5, 0)); },
+    |s| {
+        s.scroll_up(3);
+        // Confirm state is consistent after scroll.
+        s.add_placement(min_placement(1, 2, 0));
+    },
+    "image must still be present after scroll_up"
+);
 
-#[test]
-fn scroll_up_discards_placements_that_scroll_off_the_top() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    // Place at row 1 — will be scrolled off when n=2.
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 1,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    store.scroll_up(2);
-    // The image data must still exist (scroll_up does not evict images).
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image data must survive scroll_up even when its placement is discarded"
-    );
-}
+assert_image_survives!(
+    scroll_up_discards_placements_that_scroll_off_the_top,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 1, 0)); },
+    |s| { s.scroll_up(2); },
+    "image data must survive scroll_up even when its placement is discarded"
+);
 
 // ── scroll_down ───────────────────────────────────────────────────────────────
 
-#[test]
-fn scroll_down_shifts_placement_rows_down_by_n() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 2,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    // scroll_down with n=3, max_row=24: row 2 → min(5, 23) = 5.
-    store.scroll_down(3, 24);
-    // Image must still be present.
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image must survive scroll_down"
-    );
-}
+assert_image_survives!(
+    scroll_down_shifts_placement_rows_down_by_n,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 2, 0)); },
+    |s| { s.scroll_down(3, 24); },
+    "image must survive scroll_down"
+);
 
 // ── delete_by_id ──────────────────────────────────────────────────────────────
 
@@ -351,117 +362,57 @@ fn image_data_byte_count_matches_pixel_vec_len() {
 
 // ── to_png_base64 round-trip ──────────────────────────────────────────────────
 
-#[test]
-fn to_png_base64_produces_non_empty_string_for_valid_image() {
-    let data = tiny_rgb(0x80);
-    let b64 = data.to_png_base64();
-    assert!(
-        !b64.is_empty(),
-        "to_png_base64 must produce a non-empty string"
-    );
-}
+assert_to_png_base64_non_empty!(
+    to_png_base64_produces_non_empty_string_for_valid_image,
+    tiny_rgb(0x80),
+    "to_png_base64 must produce a non-empty string"
+);
 
-#[test]
-fn to_png_base64_rgba_produces_non_empty_string() {
-    let data = tiny_rgba(0x40);
-    let b64 = data.to_png_base64();
-    assert!(
-        !b64.is_empty(),
-        "to_png_base64 for RGBA must produce a non-empty string"
-    );
-}
+assert_to_png_base64_non_empty!(
+    to_png_base64_rgba_produces_non_empty_string,
+    tiny_rgba(0x40),
+    "to_png_base64 for RGBA must produce a non-empty string"
+);
 
 // ── scroll_up edge cases ──────────────────────────────────────────────────────
 
-#[test]
-// INVARIANT: scroll_up(0) is a no-op — placement at row 5 must still be
-// in the store and a subsequent add_placement must succeed.
-fn scroll_up_zero_is_noop() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 5,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    store.scroll_up(0);
-    // Image data must still be present.
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image must survive scroll_up(0)"
-    );
-}
+assert_image_survives!(
+    scroll_up_zero_is_noop,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 5, 0)); },
+    |s| { s.scroll_up(0); },
+    "image must survive scroll_up(0)"
+);
 
-#[test]
-// INVARIANT: scroll_up(n) where n equals the exact row of a placement
-// discards that placement (row < n is false when row == n, but the
-// condition is `row < n` so row == n is kept).
-fn scroll_up_keeps_placement_at_exact_boundary() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    // Place at row == n (n=5, row=5): row 5 - 5 = 0 — survives.
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 5,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    store.scroll_up(5);
-    // row=5 is NOT < 5, so placement survives at row=0.
-    // Image data must still be present.
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image must survive scroll_up equal to placement row"
-    );
-}
+assert_image_survives!(
+    scroll_up_keeps_placement_at_exact_boundary,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 5, 0)); },
+    |s| { s.scroll_up(5); },
+    "image must survive scroll_up equal to placement row"
+);
 
 // ── scroll_down edge cases ────────────────────────────────────────────────────
 
-#[test]
-// INVARIANT: scroll_down(n, max_row=0) uses saturating_sub(1) = 0, so
-// all placements are clamped to row 0.
-fn scroll_down_with_zero_max_row_clamps_to_zero() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 0,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    // max_row=0 → saturating_sub(1) = 0 → clamped to 0.
-    store.scroll_down(5, 0);
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image must survive scroll_down with max_row=0"
-    );
-}
+assert_image_survives!(
+    scroll_down_with_zero_max_row_clamps_to_zero,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 0, 0)); },
+    |s| { s.scroll_down(5, 0); },
+    "image must survive scroll_down with max_row=0"
+);
 
-#[test]
-// INVARIANT: scroll_down(n, max_row) clamps placement to max_row - 1 when
-// the shifted row would exceed the terminal height.
-fn scroll_down_clamps_placement_to_max_row_minus_one() {
-    let mut store = GraphicsStore::new();
-    store.store_image(Some(1), tiny_rgb(0x01));
-    store.add_placement(ImagePlacement {
-        image_id: 1,
-        row: 20,
-        col: 0,
-        display_cols: 1,
-        display_rows: 1,
-    });
-    // scroll_down(100, 24): row = min(20+100, 23) = 23.
-    store.scroll_down(100, 24);
-    // Image must still be present (scroll_down never discards images).
-    assert!(
-        !store.get_image_png_base64(1).is_empty(),
-        "image must survive scroll_down with large n"
-    );
-}
+assert_image_survives!(
+    scroll_down_clamps_placement_to_max_row_minus_one,
+    1,
+    tiny_rgb(0x01),
+    |s| { s.add_placement(min_placement(1, 20, 0)); },
+    |s| { s.scroll_down(100, 24); },
+    "image must survive scroll_down with large n"
+);
 
 // ── delete_by_id — multiple images, partial delete ────────────────────────────
 

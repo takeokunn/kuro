@@ -89,35 +89,34 @@ Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is 
           :blink-fast blink-fast
           :hidden hidden)))
 
+;;; Underline style data table
+
+(defconst kuro--underline-style-face-symbols
+  [nil line double-line wave dots dashes]
+  "Vector mapping underline style integers (0–5) to Emacs face :style symbols.
+Index 0 (None) maps to nil; indices 1–5 map to the symbol used in Emacs face
+:underline property lists.  Style 1 (Straight) is special: without a color it
+becomes the atom t (plain underline) rather than `(list :style 'line)'.")
+
 (defun kuro--underline-style-to-face-prop (style underline-color)
   "Convert underline STYLE integer and UNDERLINE-COLOR to an Emacs :underline value.
-STYLE is the decoded underline style integer (0-5):
-  0 = None (no underline)
-  1 = Straight
-  2 = Double
-  3 = Curly (undercurl / wave)
-  4 = Dotted
-  5 = Dashed
+STYLE is 0–5 per the SGR underline style encoding (see `kuro--underline-style-face-symbols').
+Values ≥ 6 are unknown and fall back to t (plain underline).
 UNDERLINE-COLOR is an Emacs color string or nil.
-Returns the value for the :underline face attribute, or nil for no underline."
-  (pcase style
-    (0 nil)   ; None
-    (1 (if underline-color
-           (list :color underline-color :style 'line)
-         t))
-    (2 (if underline-color
-           (list :color underline-color :style 'line)
-         (list :style 'double-line)))
-    (3 (if underline-color
-           (list :color underline-color :style 'wave)
-         (list :style 'wave)))
-    (4 (if underline-color
-           (list :color underline-color :style 'dots)
-         (list :style 'dots)))
-    (5 (if underline-color
-           (list :color underline-color :style 'dashes)
-         (list :style 'dashes)))
-    (_ t)))  ; Unknown style: plain underline
+Returns the :underline face attribute value, or nil for no underline.
+
+Style 2 (double) with an explicit color uses \\='line rather than \\='double-line
+because Emacs renders double-line+color identically to line+color in practice."
+  (if (>= style (length kuro--underline-style-face-symbols))
+      t  ; unknown style: plain underline
+    (let ((sym (aref kuro--underline-style-face-symbols style)))
+      (cond
+       ((null sym)    nil)     ; style 0: no underline
+       (underline-color
+        ;; Style 2 (double) with color coerces to 'line — see docstring above.
+        (list :color underline-color :style (if (eq sym 'double-line) 'line sym)))
+       ((eq sym 'line) t)     ; style 1, no color: Emacs plain-underline atom
+       (t (list :style sym))))))
 
 (defun kuro--attrs-to-face-props (fg bg attr-flags underline-color)
   "Convert SGR attributes to Emacs face property list.

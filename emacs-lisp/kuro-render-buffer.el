@@ -173,24 +173,22 @@ already bound non-nil by the caller."
         (when (and kuro--row-positions (< row (length kuro--row-positions)))
           (aset kuro--row-positions row (point)))))))
 
-;;; Cursor shape helpers
+;;; Cursor shape data + helpers
 
-(defun kuro--decscusr-to-cursor-type (shape)
-  "Convert DECSCUSR SHAPE integer to Emacs cursor-type symbol.
-SHAPE is 0-6 per the DECSCUSR specification (CSI Ps SP q):
-  0/1 = blinking block, 2 = steady block,
-  3 = blinking underline, 4 = steady underline,
-  5 = blinking bar (I-beam), 6 = steady bar (I-beam).
-Returns a `cursor-type' value suitable for `setq-local cursor-type'."
-  (pcase shape
-    (0 'box)          ; default blinking block
-    (1 'box)          ; blinking block
-    (2 'box)          ; steady block
-    (3 '(hbar . 2))   ; blinking underline
-    (4 '(hbar . 2))   ; steady underline
-    (5 '(bar . 2))    ; blinking bar (I-beam)
-    (6 '(bar . 2))    ; steady bar (I-beam)
-    (_ 'box)))
+(defconst kuro--decscusr-cursor-types
+  [box box box (hbar . 2) (hbar . 2) (bar . 2) (bar . 2)]
+  "Vector mapping DECSCUSR shape integers (0–6) to Emacs cursor-type values.
+Indices per CSI Ps SP q spec: 0/1=blinking-block, 2=steady-block,
+3=blinking-underline, 4=steady-underline, 5=blinking-bar, 6=steady-bar.")
+
+(defsubst kuro--decscusr-to-cursor-type (shape)
+  "Convert DECSCUSR SHAPE integer (0–6) to an Emacs `cursor-type' value.
+Unknown shapes (negative, > 6, or non-integer) fall back to \\='box."
+  (if (and (integerp shape)
+           (>= shape 0)
+           (< shape (length kuro--decscusr-cursor-types)))
+      (aref kuro--decscusr-cursor-types shape)
+    'box))
 
 ;;; Buffer update functions
 
@@ -218,10 +216,8 @@ existing entry so stale CJK mappings do not persist after an ASCII redraw."
 (defun kuro--update-line-full (row text face-ranges col-to-buf)
   "Navigate to ROW exactly once and perform all line-update operations atomically.
 TEXT replaces the current line content.  FACE-RANGES is a list of FFI face
-range 5-tuples as returned by `kuro-core-poll-updates-with-faces', or nil.
+range 6-tuples (start-buf end-buf fg bg flags ul-color) or nil.
 COL-TO-BUF is the grid-column → buffer-char-offset vector for this row, or nil.
-FACE-RANGES is a list of FFI face range 6-tuples as returned by the render FFI,
-or nil.
 
 Performs text replacement, blink-overlay clearing, and face application in a
 single `save-excursion' block, reducing O(N²) triple-navigation to O(N)
@@ -284,9 +280,14 @@ Falls back to COL when the mapping is absent or shorter than COL
                        col)))
     (save-excursion
       (goto-char (point-min))
-      (forward-line row)
-      (goto-char (min (+ (point) buf-offset) (line-end-position)))
-      (point))))
+      (let ((not-moved (forward-line row)))
+        ;; If forward-line couldn't reach ROW (buffer has fewer lines),
+        ;; clamp to the last line to avoid wrong cursor placement.
+        (when (> not-moved 0)
+          (goto-char (point-max))
+          (beginning-of-line))
+        (goto-char (min (+ (point) buf-offset) (line-end-position)))
+        (point)))))
 
 (defun kuro--anchor-window-at-pos (win target-pos)
   "Anchor WIN display at point-min and move its point to TARGET-POS.
@@ -316,6 +317,22 @@ When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil."
                   (kuro--decscusr-to-cursor-type (or shape 0))
                 nil)))
 
+;;; Cursor state macros + helpers
+
+(defmacro kuro--cache-cursor-state (row col visible shape)
+  "Store ROW, COL, VISIBLE, SHAPE into the per-buffer cursor cache variables."
+  `(setq kuro--last-cursor-row     ,row
+         kuro--last-cursor-col     ,col
+         kuro--last-cursor-visible ,visible
+         kuro--last-cursor-shape   ,shape))
+
+(defsubst kuro--cursor-state-changed-p (row col visible shape)
+  "Return non-nil when (ROW COL VISIBLE SHAPE) differs from the cached state."
+  (or (not (eql row     kuro--last-cursor-row))
+      (not (eql col     kuro--last-cursor-col))
+      (not (eq  visible kuro--last-cursor-visible))
+      (not (eql shape   kuro--last-cursor-shape))))
+
 ;;; Cursor update
 
 (defun kuro--update-cursor ()
@@ -329,23 +346,33 @@ native redisplay from drifting the viewport between render cycles."
     (when-let ((state (kuro--get-cursor-state)))
       (pcase-let* ((`(,row ,col ,visible ,shape) state))
         (when-let ((win (get-buffer-window (current-buffer) t)))
-          (if (and (eql row kuro--last-cursor-row)
-                   (eql col kuro--last-cursor-col)
-                   (eq  visible kuro--last-cursor-visible)
-                   (eql shape kuro--last-cursor-shape))
-              ;; Cursor unchanged — still re-anchor to prevent viewport drift.
-              (kuro--anchor-window-at-pos win (or (and kuro--cursor-marker
-                                                       (marker-position kuro--cursor-marker))
-                                                  (kuro--grid-col-to-buffer-pos row col)))
-            (setq kuro--last-cursor-row     row
-                  kuro--last-cursor-col     col
-                  kuro--last-cursor-visible visible
-                  kuro--last-cursor-shape   shape)
-            (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
-              (when kuro--cursor-marker
-                (set-marker kuro--cursor-marker target-pos))
-              (kuro--anchor-window-at-pos win target-pos)
-              (kuro--apply-cursor-display visible shape))))))))
+          (if (kuro--cursor-state-changed-p row col visible shape)
+              ;; State changed: update cache, position, and shape.
+              (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
+                (kuro--cache-cursor-state row col visible shape)
+                (when kuro--cursor-marker
+                  (set-marker kuro--cursor-marker target-pos))
+                (kuro--anchor-window-at-pos win target-pos)
+                (kuro--apply-cursor-display visible shape))
+            ;; Cursor unchanged — still re-anchor to prevent viewport drift.
+            (kuro--anchor-window-at-pos win (or (and kuro--cursor-marker
+                                                     (marker-position kuro--cursor-marker))
+                                                (kuro--grid-col-to-buffer-pos row col)))))))))
+
+;;; Scrollback indicator
+
+(defun kuro--update-scroll-indicator ()
+  "Update header-line to show scrollback position.
+When `kuro--scroll-offset' is positive, display a header-line indicating
+how many lines into scrollback history the user has scrolled.
+When at live view (offset 0), remove the header-line.
+Lightweight: only updates `header-line-format' when the value changes."
+  (let ((new-header (when (and (boundp 'kuro--scroll-offset)
+                               (> kuro--scroll-offset 0))
+                      (format " ↑ Scrollback: +%d lines (S-End to return) "
+                              kuro--scroll-offset))))
+    (unless (equal header-line-format new-header)
+      (setq header-line-format new-header))))
 
 (provide 'kuro-render-buffer)
 

@@ -126,20 +126,21 @@ when length is zero (no CJK wide characters on this row)."
           (setq pos (+ pos 4)))
         (cons v pos)))))
 
-;;; Top-level frame decoder
+;;; Shared frame decoder (CPS: text acquisition passed as continuation)
 
-(defun kuro--decode-binary-updates (vec)
-  "Decode a binary update VEC (Emacs vector of byte integers) into
-the same format as `kuro--poll-updates-with-faces' returns.
+(defun kuro--decode-binary-frame-rows (vec text-fn)
+  "Decode all dirty rows from binary frame VEC into the dirty-line list format.
+TEXT-FN is a continuation called as (TEXT-FN idx pos text-byte-len) for each
+row, returning a cons cell (TEXT . NEW-POS) with the decoded row text and the
+byte offset after text data.  This separates text acquisition strategy from
+the shared frame-parsing logic, allowing both byte-decoding and pre-supplied
+native string paths to share one implementation.
 
-Format: see `encode_screen_binary' in rust-core/src/ffi/codec.rs.
-The frame begins with an 8-byte header:
-  [format_version: u32 LE][num_rows: u32 LE]
-Versions 1 and 2 are accepted; any other version signals an error.
-Each element of the returned list has the structure:
-  (((row . text) . face-list) . col-to-buf-vector)
-which is identical to what `kuro--apply-dirty-lines' expects."
-  (let* ((format-version (kuro--read-u32-le vec 0)))
+Validates the frame header (format version 1 or 2), then iterates over rows,
+decoding face ranges and col-to-buf entries via the section decoders.
+Each result element has the structure expected by `kuro--apply-dirty-lines':
+  (((row . text) . face-list) . col-to-buf-vector)"
+  (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
                 (= format-version kuro--binary-format-version-v2))
       (error "kuro: unsupported binary format version %d" format-version))
@@ -152,60 +153,43 @@ which is identical to what `kuro--apply-dirty-lines' expects."
                (num-face-ranges (kuro--read-u32-le vec (+ pos 4)))
                (text-byte-len   (kuro--read-u32-le vec (+ pos 8))))
           (setq pos (+ pos 12))
-          (let* ((text-pair (kuro--decode-row-text vec pos text-byte-len))
-                 (text (car text-pair)))
-            (setq pos (cdr text-pair))
-            (let* ((face-pair (kuro--decode-face-ranges vec pos num-face-ranges format-version))
-                   (face-list (car face-pair)))
-              (setq pos (cdr face-pair))
-              (let* ((ctb-pair (kuro--decode-col-to-buf vec pos))
-                     (col-to-buf (car ctb-pair)))
-                (setq pos (cdr ctb-pair))
-                (aset result idx
-                      (cons (cons (cons row-index text) face-list) col-to-buf))
-                (setq idx (1+ idx)))))))
+          ;; Use distinct names p1/p2/p3 so pcase-let* does not shadow the
+          ;; outer `pos'.  Shadowing would leave pos frozen at (+ pos 12)
+          ;; for all subsequent rows — the bug this test was written to catch.
+          (pcase-let* ((`(,text      . ,p1) (funcall text-fn idx pos text-byte-len))
+                       (`(,face-list . ,p2) (kuro--decode-face-ranges vec p1 num-face-ranges format-version))
+                       (`(,col-to-buf . ,p3) (kuro--decode-col-to-buf vec p2)))
+            (setq pos p3)
+            (aset result idx (cons (cons (cons row-index text) face-list) col-to-buf))
+            (setq idx (1+ idx)))))
       (append result nil))))
+
+;;; Top-level frame decoders
+
+(defun kuro--decode-binary-updates (vec)
+  "Decode a binary update VEC into the dirty-line list format.
+Decodes row text from UTF-8 bytes embedded in VEC.
+See `encode_screen_binary' in rust-core/src/ffi/codec.rs for the wire format."
+  (kuro--decode-binary-frame-rows
+   vec
+   (lambda (_idx pos text-byte-len)
+     (kuro--decode-row-text vec pos text-byte-len))))
 
 ;;; Optimised decoder using native Emacs strings from Rust
 
 (defun kuro--decode-binary-updates-with-strings (text-strings vec)
   "Decode a binary update VEC using pre-supplied native TEXT-STRINGS.
 TEXT-STRINGS is an Emacs vector of strings (one per dirty row) as returned
-by `kuro-core-poll-updates-binary-with-strings'.  VEC is the binary face/
-col-to-buf data with `text_byte_len' = 0 for every row.
+by `kuro-core-poll-updates-binary-with-strings'.  VEC carries face/col-to-buf
+data only; `text_byte_len' is always 0.
 
 This avoids the triple-copy `make-string' + `dotimes aset' +
-`decode-coding-string' path in `kuro--decode-row-text': Rust has already
-handed us native Emacs strings via `env.into_lisp(text)'.
-
-The return value has the same structure as `kuro--decode-binary-updates':
-  (((row . text) . face-list) . col-to-buf-vector)"
-  (let* ((format-version (kuro--read-u32-le vec 0)))
-    (unless (or (= format-version kuro--binary-format-version-v1)
-                (= format-version kuro--binary-format-version-v2))
-      (error "kuro: unsupported binary format version %d" format-version))
-    (let* ((num-rows (kuro--read-u32-le vec 4))
-           (pos 8)
-           (result (make-vector num-rows nil))
-           (idx 0))
-      (dotimes (_ num-rows)
-        (let* ((row-index       (kuro--read-u32-le vec pos))
-               (num-face-ranges (kuro--read-u32-le vec (+ pos 4)))
-               ;; text_byte_len is always 0 in this variant; skip the 4-byte field.
-               (_text-byte-len  (kuro--read-u32-le vec (+ pos 8))))
-          (setq pos (+ pos 12))
-          ;; Text is supplied directly as a native Emacs string — no decoding loop.
-          (let* ((text (aref text-strings idx))
-                 (face-pair (kuro--decode-face-ranges vec pos num-face-ranges format-version))
-                 (face-list (car face-pair)))
-            (setq pos (cdr face-pair))
-            (let* ((ctb-pair (kuro--decode-col-to-buf vec pos))
-                   (col-to-buf (car ctb-pair)))
-              (setq pos (cdr ctb-pair))
-              (aset result idx
-                    (cons (cons (cons row-index text) face-list) col-to-buf))
-              (setq idx (1+ idx))))))
-      (append result nil))))
+`decode-coding-string' path: Rust supplies native Emacs strings directly via
+`env.into_lisp(text)', so the text continuation simply indexes TEXT-STRINGS."
+  (kuro--decode-binary-frame-rows
+   vec
+   (lambda (idx pos _text-byte-len)
+     (cons (aref text-strings idx) pos))))
 
 (defun kuro--poll-updates-binary-optimised (session-id)
   "Poll dirty lines for SESSION-ID using the text-string-optimised FFI path.

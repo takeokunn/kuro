@@ -32,8 +32,57 @@
 
 (require 'kuro-config)
 
+;;; Error logging
+
+(defcustom kuro-log-errors t
+  "Non-nil means log FFI errors to the `*kuro-log*' buffer.
+When nil, errors caught by `kuro--call' are silently discarded."
+  :type 'boolean
+  :group 'kuro)
+
+(defconst kuro--log-buffer-name "*kuro-log*"
+  "Name of the buffer used for Kuro error logging.")
+
+(defconst kuro--log-max-size 102400
+  "Maximum size in bytes for the `*kuro-log*' buffer.
+When exceeded, the oldest half of the buffer is truncated.")
+
+(defsubst kuro--log (err)
+  "Write a timestamped error entry for ERR to the `*kuro-log*' buffer.
+ERR is a condition-case error value (a list whose car is the error symbol).
+Only called when `kuro-log-errors' is non-nil.  Uses `with-current-buffer'
+and `insert' for speed (no echo-area overhead)."
+  (let ((buf (get-buffer-create kuro--log-buffer-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'special-mode)
+        (special-mode))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "[%s] ERROR: %s\n"
+                        (format-time-string "%H:%M:%S")
+                        (error-message-string err)))
+        (when (> (buffer-size) kuro--log-max-size)
+          (delete-region (point-min) (- (point-max) (/ kuro--log-max-size 2))))))))
+
+(defun kuro-show-log ()
+  "Display the `*kuro-log*' buffer."
+  (interactive)
+  (let ((buf (get-buffer-create kuro--log-buffer-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'special-mode)
+        (special-mode)))
+    (display-buffer buf)))
+
 ;;; Structural macros
 ;; Defined first so they are available for the variable declarations below.
+
+(defmacro kuro--when-divisible (counter divisor &rest body)
+  "Execute BODY when COUNTER is divisible by DIVISOR (i.e., counter mod divisor = 0).
+This is the fundamental cadence-gating primitive used for periodic polling and
+animation timing: BODY is a continuation invoked only at exact multiples of DIVISOR."
+  (declare (indent 2))
+  `(when (zerop (mod ,counter ,divisor))
+     ,@body))
 
 (defmacro kuro--defvar-permanent-local (name value &optional doc)
   "Define NAME as a buffer-local variable with VALUE, marked permanent-local.
@@ -105,9 +154,11 @@ Usage:
   (kuro--call 0   (kuro-core-get-scroll-offset kuro--session-id))"
   (declare (indent 1))
   `(when kuro--initialized
-     (condition-case _err
+     (condition-case err
          (progn ,@body)
-       (error ,fallback))))
+       (error
+        (when kuro-log-errors (kuro--log err))
+        ,fallback))))
 
 ;;; Session lifecycle
 

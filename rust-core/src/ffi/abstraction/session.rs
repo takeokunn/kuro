@@ -106,6 +106,19 @@ fn advance_with_budget(
     }
 }
 
+/// Generate a public `const fn` getter that reads a field from `self.core.dec_modes`.
+///
+/// Syntax: `dec_mode_getter!(/// doc fn get_name -> RetType = field_name);`
+macro_rules! dec_mode_getter {
+    ($(#[$doc:meta])* fn $name:ident -> $ret:ty = $field:ident) => {
+        $(#[$doc])*
+        #[must_use]
+        pub const fn $name(&self) -> $ret {
+            self.core.dec_modes.$field
+        }
+    };
+}
+
 // TerminalSession Facade
 // -----------------------
 // Current public method count: 38.
@@ -330,11 +343,10 @@ impl TerminalSession {
         (c.row, c.col)
     }
 
-    /// Get cursor visibility (DECTCEM state)
-    #[must_use]
-    pub const fn get_cursor_visible(&self) -> bool {
-        self.core.dec_modes.cursor_visible
-    }
+    dec_mode_getter!(
+        /// Get cursor visibility (DECTCEM state)
+        fn get_cursor_visible -> bool = cursor_visible
+    );
 
     /// Get scrollback lines
     #[must_use]
@@ -469,11 +481,10 @@ impl TerminalSession {
         None
     }
 
-    /// Get mouse pixel mode state (?1016)
-    #[must_use]
-    pub const fn get_mouse_pixel(&self) -> bool {
-        self.core.dec_modes.mouse_pixel
-    }
+    dec_mode_getter!(
+        /// Get mouse pixel mode state (?1016)
+        fn get_mouse_pixel -> bool = mouse_pixel
+    );
 
     /// Get current 256-color palette overrides (non-None entries only).
     ///
@@ -563,59 +574,24 @@ impl TerminalSession {
         std::mem::take(&mut self.core.osc_data.prompt_marks)
     }
 
-    /// Get the current mouse tracking mode.
-    #[must_use]
-    pub const fn get_mouse_mode(&self) -> u16 {
-        self.core.dec_modes.mouse_mode
-    }
-
-    /// Get whether SGR mouse coordinate encoding is active.
-    #[must_use]
-    pub const fn get_mouse_sgr(&self) -> bool {
-        self.core.dec_modes.mouse_sgr
-    }
-
-    /// Get whether application cursor keys mode (DECCKM) is active.
-    #[must_use]
-    pub const fn get_app_cursor_keys(&self) -> bool {
-        self.core.dec_modes.app_cursor_keys
-    }
-
-    /// Get whether application keypad mode is active.
-    #[must_use]
-    pub const fn get_app_keypad(&self) -> bool {
-        self.core.dec_modes.app_keypad
-    }
-
-    /// Get the kitty keyboard protocol flags bitmask.
-    #[must_use]
-    pub const fn get_keyboard_flags(&self) -> u32 {
-        self.core.dec_modes.keyboard_flags
-    }
-
-    /// Get the current cursor shape.
-    #[must_use]
-    pub const fn get_cursor_shape(&self) -> crate::types::cursor::CursorShape {
-        self.core.dec_modes.cursor_shape
-    }
-
-    /// Get whether bracketed paste mode is active.
-    #[must_use]
-    pub const fn get_bracketed_paste(&self) -> bool {
-        self.core.dec_modes.bracketed_paste
-    }
-
-    /// Get whether focus event reporting is active.
-    #[must_use]
-    pub const fn get_focus_events(&self) -> bool {
-        self.core.dec_modes.focus_events
-    }
-
-    /// Get whether synchronized output mode (DEC ?2026) is active.
-    #[must_use]
-    pub const fn get_synchronized_output(&self) -> bool {
-        self.core.dec_modes.synchronized_output
-    }
+    dec_mode_getter!(/// Get the current mouse tracking mode.
+        fn get_mouse_mode -> u16 = mouse_mode);
+    dec_mode_getter!(/// Get whether SGR mouse coordinate encoding is active.
+        fn get_mouse_sgr -> bool = mouse_sgr);
+    dec_mode_getter!(/// Get whether application cursor keys mode (DECCKM) is active.
+        fn get_app_cursor_keys -> bool = app_cursor_keys);
+    dec_mode_getter!(/// Get whether application keypad mode is active.
+        fn get_app_keypad -> bool = app_keypad);
+    dec_mode_getter!(/// Get the kitty keyboard protocol flags bitmask.
+        fn get_keyboard_flags -> u32 = keyboard_flags);
+    dec_mode_getter!(/// Get the current cursor shape.
+        fn get_cursor_shape -> crate::types::cursor::CursorShape = cursor_shape);
+    dec_mode_getter!(/// Get whether bracketed paste mode is active.
+        fn get_bracketed_paste -> bool = bracketed_paste);
+    dec_mode_getter!(/// Get whether focus event reporting is active.
+        fn get_focus_events -> bool = focus_events);
+    dec_mode_getter!(/// Get whether synchronized output mode is active.
+        fn get_synchronized_output -> bool = synchronized_output);
 }
 
 #[cfg(test)]

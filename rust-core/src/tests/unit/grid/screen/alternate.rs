@@ -5,9 +5,7 @@ use crate::grid::screen::Screen;
 use crate::types::cell::SgrAttributes;
 use proptest::prelude::*;
 
-fn make_screen() -> Screen {
-    Screen::new(24, 80)
-}
+use super::make_screen;
 
 // ---------------------------------------------------------------------------
 // is_alternate_screen_active — initial state

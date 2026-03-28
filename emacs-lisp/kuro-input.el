@@ -25,6 +25,7 @@
 ;; Forward reference: kuro--render-cycle is defined in kuro-renderer.el,
 ;; which is loaded after kuro-input.el.  Declare it here to suppress warnings.
 (declare-function kuro--render-cycle "kuro-renderer" ())
+(declare-function kuro--update-scroll-indicator "kuro-render-buffer" ())
 
 
 ;;; Printable Characters
@@ -125,36 +126,64 @@ Always schedules an immediate render so cursor movement feels instant."
 (defconst kuro--scroll-to-bottom-sentinel 999999
   "Sentinel value for `kuro-scroll-to-bottom': scrolls past any real content.")
 
+(defmacro kuro--def-scroll-command (name doc scroll-form offset-form)
+  "Define interactive scroll command NAME with docstring DOC.
+SCROLL-FORM is the FFI call (e.g. `(kuro--scroll-up lines)').
+OFFSET-FORM is the expression assigned to `kuro--scroll-offset' after the call.
+The generated function is guarded by `kuro--initialized', calls
+`kuro--render-cycle', and calls `kuro--update-scroll-indicator'."
+  (declare (indent 1))
+  `(defun ,name ()
+     ,doc
+     (interactive)
+     (when kuro--initialized
+       ,scroll-form
+       (setq kuro--scroll-offset ,offset-form)
+       (kuro--render-cycle)
+       (kuro--update-scroll-indicator))))
+
+(defun kuro--scroll-aware-ctrl-v ()
+  "Send C-v to PTY when at live view; scroll down when in scrollback.
+When `kuro--scroll-offset' > 0 the user is browsing scrollback history,
+so C-v acts like `kuro-scroll-down' (toward live output) matching the
+standard Emacs `scroll-up-command' semantics.  At live view (offset 0),
+the raw control byte 22 is sent to the PTY."
+  (interactive)
+  (if (> kuro--scroll-offset 0)
+      (kuro-scroll-down)
+    (kuro--send-ctrl 22)))
+
+(defun kuro--scroll-aware-meta-v ()
+  "Send M-v to PTY when at live view; scroll up when in scrollback.
+When `kuro--scroll-offset' > 0, M-v acts like `kuro-scroll-up' (toward
+history) matching the standard Emacs `scroll-down-command' semantics.
+At live view (offset 0), ESC + v is sent to the PTY."
+  (interactive)
+  (if (> kuro--scroll-offset 0)
+      (kuro-scroll-up)
+    (kuro--send-meta ?v)))
+
 ;;;###autoload
-(defun kuro-scroll-up ()
+(kuro--def-scroll-command kuro-scroll-up
   "Scroll back into terminal history by one screenful."
-  (interactive)
-  (when kuro--initialized
-    (let ((lines (window-body-height)))
-      (kuro--scroll-up lines)
-      (setq kuro--scroll-offset (or (kuro--get-scroll-offset)
-                                     (+ kuro--scroll-offset lines)))
-      (kuro--render-cycle))))
+  (let ((lines (window-body-height)))
+    (kuro--scroll-up lines))
+  (let ((lines (window-body-height)))
+    (or (kuro--get-scroll-offset) (+ kuro--scroll-offset lines))))
 
 ;;;###autoload
-(defun kuro-scroll-down ()
+(kuro--def-scroll-command kuro-scroll-down
   "Scroll toward live terminal output by one screenful."
-  (interactive)
-  (when kuro--initialized
-    (let ((lines (window-body-height)))
-      (kuro--scroll-down lines)
-      (setq kuro--scroll-offset (or (kuro--get-scroll-offset)
-                                     (max 0 (- kuro--scroll-offset lines))))
-      (kuro--render-cycle))))
+  (let ((lines (window-body-height)))
+    (kuro--scroll-down lines))
+  (let ((lines (window-body-height)))
+    (or (kuro--get-scroll-offset) (max 0 (- kuro--scroll-offset lines)))))
 
 ;;;###autoload
-(defun kuro-scroll-bottom ()
+(kuro--def-scroll-command kuro-scroll-bottom
   "Return immediately to live terminal output."
-  (interactive)
-  (when kuro--initialized
-    (kuro--scroll-down kuro--scroll-to-bottom-sentinel)
-    (setq kuro--scroll-offset (or (kuro--get-scroll-offset) 0))
-    (kuro--render-cycle)))
+  (kuro--scroll-down kuro--scroll-to-bottom-sentinel)
+  (or (kuro--get-scroll-offset) 0))
 
 
 (defun kuro--ctrl-alt-modified (char modifier)

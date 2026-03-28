@@ -208,66 +208,35 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-focus-events nil
     (should (null (kuro--get-focus-events)))))
 
+;;; Test helper macro
+
+(defmacro kuro-ffi-modes-test--uninit-nil (sym &rest args)
+  "Define an ert-deftest asserting (SYM ARGS...) returns nil when uninit.
+SYM must be a kuro-- prefixed symbol; the test is named by stripping that prefix."
+  (let* ((bare (replace-regexp-in-string "^kuro--" "" (symbol-name sym)))
+         (test-name (intern (format "kuro-ffi-modes--%s-nil-when-not-initialized" bare))))
+    `(ert-deftest ,test-name ()
+       ,(format "%s returns nil when kuro--initialized is nil." sym)
+       (let ((kuro--initialized nil))
+         (should (null (,sym ,@args)))))))
+
 ;;; Group 5: kuro--initialized guard path
 ;;
 ;; When `kuro--initialized' is nil, the `kuro--call' macro's `when' form
 ;; short-circuits and returns nil — regardless of the declared fallback value.
 ;; These tests verify that every kuro-ffi-modes wrapper returns nil in that case.
 
-(ert-deftest kuro-ffi-modes--get-cursor-visible-nil-when-not-initialized ()
-  "kuro--get-cursor-visible returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-cursor-visible)))))
-
-(ert-deftest kuro-ffi-modes--get-cursor-shape-nil-when-not-initialized ()
-  "kuro--get-cursor-shape returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-cursor-shape)))))
-
-(ert-deftest kuro-ffi-modes--get-app-cursor-keys-nil-when-not-initialized ()
-  "kuro--get-app-cursor-keys returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-app-cursor-keys)))))
-
-(ert-deftest kuro-ffi-modes--get-app-keypad-nil-when-not-initialized ()
-  "kuro--get-app-keypad returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-app-keypad)))))
-
-(ert-deftest kuro-ffi-modes--get-bracketed-paste-nil-when-not-initialized ()
-  "kuro--get-bracketed-paste returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-bracketed-paste)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-mode-nil-when-not-initialized ()
-  "kuro--get-mouse-mode returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-mouse-mode)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-sgr-nil-when-not-initialized ()
-  "kuro--get-mouse-sgr returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-mouse-sgr)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-pixel-nil-when-not-initialized ()
-  "kuro--get-mouse-pixel returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-mouse-pixel)))))
-
-(ert-deftest kuro-ffi-modes--get-focus-events-nil-when-not-initialized ()
-  "kuro--get-focus-events returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-focus-events)))))
-
-(ert-deftest kuro-ffi-modes--get-sync-output-nil-when-not-initialized ()
-  "kuro--get-sync-output returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-sync-output)))))
-
-(ert-deftest kuro-ffi-modes--get-keyboard-flags-nil-when-not-initialized ()
-  "kuro--get-keyboard-flags returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-keyboard-flags)))))
+(kuro-ffi-modes-test--uninit-nil kuro--get-cursor-visible)
+(kuro-ffi-modes-test--uninit-nil kuro--get-cursor-shape)
+(kuro-ffi-modes-test--uninit-nil kuro--get-app-cursor-keys)
+(kuro-ffi-modes-test--uninit-nil kuro--get-app-keypad)
+(kuro-ffi-modes-test--uninit-nil kuro--get-bracketed-paste)
+(kuro-ffi-modes-test--uninit-nil kuro--get-mouse-mode)
+(kuro-ffi-modes-test--uninit-nil kuro--get-mouse-sgr)
+(kuro-ffi-modes-test--uninit-nil kuro--get-mouse-pixel)
+(kuro-ffi-modes-test--uninit-nil kuro--get-focus-events)
+(kuro-ffi-modes-test--uninit-nil kuro--get-sync-output)
+(kuro-ffi-modes-test--uninit-nil kuro--get-keyboard-flags)
 
 ;;; Group 6: Consolidated queries (kuro--get-cursor-state, kuro--get-terminal-modes)
 
@@ -286,10 +255,7 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-state nil
     (should (null (kuro--get-cursor-state)))))
 
-(ert-deftest kuro-ffi-modes--get-cursor-state-nil-when-not-initialized ()
-  "kuro--get-cursor-state returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-cursor-state)))))
+(kuro-ffi-modes-test--uninit-nil kuro--get-cursor-state)
 
 (ert-deftest kuro-ffi-modes--get-terminal-modes-returns-list ()
   "kuro--get-terminal-modes returns the full modes list from the stub."
@@ -303,10 +269,7 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-terminal-modes nil
     (should (null (kuro--get-terminal-modes)))))
 
-(ert-deftest kuro-ffi-modes--get-terminal-modes-nil-when-not-initialized ()
-  "kuro--get-terminal-modes returns nil when kuro--initialized is nil."
-  (let ((kuro--initialized nil))
-    (should (null (kuro--get-terminal-modes)))))
+(kuro-ffi-modes-test--uninit-nil kuro--get-terminal-modes)
 
 ;;; Group 7: kuro--session-id passthrough
 ;;
@@ -450,85 +413,29 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
 ;; Groups 7 and 10 covered a selection of wrappers.  This group completes the
 ;; picture: every remaining getter must forward kuro--session-id, not a literal.
 
-(ert-deftest kuro-ffi-modes--get-cursor-shape-forwards-session-id ()
-  "kuro--get-cursor-shape passes kuro--session-id to kuro-core-get-cursor-shape."
-  (let ((kuro--initialized t)
-        (kuro--session-id 10)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor-shape)
-               (lambda (sid) (setq captured-sid sid) 2)))
-      (kuro--get-cursor-shape)
-      (should (= captured-sid 10)))))
+(defmacro kuro-ffi-modes-test--session-id-fwd (wrapper core-fn sid stub-val)
+  "Define an ert-deftest asserting WRAPPER forwards SESSION-ID to CORE-FN.
+STUB-VAL is the value the stub returns so the call succeeds."
+  (let* ((bare (replace-regexp-in-string "^kuro--" "" (symbol-name wrapper)))
+         (test-name (intern (format "kuro-ffi-modes--%s-forwards-session-id" bare))))
+    `(ert-deftest ,test-name ()
+       ,(format "%s passes kuro--session-id to the FFI function." wrapper)
+       (let ((kuro--initialized t)
+             (kuro--session-id ,sid)
+             (captured-sid nil))
+         (cl-letf (((symbol-function ',core-fn)
+                    (lambda (s) (setq captured-sid s) ,stub-val)))
+           (,wrapper)
+           (should (= captured-sid ,sid)))))))
 
-(ert-deftest kuro-ffi-modes--get-app-cursor-keys-forwards-session-id ()
-  "kuro--get-app-cursor-keys passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 20)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-app-cursor-keys)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-app-cursor-keys)
-      (should (= captured-sid 20)))))
-
-(ert-deftest kuro-ffi-modes--get-app-keypad-forwards-session-id ()
-  "kuro--get-app-keypad passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 30)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-app-keypad)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-app-keypad)
-      (should (= captured-sid 30)))))
-
-(ert-deftest kuro-ffi-modes--get-bracketed-paste-forwards-session-id ()
-  "kuro--get-bracketed-paste passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 40)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-bracketed-paste)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-bracketed-paste)
-      (should (= captured-sid 40)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-sgr-forwards-session-id ()
-  "kuro--get-mouse-sgr passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 50)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-mouse-sgr)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-mouse-sgr)
-      (should (= captured-sid 50)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-pixel-forwards-session-id ()
-  "kuro--get-mouse-pixel passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 60)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-mouse-pixel)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-mouse-pixel)
-      (should (= captured-sid 60)))))
-
-(ert-deftest kuro-ffi-modes--get-focus-events-forwards-session-id ()
-  "kuro--get-focus-events passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 70)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-focus-events)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-focus-events)
-      (should (= captured-sid 70)))))
-
-(ert-deftest kuro-ffi-modes--get-sync-output-forwards-session-id ()
-  "kuro--get-sync-output passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 80)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-sync-output)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-sync-output)
-      (should (= captured-sid 80)))))
+(kuro-ffi-modes-test--session-id-fwd kuro--get-cursor-shape    kuro-core-get-cursor-shape    10 2)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-app-cursor-keys kuro-core-get-app-cursor-keys 20 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-app-keypad      kuro-core-get-app-keypad      30 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-bracketed-paste kuro-core-get-bracketed-paste 40 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-mouse-sgr       kuro-core-get-mouse-sgr       50 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-mouse-pixel     kuro-core-get-mouse-pixel     60 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-focus-events    kuro-core-get-focus-events    70 t)
+(kuro-ffi-modes-test--session-id-fwd kuro--get-sync-output     kuro-core-get-sync-output     80 t)
 
 ;;; Group 13: nil-default wrappers return nil on FFI error, not the fallback
 ;;
@@ -537,68 +444,26 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
 ;; kuro--call catches an error — since nil is both the fallback and the safe
 ;; sentinel.  This group makes the error path explicit for each such wrapper.
 
-(ert-deftest kuro-ffi-modes--get-app-cursor-keys-nil-on-ffi-error ()
-  "kuro--get-app-cursor-keys returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-app-cursor-keys)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-app-cursor-keys))))))
+(defmacro kuro-ffi-modes-test--nil-on-ffi-error (wrapper core-fn)
+  "Define an ert-deftest asserting WRAPPER returns nil when CORE-FN signals an error."
+  (let* ((bare (replace-regexp-in-string "^kuro--" "" (symbol-name wrapper)))
+         (test-name (intern (format "kuro-ffi-modes--%s-nil-on-ffi-error" bare))))
+    `(ert-deftest ,test-name ()
+       ,(format "%s returns nil when the FFI function signals an error." wrapper)
+       (let ((kuro--initialized t))
+         (cl-letf (((symbol-function ',core-fn)
+                    (lambda (_id) (error "FFI crash"))))
+           (should (null (,wrapper))))))))
 
-(ert-deftest kuro-ffi-modes--get-app-keypad-nil-on-ffi-error ()
-  "kuro--get-app-keypad returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-app-keypad)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-app-keypad))))))
-
-(ert-deftest kuro-ffi-modes--get-bracketed-paste-nil-on-ffi-error ()
-  "kuro--get-bracketed-paste returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-bracketed-paste)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-bracketed-paste))))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-sgr-nil-on-ffi-error ()
-  "kuro--get-mouse-sgr returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-mouse-sgr)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-mouse-sgr))))))
-
-(ert-deftest kuro-ffi-modes--get-focus-events-nil-on-ffi-error ()
-  "kuro--get-focus-events returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-focus-events)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-focus-events))))))
-
-(ert-deftest kuro-ffi-modes--get-sync-output-nil-on-ffi-error ()
-  "kuro--get-sync-output returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-sync-output)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-sync-output))))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-pixel-nil-on-ffi-error ()
-  "kuro--get-mouse-pixel returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-mouse-pixel)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-mouse-pixel))))))
-
-(ert-deftest kuro-ffi-modes--get-cursor-state-nil-on-ffi-error ()
-  "kuro--get-cursor-state returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor-state)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-cursor-state))))))
-
-(ert-deftest kuro-ffi-modes--get-terminal-modes-nil-on-ffi-error ()
-  "kuro--get-terminal-modes returns nil when the FFI function signals an error."
-  (let ((kuro--initialized t))
-    (cl-letf (((symbol-function 'kuro-core-get-terminal-modes)
-               (lambda (_id) (error "FFI crash"))))
-      (should (null (kuro--get-terminal-modes))))))
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-app-cursor-keys kuro-core-get-app-cursor-keys)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-app-keypad      kuro-core-get-app-keypad)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-bracketed-paste kuro-core-get-bracketed-paste)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-mouse-sgr       kuro-core-get-mouse-sgr)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-focus-events    kuro-core-get-focus-events)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-sync-output     kuro-core-get-sync-output)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-mouse-pixel     kuro-core-get-mouse-pixel)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-cursor-state    kuro-core-get-cursor-state)
+(kuro-ffi-modes-test--nil-on-ffi-error kuro--get-terminal-modes  kuro-core-get-terminal-modes)
 
 (ert-deftest kuro-ffi-modes--get-terminal-modes-keyboard-flags-bitmask-values ()
   "kuro--get-terminal-modes passes through each single-bit keyboard-flags value."

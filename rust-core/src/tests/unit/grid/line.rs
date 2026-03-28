@@ -324,71 +324,97 @@ fn test_resize_same_size_marks_dirty() {
 
 // ── new_with_bg — all cells carry the bg color ───────────────────────────────
 
-#[test]
-// EVERY cell in new_with_bg(cols, Indexed(42)) must carry background == Indexed(42).
-// The existing proptest checks is_dirty but does not enumerate each cell by position.
-fn test_new_with_bg_all_cells_carry_bg() {
-    let cols = 8usize;
-    let bg = Color::Indexed(42);
-    let line = Line::new_with_bg(cols, bg);
-    assert_eq!(line.cells.len(), cols);
+/// Assert that every cell in `line` carries `expected_bg` as its background.
+#[inline]
+fn assert_all_cells_have_bg(line: &Line, expected_bg: Color, label: &str) {
+    assert!(!line.cells.is_empty(), "{label}: line must be non-empty");
     for (i, cell) in line.cells.iter().enumerate() {
         assert_eq!(
-            cell.attrs.background, bg,
-            "cell at col {i} must have background Indexed(42)"
+            cell.attrs.background, expected_bg,
+            "{label}: cell at col {i} must have background {expected_bg:?}"
         );
     }
 }
 
-#[test]
-// RGB background color must appear on every cell including first and last.
-fn test_new_with_bg_rgb_first_and_last() {
-    let bg = Color::Rgb(10, 20, 30);
-    let line = Line::new_with_bg(5, bg);
-    assert_eq!(
-        line.cells[0].attrs.background, bg,
-        "first cell must carry the RGB background"
-    );
-    assert_eq!(
-        line.cells[4].attrs.background, bg,
-        "last cell must carry the RGB background"
-    );
+/// Macro: `assert_new_with_bg!(name, cols, bg_expr, label)` — constructs a
+/// `Line::new_with_bg` and asserts every cell carries the expected background.
+macro_rules! assert_new_with_bg {
+    ($name:ident, $cols:expr, $bg:expr, $label:expr) => {
+        #[test]
+        fn $name() {
+            let bg = $bg;
+            let line = Line::new_with_bg($cols, bg);
+            assert_eq!(line.cells.len(), $cols);
+            assert_all_cells_have_bg(&line, bg, $label);
+        }
+    };
 }
+
+assert_new_with_bg!(
+    test_new_with_bg_all_cells_carry_bg,
+    8,
+    Color::Indexed(42),
+    "new_with_bg(Indexed(42))"
+);
+assert_new_with_bg!(
+    test_new_with_bg_rgb_first_and_last,
+    5,
+    Color::Rgb(10, 20, 30),
+    "new_with_bg(Rgb(10,20,30))"
+);
 
 // ── clear_with_bg edge cases ──────────────────────────────────────────────────
 
-#[test]
-// clear_with_bg(Color::Default) must reset every cell to Cell::default()
-// (grapheme == ' ', all attrs default).
-fn test_clear_with_bg_default_equals_cell_default() {
-    let mut line = Line::new(6);
-    // Write some non-default content first.
-    line.update_cell(2, 'Q', SgrAttributes::default());
-    line.clear_with_bg(Color::Default);
-    assert!(line.is_dirty);
-    let expected = Cell::default();
-    for (i, cell) in line.cells.iter().enumerate() {
-        assert_eq!(
-            cell, &expected,
-            "cell at col {i} must equal Cell::default() after clear_with_bg(Default)"
-        );
-    }
+/// Macro: `assert_clear_with_bg!(name, setup_fn, bg_expr, expected_cell_check)`
+/// — builds a line, optionally modifies it, calls `clear_with_bg`, then
+/// checks every cell using a per-cell closure `|cell| assert!(...)`.
+macro_rules! assert_clear_with_bg_cells {
+    ($name:ident, $setup:expr, $bg:expr, $check:expr, $msg:expr) => {
+        #[test]
+        fn $name() {
+            let bg = $bg;
+            let mut line = $setup;
+            line.clear_with_bg(bg);
+            assert!(line.is_dirty, "clear_with_bg() must set is_dirty");
+            for (i, cell) in line.cells.iter().enumerate() {
+                let check: &dyn Fn(&crate::types::Cell, usize) = &$check;
+                check(cell, i);
+            }
+        }
+    };
 }
 
-#[test]
-// clear_with_bg must overwrite prior non-default bg on all cells.
-fn test_clear_with_bg_overwrites_existing_bg() {
-    let mut line = Line::new_with_bg(4, Color::Indexed(1));
-    // Change bg to a different color.
-    line.clear_with_bg(Color::Indexed(7));
-    for (i, cell) in line.cells.iter().enumerate() {
+assert_clear_with_bg_cells!(
+    test_clear_with_bg_default_equals_cell_default,
+    {
+        let mut l = Line::new(6);
+        l.update_cell(2, 'Q', SgrAttributes::default());
+        l
+    },
+    Color::Default,
+    |cell, i| {
+        assert_eq!(
+            cell,
+            &Cell::default(),
+            "cell at col {i} must equal Cell::default() after clear_with_bg(Default)"
+        );
+    },
+    "clear_with_bg(Default)"
+);
+
+assert_clear_with_bg_cells!(
+    test_clear_with_bg_overwrites_existing_bg,
+    Line::new_with_bg(4, Color::Indexed(1)),
+    Color::Indexed(7),
+    |cell, i| {
         assert_eq!(
             cell.attrs.background,
             Color::Indexed(7),
             "cell at col {i} must have new bg Indexed(7) after clear_with_bg"
         );
-    }
-}
+    },
+    "clear_with_bg overwrite"
+);
 
 // ── update_cell — out-of-bounds silent ignore ─────────────────────────────────
 

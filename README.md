@@ -73,10 +73,13 @@ M-x package-install RET kuro RET
 | `C-c C-p` | Previous prompt (OSC 133) |
 | `C-c C-n` | Next prompt (OSC 133) |
 | `C-c C-t` | Toggle copy mode |
+| `C-c C-SPC` | Toggle copy mode (alternative) |
+| `C-c C-q` | Send next key directly (bypass exceptions) |
+| `M-w` | Copy region and exit copy mode (copy mode only) |
 
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2597 ERT tests. Clippy runs in pedantic + nursery mode with 0 warnings. CI covers Linux, macOS, and WSL2 across Emacs 29.1/29.4/30.1 with Rust stable. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs in pedantic + nursery mode with 0 warnings. CI covers Linux, macOS, and WSL2 across Emacs 29.1/29.4/30.1 with Rust stable. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 

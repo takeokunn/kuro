@@ -37,13 +37,13 @@
   "Cached frame interval for slow text blink cycle (SGR 5).
 Number of render frames between each visibility toggle,
 yielding a ~0.5 Hz toggle rate (1.0 s per phase).
-Recomputed by `kuro--recompute-blink-frame-intervals' when `kuro-frame-rate' changes.")
+Recomputed by `kuro--recompute-blink-frame-intervals' on frame-rate change.")
 
 (defvar kuro--blink-fast-frames-cached (max 1 (round (* 60 0.167)))
   "Cached frame interval for fast text blink cycle (SGR 6).
 Number of render frames between each visibility toggle,
 yielding a ~1.5 Hz toggle rate (~0.33 s per phase).
-Recomputed by `kuro--recompute-blink-frame-intervals' when `kuro-frame-rate' changes.")
+Recomputed by `kuro--recompute-blink-frame-intervals' on frame-rate change.")
 
 (defun kuro--recompute-blink-frame-intervals ()
   "Recompute cached blink frame intervals from current `kuro-frame-rate'.
@@ -124,7 +124,7 @@ visibility state variable is consulted."
              kuro--blink-overlays-by-row)))
 
 (defun kuro--toggle-blink-phase (blink-type)
-  "Toggle BLINK-TYPE (`slow' or `fast') visibility state and update matching overlays.
+  "Toggle BLINK-TYPE (`slow' or `fast') visibility; update matching overlays.
 The state variable is toggled first; the new state is then applied to every
 live overlay whose `kuro-blink-type' matches BLINK-TYPE."
   (let ((visible (kuro--toggle-blink-state blink-type)))
@@ -134,9 +134,11 @@ live overlay whose `kuro-blink-type' matches BLINK-TYPE."
         (overlay-put ov 'invisible (not visible))))))
 
 (defun kuro--tick-blink-overlays ()
-  "Advance the blink frame counter and toggle overlay visibility at correct intervals.
-Slow blink (SGR 5): ~0.5 Hz — toggle every `kuro--blink-slow-frames' frames (1 s per phase).
-Fast blink (SGR 6): ~1.5 Hz — toggle every `kuro--blink-fast-frames' frames (~0.33 s per phase).
+  "Advance the blink frame counter; toggle overlay visibility at each interval.
+Slow blink (SGR 5): ~0.5 Hz — toggle every `kuro--blink-slow-frames' frames
+\(1 s per phase).
+Fast blink (SGR 6): ~1.5 Hz — toggle every `kuro--blink-fast-frames' frames
+\(~0.33 s per phase).
 Frame intervals are computed dynamically from `kuro-frame-rate' so that
 blink timing is correct at any frame rate (not just 30 fps).
 Called once per render cycle from `kuro--render-cycle'."
@@ -184,7 +186,7 @@ May signal an error if B64 is malformed or `create-image' fails."
    'png t))
 
 (defun kuro--place-image-overlay (img row col cell-width)
-  "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH chars.
+  "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH cols.
 Uses `forward-char' for column positioning so wide characters (2 terminal
 columns, 1 buffer position) are handled correctly.  Pushes the new overlay
 onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
@@ -205,7 +207,7 @@ onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
 (defun kuro--render-image-notification (notif)
   "Render a single Kitty Graphics image placement NOTIF in the terminal buffer.
 NOTIF is a list of the form (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT).
-Creates an overlay with a `display' image property at the correct grid position."
+Creates an overlay with a `display' property at the correct grid position."
   (pcase-let* ((`(,image-id ,row ,col ,raw-width . ,_) notif)
                (cell-width (max 1 raw-width))
                (b64 (kuro--get-image image-id)))

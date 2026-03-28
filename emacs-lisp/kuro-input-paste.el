@@ -19,7 +19,7 @@
 ;;; Bracketed Paste State
 
 (kuro--defvar-permanent-local kuro--bracketed-paste-mode nil
-  "Cached bracketed paste mode state from Rust (?2004), polled by render cycle.")
+  "Bracketed paste mode state from Rust (?2004); polled by render cycle.")
 
 (kuro--defvar-permanent-local kuro--keyboard-flags 0
   "Cached Kitty keyboard protocol flags, polled by render cycle.
@@ -68,8 +68,8 @@ In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
   (kuro--schedule-immediate-render))
 
 (defun kuro--yank-pop (&optional arg)
-  "Cycle kill ring and yank, wrapping with bracketed paste sequences when active.
-Like `yank-pop', signals an error if the previous command was not a yank."
+  "Cycle kill ring and yank; wraps with bracketed paste sequences when active.
+Like `yank-pop': signals an error if the previous command was not a yank."
   (interactive "p")
   (unless (memq last-command '(yank kuro--yank kuro--yank-pop))
     (user-error "Previous command was not a yank"))

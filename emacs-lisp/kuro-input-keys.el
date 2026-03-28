@@ -33,7 +33,7 @@
 
 (defmacro kuro--def-key-sequence (name doc normal application)
   "Define an interactive command NAME that sends a key sequence to the PTY.
-NORMAL is sent in normal cursor mode; APPLICATION in application cursor keys mode.
+NORMAL is sent in normal cursor mode; APPLICATION in application cursor mode.
 DOC is the function docstring."
   `(defun ,name () ,doc
      (interactive)

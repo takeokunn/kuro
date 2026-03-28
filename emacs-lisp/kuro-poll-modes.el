@@ -90,7 +90,7 @@ See `kuro--mode-poll-cadence' and `kuro--osc-rare-poll-cadence'.")
 ;;; Tier-2: rare OSC events
 
 (defun kuro--poll-osc-events ()
-  "Poll rare OSC events: color palette (OSC 4) and default colors (OSC 10/11/12).
+  "Poll rare OSC events: color palette (OSC 4), default colors (OSC 10/11/12).
 Called every `kuro--osc-rare-poll-cadence' frames.  At 30 fps this fires
 approximately once per second.  Changes occur at user-action timescale
 (theme switch, startup), so a ~1 second lag is invisible."
@@ -134,7 +134,7 @@ MODES is the 7-element list from `kuro--get-terminal-modes':
     (kuro--render-image-notification notif)))
 
 (defun kuro--check-process-exit ()
-  "Kill the buffer when `kuro-kill-buffer-on-exit' is set and process has exited."
+  "Kill the buffer when `kuro-kill-buffer-on-exit' is set and process exited."
   (when (and kuro-kill-buffer-on-exit (not (kuro--is-process-alive)))
     (kuro-kill)))
 
@@ -183,7 +183,7 @@ Returns nil."
     kuro--poll-image-events
     kuro--check-process-exit)
   "Tier-1 poll functions called in order every `kuro--mode-poll-cadence' frames.
-Add new shell-interaction-timescale polls here; no code changes to the dispatch loop.")
+Add new shell-interaction-timescale polls here; no changes to dispatch loop.")
 
 ;;; Tier-1 consolidated dispatcher
 

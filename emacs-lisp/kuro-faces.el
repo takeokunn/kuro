@@ -60,7 +60,7 @@
 ;;; Face cache
 
 (defvar kuro--face-cache (make-hash-table :test 'equal)
-  "Cache computed faces to avoid recreating them for same attribute combinations.")
+  "Cache of computed faces; avoids recreating them for identical attributes.")
 
 
 (kuro--defvar-permanent-local kuro--font-remap-cookie nil
@@ -77,7 +77,7 @@ so the stored key is never the same object as this lookup vector.")
 ;;; Face remap lifecycle macro
 
 (defmacro kuro--with-face-remap (cookie-var &rest remap-body)
-  "Remove the existing face-remap cookie in COOKIE-VAR, then evaluate REMAP-BODY.
+  "Remove the face-remap cookie in COOKIE-VAR, then evaluate REMAP-BODY.
 COOKIE-VAR is a symbol whose value holds the cookie returned by
 `face-remap-add-relative', or nil when no remap is active.
 The old cookie is removed and COOKIE-VAR set to nil before REMAP-BODY runs.

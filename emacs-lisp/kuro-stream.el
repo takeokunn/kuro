@@ -63,7 +63,8 @@ Set to nil when streaming latency mode is disabled.")
 Used to rate-limit idle renders to at most `kuro-frame-rate' times/second.")
 
 (kuro--defvar-permanent-local kuro--stream-min-interval nil
-  "Minimum seconds between idle-timer render cycles, derived from `kuro-frame-rate'.
+  "Minimum seconds between idle-timer render cycles.
+Derived from `kuro-frame-rate'.
 Computed lazily: nil means unset, will be computed on first idle render.")
 
 ;;; Low-latency idle timer

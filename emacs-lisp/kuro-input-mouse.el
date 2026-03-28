@@ -73,7 +73,7 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
 ;;; Mouse Event Dispatch
 
 (defmacro kuro--dispatch-mouse-event (btn press)
-  "When mouse tracking is active and BTN is non-nil, encode and forward the event.
+  "When mouse tracking is active and BTN is non-nil, encode and forward it.
 BTN is an integer button index (0/1/2/64/65) or nil to skip.
 PRESS is non-nil for press, nil for release.
 Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
@@ -87,7 +87,7 @@ Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
 ;;; Mouse Event Handler Macro
 
 (defmacro kuro--def-mouse-cmd (name btn-form press doc)
-  "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to the PTY.
+  "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to PTY.
 BTN-FORM is evaluated at call time: a literal integer for scroll commands, or a
 pcase expression over `event-basic-type' for button commands.
 PRESS is t for press events, nil for release."
@@ -121,7 +121,7 @@ PRESS is t for press events, nil for release."
   "Forward reference; defined in kuro-input.el.")
 
 (kuro--def-scroll-command kuro--mouse-scroll-up--scrollback
-  "Scroll terminal scrollback up by `kuro--mouse-scroll-lines' (internal helper)."
+  "Scroll terminal scrollback up by `kuro--mouse-scroll-lines' lines."
   (kuro--scroll-up kuro--mouse-scroll-lines)
   (max 0 (or (kuro--get-scroll-offset) (+ kuro--scroll-offset kuro--mouse-scroll-lines))))
 
@@ -136,7 +136,7 @@ Otherwise, scroll the terminal scrollback up by `kuro--mouse-scroll-lines'."
     (kuro--mouse-scroll-up--scrollback)))
 
 (kuro--def-scroll-command kuro--mouse-scroll-down--scrollback
-  "Scroll terminal scrollback down by `kuro--mouse-scroll-lines' (internal helper)."
+  "Scroll terminal scrollback down by `kuro--mouse-scroll-lines' lines."
   (kuro--scroll-down kuro--mouse-scroll-lines)
   (max 0 (or (kuro--get-scroll-offset) (- kuro--scroll-offset kuro--mouse-scroll-lines))))
 

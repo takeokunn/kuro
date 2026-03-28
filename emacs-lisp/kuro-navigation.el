@@ -82,7 +82,7 @@ to the exact buffer position corresponding to grid row ROW."
 ;;; Focus event handlers
 
 (defmacro kuro--with-focus-guard (&rest body)
-  "Execute BODY only when in an active kuro buffer with focus-events mode enabled."
+  "Execute BODY only when in an active kuro buffer with focus-events enabled."
   `(when (and (derived-mode-p 'kuro-mode)
               kuro--initialized
               (kuro--get-focus-events))

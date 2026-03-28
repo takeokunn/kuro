@@ -58,10 +58,10 @@ Saves and restores point via `save-excursion'."
 ;;; Scroll event application
 
 (defun kuro--scroll-lines (direction n _last-rows)
-  "Move N terminal lines in DIRECTION (\\='up or \\='down) within the current buffer.
+  "Move N terminal lines in DIRECTION (\\='up or \\='down) in the buffer.
 _LAST-ROWS is accepted for interface symmetry but not used; N is applied as-is.
-For \\='up: delete the first N lines in one operation and insert N blank lines at bottom.
-For \\='down: delete the last N lines in one operation and insert N blank lines at top.
+For \\='up: delete the first N lines and insert N blank lines at bottom.
+For \\='down: delete the last N lines and insert N blank lines at top.
 Must be called with `inhibit-read-only' and `inhibit-modification-hooks'
 already bound non-nil by the caller.  The outer `kuro--with-buffer-edit' already
 provides `save-excursion', so no inner save-excursion is needed here."
@@ -135,10 +135,10 @@ Must be called before the line text is replaced (uses pre-replace line-end)."
 
 (defun kuro--apply-face-ranges (face-ranges line-start line-end)
   "Apply FACE-RANGES to the line bounded by LINE-START and LINE-END.
-Each range is a 6-element list (START-BUF END-BUF FG-ENC BG-ENC FLAGS UL-COLOR-ENC)
+Each range is a list (START-BUF END-BUF FG-ENC BG-ENC FLAGS UL-COLOR-ENC)
 with byte offsets relative to LINE-START.  UL-COLOR-ENC is the encoded
 underline color transmitted in the version-2 binary wire format (0 = default).
-Must be called after the line text has been inserted (uses post-insert line-end)."
+Must be called after the line text has been inserted (post-insert line-end)."
   (when face-ranges
     (dolist (range face-ranges)
       (pcase-let* ((`(,start-buf ,end-buf ,fg-enc ,bg-enc ,flags ,ul-color-enc) range))
@@ -214,7 +214,7 @@ existing entry so stale CJK mappings do not persist after an ASCII redraw."
       (remhash row kuro--col-to-buf-map))))
 
 (defun kuro--update-line-full (row text face-ranges col-to-buf)
-  "Navigate to ROW exactly once and perform all line-update operations atomically.
+  "Navigate to ROW once and perform all line-update operations atomically.
 TEXT replaces the current line content.  FACE-RANGES is a list of FFI face
 range 6-tuples (start-buf end-buf fg bg flags ul-color) or nil.
 COL-TO-BUF is the grid-column → buffer-char-offset vector for this row, or nil.

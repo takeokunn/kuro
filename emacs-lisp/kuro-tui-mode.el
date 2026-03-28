@@ -65,7 +65,7 @@ output and the idle timer would only add spurious render cycles on top of
 the normal 120fps ticker.")
 
 (kuro--defvar-permanent-local kuro--tui-mode-active nil
-  "Non-nil when TUI mode is active and the render timer is running at `kuro-tui-frame-rate'.")
+  "Non-nil when TUI mode is active (render timer at `kuro-tui-frame-rate').")
 
 (kuro--defvar-permanent-local kuro--last-dirty-count 0
   "Number of dirty lines from the last actual render.
@@ -87,13 +87,13 @@ floating-point precision issues in `ceiling'.  For THRESHOLD=0.8:
 ;;; TUI mode transitions
 
 (defun kuro--enter-tui-mode ()
-  "Activate TUI mode: switch to TUI frame rate and suppress the streaming idle timer."
+  "Activate TUI mode: use TUI frame rate and suppress the streaming idle timer."
   (kuro--stop-stream-idle-timer)
   (kuro--switch-render-timer kuro-tui-frame-rate)
   (setq kuro--tui-mode-active t))
 
 (defun kuro--exit-tui-mode ()
-  "Deactivate TUI mode: restore normal frame rate and restart the streaming idle timer."
+  "Deactivate TUI mode: restore normal frame rate and restart the idle timer."
   (kuro--switch-render-timer kuro-frame-rate)
   (setq kuro--tui-mode-active nil)
   (kuro--start-stream-idle-timer))

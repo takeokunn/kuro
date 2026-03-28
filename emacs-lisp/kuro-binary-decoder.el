@@ -83,7 +83,7 @@ and NEW-POS is the byte offset after the text data."
 (defun kuro--decode-face-ranges (vec pos num-face-ranges format-version)
   "Decode NUM-FACE-RANGES face tuples from VEC starting at byte offset POS.
 FORMAT-VERSION controls the stride and presence of the ul-color field:
-  version 1: 24 bytes per range — start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64)
+  version 1: 24 bytes — start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64)
   version 2: 28 bytes per range — adds ul-color(u32) at offset 24.
 Returns a cons cell (FACE-LIST . NEW-POS) where FACE-LIST is in original order."
   (if (>= format-version 2)

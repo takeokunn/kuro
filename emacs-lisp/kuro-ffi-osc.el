@@ -76,7 +76,7 @@ or nil if none are pending.")
 
 (kuro--def-ffi-getter kuro--consume-scroll-events
   kuro-core-consume-scroll-events nil
-  "Atomically consume pending full-screen scroll event counts from the Rust core.
+  "Atomically consume pending full-screen scroll event counts from Rust core.
 Returns a cons cell (UP . DOWN) when scroll events are pending, nil when
 both counts are zero (no scrolling occurred since the last call).
 Must be called BEFORE `kuro--poll-updates-with-faces' each frame.")

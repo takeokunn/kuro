@@ -96,7 +96,7 @@ Each entry is (KBD-STRING . CTRL-BYTE).  The ctrl byte for a letter is
 C-c is intentionally absent — it is the kuro-mode-map prefix key.")
 
 (defun kuro--keymap-setup-ctrl (map)
-  "Add Ctrl+letter bindings to MAP, forwarding each to the PTY as its control byte.
+  "Add Ctrl+letter bindings to MAP, forwarding each to the PTY as control byte.
 Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
   (dolist (entry kuro--ctrl-key-table)
     (let ((key  (car entry))
@@ -121,7 +121,8 @@ This is the standard control sequence for backward-kill-word in readline/bash."
   "Alist of (KBD-STRING . CHAR) for Meta+punctuation bindings.
 Each entry maps an Emacs key string to the character sent via `kuro--send-meta'.
 Applied by `kuro--keymap-setup-meta'.
-M-DEL and M-<backspace> are handled separately (they call `kuro--send-meta-backspace').")
+M-DEL and M-<backspace> are handled separately
+\(they call `kuro--send-meta-backspace').")
 
 (defun kuro--keymap-setup-meta (map)
   "Add Meta/Alt bindings M-a through M-z and related keys to MAP.
@@ -187,7 +188,7 @@ like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
   '((f1  . kuro--F1)  (f2  . kuro--F2)  (f3  . kuro--F3)  (f4  . kuro--F4)
     (f5  . kuro--F5)  (f6  . kuro--F6)  (f7  . kuro--F7)  (f8  . kuro--F8)
     (f9  . kuro--F9)  (f10 . kuro--F10) (f11 . kuro--F11) (f12 . kuro--F12))
-  "Alist mapping Emacs function-key event symbols to their Kuro handler commands.")
+  "Alist mapping Emacs function-key event symbols to Kuro handler commands.")
 
 (defconst kuro--nav-key-bindings
   '(([up]      . kuro--arrow-up)

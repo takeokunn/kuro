@@ -23,27 +23,38 @@
 ;;; SGR attribute bitmask constants
 ;; These must match the encoding in rust-core/src/ffi/codec.rs `encode_attrs`.
 (defconst kuro--sgr-flag-bold          #x001
-  "SGR bold attribute flag (bit 0). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR bold attribute flag (bit 0).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-dim           #x002
-  "SGR dim/faint attribute flag (bit 1). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR dim/faint attribute flag (bit 1).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-italic        #x004
-  "SGR italic attribute flag (bit 2). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR italic attribute flag (bit 2).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-underline     #x008
-  "SGR underline attribute flag (bit 3). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR underline attribute flag (bit 3).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-blink-slow    #x010
-  "SGR slow blink attribute flag (bit 4). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR slow blink attribute flag (bit 4).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-blink-fast    #x020
-  "SGR fast blink attribute flag (bit 5). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR fast blink attribute flag (bit 5).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-inverse       #x040
-  "SGR inverse/reverse video attribute flag (bit 6). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR inverse/reverse video attribute flag (bit 6).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-hidden        #x080
-  "SGR hidden/invisible attribute flag (bit 7). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR hidden/invisible attribute flag (bit 7).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-strikethrough #x100
-  "SGR strikethrough attribute flag (bit 8). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "SGR strikethrough attribute flag (bit 8).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-underline-style-mask  #xE00
-  "Bitmask for underline style field (bits 9-11). Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "Bitmask for underline style field (bits 9-11).
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-underline-style-shift 9
-  "Bit shift for underline style field. Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+  "Bit shift for underline style field.
+Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 
 (defsubst kuro--sgr-flag-set-p (attr-flags flag)
   "Return t if FLAG bit is set in ATTR-FLAGS bitmask, nil otherwise.
@@ -66,7 +77,8 @@ ATTR-FLAGS is a bitmask matching Rust encode_attrs:
   bit 8  (0x100) = strikethrough
   bits 9-11 (0xE00, shift 9) = underline style:
     0 = None, 1 = Straight, 2 = Double, 3 = Curly, 4 = Dotted, 5 = Dashed
-Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy, only nil is falsy."
+Use (/= 0 ...) to produce t/nil booleans — in Elisp, 0 is truthy,
+only nil is falsy."
   (let ((bold           (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-bold))
         (dim            (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-dim))
         (italic         (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-italic))
@@ -99,13 +111,14 @@ Index 0 (None) maps to nil; indices 1–5 map to the symbol used in Emacs face
 becomes the atom t (plain underline) rather than `(list :style 'line)'.")
 
 (defun kuro--underline-style-to-face-prop (style underline-color)
-  "Convert underline STYLE integer and UNDERLINE-COLOR to an Emacs :underline value.
-STYLE is 0–5 per the SGR underline style encoding (see `kuro--underline-style-face-symbols').
+  "Convert underline STYLE integer and UNDERLINE-COLOR to an :underline value.
+STYLE is 0–5 per the SGR underline style encoding
+\(see `kuro--underline-style-face-symbols').
 Values ≥ 6 are unknown and fall back to t (plain underline).
 UNDERLINE-COLOR is an Emacs color string or nil.
 Returns the :underline face attribute value, or nil for no underline.
 
-Style 2 (double) with an explicit color uses \\='line rather than \\='double-line
+Style 2 (double) with color uses \\='line rather than \\='double-line
 because Emacs renders double-line+color identically to line+color in practice."
   (if (>= style (length kuro--underline-style-face-symbols))
       t  ; unknown style: plain underline

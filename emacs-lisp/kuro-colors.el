@@ -58,7 +58,7 @@
     ("bright-magenta" . kuro-color-bright-magenta)
     ("bright-cyan"    . kuro-color-bright-cyan)
     ("bright-white"   . kuro-color-bright-white))
-  "Alist mapping ANSI color name strings to their `kuro-color-*' defcustom symbols.
+  "Alist mapping ANSI color name strings to `kuro-color-*' defcustom symbols.
 Used by `kuro--rebuild-named-colors' to populate `kuro--named-colors'.")
 
 ;;; Internal Color Table

@@ -113,7 +113,7 @@ SYMBOL and VALUE are bound within BODY."
 
 (kuro--def-positive-int-setter kuro--set-tui-frame-rate
     "kuro: tui-frame-rate must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and switch render timer in active TUI-mode Kuro buffers."
+    "Set SYMBOL to VALUE and switch render timer in TUI-mode Kuro buffers."
   (when (fboundp 'kuro--switch-render-timer)
     (kuro--in-all-buffers
       (when (bound-and-true-p kuro--tui-mode-active)
@@ -177,7 +177,7 @@ Used in `kuro--init' when the ROWS argument is nil (e.g., noninteractive mode).
 See also `kuro--default-cols'.")
 
 (defconst kuro--default-cols 80
-  "Default terminal width in columns used when window dimensions are unavailable.
+  "Default terminal width in columns when window dimensions are unavailable.
 Used in `kuro--init' when the COLS argument is nil (e.g., noninteractive mode).
 See also `kuro--default-rows'.")
 
@@ -248,8 +248,8 @@ Changes take effect immediately in all running Kuro buffers."
 Must be a positive integer (greater than zero).
 Changes take effect immediately by restarting the render loop.
 120 fps (≈8 ms between frames) provides smooth, low-latency rendering.
-The idle-timer mechanism in kuro--self-insert also triggers an
-immediate render after each keypress, so input echo is not limited by this rate."
+The idle-timer mechanism in kuro--self-insert also triggers an immediate render
+after each keypress, so input echo is not limited by this rate."
   :type '(integer :tag "Positive integer (> 0)")
   :group 'kuro-display
   :set #'kuro--set-frame-rate)

@@ -77,9 +77,9 @@ and `insert' for speed (no echo-area overhead)."
 ;; Defined first so they are available for the variable declarations below.
 
 (defmacro kuro--when-divisible (counter divisor &rest body)
-  "Execute BODY when COUNTER is divisible by DIVISOR (i.e., counter mod divisor = 0).
+  "Execute BODY when COUNTER is divisible by DIVISOR (counter mod divisor = 0).
 This is the fundamental cadence-gating primitive used for periodic polling and
-animation timing: BODY is a continuation invoked only at exact multiples of DIVISOR."
+animation timing: BODY is a continuation invoked at exact multiples of DIVISOR."
   (declare (indent 2))
   `(when (zerop (mod ,counter ,divisor))
      ,@body))

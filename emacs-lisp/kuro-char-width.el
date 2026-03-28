@@ -60,9 +60,10 @@
     (#x3105  . #x312F)  (#x31A0  . #x31BF)
     (#x3200  . #x321E)  (#x3220  . #x3247)
     (#x3250  . #x32FE)  (#x3300  . #x33FF))
-  "Unicode ranges with display width 2 (emoji, CJK), matching Rust unicode-width 0.2.2.
-Used by `kuro--setup-char-width-table' to align Emacs display width with
-the terminal grid column count, preventing cursor misalignment for wide chars.")
+  "Unicode ranges with display width 2 (emoji, CJK).
+Matches Rust unicode-width 0.2.2.  Used by `kuro--setup-char-width-table'
+to align Emacs display width with the terminal grid column count,
+preventing cursor misalignment for wide chars.")
 
 (defconst kuro--char-width-1-ranges
   '(;; EA-Ambiguous ranges: Rust unicode-width 0.2 and xterm treat these as
@@ -120,7 +121,8 @@ update existing frames, and modifying only nil would not affect new frames."
 Each entry is ((range-start . range-end) . probe-char).
 The range is forced to display-width 1 in kuro buffers; the probe char is used
 by `kuro--refine-glyph-widths' to detect and correct font metrics.
-Unifies the old parallel `kuro--char-width-overrides' + `kuro--glyph-probe-chars'.")
+Unifies the old parallel `kuro--char-width-overrides' +
+`kuro--glyph-probe-chars'.")
 
 (defconst kuro--char-width-overrides
   (mapcar #'car kuro--ea-range-probe-table)
@@ -130,7 +132,7 @@ these EA-Ambiguous ranges to width 2, but terminal apps and Rust unicode-width
 treat them as width 1.")
 
 (defun kuro--apply-char-width-overrides ()
-  "Force all `kuro--char-width-overrides' ranges to width 1 in the current buffer.
+  "Force all `kuro--char-width-overrides' ranges to width 1 in current buffer.
 Must be called after `char-width-table' is buffer-local."
   (dolist (range kuro--char-width-overrides)
     (set-char-table-range char-width-table range 1)))

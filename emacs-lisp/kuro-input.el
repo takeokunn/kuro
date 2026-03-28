@@ -79,7 +79,7 @@ events that were not caught by the explicit Ctrl+letter bindings."
 ;;; Special Keys
 
 (defun kuro--send-special (byte)
-  "Send special key as single byte sequence to PTY and schedule immediate render."
+  "Send special key as single byte sequence to PTY; schedule immediate render."
   (kuro--send-key (string byte))
   (kuro--schedule-immediate-render))
 
@@ -98,15 +98,16 @@ DOC is the function docstring."
 ;;; Helper Function for Key Sequences
 
 (kuro--defvar-permanent-local kuro--application-cursor-keys-mode nil
-  "Cached DECCKM (application cursor keys) mode state from Rust (?1), polled by render cycle.")
+  "Cached DECCKM (application cursor keys) mode state from Rust (?1).
+Polled by render cycle.")
 
 (kuro--defvar-permanent-local kuro--scroll-offset 0
   "Current scrollback offset. 0 means live terminal view.")
 
 (kuro--defvar-permanent-local kuro--app-keypad-mode nil
-  "Cached application keypad mode (DECKPAM/DECKPNM) state from Rust, polled by render cycle.
-This is intentional P1 scaffolding: the variable is declared and polled now so that the
-numeric keypad bindings (kp-0 through kp-9, kp-enter, etc.) can read it when implemented.")
+  "Cached application keypad mode (DECKPAM/DECKPNM) state from Rust.
+Polled by render cycle.  P1 scaffolding: declared and polled now so that
+numeric keypad bindings (kp-0 through kp-9, kp-enter, etc.) can read it.")
 
 (defun kuro--send-key-sequence (normal-sequence application-sequence)
   "Send key sequence, switching between normal and application cursor modes.
@@ -187,7 +188,7 @@ At live view (offset 0), ESC + v is sent to the PTY."
 
 
 (defun kuro--ctrl-alt-modified (char modifier)
-  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  MODIFIER is ignored."
+  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  Ignores MODIFIER."
   (interactive "nChar: \nModifier: ")
   (kuro--send-key (concat (string ?\e) (string (logand char 31))))
   (kuro--schedule-immediate-render))
@@ -240,7 +241,7 @@ DOC is the docstring for the generated function."
     (backspace . "\x7f")
     (escape    . "\e"))
   "Alist mapping named key symbols to their PTY byte sequences.
-Used by `kuro--encode-key-event' to handle special keys in `kuro-send-next-key'.")
+Used by `kuro--encode-key-event' for special keys in `kuro-send-next-key'.")
 
 (defun kuro--encode-key-event (event)
   "Encode keyboard EVENT as a PTY byte sequence string, or nil if unsupported.

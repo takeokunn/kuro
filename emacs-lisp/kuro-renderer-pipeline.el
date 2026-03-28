@@ -299,7 +299,7 @@ GC is suppressed during the render to reduce pause jitter."
 
 (defun kuro--core-render-pipeline-with-timing ()
   "Execute the core render pipeline with per-step timing and return updates.
-Appends one timing line to *kuro-perf* every `kuro--perf-sample-interval' frames."
+Appends one timing line to *kuro-perf* per `kuro--perf-sample-interval' frames."
   (let ((t-total (float-time))
         ffi-ms apply-ms cursor-ms updates)
     (kuro--with-render-env
@@ -335,7 +335,8 @@ high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
 loop.  Process-exit detection is always performed regardless of budget.")
 
 (defvar kuro--frame-duration-ring (make-vector kuro--frame-duration-ring-size 0.0)
-  "Ring buffer of the last `kuro--frame-duration-ring-size' frame durations in seconds.")
+  "Ring buffer of the last `kuro--frame-duration-ring-size' frame durations
+\(seconds).")
 
 (defvar kuro--frame-duration-ring-index 0
   "Current write index into `kuro--frame-duration-ring'.")

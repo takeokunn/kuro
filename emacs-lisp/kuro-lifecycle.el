@@ -71,7 +71,8 @@ Signals on any failure; the caller is responsible for rollback."
     (kuro--start-render-loop)))
 
 (defun kuro--rollback-attach (session-id buffer err)
-  "Roll back a failed attach for SESSION-ID: log ERR, clear state, detach, kill BUFFER."
+  "Roll back a failed attach for SESSION-ID.
+Log ERR, clear state, detach, and kill BUFFER."
   (message "Kuro: Failed to attach to session %d: %s" session-id err)
   (kuro--clear-session-state)
   (condition-case nil
@@ -83,7 +84,7 @@ Signals on any failure; the caller is responsible for rollback."
 (defun kuro--teardown-session ()
   "Detach or destroy the current session, prompting if the process is alive.
 Detached sessions remain reattachable via `kuro-attach'.
-Assumes `kuro--stop-render-loop' and `kuro--cleanup-render-state' have already run."
+Assumes `kuro--stop-render-loop' and `kuro--cleanup-render-state' already ran."
   (if (and kuro--initialized
            (kuro--is-process-alive)
            (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it) ")))
@@ -260,7 +261,7 @@ Switches to the terminal buffer after creation."
   `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
 
 ;;;###autoload
-(kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal process.")
+(kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
 ;;;###autoload
 (kuro--def-control-key kuro-send-sigstop  [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
 ;;;###autoload

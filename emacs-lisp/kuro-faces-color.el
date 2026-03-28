@@ -36,7 +36,7 @@ See `encode_color' in rust-core/src/ffi/codec.rs for the encoding contract.")
   "Standard ANSI terminal color names for indices 0-15.
 Used to look up named-color faces in `kuro--decode-ffi-color' and
 `kuro--indexed-to-emacs'. Indices match the order of NamedColor in
-rust-core/src/types/color.rs.  Names must match the keys in `kuro--named-colors'.")
+rust-core/src/types/color.rs.  Names match the keys in `kuro--named-colors'.")
 
 ;;; 256-color palette constants
 
@@ -63,7 +63,7 @@ Indices 232-255 encode 24 shades from near-black to near-white.")
 
 (defconst kuro--color-gray-offset 8
   "Base intensity offset for the first grayscale ramp entry (index 232).
-The formula is: value = index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
+Formula: index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
 
 ;;; Pre-computed 256-color lookup tables
 

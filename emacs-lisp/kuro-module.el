@@ -33,7 +33,8 @@
   (kuro--module-try kuro-module-binary-path))
 
 (defun kuro-module--lib-name ()
-  "Return the platform-specific shared library filename (e.g. \"libkuro_core.dylib\")."
+  "Return the platform-specific shared library filename.
+For example: \"libkuro_core.dylib\" on macOS, \"libkuro_core.so\" on Linux."
   (format "libkuro_core.%s" (kuro-module--platform-extension)))
 
 (defun kuro-module--tier-env ()
@@ -66,7 +67,7 @@ we fall back to locate-library so that batch-mode tests also work."
   "Ordered list of module path resolution strategies, tried in priority order.")
 
 (defun kuro-module--find-library ()
-  "Find the kuro native module binary using the ordered `kuro-module--search-tiers'.
+  "Find the kuro native module binary via `kuro-module--search-tiers'.
 1. kuro-module-binary-path defcustom (user override)
 2. KURO_MODULE_PATH environment variable (CI/dev override)
 3. XDG standard path: ~/.local/share/kuro/
@@ -76,7 +77,7 @@ we fall back to locate-library so that batch-mode tests also work."
 ;;;###autoload
 (defun kuro-module-load ()
   "Load the kuro native module if available.
-Searches for the binary in: custom path, XDG standard location, development path.
+Searches for the binary in: custom path, XDG location, development path.
 Emits a warning but does not error if the module is not found.
 If the module is already loaded (kuro-core-init is fbound), does nothing."
   (unless (fboundp 'kuro-core-init)

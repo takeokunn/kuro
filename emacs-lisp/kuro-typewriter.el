@@ -47,7 +47,8 @@ The typewriter timer drains this queue character-by-character.")
 
 (kuro--defvar-permanent-local kuro--typewriter-timer nil
   "Repeating timer for the typewriter character-drip effect.
-Fires at `kuro-typewriter-chars-per-second' Hz when `kuro-typewriter-effect' is t.")
+Fires at `kuro-typewriter-chars-per-second' Hz when
+`kuro-typewriter-effect' is t.")
 
 (kuro--defvar-permanent-local kuro--typewriter-current-row nil
   "Row currently being written by the typewriter effect.")

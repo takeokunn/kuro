@@ -573,4 +573,3 @@ fn test_tab_stops_available_after_resize_grow() {
 }
 
 include!("include/integration_terminal_cursor_save.rs");
-

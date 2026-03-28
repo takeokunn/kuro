@@ -65,10 +65,7 @@ macro_rules! assert_image_survives {
             setup_fn(&mut store);
             let op_fn: &dyn Fn(&mut GraphicsStore) = &$op;
             op_fn(&mut store);
-            assert!(
-                !store.get_image_png_base64($id).is_empty(),
-                $msg
-            );
+            assert!(!store.get_image_png_base64($id).is_empty(), $msg);
         }
     };
 }
@@ -272,7 +269,9 @@ assert_image_survives!(
     scroll_up_shifts_placement_rows_up_by_n,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 5, 0)); },
+    |s| {
+        s.add_placement(min_placement(1, 5, 0));
+    },
     |s| {
         s.scroll_up(3);
         // Confirm state is consistent after scroll.
@@ -285,8 +284,12 @@ assert_image_survives!(
     scroll_up_discards_placements_that_scroll_off_the_top,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 1, 0)); },
-    |s| { s.scroll_up(2); },
+    |s| {
+        s.add_placement(min_placement(1, 1, 0));
+    },
+    |s| {
+        s.scroll_up(2);
+    },
     "image data must survive scroll_up even when its placement is discarded"
 );
 
@@ -296,8 +299,12 @@ assert_image_survives!(
     scroll_down_shifts_placement_rows_down_by_n,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 2, 0)); },
-    |s| { s.scroll_down(3, 24); },
+    |s| {
+        s.add_placement(min_placement(1, 2, 0));
+    },
+    |s| {
+        s.scroll_down(3, 24);
+    },
     "image must survive scroll_down"
 );
 
@@ -380,8 +387,12 @@ assert_image_survives!(
     scroll_up_zero_is_noop,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 5, 0)); },
-    |s| { s.scroll_up(0); },
+    |s| {
+        s.add_placement(min_placement(1, 5, 0));
+    },
+    |s| {
+        s.scroll_up(0);
+    },
     "image must survive scroll_up(0)"
 );
 
@@ -389,8 +400,12 @@ assert_image_survives!(
     scroll_up_keeps_placement_at_exact_boundary,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 5, 0)); },
-    |s| { s.scroll_up(5); },
+    |s| {
+        s.add_placement(min_placement(1, 5, 0));
+    },
+    |s| {
+        s.scroll_up(5);
+    },
     "image must survive scroll_up equal to placement row"
 );
 
@@ -400,8 +415,12 @@ assert_image_survives!(
     scroll_down_with_zero_max_row_clamps_to_zero,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 0, 0)); },
-    |s| { s.scroll_down(5, 0); },
+    |s| {
+        s.add_placement(min_placement(1, 0, 0));
+    },
+    |s| {
+        s.scroll_down(5, 0);
+    },
     "image must survive scroll_down with max_row=0"
 );
 
@@ -409,8 +428,12 @@ assert_image_survives!(
     scroll_down_clamps_placement_to_max_row_minus_one,
     1,
     tiny_rgb(0x01),
-    |s| { s.add_placement(min_placement(1, 20, 0)); },
-    |s| { s.scroll_down(100, 24); },
+    |s| {
+        s.add_placement(min_placement(1, 20, 0));
+    },
+    |s| {
+        s.scroll_down(100, 24);
+    },
     "image must survive scroll_down with large n"
 );
 

@@ -439,7 +439,6 @@ fn test_sgr_4_subparam_1_is_straight() {
     assert_eq!(term.current_attrs.underline_style, UnderlineStyle::Straight);
 }
 
-
 /// Apply a single SGR sequence and assert a color field equals the expected value.
 ///
 /// Usage:

@@ -348,7 +348,11 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
         return (String::new(), Vec::new(), Vec::new());
     }
     fill_encode_pool(cells, pool);
-    (pool.text.clone(), pool.face_ranges.clone(), pool.col_to_buf.clone())
+    (
+        pool.text.clone(),
+        pool.face_ranges.clone(),
+        pool.col_to_buf.clone(),
+    )
 }
 
 /// Encode a cell slice into the pool, then serialise **face ranges and

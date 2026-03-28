@@ -596,4 +596,3 @@ proptest! {
 }
 
 include!("erase_character_fill.rs");
-

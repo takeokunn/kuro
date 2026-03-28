@@ -137,7 +137,12 @@ fn insert_lines_shifts_content_down() {
 }
 
 assert_count_zero_noop!(insert_lines_count_zero_is_noop, 'X', insert_lines(0));
-assert_outside_scroll_noop!(insert_lines_outside_scroll_region_is_noop, 3, 'Q', insert_lines(1));
+assert_outside_scroll_noop!(
+    insert_lines_outside_scroll_region_is_noop,
+    3,
+    'Q',
+    insert_lines(1)
+);
 assert_preserves_row_count!(insert_lines_preserves_line_count, insert_lines(5));
 
 // ---------------------------------------------------------------------------
@@ -168,7 +173,12 @@ fn delete_lines_scrolls_content_up() {
     assert_cell_char!(s, 23, 0, ' ');
 }
 
-assert_outside_scroll_noop!(delete_lines_outside_scroll_region_is_noop, 2, 'W', delete_lines(1));
+assert_outside_scroll_noop!(
+    delete_lines_outside_scroll_region_is_noop,
+    2,
+    'W',
+    delete_lines(1)
+);
 assert_preserves_row_count!(delete_lines_preserves_line_count, delete_lines(3));
 
 // ---------------------------------------------------------------------------
@@ -194,7 +204,10 @@ fn insert_chars_shifts_right() {
     assert_cell_char!(s, 0, 2, 'B');
 }
 
-assert_line_width_unchanged!(insert_chars_does_not_change_line_width, insert_chars(5, SgrAttributes::default()));
+assert_line_width_unchanged!(
+    insert_chars_does_not_change_line_width,
+    insert_chars(5, SgrAttributes::default())
+);
 
 #[test]
 fn insert_chars_count_larger_than_remaining_clamps() {

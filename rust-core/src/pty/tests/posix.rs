@@ -259,6 +259,19 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
 
 // --- Tests for setup_child_env (pure env-var function) ---
 
+/// Serializes all fork-based and env-mutating `setup_child_env` tests.
+///
+/// `fork()` in a multi-threaded process (cargo test) copies only the calling
+/// thread but inherits all mutexes in their current state.  Rust's internal
+/// env-var `RwLock` will be permanently locked in the child if another thread
+/// holds it at fork time, causing a deadlock that hits the 2-second timeout.
+///
+/// By holding `ENV_FORK_LOCK` for the entire critical section (env mutation
+/// + fork + cleanup), we guarantee that no env-var write is in-flight when
+/// `fork()` is called in any of the three `setup_child_env` tests.
+#[cfg(unix)]
+static ENV_FORK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `setup_child_env` tests run in a subprocess via `fork()` so that process-wide
 /// env-var mutations are isolated from parallel test threads.
 ///
@@ -341,6 +354,7 @@ fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> bool {
 fn test_setup_child_env_sets_term() {
     // setup_child_env must set TERM=xterm-256color and COLORTERM=truecolor.
     // Runs in a forked child to isolate env-var mutations from other test threads.
+    let _lock = ENV_FORK_LOCK.lock().unwrap();
     let ok = run_in_child_check(|| {
         super::setup_child_env(24, 80);
         std::env::var("TERM").as_deref() == Ok("xterm-256color")
@@ -357,6 +371,7 @@ fn test_setup_child_env_sets_term() {
 #[cfg(unix)]
 fn test_setup_child_env_propagates_dimensions() {
     // Runs in a forked child to isolate env-var mutations from other test threads.
+    let _lock = ENV_FORK_LOCK.lock().unwrap();
     let ok = run_in_child_check(|| {
         super::setup_child_env(42, 120);
         std::env::var("LINES").as_deref() == Ok("42")
@@ -369,11 +384,9 @@ fn test_setup_child_env_propagates_dimensions() {
 #[cfg(unix)]
 fn test_setup_child_env_removes_multiplexer_vars() {
     // Set multiplexer vars in the PARENT before fork so the child inherits them.
-    // Calling set_var inside the child (after fork) is unsafe in a multi-threaded
-    // process: the env mutex may be locked at fork time, causing deadlock.
-    // SAFETY: set/remove_var here race with other env reads in parallel tests,
-    // but TMUX/STY/INSIDE_EMACS/EMACS_SOCKET_NAME are test-only vars not used
-    // by any other test in this crate.
+    // Hold ENV_FORK_LOCK for the full critical section (set_var + fork + cleanup)
+    // so no concurrent test can hold the env RwLock when fork() is called.
+    let _lock = ENV_FORK_LOCK.lock().unwrap();
     #[allow(deprecated)]
     unsafe {
         std::env::set_var("TMUX", "some-socket");

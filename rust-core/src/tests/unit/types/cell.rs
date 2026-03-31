@@ -26,7 +26,7 @@ prop_compose! {
         hidden      in proptest::bool::ANY,
         strikethrough in proptest::bool::ANY,
     ) -> SgrAttributes {
-        let mut flags = SgrFlags::empty();
+        let mut flags = SgrFlags::default();
         flags.set(SgrFlags::BOLD, bold);
         flags.set(SgrFlags::DIM, dim);
         flags.set(SgrFlags::ITALIC, italic);
@@ -346,7 +346,7 @@ fn sgr_default_all_false() {
     let attrs = SgrAttributes::default();
     assert_eq!(
         attrs.flags,
-        SgrFlags::empty(),
+        SgrFlags::default(),
         "all boolean flags must be clear in default attrs"
     );
     assert!(!attrs.underline());

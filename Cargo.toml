@@ -12,8 +12,6 @@ repository = "https://github.com/takeokunn/kuro"
 rust-version = "1.84.0"
 
 [workspace.dependencies]
-bitflags = "2"
-bitvec = "1.0"
 vte = "0.15.0"
 emacs = "0.19.0"
 unicode-width = "0.2"
@@ -22,11 +20,7 @@ serde = { version = "1.0", features = ["derive"] }
 proptest = "1.5"
 criterion = "0.5"
 nix = { version = "0.29", features = ["process", "term", "fs", "signal"] }
-which = "7.0"
-base64 = "0.22"
 png = "0.17"
-crossbeam-channel = "0.5"
-memchr = "2.7"
 
 [profile.release]
 lto = "thin"

@@ -386,7 +386,7 @@ fn encode_1x1_png_b64(color_type: png::ColorType, pixels: &[u8]) -> String {
         let mut writer = encoder.write_header().expect("PNG header write");
         writer.write_image_data(pixels).expect("PNG pixel write");
     }
-    BASE64_STANDARD.encode(&buf)
+    crate::util::base64::encode(&buf)
 }
 
 #[test]

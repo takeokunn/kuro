@@ -175,7 +175,10 @@ pub struct Pty {
     /// Child process ID
     child_pid: Pid,
     /// Channel for receiving PTY output (bounded for backpressure)
-    receiver: crossbeam_channel::Receiver<Vec<u8>>,
+    receiver: std::sync::mpsc::Receiver<Vec<u8>>,
+    /// One-item peek buffer populated by `has_pending_data` so that `read` can
+    /// drain it first without losing the already-consumed channel item.
+    peek_buffer: std::sync::Mutex<Option<Vec<u8>>>,
     /// Shutdown signal for reader thread
     shutdown: Arc<AtomicBool>,
     /// Thread handle for PTY reader
@@ -185,6 +188,26 @@ pub struct Pty {
 }
 
 impl Pty {
+    /// Search `$PATH` for an executable named `command`.
+    ///
+    /// Returns the first absolute path found, or `None` if not found.
+    fn find_in_path(command: &str) -> Option<PathBuf> {
+        if command.is_empty() {
+            return None;
+        }
+        let path_var = std::env::var("PATH").unwrap_or_default();
+        for dir in path_var.split(':') {
+            if dir.is_empty() {
+                continue;
+            }
+            let candidate = PathBuf::from(dir).join(command);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
     /// Validate shell command against whitelist
     ///
     /// Ensures only allowed shells can be spawned to prevent command injection.
@@ -222,8 +245,8 @@ impl Pty {
             }
             p
         } else {
-            which::which(command)
-                .map_err(|e| invalid_parameter_error("command", &format!("Shell not found: {e}")))?
+            Self::find_in_path(command)
+                .ok_or_else(|| invalid_parameter_error("command", &format!("Shell not found in PATH: {command}")))?
         };
 
         let basename = path
@@ -277,7 +300,7 @@ impl Pty {
             .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {e}")))?;
 
         // Create bounded channel for backpressure
-        let (sender, receiver) = crossbeam_channel::bounded(CHANNEL_CAPACITY);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
         let process_exited = Arc::new(AtomicBool::new(false));
 
@@ -329,6 +352,7 @@ impl Pty {
                     master: master_file,
                     child_pid: child,
                     receiver,
+                    peek_buffer: std::sync::Mutex::new(None),
                     shutdown,
                     _reader_thread: reader_thread,
                     process_exited,
@@ -378,7 +402,12 @@ impl Pty {
     pub fn read(&mut self) -> Result<Vec<u8>> {
         let mut all_data = Vec::with_capacity(8192);
 
-        // Drain all available data from the channel
+        // Drain the peek buffer first (populated by has_pending_data)
+        if let Some(data) = self.peek_buffer.lock().expect("peek_buffer lock poisoned").take() {
+            all_data.extend(data);
+        }
+
+        // Drain remaining channel data
         while let Ok(data) = self.receiver.try_recv() {
             all_data.extend(data);
         }
@@ -389,7 +418,21 @@ impl Pty {
     /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
     #[must_use]
     pub fn has_pending_data(&self) -> bool {
-        !self.receiver.is_empty()
+        // Check peek buffer first (previously peeked item)
+        {
+            let peek = self.peek_buffer.lock().expect("peek_buffer lock poisoned");
+            if peek.is_some() {
+                return true;
+            }
+        }
+        // Try to consume one item and store it in the peek buffer
+        match self.receiver.try_recv() {
+            Ok(data) => {
+                *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(data);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Return the child process PID.

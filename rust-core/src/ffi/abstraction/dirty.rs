@@ -52,28 +52,25 @@ impl TerminalSession {
             let num_rows_offset = buf.len();
             buf.extend_from_slice(&0u32.to_le_bytes()); // placeholder — backfilled below
             for row in 0..rows {
-                match self.core.screen.get_scrollback_viewport_line(row) {
-                    Some(line) => {
-                        let text = crate::ffi::codec::encode_line_into_buf(
-                            &line.cells,
-                            &mut self.encode_pool,
-                            row,
-                            &mut buf,
-                        );
-                        texts.push(text);
-                    }
-                    None => {
-                        // Emit an empty row entry.
-                        #[expect(
-                            clippy::cast_possible_truncation,
-                            reason = "row index is a terminal row (≤ 65535); fits u32"
-                        )]
-                        buf.extend_from_slice(&(row as u32).to_le_bytes());
-                        buf.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
-                        buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
-                        buf.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
-                        texts.push(String::new());
-                    }
+                if let Some(line) = self.core.screen.get_scrollback_viewport_line(row) {
+                    let text = crate::ffi::codec::encode_line_into_buf(
+                        &line.cells,
+                        &mut self.encode_pool,
+                        row,
+                        &mut buf,
+                    );
+                    texts.push(text);
+                } else {
+                    // Emit an empty row entry.
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "row index is a terminal row (≤ 65535); fits u32"
+                    )]
+                    buf.extend_from_slice(&(row as u32).to_le_bytes());
+                    buf.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
+                    buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
+                    buf.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
+                    texts.push(String::new());
                 }
             }
             // Backfill num_rows.

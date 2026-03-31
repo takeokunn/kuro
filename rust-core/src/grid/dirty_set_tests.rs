@@ -261,9 +261,8 @@ fn test_clone_is_independent() {
 #[test]
 fn test_iter_ones_direct_on_empty_set() {
     let ds = BitVecDirtySet::new(16);
-    let result: Vec<usize> = ds.iter_ones_direct().collect();
     assert!(
-        result.is_empty(),
+        ds.iter_ones_direct().next().is_none(),
         "iter_ones_direct on empty set must yield nothing"
     );
 }

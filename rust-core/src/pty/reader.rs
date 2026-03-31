@@ -21,7 +21,7 @@ impl PtyReader {
     )]
     pub fn read_loop(
         mut master: File,
-        sender: crossbeam_channel::Sender<Vec<u8>>,
+        sender: std::sync::mpsc::SyncSender<Vec<u8>>,
         shutdown: Arc<AtomicBool>,
         process_exited: Arc<AtomicBool>,
     ) {
@@ -78,7 +78,7 @@ mod tests {
         let read_fd = fds[0];
         let write_fd = fds[1];
 
-        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(128);
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // Wrap the read end as a File and hand it to read_loop in a background thread
@@ -128,7 +128,7 @@ mod tests {
         let read_fd = fds[0];
         let write_fd = fds[1];
 
-        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(128);
         let shutdown = Arc::new(AtomicBool::new(true)); // already set
 
         // Wrap fds as Files so they are closed on drop
@@ -173,7 +173,7 @@ mod tests {
         let read_fd = fds[0];
         let write_fd = fds[1];
 
-        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(128);
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // SAFETY: read_fd is a valid fd from pipe above; File takes ownership; not used again.

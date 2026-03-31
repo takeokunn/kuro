@@ -5,8 +5,6 @@
 //! and dispatched here for parsing and decoding.
 
 use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine as _;
 
 /// Kitty Graphics Protocol format code for 24-bit RGB (3 bytes per pixel).
 const FORMAT_RGB: u32 = 24;
@@ -185,7 +183,7 @@ pub fn process_apc_payload(
     // Base64 decode the payload
     let decoded = if b64_data.is_empty() {
         Vec::new()
-    } else if let Ok(d) = BASE64_STANDARD.decode(b64_data) {
+    } else if let Ok(d) = crate::util::base64::decode(b64_data) {
         d
     } else {
         // Malformed base64 — discard entire sequence including any chunk state

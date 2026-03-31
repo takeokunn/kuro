@@ -335,7 +335,7 @@ mod tests {
     fn test_update_cell_with_different_cell_marks_dirty() {
         let mut line = Line::new(5);
         let new_cell = Cell::new('Z');
-        line.update_cell_with(3, new_cell.clone());
+        line.update_cell_with(3, new_cell);
         assert!(
             line.is_dirty,
             "update_cell_with differing cell must mark dirty"

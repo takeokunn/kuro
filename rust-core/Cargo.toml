@@ -10,23 +10,14 @@ repository.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-bitflags.workspace = true
-bitvec.workspace = true
 vte.workspace = true
 emacs.workspace = true
 unicode-width.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 nix.workspace = true
-which.workspace = true
-crossbeam-channel.workspace = true
-base64.workspace = true
 png.workspace = true
 compact_str = { version = "0.8", features = ["serde"] }
-memchr.workspace = true
-ahash = "0.8"
-smallvec = { version = "1", features = ["union"] }
-mimalloc = { version = "0.1", default-features = false }
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]
@@ -35,6 +26,7 @@ libc = "0.2"
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true
+base64 = "0.22"
 
 [[bench]]
 name = "parser_throughput"

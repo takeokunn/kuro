@@ -1,8 +1,6 @@
 //! Protocol-specific OSC handlers: OSC 52 (clipboard), OSC 104 (palette reset),
 //! OSC 133 (prompt marks), OSC 10/11/12 (default colors), OSC 1337 (iTerm2 images).
 
-use base64::Engine as _;
-
 use crate::TerminalCore;
 
 /// Decode a `params` slot as UTF-8, returning `""` on failure.
@@ -83,7 +81,7 @@ pub(crate) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
                 .push(crate::types::osc::ClipboardAction::Query);
         } else if data_raw.len() <= 1_048_576 {
             // 1MB cap
-            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(data_raw) {
+            if let Ok(decoded) = crate::util::base64::decode(data_raw) {
                 if let Ok(text) = String::from_utf8(decoded) {
                     core.osc_data
                         .clipboard_actions
@@ -241,8 +239,7 @@ pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)>
     if b64_data.is_empty() {
         return None;
     }
-    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    let raw = BASE64_STANDARD.decode(b64_data.trim()).ok()?;
+    let raw = crate::util::base64::decode(b64_data.trim().as_bytes()).ok()?;
 
     use crate::parser::kitty::ImageFormat;
     let decoder = png::Decoder::new(std::io::Cursor::new(&raw));

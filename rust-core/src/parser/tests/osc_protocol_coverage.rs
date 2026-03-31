@@ -66,9 +66,6 @@ fn test_handle_osc_default_colors_set_fg_via_rgb_4digit() {
 /// (the `_ => ImageFormat::Rgb` path in `decode_iterm2_image`).
 #[test]
 fn test_decode_iterm2_image_rgb_png_converts_to_rgba() {
-    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use base64::Engine as _;
-
     // Build a minimal 1×1 RGB PNG at runtime so the test does not depend on
     // any hardcoded binary blob.
     let mut png_bytes: Vec<u8> = Vec::new();
@@ -81,7 +78,7 @@ fn test_decode_iterm2_image_rgb_png_converts_to_rgba() {
             .write_image_data(&[0xDE, 0xAD, 0xBE])
             .expect("PNG data");
     }
-    let b64 = BASE64_STANDARD.encode(&png_bytes);
+    let b64 = crate::util::base64::encode(&png_bytes);
     let result = super::decode_iterm2_image(&b64);
     assert!(result.is_some(), "valid RGB PNG must decode successfully");
     let (pixels, w, h) = result.unwrap();
@@ -105,8 +102,6 @@ fn test_decode_iterm2_image_rgb_png_converts_to_rgba() {
 #[test]
 fn test_handle_osc_1337_inline_png_advances_cursor() {
     use crate::TerminalCore;
-    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use base64::Engine as _;
 
     // Build a 1×1 RGBA PNG.
     let mut png_bytes: Vec<u8> = Vec::new();
@@ -119,7 +114,7 @@ fn test_handle_osc_1337_inline_png_advances_cursor() {
             .write_image_data(&[0xFF, 0xFF, 0xFF, 0xFF])
             .expect("PNG data");
     }
-    let b64 = BASE64_STANDARD.encode(&png_bytes);
+    let b64 = crate::util::base64::encode(&png_bytes);
 
     // Compose the OSC 1337 param string: inline=1, explicit 2-col × 1-row display.
     let param_str = format!("File=inline=1;width=2;height=1:{b64}");
@@ -219,7 +214,7 @@ fn test_handle_osc_52_non_c_selection_records_write() {
     assert_eq!(core.osc_data().clipboard_actions.len(), 1);
     match &core.osc_data().clipboard_actions[0] {
         ClipboardAction::Write(s) => assert_eq!(s, "hi"),
-        other => panic!("expected Write(\"hi\"), got {other:?}"),
+        other @ ClipboardAction::Query => panic!("expected Write(\"hi\"), got {other:?}"),
     }
 }
 

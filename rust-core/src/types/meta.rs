@@ -94,8 +94,8 @@ mod tests {
         let mut m = TerminalMeta::default();
         m.pending_responses.push(b"r1".to_vec());
         m.pending_responses.push(b"r2".to_vec());
-        let drained: Vec<_> = m.pending_responses.drain(..).collect();
-        assert_eq!(drained.len(), 2);
+        let drained_count = m.pending_responses.drain(..).count();
+        assert_eq!(drained_count, 2);
         assert!(m.pending_responses.is_empty());
     }
 

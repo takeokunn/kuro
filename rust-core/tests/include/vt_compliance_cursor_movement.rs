@@ -174,7 +174,7 @@ fn vt_ed2_full_screen_erase() {
     // Every cell in the 5×20 grid must now be a space
     for row in 0..5_usize {
         for col in 0..20_usize {
-            let ch = t.get_cell(row, col).map(|c| c.char()).unwrap_or(' ');
+            let ch = t.get_cell(row, col).map_or(' ', |c| c.char());
             assert_eq!(
                 ch, ' ',
                 "cell ({row},{col}) must be space after ED 2, got '{ch}'"

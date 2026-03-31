@@ -45,7 +45,7 @@ macro_rules! test_transmit_nxn_image {
     ) => {
         #[test]
         fn $name() {
-            let b64 = BASE64_STANDARD.encode([0u8; $nbytes]);
+            let b64 = crate::util::base64::encode(&[0u8; $nbytes]);
             let mut chunk_state = None;
             let payload = format!(
                 "a=t,f={},i={},s={},v={};{}",
@@ -350,7 +350,7 @@ fn test_kitty_png_indexed_color_type_produces_rgba_format() {
         // Image data: one pixel at palette index 0.
         writer.write_image_data(&[0u8]).expect("PNG pixel write");
     }
-    let b64 = BASE64_STANDARD.encode(&png_bytes);
+    let b64 = crate::util::base64::encode(&png_bytes);
     let payload = format!("a=t,f=100,i=40,s=1,v=1;{b64}");
     let mut chunk_state = None;
     let result = process_apc_payload(payload.as_bytes(), &mut chunk_state);

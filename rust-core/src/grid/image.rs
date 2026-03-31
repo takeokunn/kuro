@@ -47,9 +47,7 @@ impl ImageData {
     /// Re-encode as base64-encoded PNG string (for Emacs FFI transfer)
     #[must_use]
     pub fn to_png_base64(&self) -> String {
-        use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-        use base64::Engine as _;
-        BASE64_STANDARD.encode(self.to_png_bytes())
+        crate::util::base64::encode(&self.to_png_bytes())
     }
 }
 

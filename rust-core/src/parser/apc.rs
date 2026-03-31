@@ -2,7 +2,6 @@
 
 use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
 use crate::TerminalCore;
-use memchr::memchr;
 
 /// State machine for raw APC byte-stream pre-scanning.
 ///
@@ -26,26 +25,25 @@ pub enum ApcScanState {
 ///
 /// This uses a hybrid approach for APC (Kitty Graphics) handling:
 /// 1. Fast path: If no ESC byte (0x1B) is present AND we're not in an APC sequence,
-///    skip the APC pre-scanner entirely (memchr check is ~10-20x faster than byte-by-byte)
+///    skip the APC pre-scanner entirely (contains-based fast-path check)
 /// 2. Slow path: Run the APC state machine only when ESC is detected or we're mid-sequence
 /// 3. Always run the vte parser for all other terminal sequences
 pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // --- Hybrid APC pre-scanner for Kitty Graphics ---
     // Only run the byte-by-byte scanner if:
-    // 1. There's an ESC byte in the buffer (detected via memchr), OR
+    // 1. There's an ESC byte in the buffer (detected via bytes.contains()), OR
     // 2. We're already in the middle of an APC sequence
     //
     // This optimization provides 2-4x throughput improvement for plain text
     // (no escape sequences) which is common in typical terminal output.
-    let has_esc = memchr(0x1B, bytes).is_some();
+    let has_esc = bytes.contains(&0x1B);
     let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
 
     // Quick bail-out: when starting Idle and the buffer contains no '_' byte,
     // no APC start sequence (ESC _) can exist, so skip the byte-by-byte
     // scanner entirely.  This is the common case for CSI/OSC-heavy TUI output
     // where ESC bytes are frequent but APC sequences are absent.
-    // memchr is SIMD-accelerated (~1μs for 64KB) and replaces a ~100μs loop.
-    if in_apc_sequence || (has_esc && memchr(b'_', bytes).is_some()) {
+    if in_apc_sequence || (has_esc && bytes.contains(&b'_')) {
         for &byte in bytes {
             match (core.kitty.apc_state, byte) {
                 // Idle: watch for ESC

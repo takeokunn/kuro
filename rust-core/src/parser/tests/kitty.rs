@@ -4,7 +4,6 @@
 //! Tier: T3 — `ProptestConfig::with_cases(256)`
 
 use super::*;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use proptest::prelude::*;
 
 #[test]

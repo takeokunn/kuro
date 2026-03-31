@@ -5,7 +5,7 @@
 //! eliminates hash-function overhead on every `insert()` call, which is the
 //! hot path when printing characters to the screen.
 
-use bitvec::prelude::*;
+use crate::util::bit_set::BitSet;
 
 /// Tracks which screen rows have been modified since the last render.
 pub trait DirtySet: Send + Sync {
@@ -29,7 +29,7 @@ pub trait DirtySet: Send + Sync {
 /// a row index beyond the current capacity is inserted.
 #[derive(Debug, Clone)]
 pub struct BitVecDirtySet {
-    bits: BitVec,
+    bits: BitSet,
     count: usize,
 }
 
@@ -38,7 +38,7 @@ impl BitVecDirtySet {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            bits: bitvec![0; capacity],
+            bits: BitSet::new(capacity),
             count: 0,
         }
     }
@@ -96,11 +96,9 @@ impl BitVecDirtySet {
     }
 
     /// Iterate over dirty row indices directly, bypassing the `DirtySet` trait's
-    /// `Box<dyn Iterator>`.  Returns `bitvec::slice::IterOnes` which yields
-    /// indices in ascending order without heap allocation.
+    /// `Box<dyn Iterator>`.  Returns indices in ascending order without heap allocation.
     #[inline]
-    #[must_use]
-    pub fn iter_ones_direct(&self) -> bitvec::slice::IterOnes<'_, usize, bitvec::order::Lsb0> {
+    pub fn iter_ones_direct(&self) -> impl Iterator<Item = usize> + '_ {
         self.bits.iter_ones()
     }
 
@@ -114,8 +112,7 @@ impl BitVecDirtySet {
             return;
         }
         self.ensure_capacity(hi - 1);
-        let slice = &mut self.bits[lo..hi];
-        slice.fill(true);
+        self.bits.fill_range(lo..hi, true);
         self.count = self.bits.count_ones();
     }
 
@@ -132,7 +129,7 @@ impl DirtySet for BitVecDirtySet {
     fn insert(&mut self, row: usize) {
         self.ensure_capacity(row);
         // Only increment count if the bit was previously clear.
-        if !self.bits[row] {
+        if !self.bits.get(row) {
             self.bits.set(row, true);
             self.count += 1;
         }
@@ -140,7 +137,7 @@ impl DirtySet for BitVecDirtySet {
 
     #[inline]
     fn contains(&self, row: usize) -> bool {
-        self.bits.get(row).is_some_and(|b| *b)
+        self.bits.get(row)
     }
 
     fn iter(&self) -> Box<dyn Iterator<Item = usize> + '_> {

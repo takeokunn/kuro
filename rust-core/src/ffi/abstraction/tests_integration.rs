@@ -67,7 +67,7 @@ fn arb_sgr_attrs() -> impl Strategy<Value = SgrAttributes> {
                 hidden,
                 strikethrough,
             )| {
-                let mut flags = SgrFlags::empty();
+                let mut flags = SgrFlags::default();
                 flags.set(SgrFlags::BOLD, bold);
                 flags.set(SgrFlags::DIM, dim);
                 flags.set(SgrFlags::ITALIC, italic);

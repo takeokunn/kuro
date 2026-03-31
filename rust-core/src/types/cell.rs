@@ -4,30 +4,123 @@ use super::color::Color;
 use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 
-bitflags::bitflags! {
-    /// SGR boolean attribute flags — packed into a single byte per cell.
-    ///
-    /// Using one `u8` bitfield instead of eight `bool` fields reduces
-    /// `SgrAttributes` by 7 bytes per instance.  With a 24×80 terminal
-    /// (1 920 cells), this saves ~13 KiB per screen buffer.
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub struct SgrFlags: u8 {
-        /// SGR 1: Bold / increased intensity
-        const BOLD          = 0b0000_0001;
-        /// SGR 2: Faint / decreased intensity
-        const DIM           = 0b0000_0010;
-        /// SGR 3: Italic
-        const ITALIC        = 0b0000_0100;
-        /// SGR 5: Blink (slow)
-        const BLINK_SLOW    = 0b0000_1000;
-        /// SGR 6: Blink (rapid)
-        const BLINK_FAST    = 0b0001_0000;
-        /// SGR 7: Inverse / reverse video
-        const INVERSE       = 0b0010_0000;
-        /// SGR 8: Concealed / hidden
-        const HIDDEN        = 0b0100_0000;
-        /// SGR 9: Crossed-out / strikethrough
-        const STRIKETHROUGH = 0b1000_0000;
+/// SGR boolean attribute flags — packed into a single byte per cell.
+///
+/// Using one `u8` bitfield instead of eight `bool` fields reduces
+/// `SgrAttributes` by 7 bytes per instance.  With a 24×80 terminal
+/// (1 920 cells), this saves ~13 KiB per screen buffer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SgrFlags(u8);
+
+impl SgrFlags {
+    /// SGR 1: Bold / increased intensity
+    pub const BOLD: Self          = Self(0b0000_0001);
+    /// SGR 2: Faint / decreased intensity
+    pub const DIM: Self           = Self(0b0000_0010);
+    /// SGR 3: Italic
+    pub const ITALIC: Self        = Self(0b0000_0100);
+    /// SGR 5: Blink (slow)
+    pub const BLINK_SLOW: Self    = Self(0b0000_1000);
+    /// SGR 6: Blink (rapid)
+    pub const BLINK_FAST: Self    = Self(0b0001_0000);
+    /// SGR 7: Inverse / reverse video
+    pub const INVERSE: Self       = Self(0b0010_0000);
+    /// SGR 8: Concealed / hidden
+    pub const HIDDEN: Self        = Self(0b0100_0000);
+    /// SGR 9: Crossed-out / strikethrough
+    pub const STRIKETHROUGH: Self = Self(0b1000_0000);
+
+    /// Return the raw `u8` bit pattern.
+    #[inline]
+    pub fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Construct from a raw `u8` bit pattern.
+    #[inline]
+    pub fn from_bits_truncate(bits: u8) -> Self {
+        Self(bits)
+    }
+
+    /// Return `true` if all bits in `other` are set in `self`.
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Set all bits in `other`.
+    #[inline]
+    pub fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    /// Clear all bits in `other`.
+    #[inline]
+    pub fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    /// Set or clear bits in `other` depending on `val`.
+    #[inline]
+    pub fn set(&mut self, other: Self, val: bool) {
+        if val { self.insert(other); } else { self.remove(other); }
+    }
+
+    /// Return `true` if no bits are set.
+    #[inline]
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl Default for SgrFlags {
+    #[inline]
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
+impl std::fmt::Debug for SgrFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SgrFlags({:#010b})", self.0)
+    }
+}
+
+impl std::ops::BitOr for SgrFlags {
+    type Output = Self;
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for SgrFlags {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAnd for SgrFlags {
+    type Output = Self;
+    #[inline]
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::BitAndAssign for SgrFlags {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
+impl std::ops::Not for SgrFlags {
+    type Output = Self;
+    #[inline]
+    fn not(self) -> Self {
+        Self(!self.0)
     }
 }
 
@@ -94,7 +187,7 @@ impl Default for SgrAttributes {
         Self {
             foreground: Color::Default,
             background: Color::Default,
-            flags: SgrFlags::empty(),
+            flags: SgrFlags::default(),
             underline_style: UnderlineStyle::None,
             underline_color: Color::Default,
         }

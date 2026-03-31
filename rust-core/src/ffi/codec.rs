@@ -28,7 +28,7 @@
 use crate::grid::line::Line;
 use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
 use crate::types::color::Color;
-use std::hash::{Hash, Hasher};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 // -------------------------------------------------------------------------
 // Color encoding constants
@@ -575,11 +575,10 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
 /// by `get_dirty_lines_with_faces` to detect unchanged rows and skip re-encoding
 /// them (row-hash skip optimisation, Option A).
 ///
-/// A new [`ahash::AHasher`] is created per call — faster than `DefaultHasher`
-/// (SipHash) on the hot render path due to AES-NI acceleration.
+/// A new [`DefaultHasher`] is created per call using SipHash-1-3.
 #[inline]
 pub(crate) fn compute_row_hash(row: &Line, col_to_buf: &[usize]) -> u64 {
-    let mut h = ahash::AHasher::default();
+    let mut h = DefaultHasher::new();
     for cell in &row.cells {
         // Hash the grapheme bytes directly — no allocation needed.
         cell.grapheme().as_bytes().hash(&mut h);

@@ -3,13 +3,13 @@ use super::*;
 #[test]
 fn test_validate_allowed_shells() {
     assert!(Pty::validate_shell("sh").is_ok());
-    if which::which("bash").is_ok() {
+    if super::Pty::find_in_path("bash").is_some() {
         assert!(Pty::validate_shell("bash").is_ok());
     }
-    if which::which("zsh").is_ok() {
+    if super::Pty::find_in_path("zsh").is_some() {
         assert!(Pty::validate_shell("zsh").is_ok());
     }
-    if which::which("fish").is_ok() {
+    if super::Pty::find_in_path("fish").is_some() {
         assert!(Pty::validate_shell("fish").is_ok());
     }
 }
@@ -218,7 +218,7 @@ fn test_validate_shell_returns_absolute_path() {
 #[test]
 fn test_validate_shell_bash_returns_absolute_path() {
     // Same as above, specifically for bash.
-    if which::which("bash").is_ok() {
+    if super::Pty::find_in_path("bash").is_some() {
         let result = Pty::validate_shell("bash");
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -266,9 +266,10 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
 /// env-var `RwLock` will be permanently locked in the child if another thread
 /// holds it at fork time, causing a deadlock that hits the 2-second timeout.
 ///
-/// By holding `ENV_FORK_LOCK` for the entire critical section (env mutation
-/// + fork + cleanup), we guarantee that no env-var write is in-flight when
-/// `fork()` is called in any of the three `setup_child_env` tests.
+/// By holding `ENV_FORK_LOCK` for the entire critical section
+/// (env mutation + fork + cleanup), we guarantee that no env-var write
+/// is in-flight when `fork()` is called in any of the three
+/// `setup_child_env` tests.
 #[cfg(unix)]
 static ENV_FORK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -449,7 +450,7 @@ fn test_has_pending_data_true_after_echo() {
 fn test_validate_shell_disallowed_message_contains_shell_name() {
     // The error message for a disallowed shell must include the shell's basename
     // and the list of allowed shells, so users know what is permitted.
-    if which::which("python3").is_ok() {
+    if super::Pty::find_in_path("python3").is_some() {
         let err = Pty::validate_shell("python3").unwrap_err();
         let msg = format!("{err}");
         assert!(

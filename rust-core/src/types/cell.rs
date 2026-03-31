@@ -14,19 +14,19 @@ pub struct SgrFlags(u8);
 
 impl SgrFlags {
     /// SGR 1: Bold / increased intensity
-    pub const BOLD: Self          = Self(0b0000_0001);
+    pub const BOLD: Self = Self(0b0000_0001);
     /// SGR 2: Faint / decreased intensity
-    pub const DIM: Self           = Self(0b0000_0010);
+    pub const DIM: Self = Self(0b0000_0010);
     /// SGR 3: Italic
-    pub const ITALIC: Self        = Self(0b0000_0100);
+    pub const ITALIC: Self = Self(0b0000_0100);
     /// SGR 5: Blink (slow)
-    pub const BLINK_SLOW: Self    = Self(0b0000_1000);
+    pub const BLINK_SLOW: Self = Self(0b0000_1000);
     /// SGR 6: Blink (rapid)
-    pub const BLINK_FAST: Self    = Self(0b0001_0000);
+    pub const BLINK_FAST: Self = Self(0b0001_0000);
     /// SGR 7: Inverse / reverse video
-    pub const INVERSE: Self       = Self(0b0010_0000);
+    pub const INVERSE: Self = Self(0b0010_0000);
     /// SGR 8: Concealed / hidden
-    pub const HIDDEN: Self        = Self(0b0100_0000);
+    pub const HIDDEN: Self = Self(0b0100_0000);
     /// SGR 9: Crossed-out / strikethrough
     pub const STRIKETHROUGH: Self = Self(0b1000_0000);
 
@@ -63,7 +63,11 @@ impl SgrFlags {
     /// Set or clear bits in `other` depending on `val`.
     #[inline]
     pub fn set(&mut self, other: Self, val: bool) {
-        if val { self.insert(other); } else { self.remove(other); }
+        if val {
+            self.insert(other);
+        } else {
+            self.remove(other);
+        }
     }
 
     /// Return `true` if no bits are set.

@@ -20,7 +20,10 @@ impl BitSet {
     #[must_use]
     pub(crate) fn new(capacity: usize) -> Self {
         let words = vec![0u64; words_for(capacity)];
-        Self { words, bit_len: capacity }
+        Self {
+            words,
+            bit_len: capacity,
+        }
     }
 
     /// Number of logically valid bits.
@@ -159,7 +162,6 @@ impl BitSet {
             }
         }
     }
-
 }
 
 /// Compute number of `u64` words needed for `n` bits.
@@ -267,15 +269,15 @@ mod tests {
         // Grow from 4 bits to 8 bits with val=true — bits [4..8) must be set
         // while the pre-existing bits [0..4) must keep their original values.
         let mut s = BitSet::new(4);
-        s.set(1, true);  // only bit 1 is set
+        s.set(1, true); // only bit 1 is set
         s.resize(8, true);
         assert_eq!(s.bit_len, 8);
         assert!(!s.get(0)); // was false, must stay false
-        assert!(s.get(1));  // was true, must stay true
+        assert!(s.get(1)); // was true, must stay true
         assert!(!s.get(2)); // was false, must stay false
         assert!(!s.get(3)); // was false, must stay false
-        assert!(s.get(4));  // new bit, val=true
-        assert!(s.get(7));  // new bit, val=true
+        assert!(s.get(4)); // new bit, val=true
+        assert!(s.get(7)); // new bit, val=true
     }
 
     #[test]

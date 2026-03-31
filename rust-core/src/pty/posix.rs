@@ -245,8 +245,9 @@ impl Pty {
             }
             p
         } else {
-            Self::find_in_path(command)
-                .ok_or_else(|| invalid_parameter_error("command", &format!("Shell not found in PATH: {command}")))?
+            Self::find_in_path(command).ok_or_else(|| {
+                invalid_parameter_error("command", &format!("Shell not found in PATH: {command}"))
+            })?
         };
 
         let basename = path
@@ -403,7 +404,12 @@ impl Pty {
         let mut all_data = Vec::with_capacity(8192);
 
         // Drain the peek buffer first (populated by has_pending_data)
-        if let Some(data) = self.peek_buffer.lock().expect("peek_buffer lock poisoned").take() {
+        if let Some(data) = self
+            .peek_buffer
+            .lock()
+            .expect("peek_buffer lock poisoned")
+            .take()
+        {
             all_data.extend(data);
         }
 

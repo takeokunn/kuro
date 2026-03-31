@@ -1,7 +1,6 @@
 //! Self-contained RFC 4648 base64 encode/decode (standard alphabet, with padding).
 
-const ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Encode `input` to base64 (standard alphabet, `=` padding).
 pub(crate) fn encode(input: &[u8]) -> String {

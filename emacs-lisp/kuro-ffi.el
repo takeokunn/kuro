@@ -32,6 +32,8 @@
 
 (require 'kuro-config)
 
+(declare-function kuro--ensure-module-loaded "kuro-module" ())
+
 ;;; Error logging
 
 (defcustom kuro-log-errors t
@@ -141,6 +143,33 @@ DOC is the docstring for the generated function."
 ARG is the parameter name symbol (used in the docstring)."
   `(defun ,name (,arg) ,doc (kuro--call ,default (,core-fn kuro--session-id ,arg))))
 
+(defmacro kuro--define-ffi-getters (&rest entries)
+  "Expand ENTRIES into top-level `kuro--def-ffi-getter' forms.
+Each entry has the form (NAME CORE-FN DEFAULT DOC)."
+  (declare (indent 0))
+  `(progn
+     ,@(mapcar (lambda (entry)
+                 `(kuro--def-ffi-getter
+                   ,(nth 0 entry)
+                   ,(nth 1 entry)
+                   ,(nth 2 entry)
+                   ,(nth 3 entry)))
+               entries)))
+
+(defmacro kuro--define-ffi-unary-getters (&rest entries)
+  "Expand ENTRIES into top-level `kuro--def-ffi-unary' forms.
+Each entry has the form (NAME CORE-FN DEFAULT ARG DOC)."
+  (declare (indent 0))
+  `(progn
+     ,@(mapcar (lambda (entry)
+                 `(kuro--def-ffi-unary
+                   ,(nth 0 entry)
+                   ,(nth 1 entry)
+                   ,(nth 2 entry)
+                   ,(nth 3 entry)
+                   ,(nth 4 entry)))
+               entries)))
+
 ;;; Core dispatch macro
 
 (defmacro kuro--call (fallback &rest body)
@@ -173,6 +202,8 @@ Returns the session ID (a non-negative integer) on success, nil otherwise."
   (condition-case err
       (let* ((r (or rows kuro--default-rows))
              (c (or cols kuro--default-cols))
+             (_ (when (fboundp 'kuro--ensure-module-loaded)
+                  (kuro--ensure-module-loaded)))
              (result (kuro-core-init command r c)))
         (when result
           (setq kuro--session-id result)
@@ -204,13 +235,14 @@ Returns t if successful, nil otherwise."
                    (apply #'string (append data nil)))))
       (kuro-core-send-key kuro--session-id bytes))))
 
-(defun kuro--poll-updates-with-faces ()
+(kuro--define-ffi-getters
+ (kuro--poll-updates-with-faces
+  kuro-core-poll-updates-with-faces nil
   "Poll for terminal updates with face information.
 Returns (DIRTY-LINES . COL-TO-BUF-VECTOR) where DIRTY-LINES is a list
 of ((ROW . TEXT) . FACE-RANGES) and COL-TO-BUF-VECTOR is a vector mapping
 grid columns to buffer character offsets.  FACE-RANGES is a list of
-\(START-COL END-COL FG BG FLAGS) for each text segment."
-  (kuro--call nil (kuro-core-poll-updates-with-faces kuro--session-id)))
+\(START-COL END-COL FG BG FLAGS) for each text segment."))
 
 (defun kuro--resize (rows cols)
   "Resize the terminal to ROWS x COLS.
@@ -219,20 +251,22 @@ Returns t if successful, nil otherwise."
 
 ;;; Process state
 
-(defun kuro--is-process-alive ()
+(kuro--define-ffi-getters
+ (kuro--is-process-alive
+  kuro-core-is-process-alive t
   "Return non-nil if the PTY child process is still running.
 Returns nil when `kuro--initialized' is nil (no active session).
 Falls back to t (alive assumed) on FFI error to prevent spurious buffer
 kills — unlike other wrappers that return nil on error, this one uses t
-so that a transient Rust failure does not destroy the buffer."
-  (kuro--call t (kuro-core-is-process-alive kuro--session-id)))
+so that a transient Rust failure does not destroy the buffer."))
 
 ;;; Cursor queries
 
-(defun kuro--get-cursor ()
+(kuro--define-ffi-getters
+ (kuro--get-cursor
+  kuro-core-get-cursor '(0 . 0)
   "Get current cursor position.
-Returns (ROW . COL) pair."
-  (kuro--call '(0 . 0) (kuro-core-get-cursor kuro--session-id)))
+Returns (ROW . COL) pair."))
 
 (provide 'kuro-ffi)
 

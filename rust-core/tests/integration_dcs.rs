@@ -5,14 +5,13 @@ mod common;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use kuro_core::TerminalCore;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // DCS XTGETTCAP
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn xtgettcap_tn_responds_with_kuro() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // DCS + q 544e ST  ("TN" in hex = 54 4e)
     t.advance(b"\x1bP+q544e\x1b\\");
     let responses = common::read_responses(&t);
@@ -35,7 +34,7 @@ fn xtgettcap_tn_responds_with_kuro() {
 
 #[test]
 fn xtgettcap_rgb_responds_with_truecolor() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // DCS + q 524742 ST  ("RGB" in hex = 52 47 42)
     t.advance(b"\x1bP+q524742\x1b\\");
     let responses = common::read_responses(&t);
@@ -49,7 +48,7 @@ fn xtgettcap_rgb_responds_with_truecolor() {
 
 #[test]
 fn xtgettcap_unknown_cap_responds_not_found() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // DCS + q 786666 ST  ("xff" — not a valid capability)
     t.advance(b"\x1bP+q786666\x1b\\");
     let responses = common::read_responses(&t);
@@ -67,7 +66,7 @@ fn xtgettcap_unknown_cap_responds_not_found() {
 
 #[test]
 fn sixel_dcs_does_not_panic_on_valid_input() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // DCS 0;1;0 q " 1;1;10;6 #0;2;100;0;0 !10~ - ST
     // This is a simple 10x6 all-red sixel image
     t.advance(b"\x1bP0;1;0q\"1;1;10;6#0;2;100;0;0!10~\x1b\\");
@@ -78,14 +77,14 @@ fn sixel_dcs_does_not_panic_on_valid_input() {
 
 #[test]
 fn sixel_empty_dcs_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1bPq\x1b\\"); // Empty sixel
     assert!(t.cursor_row() < 24);
 }
 
 #[test]
 fn sixel_rle_sequence_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // RLE: !100~ = repeat ~ 100 times
     t.advance(b"\x1bP0;1;0q\"1;1;100;6#0;2;100;0;0!100~\x1b\\");
     assert!(t.cursor_row() < 24);
@@ -93,7 +92,7 @@ fn sixel_rle_sequence_does_not_panic() {
 
 #[test]
 fn sixel_multiband_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Two bands separated by '-'
     t.advance(b"\x1bP0;1;0q\"1;1;4;12#0;2;100;0;0~~~~-~~~~\x1b\\");
     assert!(t.cursor_row() < 24);
@@ -110,7 +109,7 @@ fn sixel_multiband_does_not_panic() {
 /// notification being queued.
 #[test]
 fn kitty_get_image_png_base64_after_complete_transfer() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Transmit: a=t, f=24 (RGB), i=1, s=1 (width), v=1 (height).
     // "AAAA" is base64 for 3 zero bytes — one 1×1 RGB pixel.
@@ -138,7 +137,7 @@ fn kitty_get_image_png_base64_after_complete_transfer() {
 /// notification in a single sequence.
 #[test]
 fn kitty_transmit_and_display_produces_notification() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // a=T: transmit and immediately display; c=8, r=4 = 8×4 cell region.
     // "AAAAAA==" = 4 zero bytes = 1×1 RGBA pixel.
@@ -185,7 +184,7 @@ fn kitty_transmit_and_display_produces_notification() {
 /// the second image replacing the first in the store.
 #[test]
 fn kitty_second_image_same_id_replaces_first() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // First transmit: 1×1 RGB pixel (all zeros — black).
     t.advance(b"\x1b_Ga=t,f=24,i=10,s=1,v=1;AAAA\x1b\\");
@@ -209,7 +208,7 @@ fn kitty_second_image_same_id_replaces_first() {
 /// Both placement notifications must be queued with the correct image ID.
 #[test]
 fn kitty_multi_placement_same_image_id() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Transmit the image once.
     t.advance(b"\x1b_Ga=t,f=24,i=5,s=1,v=1;AAAA\x1b\\");
@@ -265,7 +264,7 @@ fn kitty_multi_placement_same_image_id() {
 /// only the placement list is cleared.
 #[test]
 fn kitty_delete_all_placements_clears_placements() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Transmit and display image 3.
     t.advance(b"\x1b_Ga=T,f=24,i=3,s=1,v=1,c=2,r=2;AAAA\x1b\\");
@@ -298,7 +297,7 @@ fn kitty_delete_all_placements_clears_placements() {
 /// This tests the `quiet` path: the default (q=0) sends a response.
 #[test]
 fn kitty_query_known_image_produces_ok_response() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Transmit an image first so the query has something to respond about.
     t.advance(b"\x1b_Ga=t,f=24,i=7,s=1,v=1;AAAA\x1b\\");
@@ -324,7 +323,7 @@ fn kitty_query_known_image_produces_ok_response() {
 /// emitting any terminal response.
 #[test]
 fn kitty_quiet_two_suppresses_response() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     let count_before = t.pending_responses().len();
 
@@ -350,7 +349,7 @@ fn kitty_quiet_two_suppresses_response() {
 /// produce a valid stored image.
 #[test]
 fn kitty_two_chunk_accumulation_produces_valid_image() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Chunk 1: m=1, carries header params and empty payload (accumulation starts).
     // Using f=24 (RGB), 1×1 image.  No data yet.
@@ -387,7 +386,7 @@ fn kitty_two_chunk_accumulation_produces_valid_image() {
 /// `pending_image_notifications()`.
 #[test]
 fn sixel_produces_image_notification_via_public_api() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     assert_eq!(
         t.pending_image_notifications().len(),
@@ -420,7 +419,7 @@ fn sixel_produces_image_notification_via_public_api() {
 /// A sixel sequence stores image data retrievable via `get_image_png_base64`.
 #[test]
 fn sixel_image_retrievable_as_png_base64() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // A 10×6 all-red sixel: raster attrs, color register 0 = red (100% R, 0% G, 0% B).
     // "#0;2;100;0;0" sets register 0 to RGB(255,0,0); "!10~" encodes 10 red pixels.
@@ -449,7 +448,7 @@ fn sixel_image_retrievable_as_png_base64() {
 /// image height and cursor col must be reset to 0.
 #[test]
 fn sixel_cursor_advances_past_image_height() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     assert_eq!(t.cursor_row(), 0, "cursor must start at row 0");
     assert_eq!(t.cursor_col(), 0, "cursor must start at col 0");
@@ -474,7 +473,7 @@ fn sixel_cursor_advances_past_image_height() {
 /// notifications, each with a unique image ID.
 #[test]
 fn sixel_two_consecutive_each_produce_distinct_notification() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     t.advance(b"\x1bP0;1;0q\"1;1;1;6#0~\x1b\\");
     t.advance(b"\x1bP0;1;0q\"1;1;1;6#0~\x1b\\");
@@ -498,7 +497,7 @@ fn sixel_two_consecutive_each_produce_distinct_notification() {
 /// same terminal session without interfering with each other's image store.
 #[test]
 fn kitty_and_sixel_coexist_in_same_session() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
 
     // Send a Kitty transmit (stores image 20 via APC).
     t.advance(b"\x1b_Ga=t,f=24,i=20,s=1,v=1;AAAA\x1b\\");

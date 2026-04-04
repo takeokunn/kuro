@@ -11,6 +11,16 @@
 (require 'cl-lib)
 (require 'kuro-faces-color)
 
+(defmacro kuro-faces-color-test--should-decode (name encoded expected)
+  "Define NAME as an ERT test asserting ENCODED decodes to EXPECTED."
+  `(ert-deftest ,name ()
+     (should (equal (kuro--decode-ffi-color ,encoded) ,expected))))
+
+(defmacro kuro-faces-color-test--should-indexed-color (name index expected)
+  "Define NAME as an ERT test asserting INDEX resolves to EXPECTED."
+  `(ert-deftest ,name ()
+     (should (equal (kuro--indexed-to-emacs ,index) ,expected))))
+
 ;;; Group 1: kuro--ffi-color-default sentinel
 
 (ert-deftest kuro-faces-color--default-sentinel-value ()
@@ -65,9 +75,10 @@
 ;;; Group 3: kuro--decode-ffi-color — focused on sentinel and boundary cases
 ;;; (Broad coverage is already in kuro-faces-test.el; these tests add gaps.)
 
-(ert-deftest kuro-faces-color--decode-ffi-color-sentinel-returns-default ()
-  "kuro--ffi-color-default sentinel decodes to the :default keyword."
-  (should (eq (kuro--decode-ffi-color kuro--ffi-color-default) :default)))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-sentinel-returns-default
+ kuro--ffi-color-default
+ :default)
 
 (ert-deftest kuro-faces-color--decode-ffi-color-named-index-15 ()
   "Named color at index 15 (bit 31 + 0x0F) decodes to (named . \"bright-white\")."
@@ -82,26 +93,20 @@
   (let ((result (kuro--decode-ffi-color (logior #x80000000 16))))
     (should (null result))))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-indexed-boundary-zero ()
-  "Indexed color at index 0 (bit 30 + 0x00) decodes to (indexed . 0)."
-  (let ((result (kuro--decode-ffi-color #x40000000)))
-    (should (consp result))
-    (should (eq (car result) 'indexed))
-    (should (= (cdr result) 0))))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-indexed-boundary-zero
+ #x40000000
+ '(indexed . 0))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-indexed-boundary-255 ()
-  "Indexed color at index 255 (bit 30 + 0xFF) decodes to (indexed . 255)."
-  (let ((result (kuro--decode-ffi-color (logior #x40000000 255))))
-    (should (consp result))
-    (should (eq (car result) 'indexed))
-    (should (= (cdr result) 255))))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-indexed-boundary-255
+ (logior #x40000000 255)
+ '(indexed . 255))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-rgb-white ()
-  "0x00FFFFFF decodes to (rgb . #xFFFFFF)."
-  (let ((result (kuro--decode-ffi-color #x00FFFFFF)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) #xFFFFFF))))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-rgb-white
+ #x00FFFFFF
+ '(rgb . 16777215))
 
 ;;; Group 4: kuro--rgb-to-emacs — boundary values
 
@@ -128,21 +133,25 @@
 
 ;;; Group 5: kuro--indexed-to-emacs — boundary values not in kuro-faces-test.el
 
-(ert-deftest kuro-faces-color--indexed-to-emacs-index-16-is-black ()
-  "Index 16 (start of 6x6x6 color cube) must be #000000."
-  (should (equal (kuro--indexed-to-emacs 16) "#000000")))
+(kuro-faces-color-test--should-indexed-color
+ kuro-faces-color--indexed-to-emacs-index-16-is-black
+ 16
+ "#000000")
 
-(ert-deftest kuro-faces-color--indexed-to-emacs-index-231-is-white ()
-  "Index 231 (end of 6x6x6 color cube) must be #ffffff."
-  (should (equal (kuro--indexed-to-emacs 231) "#ffffff")))
+(kuro-faces-color-test--should-indexed-color
+ kuro-faces-color--indexed-to-emacs-index-231-is-white
+ 231
+ "#ffffff")
 
-(ert-deftest kuro-faces-color--indexed-to-emacs-index-232-grayscale-start ()
-  "Index 232 (grayscale ramp start) must be #080808."
-  (should (equal (kuro--indexed-to-emacs 232) "#080808")))
+(kuro-faces-color-test--should-indexed-color
+ kuro-faces-color--indexed-to-emacs-index-232-grayscale-start
+ 232
+ "#080808")
 
-(ert-deftest kuro-faces-color--indexed-to-emacs-index-255-grayscale-end ()
-  "Index 255 (grayscale ramp end) must be #eeeeee."
-  (should (equal (kuro--indexed-to-emacs 255) "#eeeeee")))
+(kuro-faces-color-test--should-indexed-color
+ kuro-faces-color--indexed-to-emacs-index-255-grayscale-end
+ 255
+ "#eeeeee")
 
 (ert-deftest kuro-faces-color--indexed-to-emacs-out-of-range-returns-nil ()
   "Index 256 (out of range) must return nil."
@@ -150,12 +159,10 @@
 
 ;;; Group 6: kuro--decode-ffi-color — true black and RGB boundary
 
-(ert-deftest kuro-faces-color--decode-ffi-color-true-black ()
-  "0x00000000 (true black, no tag bits) decodes to (rgb . 0), not :default."
-  (let ((result (kuro--decode-ffi-color #x00000000)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) 0))))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-true-black
+ #x00000000
+ '(rgb . 0))
 
 (ert-deftest kuro-faces-color--decode-ffi-color-rgb-black ()
   "True black RGB (rgb . 0) converts to #000000 via kuro--color-to-emacs."
@@ -163,12 +170,10 @@
          (result (kuro--rgb-to-emacs (cdr decoded))))
     (should (equal result "#000000"))))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-0 ()
-  "Named color at index 0 (bit 31 + 0x00) decodes to (named . \"black\")."
-  (let ((result (kuro--decode-ffi-color #x80000000)))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "black"))))
+(kuro-faces-color-test--should-decode
+ kuro-faces-color--decode-ffi-color-named-index-0
+ #x80000000
+ '(named . "black"))
 
 ;;; Group 7: kuro--color-to-emacs dispatch
 

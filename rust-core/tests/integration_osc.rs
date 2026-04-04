@@ -14,7 +14,7 @@ use kuro_core::TerminalCore;
 /// Usage: `assert_osc_color_query!(set_seq, query_seq, "10;", "OSC 10 label")`
 macro_rules! assert_osc_color_query {
     ($set_seq:expr, $query_seq:expr, $needle:literal, $label:literal) => {{
-        let mut t = TerminalCore::new(24, 80);
+        let mut t = common::new_terminal();
         t.advance($set_seq);
         t.advance($query_seq);
         let responses = common::read_responses(&t);
@@ -37,7 +37,7 @@ macro_rules! assert_osc_color_query {
 /// correct number of prompt marks.
 macro_rules! assert_osc133_cycle {
     ($seq:expr, $expected_count:expr, $label:literal) => {{
-        let mut t = TerminalCore::new(24, 80);
+        let mut t = common::new_terminal();
         t.advance($seq);
         assert_eq!(
             t.osc_data().prompt_marks.len(),
@@ -56,7 +56,7 @@ macro_rules! assert_osc133_cycle {
 
 #[test]
 fn osc4_set_palette_color() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // OSC 4 ; 1 ; rgb:ff/00/00 BEL — set palette index 1 to red
     t.advance(b"\x1b]4;1;rgb:ff/00/00\x07");
     let palette = &t.osc_data().palette;
@@ -69,7 +69,7 @@ fn osc4_set_palette_color() {
 
 #[test]
 fn osc4_set_palette_color_4digit_hex() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // 4-digit hex per channel: rgb:ffff/0000/0000 → [255, 0, 0]
     t.advance(b"\x1b]4;2;rgb:ffff/0000/0000\x07");
     let palette = &t.osc_data().palette;
@@ -82,7 +82,7 @@ fn osc4_set_palette_color_4digit_hex() {
 
 #[test]
 fn osc4_query_palette_color_produces_response() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]4;3;rgb:00/ff/00\x07"); // set index 3 = green
     t.advance(b"\x1b]4;3;?\x07"); // query index 3
     let responses = common::read_responses(&t);
@@ -101,7 +101,7 @@ fn osc4_query_palette_color_produces_response() {
 
 #[test]
 fn osc4_set_marks_palette_dirty() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     assert!(!t.palette_dirty());
     t.advance(b"\x1b]4;5;rgb:80/80/80\x07");
     assert!(
@@ -112,7 +112,7 @@ fn osc4_set_marks_palette_dirty() {
 
 #[test]
 fn osc104_reset_specific_index() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]4;10;rgb:aa/bb/cc\x07"); // set index 10
     assert!(t.osc_data().palette[10].is_some());
     t.advance(b"\x1b]104;10\x07"); // reset index 10 only
@@ -124,7 +124,7 @@ fn osc104_reset_specific_index() {
 
 #[test]
 fn osc104_reset_all() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]4;0;rgb:ff/00/00\x07");
     t.advance(b"\x1b]4;1;rgb:00/ff/00\x07");
     t.advance(b"\x1b]104\x07"); // reset all
@@ -143,7 +143,7 @@ fn osc104_reset_all() {
 
 #[test]
 fn osc10_set_default_fg_color() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]10;rgb:ff/80/00\x07"); // set fg to orange
     let osc = t.osc_data();
     assert!(
@@ -159,7 +159,7 @@ fn osc10_set_default_fg_color() {
 
 #[test]
 fn osc11_set_default_bg_color() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]11;rgb:1e/1e/2e\x07"); // Catppuccin Mocha base
     let osc = t.osc_data();
     assert!(
@@ -174,7 +174,7 @@ fn osc11_set_default_bg_color() {
 
 #[test]
 fn osc12_set_cursor_color() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]12;rgb:ff/ff/ff\x07");
     let osc = t.osc_data();
     assert!(osc.cursor_color.is_some());
@@ -186,7 +186,7 @@ fn osc12_set_cursor_color() {
 
 #[test]
 fn osc10_sets_default_colors_dirty_flag() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     assert!(!t.default_colors_dirty());
     t.advance(b"\x1b]10;rgb:11/22/33\x07");
     assert!(
@@ -228,7 +228,7 @@ fn osc12_query_produces_response() {
 #[test]
 fn osc10_hash_color_format() {
     // CSS-style #RRGGBB format should also work
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]10;#ff8000\x07");
     assert_eq!(
         t.osc_data().default_fg,
@@ -243,7 +243,7 @@ fn osc10_hash_color_format() {
 
 #[test]
 fn iterm2_osc1337_inline0_is_ignored() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     let cursor_before = (t.cursor_row(), t.cursor_col());
     // inline=0 means save to disk, not display — should be ignored
     t.advance(b"\x1b]1337;File=name=dGVzdA==;inline=0:dGVzdA==\x07");
@@ -257,7 +257,7 @@ fn iterm2_osc1337_inline0_is_ignored() {
 
 #[test]
 fn iterm2_osc1337_malformed_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Malformed: missing ':' separator between params and data
     t.advance(b"\x1b]1337;File=inline=1;NOTBASE64\x07");
     // Just must not panic
@@ -266,14 +266,14 @@ fn iterm2_osc1337_malformed_does_not_panic() {
 
 #[test]
 fn iterm2_osc1337_empty_data_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]1337;File=inline=1:\x07"); // empty base64
     assert!(t.cursor_row() < 24);
 }
 
 #[test]
 fn iterm2_osc1337_invalid_base64_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Invalid base64 — should be silently ignored without panic
     t.advance(b"\x1b]1337;File=inline=1:!!!invalid!!!\x07");
     assert!(t.cursor_row() < 24);
@@ -285,7 +285,7 @@ fn iterm2_osc1337_invalid_base64_does_not_panic() {
 
 #[test]
 fn osc133_prompt_marks_are_recorded() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]133;A\x07"); // PromptStart
     t.advance(b"\x1b]133;B\x07"); // PromptEnd
     let marks = &t.osc_data().prompt_marks;
@@ -300,7 +300,7 @@ fn osc133_prompt_marks_are_recorded() {
 /// silently discarded without panic and the cursor must remain in bounds.
 #[test]
 fn osc9_notification_does_not_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]9;Test notification text\x07");
     assert!(
         t.cursor_row() < 24,
@@ -328,7 +328,7 @@ fn osc133_full_cycle_records_four_marks() {
 /// reflect the OSC 133 sequences received.
 #[test]
 fn osc133_mark_round_trip_via_prompt_marks() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Move cursor to a non-zero position
     t.advance(b"\x1b[5;3H"); // row 4, col 2 (1-indexed)
     assert_eq!(t.cursor_row(), 4);
@@ -344,7 +344,7 @@ fn osc133_mark_round_trip_via_prompt_marks() {
 /// extracted and stored in `osc_data().cwd`.
 #[test]
 fn osc7_cwd_round_trip() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]7;file://localhost/home/user/projects\x07");
     assert_eq!(
         t.osc_data().cwd.as_deref(),
@@ -358,7 +358,7 @@ fn osc7_cwd_round_trip() {
 /// (no URL-decode occurs in the handler).
 #[test]
 fn osc7_cwd_with_spaces_percent_encoded() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Spaces are percent-encoded in the URL; the handler stores the raw path
     t.advance(b"\x1b]7;file://localhost/home/user/my%20project\x07");
     assert_eq!(
@@ -371,7 +371,7 @@ fn osc7_cwd_with_spaces_percent_encoded() {
 /// OSC 7 with a non-file:// scheme must be silently rejected (not stored).
 #[test]
 fn osc7_non_file_scheme_is_rejected() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]7;https://example.com/\x07");
     assert!(
         t.osc_data().cwd.is_none(),
@@ -384,7 +384,7 @@ fn osc7_non_file_scheme_is_rejected() {
 /// is internal, but the terminal cursor must remain in bounds.
 #[test]
 fn osc52_write_and_query_no_panic() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     // Write "hello" (base64: aGVsbG8=) to the clipboard
     t.advance(b"\x1b]52;c;aGVsbG8=\x07");
     // Query clipboard
@@ -397,7 +397,7 @@ fn osc52_write_and_query_no_panic() {
 /// OSC 52 with an invalid base64 payload must be silently ignored.
 #[test]
 fn osc52_invalid_base64_is_ignored() {
-    let mut t = TerminalCore::new(24, 80);
+    let mut t = common::new_terminal();
     t.advance(b"\x1b]52;c;!!!not-base64!!!\x07");
     // Terminal must remain usable
     assert!(t.cursor_row() < 24);

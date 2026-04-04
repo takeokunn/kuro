@@ -84,6 +84,10 @@ when no Kitty Graphics images are present.")
 (defvar kuro--face-prop-template (list 'face nil)
   "Reusable property list for face application to avoid per-call allocation.")
 
+(defconst kuro--sgr-visual-flags-mask
+  (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)
+  "SGR flags that require blink overlays or invisible text properties.")
+
 (kuro--defvar-permanent-local kuro--blink-frame-count 0
   "Frame counter used for blink animation timing.")
 
@@ -220,6 +224,36 @@ Creates an overlay with a `display' property at the correct grid position."
 
 ;;; FFI face application with blink and hidden support
 
+(defsubst kuro--ffi-face-default-p (fg-enc bg-enc flags ul-color-enc)
+  "Return non-nil when FFI face payload is visually a no-op.
+FG-ENC and BG-ENC are encoded colors, FLAGS is the SGR bitmask, and
+UL-COLOR-ENC is the encoded underline color where 0 means default."
+  (and (= fg-enc kuro--ffi-color-default)
+       (= bg-enc kuro--ffi-color-default)
+       (= flags 0)
+       (= ul-color-enc 0)))
+
+(defsubst kuro--ffi-face-has-visual-effects-p (flags)
+  "Return non-nil when FLAGS require blink or hidden side effects."
+  (/= 0 (logand flags kuro--sgr-visual-flags-mask)))
+
+(defsubst kuro--apply-ffi-face-text-properties (start-pos end-pos face)
+  "Apply FACE to START-POS..END-POS using the fastest supported path."
+  (if (>= emacs-major-version 29)
+      (add-face-text-property start-pos end-pos face)
+    (setcar (cdr kuro--face-prop-template) face)
+    (add-text-properties start-pos end-pos kuro--face-prop-template)))
+
+(defsubst kuro--apply-ffi-face-effects (start-pos end-pos flags)
+  "Apply blink and hidden effects for FLAGS to START-POS..END-POS."
+  (cond
+   ((/= 0 (logand flags kuro--sgr-flag-blink-fast))
+    (kuro--apply-blink-overlay start-pos end-pos 'fast))
+   ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
+    (kuro--apply-blink-overlay start-pos end-pos 'slow)))
+  (when (/= 0 (logand flags kuro--sgr-flag-hidden))
+    (add-text-properties start-pos end-pos '(invisible t))))
+
 (defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags ul-color-enc)
   "Apply FFI face data to the buffer region from START-POS to END-POS.
 FG-ENC and BG-ENC are encoded foreground/background colors (u32).
@@ -227,25 +261,27 @@ FLAGS is the SGR attribute bitmask.  UL-COLOR-ENC is the encoded underline
 color (u32) transmitted in the version-2 binary wire format.
 Applies the face, blink overlays (SGR 5/6), and invisible property (SGR 8).
 
-Fast-path: returns immediately when FG-ENC, BG-ENC, FLAGS, and UL-COLOR-ENC
-are all at their default/zero values (no color, no attributes).  Callers do
-not need to repeat this guard."
-  (unless (and (= fg-enc kuro--ffi-color-default)
-               (= bg-enc kuro--ffi-color-default)
-               (= flags 0))
-    (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags ul-color-enc)))
-      (if (>= emacs-major-version 29)
-          (add-face-text-property start-pos end-pos face)
-        (setcar (cdr kuro--face-prop-template) face)
-        (add-text-properties start-pos end-pos kuro--face-prop-template)))
-    (when (/= 0 (logand flags (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)))
-      (cond
-       ((/= 0 (logand flags kuro--sgr-flag-blink-fast))
-        (kuro--apply-blink-overlay start-pos end-pos 'fast))
-       ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
-        (kuro--apply-blink-overlay start-pos end-pos 'slow)))
-      (when (/= 0 (logand flags kuro--sgr-flag-hidden))
-        (add-text-properties start-pos end-pos '(invisible t))))))
+  Fast-path: returns immediately when FG-ENC, BG-ENC, FLAGS, and UL-COLOR-ENC
+  are all at their default/zero values (no color, no attributes).  Callers do
+  not need to repeat this guard."
+  (unless (kuro--ffi-face-default-p fg-enc bg-enc flags ul-color-enc)
+    (kuro--apply-ffi-face-text-properties
+     start-pos end-pos
+     (kuro--get-cached-face-raw fg-enc bg-enc flags ul-color-enc))
+    (when (kuro--ffi-face-has-visual-effects-p flags)
+      (kuro--apply-ffi-face-effects start-pos end-pos flags))))
+
+(defun kuro--call-with-normalized-ffi-face-range (range line-start line-end continuation)
+  "Normalize FFI face RANGE and call CONTINUATION with the computed arguments.
+RANGE is a 6-tuple: (START-BUF END-BUF FG-ENC BG-ENC FLAGS UL-COLOR-ENC).
+LINE-START and LINE-END bound the inserted line. CONTINUATION runs only for
+non-empty ranges after clamping. Returns non-nil when CONTINUATION ran."
+  (pcase-let* ((`(,start-buf ,end-buf ,fg-enc ,bg-enc ,flags ,ul-color-enc) range)
+               (start-pos (min (+ line-start start-buf) line-end))
+               (end-pos   (min (+ line-start end-buf) line-end)))
+    (when (> end-pos start-pos)
+      (funcall continuation start-pos end-pos fg-enc bg-enc flags ul-color-enc)
+      t)))
 
 (provide 'kuro-overlays)
 

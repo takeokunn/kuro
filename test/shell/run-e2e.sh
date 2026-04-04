@@ -15,6 +15,7 @@ cargo build --release 2>&1
 
 echo ""
 echo "--- Running E2E tests ---"
+export KURO_MODULE_PATH="$PROJECT_DIR/target/release"
 emacs -Q --batch \
   -L "$PROJECT_DIR/emacs-lisp" \
   -L "$PROJECT_DIR/test/unit" \

@@ -51,6 +51,9 @@ pub const COLOR_NAMED_MARKER: u32 = 0x8000_0000;
 /// `encode_color(Color::Indexed(i))` produces `COLOR_INDEXED_MARKER | i`.
 pub const COLOR_INDEXED_MARKER: u32 = 0x4000_0000;
 
+/// Bitmask selecting the lower 24 bits used by RGB truecolor encoding.
+pub const COLOR_RGB_MASK: u32 = 0x00FF_FFFF;
+
 /// Bit shift for the red channel in RGB packing: `r << RGB_R_SHIFT`.
 pub const RGB_R_SHIFT: u32 = 16;
 
@@ -156,10 +159,13 @@ pub fn encode_color(color: &Color) -> u32 {
         // so a direct cast replaces the 16-arm match with a single instruction.
         Color::Named(named) => COLOR_NAMED_MARKER | u32::from(*named as u8),
         Color::Indexed(idx) => COLOR_INDEXED_MARKER | u32::from(*idx),
-        Color::Rgb(r, g, b) => {
-            (u32::from(*r) << RGB_R_SHIFT) | (u32::from(*g) << RGB_G_SHIFT) | u32::from(*b)
-        }
+        Color::Rgb(r, g, b) => encode_rgb(*r, *g, *b),
     }
+}
+
+#[inline(always)]
+const fn encode_rgb(red: u8, green: u8, blue: u8) -> u32 {
+    ((red as u32) << RGB_R_SHIFT) | ((green as u32) << RGB_G_SHIFT) | (blue as u32)
 }
 
 /// Encode `SgrAttributes` as a `u64` bitmask for FFI transfer.

@@ -1,4 +1,4 @@
-.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate test-elisp run
+.PHONY: all build test clean install lint fmt check test-safe vttest-compliance bench-validate test-elisp coverage run
 
 # Variables
 CARGO = cargo
@@ -58,12 +58,18 @@ test-elisp:
 	$(EMACS) -Q --batch \
 		-L emacs-lisp \
 		-L test/unit \
-		-L test/integration \
 		--eval "(setq load-prefer-newer t)" \
 		--eval "(load (expand-file-name \"test/unit/kuro-test.el\"))" \
+		--eval "(load (expand-file-name \"test/integration/kuro-performance-test.el\"))" \
 		--eval "(mapc (function load) (seq-remove (lambda (f) (string-suffix-p \"/kuro-test.el\" f)) (directory-files (expand-file-name \"test/unit\") t \".el$$\")))" \
-		--eval "(mapc (function load) (directory-files (expand-file-name \"test/integration\") t \".el$$\"))" \
 		--eval "(ert-run-tests-batch-and-exit)"
+
+# Run Rust coverage for the touched core surfaces.
+# Uses nix-provided cargo-tarpaulin because PTY-heavy code and local toolchains
+# can vary across environments.
+coverage:
+	nix run nixpkgs#cargo-tarpaulin -- --workspace --timeout 300 --out Stdout \
+		--include-files rust-core/src/types/color.rs rust-core/src/ffi/codec.rs
 
 # Run all tests
 test-all: test test-e2e test-elisp

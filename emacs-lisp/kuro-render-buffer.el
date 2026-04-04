@@ -1,4 +1,4 @@
-;;; kuro-render-buffer.el --- Buffer update functions for Kuro terminal -*- lexical-binding: t; -*-
+;;; kuro-render-buffer.el --- Buffer update functions for Kuro terminal  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025 takeokunn
 
@@ -17,10 +17,15 @@
 (require 'kuro-overlays)
 
 (declare-function kuro--clear-row-image-overlays "kuro-overlays" (row))
+(declare-function kuro--call-with-normalized-ffi-face-range "kuro-overlays" (range line-start line-end continuation))
 (defvar kuro--has-images nil
   "Forward reference; defvar-local in kuro-overlays.el.")
 (defvar kuro--blink-overlays-by-row nil
   "Forward reference; defvar-local in kuro-overlays.el.")
+(defvar kuro--scroll-offset 0
+  "Forward reference; defvar-local in kuro-input.el.")
+(defvar kuro--cursor-marker nil
+  "Forward reference; defvar-local in kuro-renderer.el.")
 (declare-function kuro--apply-ffi-face-at "kuro-overlays" (start-pos end-pos fg-enc bg-enc flags ul-color-enc))
 (declare-function kuro--get-cursor         "kuro-ffi"       ())
 (declare-function kuro--get-cursor-visible "kuro-ffi-modes" ())
@@ -138,14 +143,23 @@ Must be called before the line text is replaced (uses pre-replace line-end)."
 Each range is a list (START-BUF END-BUF FG-ENC BG-ENC FLAGS UL-COLOR-ENC)
 with byte offsets relative to LINE-START.  UL-COLOR-ENC is the encoded
 underline color transmitted in the version-2 binary wire format (0 = default).
-Must be called after the line text has been inserted (post-insert line-end)."
+  Must be called after the line text has been inserted (post-insert line-end)."
   (when face-ranges
     (dolist (range face-ranges)
-      (pcase-let* ((`(,start-buf ,end-buf ,fg-enc ,bg-enc ,flags ,ul-color-enc) range))
-        (let ((start-pos (min (+ line-start start-buf) line-end))
-              (end-pos   (min (+ line-start end-buf)   line-end)))
-          (when (> end-pos start-pos)
-            (kuro--apply-ffi-face-at start-pos end-pos fg-enc bg-enc flags ul-color-enc)))))))
+      (kuro--call-with-normalized-ffi-face-range
+       range line-start line-end
+       #'kuro--apply-ffi-face-at))))
+
+(defun kuro--update-row-position-cache-after-line-change (row old-len new-len new-line-end)
+  "Refresh cached row positions after replacing ROW from OLD-LEN to NEW-LEN.
+When the row length changes, ROW+1 can be updated exactly from NEW-LINE-END,
+while all later rows become unknown and are cleared."
+  (unless (= old-len new-len)
+    (when (and kuro--row-positions (< (1+ row) (length kuro--row-positions)))
+      (let ((len (length kuro--row-positions)))
+        (aset kuro--row-positions (1+ row) (1+ new-line-end))
+        (cl-loop for i from (+ row 2) below len
+                 do (aset kuro--row-positions i nil))))))
 
 (defun kuro--ensure-buffer-row-exists (row)
   "Ensure the buffer has at least ROW+1 lines and position point at ROW start.
@@ -231,25 +245,17 @@ delete+insert so face ranges use the new content offsets, not cached old ones."
       (kuro--ensure-buffer-row-exists row)
       (let* ((line-start (point))
              (old-end (line-end-position))
-             (old-len (- old-end line-start)))
+             (old-len (- old-end line-start))
+             (new-len (length text)))
         (kuro--clear-row-overlays row)
         (delete-region line-start old-end)
         (insert text)
         ;; Capture new line-end once; used for both face application and cache update.
         (let ((new-line-end (line-end-position)))
-          ;; When line length changed, buffer positions for rows after this one
-          ;; are shifted.  Row+1's start is exactly (1+ new-line-end), which we
-          ;; can cache directly; rows +2 and beyond are unknown and cleared.
-          (unless (= (length text) old-len)
-            (when (and kuro--row-positions (< (1+ row) (length kuro--row-positions)))
-              (let ((len (length kuro--row-positions)))
-                ;; Cache row+1's exact start position instead of invalidating it.
-                (aset kuro--row-positions (1+ row) (1+ new-line-end))
-                (cl-loop for i from (+ row 2) below len
-                         do (aset kuro--row-positions i nil)))))
+          (kuro--update-row-position-cache-after-line-change row old-len new-len new-line-end)
           ;; line-end MUST be recomputed after insert: multi-byte text means
           ;; (+ line-start (length text)) would be wrong.
-                              (kuro--apply-face-ranges face-ranges line-start new-line-end))))))
+          (kuro--apply-face-ranges face-ranges line-start new-line-end))))))
 
 (kuro--defvar-permanent-local kuro--last-cursor-row nil
   "Cached cursor row from the previous render frame.

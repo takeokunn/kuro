@@ -103,6 +103,22 @@ or defaulted incorrectly."
       (should (= (nth 1 received-args) 30))
       (should (= (nth 2 received-args) 120)))))
 
+(ert-deftest kuro-ffi-init-ensures-module-loaded-before-core-init ()
+  "kuro--init loads the native module before calling kuro-core-init.
+This keeps direct callers such as the E2E harness on the real Elisp↔Rust path
+instead of failing with a void-function error when the module is available but
+has not been loaded yet."
+  (let ((kuro--initialized nil)
+        (call-order nil))
+    (cl-letf (((symbol-function 'kuro--ensure-module-loaded)
+               (lambda () (push 'ensure call-order)))
+              ((symbol-function 'kuro-core-init)
+               (lambda (_cmd _rows _cols)
+                 (push 'init call-order)
+                 t)))
+      (kuro--init "bash")
+      (should (equal (reverse call-order) '(ensure init))))))
+
 (ert-deftest kuro-ffi-init-uses-defaults-when-omitted ()
   "kuro--init uses sensible defaults (24 rows, 80 cols) when dimensions omitted."
   (let ((kuro--initialized nil)

@@ -1,4 +1,4 @@
-;;; kuro-ffi-modes.el --- Terminal mode query wrappers for Kuro -*- lexical-binding: t; -*-
+;;; kuro-ffi-modes.el --- Terminal mode query wrappers for Kuro  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025 takeokunn
 
@@ -26,23 +26,6 @@
 (declare-function kuro-core-get-keyboard-flags   "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-mouse-pixel      "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-terminal-modes   "ext:kuro-core" (session-id))
-
-;;; Table-driven getter generation
-
-(defmacro kuro--define-ffi-getters (&rest entries)
-  "Expand each ENTRIES element into a `kuro--def-ffi-getter' call.
-Each entry has the form (NAME CORE-FN DEFAULT DOC).
-Using a macro (rather than dolist+eval) ensures every getter is a
-proper top-level `defun', so `describe-function' shows its docstring."
-  (declare (indent 0))
-  `(progn
-     ,@(mapcar (lambda (entry)
-                 `(kuro--def-ffi-getter
-                   ,(nth 0 entry)
-                   ,(nth 1 entry)
-                   ,(nth 2 entry)
-                   ,(nth 3 entry)))
-               entries)))
 
 (kuro--define-ffi-getters
  ;;; Cursor visibility / shape

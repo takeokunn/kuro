@@ -1,4 +1,4 @@
-;;; kuro-navigation.el --- Navigation and hyperlink overlays for Kuro -*- lexical-binding: t; -*-
+;;; kuro-navigation.el --- Navigation and hyperlink overlays for Kuro  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025 takeokunn
 

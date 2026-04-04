@@ -70,9 +70,12 @@ Formula: index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
 (defconst kuro--color-cube-table
   (let ((v (make-vector 216 nil)))
     (dotimes (i 216)
-      (let* ((r (* (/ i 36) 51))
-             (g (* (mod (/ i 6) 6) 51))
-             (b (* (mod i 6) 51)))
+      (let* ((r (* (/ i (* kuro--color-cube-size kuro--color-cube-size))
+                   kuro--color-cube-step))
+             (g (* (mod (/ i kuro--color-cube-size) kuro--color-cube-size)
+                   kuro--color-cube-step))
+             (b (* (mod i kuro--color-cube-size)
+                   kuro--color-cube-step)))
         (aset v i (format "#%02x%02x%02x" r g b))))
     v)
   "Pre-computed RGB strings for 256-color cube (indices 16-231).")
@@ -80,7 +83,7 @@ Formula: index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
 (defconst kuro--grayscale-table
   (let ((v (make-vector 24 nil)))
     (dotimes (i 24)
-      (let ((val (+ (* i 10) 8)))
+      (let ((val (+ (* i kuro--color-gray-step) kuro--color-gray-offset)))
         (aset v i (format "#%02x%02x%02x" val val val))))
     v)
   "Pre-computed RGB strings for grayscale ramp (indices 232-255).")
@@ -150,13 +153,10 @@ COLOR-ENC is a u32 value:
                    (aref kuro--ansi-color-names idx))))
       (when name
         (cons 'named name))))
-   ((/= 0 (logand color-enc kuro--color-tag-indexed))
-    (cons 'indexed (logand color-enc #xFF)))
-   (t
-    (let ((r (logand (ash color-enc -16) #xFF))
-          (g (logand (ash color-enc -8)  #xFF))
-          (b (logand color-enc            #xFF)))
-      (cons 'rgb (logior (ash r 16) (ash g 8) b))))))
+    ((/= 0 (logand color-enc kuro--color-tag-indexed))
+     (cons 'indexed (logand color-enc #xFF)))
+    (t
+     (cons 'rgb (logand color-enc kuro--color-rgb-mask)))))
 
 (provide 'kuro-faces-color)
 

@@ -31,6 +31,15 @@
   (with-current-buffer buf
     (count-lines (point-min) (point-max))))
 
+(defmacro kuro-render-buffer-test--capture-face-calls (calls-var &rest body)
+  "Run BODY while recording `kuro--apply-ffi-face-at' calls in CALLS-VAR."
+  (declare (indent 1))
+  `(let ((,calls-var nil))
+     (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
+                (lambda (s e fg bg fl _ul)
+                  (push (list s e fg bg fl) ,calls-var))))
+       ,@body)))
+
 ;;; Group 8: kuro--anchor-window-at-pos
 
 (ert-deftest kuro-render-buffer-anchor-window-sets-window-point ()
@@ -89,55 +98,47 @@
   "kuro--apply-face-ranges calls kuro--apply-ffi-face-at for each valid range."
   (kuro-render-buffer-test--with-buffer
     (insert "hello\n")
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
-        ;; range (0 3 1 0 0 0): start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
-        (kuro--apply-face-ranges '((0 3 1 0 0 0)) 1 6)
-        (should (= (length calls) 1))
-        (should (equal (car calls) '(1 4 1 0 0)))))))
+    (kuro-render-buffer-test--capture-face-calls calls
+      ;; range (0 3 1 0 0 0): start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
+      (kuro--apply-face-ranges '((0 3 1 0 0 0)) 1 6)
+      (should (= (length calls) 1))
+      (should (equal (car calls) '(1 4 1 0 0))))))
 
 (ert-deftest kuro-render-buffer-apply-face-ranges-skips-zero-width ()
   "kuro--apply-face-ranges skips ranges where start-pos >= end-pos."
   (kuro-render-buffer-test--with-buffer
     (insert "hello\n")
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
-        ;; start-buf=3 end-buf=3 → start-pos=end-pos → no call
-        (kuro--apply-face-ranges '((3 3 1 0 0 0)) 1 6)
-        (should (null calls))))))
+    (kuro-render-buffer-test--capture-face-calls calls
+      ;; start-buf=3 end-buf=3 → start-pos=end-pos → no call
+      (kuro--apply-face-ranges '((3 3 1 0 0 0)) 1 6)
+      (should (null calls)))))
 
 (ert-deftest kuro-render-buffer-apply-face-ranges-clamps-to-line-end ()
   "kuro--apply-face-ranges clamps start-pos and end-pos to line-end."
   (kuro-render-buffer-test--with-buffer
     (insert "ab\n")
     ;; line-start=1, line-end=3 ("ab" occupies positions 1-2, newline at 3)
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
-        ;; range (0 99 1 0 0 0): end-pos = min(1+99, 3) = 3
-        (kuro--apply-face-ranges '((0 99 1 0 0 0)) 1 3)
-        (should (= (length calls) 1))
-        (should (= (nth 1 (car calls)) 3))))))
+    (kuro-render-buffer-test--capture-face-calls calls
+      ;; range (0 99 1 0 0 0): end-pos = min(1+99, 3) = 3
+      (kuro--apply-face-ranges '((0 99 1 0 0 0)) 1 3)
+      (should (= (length calls) 1))
+      (should (= (nth 1 (car calls)) 3)))))
 
 (ert-deftest kuro-render-buffer-apply-face-ranges-multi-range-all-called ()
   "kuro--apply-face-ranges calls kuro--apply-ffi-face-at once per valid range."
   (kuro-render-buffer-test--with-buffer
     (insert "hello world\n")
     ;; line-start=1, line-end=12 ("hello world" = 11 chars)
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
-                 (lambda (s e fg bg fl _ul) (push (list s e fg bg fl) calls))))
-        ;; Three non-overlapping ranges
-        (kuro--apply-face-ranges '((0 3 1 0 0 0)   ; "hel"
-                                   (4 6 2 0 0 0)   ; "o "
-                                   (7 10 3 0 0 0)) ; "wor"
-                                 1 12)
-        (should (= (length calls) 3))
-        ;; calls pushed in reverse order; verify each call's fg-enc
-        (should (equal (mapcar (lambda (c) (nth 2 c)) (reverse calls))
-                       '(1 2 3)))))))
+    (kuro-render-buffer-test--capture-face-calls calls
+      ;; Three non-overlapping ranges
+      (kuro--apply-face-ranges '((0 3 1 0 0 0)   ; "hel"
+                                 (4 6 2 0 0 0)   ; "o "
+                                 (7 10 3 0 0 0)) ; "wor"
+                               1 12)
+      (should (= (length calls) 3))
+      ;; calls pushed in reverse order; verify each call's fg-enc
+      (should (equal (mapcar (lambda (c) (nth 2 c)) (reverse calls))
+                     '(1 2 3))))))
 
 ;;; Group 11: kuro--scroll-lines
 
@@ -293,9 +294,23 @@ An empty vector is functionally equivalent to absent (identity fallback),
 so storing it would waste hash table space without any semantic benefit."
   (kuro-render-buffer-test--with-buffer
     ;; Pre-populate so we can confirm the remhash actually fires.
-    (puthash 5 [1 2 3] kuro--col-to-buf-map)
-    (kuro--store-col-to-buf 5 [])
-    (should (null (gethash 5 kuro--col-to-buf-map)))))
+     (puthash 5 [1 2 3] kuro--col-to-buf-map)
+     (kuro--store-col-to-buf 5 [])
+     (should (null (gethash 5 kuro--col-to-buf-map)))))
+
+(ert-deftest kuro-render-buffer-update-row-position-cache-after-line-change-updates-next-row ()
+  "Length changes update row+1 and invalidate later cached rows."
+  (kuro-render-buffer-test--with-buffer
+    (setq kuro--row-positions [10 20 30 40 50])
+    (kuro--update-row-position-cache-after-line-change 1 3 5 99)
+    (should (equal kuro--row-positions [10 20 100 nil nil]))))
+
+(ert-deftest kuro-render-buffer-update-row-position-cache-after-line-change-skips-equal-length ()
+  "Equal lengths leave the cached row positions untouched."
+  (kuro-render-buffer-test--with-buffer
+    (setq kuro--row-positions [10 20 30])
+    (kuro--update-row-position-cache-after-line-change 1 4 4 99)
+    (should (equal kuro--row-positions [10 20 30]))))
 
 ;;; Group 14: kuro--with-buffer-edit
 

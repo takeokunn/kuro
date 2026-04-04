@@ -5,7 +5,7 @@
 test_encode_color!(
     test_encode_color_default_is_sentinel,
     Color::Default,
-    0xFF00_0000u32
+    COLOR_DEFAULT_SENTINEL
 );
 
 test_encode_color!(
@@ -17,19 +17,19 @@ test_encode_color!(
 test_encode_color!(
     test_encode_color_named_red,
     Color::Named(NamedColor::Red),
-    0x8000_0000u32 | 1u32
+    COLOR_NAMED_MARKER | 1u32
 );
 
 test_encode_color!(
     test_encode_color_indexed,
     Color::Indexed(16),
-    0x4000_0000u32 | 16u32
+    COLOR_INDEXED_MARKER | 16u32
 );
 
 test_encode_color!(
     test_encode_color_indexed_zero,
     Color::Indexed(0),
-    0x4000_0000u32
+    COLOR_INDEXED_MARKER
 );
 
 test_encode_color!(
@@ -67,19 +67,19 @@ test_encode_color!(
 test_encode_color!(
     test_encode_color_rgb_single_channel_red,
     Color::Rgb(255, 0, 0),
-    0x00FF_0000u32
+    0x00FF_0000
 );
 
 test_encode_color!(
     test_encode_color_rgb_single_channel_green,
     Color::Rgb(0, 255, 0),
-    0x0000_FF00u32
+    0x0000_FF00
 );
 
 test_encode_color!(
     test_encode_color_rgb_single_channel_blue,
     Color::Rgb(0, 0, 255),
-    0x0000_00FFu32
+    0x0000_00FF
 );
 
 // -------------------------------------------------------------------------
@@ -256,7 +256,7 @@ test_encode_color!(
 fn test_encode_color_rgb_true_white_no_marker_bits() {
     let encoded = encode_color(&Color::Rgb(255, 255, 255));
     assert_eq!(
-        encoded, 0x00FF_FFFFu32,
+        encoded, COLOR_RGB_MASK,
         "Rgb(255,255,255) must be 0x00FFFFFF"
     );
     // Must not have named-color marker (bit 31).

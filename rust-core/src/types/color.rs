@@ -2,6 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+const SYSTEM_COLOR_MAX: u8 = 15;
+const COLOR_CUBE_BASE: u8 = 16;
+const COLOR_CUBE_LAST: u8 = 231;
+const COLOR_CUBE_SIZE: u8 = 6;
+const COLOR_CUBE_STEP: u8 = 51;
+const GRAYSCALE_BASE: u8 = 232;
+const GRAYSCALE_STEP: u8 = 10;
+const GRAYSCALE_OFFSET: u8 = 8;
+
 /// Named ANSI colors (standard 16-color palette)
 ///
 /// `#[repr(u8)]` with explicit discriminants enables zero-cost `as u8` casts
@@ -72,43 +81,43 @@ impl Color {
     /// Convert 256-color palette index to RGB
     const fn indexed_to_rgb(idx: u8) -> (u8, u8, u8) {
         match idx {
-            0..=15 => {
-                // Standard colors
-                let named = match idx {
-                    1 => NamedColor::Red,
-                    2 => NamedColor::Green,
-                    3 => NamedColor::Yellow,
-                    4 => NamedColor::Blue,
-                    5 => NamedColor::Magenta,
-                    6 => NamedColor::Cyan,
-                    7 => NamedColor::White,
-                    8 => NamedColor::BrightBlack,
-                    9 => NamedColor::BrightRed,
-                    10 => NamedColor::BrightGreen,
-                    11 => NamedColor::BrightYellow,
-                    12 => NamedColor::BrightBlue,
-                    13 => NamedColor::BrightMagenta,
-                    14 => NamedColor::BrightCyan,
-                    15 => NamedColor::BrightWhite,
-                    _ => NamedColor::Black,
-                };
-                named.to_rgb()
-            }
-            16..=231 => {
-                // 6x6x6 color cube
-                let n = idx - 16;
-                let r = (n / 36) * 51;
-                let g = ((n / 6) % 6) * 51;
-                let b = (n % 6) * 51;
-                (r, g, b)
-            }
-            232..=255 => {
-                // Grayscale ramp
-                let n = idx - 232;
-                let v = n * 10 + 8;
-                (v, v, v)
-            }
+            0..=SYSTEM_COLOR_MAX => Self::system_color_from_index(idx).to_rgb(),
+            COLOR_CUBE_BASE..=COLOR_CUBE_LAST => Self::color_cube_rgb(idx - COLOR_CUBE_BASE),
+            GRAYSCALE_BASE..=u8::MAX => Self::grayscale_rgb(idx - GRAYSCALE_BASE),
         }
+    }
+
+    const fn system_color_from_index(idx: u8) -> NamedColor {
+        match idx {
+            1 => NamedColor::Red,
+            2 => NamedColor::Green,
+            3 => NamedColor::Yellow,
+            4 => NamedColor::Blue,
+            5 => NamedColor::Magenta,
+            6 => NamedColor::Cyan,
+            7 => NamedColor::White,
+            8 => NamedColor::BrightBlack,
+            9 => NamedColor::BrightRed,
+            10 => NamedColor::BrightGreen,
+            11 => NamedColor::BrightYellow,
+            12 => NamedColor::BrightBlue,
+            13 => NamedColor::BrightMagenta,
+            14 => NamedColor::BrightCyan,
+            15 => NamedColor::BrightWhite,
+            _ => NamedColor::Black,
+        }
+    }
+
+    const fn color_cube_rgb(offset: u8) -> (u8, u8, u8) {
+        let red = (offset / (COLOR_CUBE_SIZE * COLOR_CUBE_SIZE)) * COLOR_CUBE_STEP;
+        let green = ((offset / COLOR_CUBE_SIZE) % COLOR_CUBE_SIZE) * COLOR_CUBE_STEP;
+        let blue = (offset % COLOR_CUBE_SIZE) * COLOR_CUBE_STEP;
+        (red, green, blue)
+    }
+
+    const fn grayscale_rgb(offset: u8) -> (u8, u8, u8) {
+        let value = offset * GRAYSCALE_STEP + GRAYSCALE_OFFSET;
+        (value, value, value)
     }
 }
 

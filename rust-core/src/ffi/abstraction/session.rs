@@ -119,6 +119,46 @@ macro_rules! dec_mode_getter {
     };
 }
 
+/// Generate a method that clones an owned field, wraps it in `Some`, and clears the dirty flag.
+macro_rules! take_some_if_dirty {
+    ($(#[$doc:meta])* fn $name:ident from $owner:ident when $dirty:ident take $value:ident : $ty:ty) => {
+        $(#[$doc])*
+        pub fn $name(&mut self) -> Option<$ty> {
+            if self.core.$owner.$dirty {
+                self.core.$owner.$dirty = false;
+                Some(self.core.$owner.$value.clone())
+            } else {
+                None
+            }
+        }
+    };
+}
+
+/// Generate a method that clones an `Option<T>` field when dirty, then clears the dirty flag.
+macro_rules! take_option_field_if_dirty {
+    ($(#[$doc:meta])* fn $name:ident from $owner:ident when $dirty:ident take $value:ident : $ty:ty) => {
+        $(#[$doc])*
+        pub fn $name(&mut self) -> Option<$ty> {
+            if self.core.$owner.$dirty {
+                self.core.$owner.$dirty = false;
+                self.core.$owner.$value.clone()
+            } else {
+                None
+            }
+        }
+    };
+}
+
+/// Generate a method that drains a `Vec` field from a nested owner.
+macro_rules! take_vec_field {
+    ($(#[$doc:meta])* fn $name:ident from $owner:ident take $field:ident : $ty:ty) => {
+        $(#[$doc])*
+        pub fn $name(&mut self) -> Vec<$ty> {
+            std::mem::take(&mut self.core.$owner.$field)
+        }
+    };
+}
+
 // TerminalSession Facade
 // -----------------------
 // Current public method count: 38.
@@ -372,12 +412,10 @@ impl TerminalSession {
         self.core.screen.get_image_png_base64(image_id)
     }
 
-    /// Drain and return all pending image placement notifications.
-    pub fn take_pending_image_notifications(
-        &mut self,
-    ) -> Vec<crate::grid::screen::ImageNotification> {
-        std::mem::take(&mut self.core.kitty.pending_image_notifications)
-    }
+    take_vec_field!(
+        /// Drain and return all pending image placement notifications.
+        fn take_pending_image_notifications from kitty take pending_image_notifications : crate::grid::screen::ImageNotification
+    );
 
     /// Get scrollback line count
     #[must_use]
@@ -543,36 +581,26 @@ impl TerminalSession {
         was_pending
     }
 
-    /// Return the window title if it has been updated since the last call, clearing the dirty flag.
-    pub fn take_title_if_dirty(&mut self) -> Option<String> {
-        if self.core.meta.title_dirty {
-            self.core.meta.title_dirty = false;
-            Some(self.core.meta.title.clone())
-        } else {
-            None
-        }
-    }
+    take_some_if_dirty!(
+        /// Return the window title if it has been updated since the last call, clearing the dirty flag.
+        fn take_title_if_dirty from meta when title_dirty take title : String
+    );
 
-    /// Return the working directory if it has been updated since the last call, clearing the dirty flag.
-    /// Returns None if not dirty or if no cwd has been set.
-    pub fn take_cwd_if_dirty(&mut self) -> Option<String> {
-        if self.core.osc_data.cwd_dirty {
-            self.core.osc_data.cwd_dirty = false;
-            self.core.osc_data.cwd.clone()
-        } else {
-            None
-        }
-    }
+    take_option_field_if_dirty!(
+        /// Return the working directory if it has been updated since the last call, clearing the dirty flag.
+        /// Returns None if not dirty or if no cwd has been set.
+        fn take_cwd_if_dirty from osc_data when cwd_dirty take cwd : String
+    );
 
-    /// Drain and return all pending clipboard actions (OSC 52).
-    pub fn take_clipboard_actions(&mut self) -> Vec<crate::types::osc::ClipboardAction> {
-        std::mem::take(&mut self.core.osc_data.clipboard_actions)
-    }
+    take_vec_field!(
+        /// Drain and return all pending clipboard actions (OSC 52).
+        fn take_clipboard_actions from osc_data take clipboard_actions : crate::types::osc::ClipboardAction
+    );
 
-    /// Drain and return all pending prompt mark events (OSC 133).
-    pub fn take_prompt_marks(&mut self) -> Vec<crate::types::osc::PromptMarkEvent> {
-        std::mem::take(&mut self.core.osc_data.prompt_marks)
-    }
+    take_vec_field!(
+        /// Drain and return all pending prompt mark events (OSC 133).
+        fn take_prompt_marks from osc_data take prompt_marks : crate::types::osc::PromptMarkEvent
+    );
 
     dec_mode_getter!(/// Get the current mouse tracking mode.
         fn get_mouse_mode -> u16 = mouse_mode);

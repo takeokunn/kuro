@@ -14,7 +14,7 @@ macro_rules! assert_dec_mode_enable_disable {
     ($name_en:ident, $name_dis:ident, $enable_seq:expr, $disable_seq:expr, $field:ident, $label:expr) => {
         #[test]
         fn $name_en() {
-            let mut term = TerminalCore::new(24, 80);
+            let mut term = common::new_terminal();
             term.advance($enable_seq);
             assert!(
                 term.dec_modes().$field,
@@ -24,7 +24,7 @@ macro_rules! assert_dec_mode_enable_disable {
 
         #[test]
         fn $name_dis() {
-            let mut term = TerminalCore::new(24, 80);
+            let mut term = common::new_terminal();
             term.advance($enable_seq);
             term.advance($disable_seq);
             assert!(
@@ -40,7 +40,7 @@ macro_rules! assert_dec_mode_reset_after_ris {
     ($name:ident, $enable_seq:expr, $field:ident, $label:expr) => {
         #[test]
         fn $name() {
-            let mut term = TerminalCore::new(24, 80);
+            let mut term = common::new_terminal();
             term.advance($enable_seq);
             assert!(
                 term.dec_modes().$field,
@@ -77,7 +77,7 @@ assert_dec_mode_reset_after_ris!(
 
 #[test]
 fn test_decckm_toggle_multiple_times() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     for _ in 0..5 {
         term.advance(b"\x1b[?1h");
         assert!(term.dec_modes().app_cursor_keys);
@@ -172,14 +172,14 @@ assert_dec_mode_reset_after_ris!(
 
 #[test]
 fn test_dectcem_cursor_hide() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?25l"); // hide cursor
     assert!(!term.cursor_visible(), "Cursor should be hidden");
 }
 
 #[test]
 fn test_dectcem_cursor_show() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?25l");
     term.advance(b"\x1b[?25h"); // show cursor
     assert!(term.cursor_visible(), "Cursor should be visible");
@@ -187,7 +187,7 @@ fn test_dectcem_cursor_show() {
 
 #[test]
 fn test_dectcem_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     // Hide cursor
     term.advance(b"\x1b[?25l");
     assert!(!term.cursor_visible());
@@ -202,7 +202,7 @@ fn test_dectcem_after_ris() {
 
 #[test]
 fn test_alternate_screen_activate() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?1049h"); // switch to alt screen
     assert!(
         term.is_alternate_screen_active(),
@@ -212,7 +212,7 @@ fn test_alternate_screen_activate() {
 
 #[test]
 fn test_alternate_screen_deactivate() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?1049h");
     term.advance(b"\x1b[?1049l");
     assert!(
@@ -223,7 +223,7 @@ fn test_alternate_screen_deactivate() {
 
 #[test]
 fn test_alternate_screen_isolates_cursor() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     // Write to primary screen, cursor advances
     term.advance(b"primary content");
     let primary_col = term.cursor_col();
@@ -245,7 +245,7 @@ fn test_alternate_screen_isolates_cursor() {
 
 #[test]
 fn test_alternate_screen_deactivated_after_ris() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?1049h");
     assert!(term.is_alternate_screen_active());
     term.advance(b"\x1bc"); // RIS
@@ -261,7 +261,7 @@ fn test_alternate_screen_deactivated_after_ris() {
 
 #[test]
 fn test_dec_modes_default_state() {
-    let term = TerminalCore::new(24, 80);
+    let term = common::new_terminal();
     // Default: app cursor keys off, bracketed paste off
     assert!(!term.app_cursor_keys());
     assert!(!term.bracketed_paste());
@@ -289,7 +289,7 @@ fn test_dec_modes_default_state() {
 /// ?2026h must set `synchronized_output` = true.
 #[test]
 fn test_sync_output_enable() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     assert!(
         !term.dec_modes().synchronized_output,
         "synchronized_output must default to false"
@@ -304,7 +304,7 @@ fn test_sync_output_enable() {
 /// ?2026l must clear `synchronized_output` = false.
 #[test]
 fn test_sync_output_disable() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?2026h");
     assert!(term.dec_modes().synchronized_output);
     term.advance(b"\x1b[?2026l");
@@ -317,7 +317,7 @@ fn test_sync_output_disable() {
 /// Repeated toggling must not corrupt state or panic.
 #[test]
 fn test_sync_output_toggle_multiple_times() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     for i in 0..10 {
         term.advance(b"\x1b[?2026h");
         assert!(
@@ -337,7 +337,7 @@ fn test_sync_output_toggle_multiple_times() {
 /// does not discard or delay writes to the terminal state machine.
 #[test]
 fn test_sync_output_grid_content_preserved() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     // Enable sync, write some content
     term.advance(b"\x1b[?2026hHello");
     assert!(term.dec_modes().synchronized_output);
@@ -367,7 +367,7 @@ fn test_sync_output_grid_content_preserved() {
 /// Regression: early broken builds would track cursor incorrectly during sync.
 #[test]
 fn test_sync_output_cursor_advances_normally() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?2026h");
     term.advance(b"ABCDE"); // 5 chars → cursor should be at col 5
     assert_eq!(
@@ -387,7 +387,7 @@ fn test_sync_output_cursor_advances_normally() {
 /// This is the pattern TUI apps use: erase, reposition, draw.
 #[test]
 fn test_sync_output_cursor_movement_inside_batch() {
-    let mut term = TerminalCore::new(24, 80);
+    let mut term = common::new_terminal();
     term.advance(b"\x1b[?2026h");
 
     // Draw separator line on row 0

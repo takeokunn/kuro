@@ -258,6 +258,26 @@ must be called to update the cached values."
     (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0 0)
     (should (null kuro--blink-overlays))))
 
+(ert-deftest kuro-overlays-call-with-normalized-ffi-face-range-calls-continuation ()
+  "Normalized face ranges invoke the continuation with clamped positions."
+  (let (captured)
+    (should
+     (kuro--call-with-normalized-ffi-face-range
+      '(1 99 10 20 30 40) 5 10
+      (lambda (&rest args)
+        (setq captured args))))
+    (should (equal captured '(6 10 10 20 30 40)))))
+
+(ert-deftest kuro-overlays-call-with-normalized-ffi-face-range-skips-empty-range ()
+  "Zero-width normalized face ranges do not invoke the continuation."
+  (let ((called nil))
+    (should-not
+     (kuro--call-with-normalized-ffi-face-range
+      '(3 3 10 20 30 40) 5 10
+      (lambda (&rest _args)
+        (setq called t))))
+    (should-not called)))
+
 ;;; Group 6: kuro--render-image-notification
 
 (ert-deftest kuro-overlays-render-image-notification-no-error-when-image-nil ()

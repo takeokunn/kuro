@@ -19,17 +19,37 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 /// using the stale 24×80 geometry and never re-draw correctly.
 // `#[defun]` requires owned String for Emacs string arguments — &str is not supported.
 #[expect(
-    clippy::needless_pass_by_value,
-    reason = "#[defun] requires owned String for Emacs string args"
-)]
-#[expect(
     clippy::cast_possible_wrap,
     reason = "session_id is a monotonically increasing counter starting at 0; will never reach i64::MAX in practice"
 )]
 #[defun]
-fn kuro_core_init(env: &Env, command: String, rows: u16, cols: u16) -> EmacsResult<Value<'_>> {
-    catch_panic(env, || {
-        let session_id = init_session(&command, rows, cols)?;
+fn kuro_core_init<'e>(
+    env: &'e Env,
+    command: String,
+    shell_args: Value<'e>,
+    rows: u16,
+    cols: u16,
+) -> EmacsResult<Value<'e>> {
+    // Convert Emacs list of strings to Vec<String> before entering catch_panic.
+    // env.call() returns emacs::Result, so ? works here in the EmacsResult context.
+    // `nil` (empty list) is the base case; each iteration takes car/cdr.
+    let args: Vec<String> = {
+        let mut result = Vec::new();
+        let mut remaining = shell_args;
+        loop {
+            // `(null remaining)` returns t when remaining is nil (end of list).
+            if env.call("null", [remaining])?.is_not_nil() {
+                break;
+            }
+            let car = env.call("car", [remaining])?;
+            let s: String = car.into_rust()?;
+            result.push(s);
+            remaining = env.call("cdr", [remaining])?;
+        }
+        result
+    };
+    catch_panic(env, move || {
+        let session_id = init_session(&command, &args, rows, cols)?;
         Ok(session_id as i64)
     })
 }

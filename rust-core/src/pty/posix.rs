@@ -46,8 +46,11 @@ fn setup_child_env(rows: u16, cols: u16, shell_path: &Path) {
     // Remove terminal-multiplexer variables so tmux/screen behave correctly inside kuro.
     std::env::remove_var("TMUX");
     std::env::remove_var("STY");
-    // Set INSIDE_EMACS so shell integration scripts and programs can detect kuro.
-    std::env::set_var("INSIDE_EMACS", "kuro,comint");
+    // Remove INSIDE_EMACS: setting it to "kuro,comint" triggers bash readline's
+    // Emacs-comint mode on macOS bash 3.2, which suppresses prompt output and
+    // causes shell-ready detection to time out.  Shell integration scripts that
+    // need this variable should set it themselves via KURO_SHELL_INTEGRATION_DIR.
+    std::env::remove_var("INSIDE_EMACS");
     std::env::remove_var("EMACS_SOCKET_NAME");
     // Advertise the kuro environment to programs that wish to detect it.
     std::env::set_var("KURO_TERMINAL", "1");
@@ -199,6 +202,10 @@ fn setup_fish_integration(integration_dir: &str) {
 /// # Safety
 /// Must only be called in the child process after `fork()`.
 /// All unsafe blocks inside perform only async-signal-safe operations until `execv`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all 8 parameters are required: this function bridges fork-child setup with PTY I/O redirection, env init, and shell exec in a single pass"
+)]
 fn exec_in_child(
     slave: std::os::fd::OwnedFd,
     master_file: std::fs::File,
@@ -207,6 +214,7 @@ fn exec_in_child(
     rows: u16,
     cols: u16,
     command: &str,
+    shell_args: &[String],
 ) -> Result<()> {
     // Establish a new session so the shell becomes the session leader.
     nix::unistd::setsid()
@@ -293,6 +301,20 @@ fn exec_in_child(
     // For bash: use --rcfile to load the integration script without overriding HOME.
     // KURO_BASH_RCFILE is set by setup_bash_integration and consumed here.
     let mut argv: Vec<&std::ffi::CStr> = vec![shell_name_cstr.as_c_str()];
+
+    // Convert caller-supplied shell_args to CStrings and append them before the rcfile flag.
+    // These args come from the Elisp call site (e.g. `--norc --noprofile` for test stability).
+    let shell_arg_cstrings: Vec<std::ffi::CString> = shell_args
+        .iter()
+        .map(|s| {
+            std::ffi::CString::new(s.as_str())
+                .map_err(|e| pty_spawn_error(command, &format!("Invalid shell arg: {e}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for cstr in &shell_arg_cstrings {
+        argv.push(cstr.as_c_str());
+    }
+
     let rcfile_flag;
     let rcfile_path_cstr;
     if let Ok(rcfile) = std::env::var("KURO_BASH_RCFILE") {
@@ -427,7 +449,7 @@ impl Pty {
     ///
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
-    pub fn spawn(command: &str, rows: u16, cols: u16) -> Result<Self> {
+    pub fn spawn(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
         let shell_path = Self::validate_shell(command)?;
 
@@ -514,6 +536,7 @@ impl Pty {
                     rows,
                     cols,
                     command,
+                    shell_args,
                 )?;
                 // exec_in_child calls execv which replaces the process on success.
                 std::process::exit(1);

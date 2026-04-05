@@ -112,7 +112,7 @@ Returns BUFFER after attempting startup."
       (let ((inhibit-read-only t))
         (kuro--prefill-buffer rows))
       (kuro--setup-shell-integration-env)
-      (when (kuro--init command rows cols)
+      (when (kuro--init command nil rows cols)
         (kuro--init-session-buffer buffer rows cols)
         (kuro--start-render-loop)
         (kuro--schedule-initial-render buffer)

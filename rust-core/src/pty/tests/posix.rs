@@ -23,7 +23,7 @@ fn test_validate_rejected_shell() {
 
 #[test]
 fn test_pty_spawn() {
-    let pty = Pty::spawn("sh", 24, 80);
+    let pty = Pty::spawn("sh", &[], 24, 80);
     assert!(pty.is_ok());
 
     let mut pty = pty.unwrap();
@@ -178,7 +178,7 @@ fn test_validate_shell_absolute_bin_sh() {
 fn test_spawn_with_nonzero_dimensions_succeeds() {
     // Spawning with explicit non-zero rows/cols must succeed.
     // This exercises the openpty(Some(&winsize), ...) path.
-    let pty = Pty::spawn("sh", 24, 80);
+    let pty = Pty::spawn("sh", &[], 24, 80);
     assert!(
         pty.is_ok(),
         "Pty::spawn with rows=24 cols=80 must succeed: {:?}",
@@ -190,7 +190,7 @@ fn test_spawn_with_nonzero_dimensions_succeeds() {
 fn test_spawn_rows_cols_passed_through() {
     // After spawn, the parent can immediately set_winsize to the same value
     // without error — confirming the master fd is valid and TIOCSWINSZ works.
-    let pty = Pty::spawn("sh", 24, 80);
+    let pty = Pty::spawn("sh", &[], 24, 80);
     assert!(pty.is_ok());
     let mut pty = pty.unwrap();
     // This mirrors what kuro does on resize; it must not error.
@@ -236,7 +236,7 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     // correctly propagated the size.  If this returns 0×0, readline in the child
     // will enter dumb mode.
     use std::os::unix::io::AsRawFd as _;
-    let pty = Pty::spawn("sh", 42, 120);
+    let pty = Pty::spawn("sh", &[], 42, 120);
     assert!(pty.is_ok());
     let pty = pty.unwrap();
 
@@ -413,10 +413,12 @@ fn test_setup_child_env_removes_multiplexer_vars() {
     }
     let result = run_in_child_check(|| {
         // Child inherits the vars set above; verify setup_child_env removes them.
+        // INSIDE_EMACS is now removed (not overwritten) to avoid triggering bash
+        // readline's Emacs-comint mode on macOS bash 3.2.
         super::setup_child_env(24, 80, std::path::Path::new("/bin/sh"));
         std::env::var("TMUX").is_err()
             && std::env::var("STY").is_err()
-            && std::env::var("INSIDE_EMACS").as_deref() == Ok("kuro,comint")
+            && std::env::var("INSIDE_EMACS").is_err()
             && std::env::var("EMACS_SOCKET_NAME").is_err()
     });
     // Clean up in the parent regardless of test outcome.
@@ -442,7 +444,7 @@ fn test_setup_child_env_removes_multiplexer_vars() {
 fn test_has_pending_data_false_on_fresh_spawn() {
     // A freshly spawned PTY has not yet produced output on the channel.
     // has_pending_data() must return false before any data arrives.
-    let pty = Pty::spawn("sh", 24, 80).expect("spawn failed");
+    let pty = Pty::spawn("sh", &[], 24, 80).expect("spawn failed");
     // We do not call read() here; we just check the flag immediately.
     // The shell may not have written anything yet, so the channel is likely empty.
     // This is a best-effort check; the test is not racey because we never write.
@@ -452,7 +454,7 @@ fn test_has_pending_data_false_on_fresh_spawn() {
 #[test]
 fn test_has_pending_data_true_after_echo() {
     // Write a command that produces output and wait for data to arrive.
-    let mut pty = Pty::spawn("sh", 24, 80).expect("spawn failed");
+    let mut pty = Pty::spawn("sh", &[], 24, 80).expect("spawn failed");
     pty.write(b"echo kuro_test_marker\n").expect("write failed");
 
     // Poll until data arrives (up to 2 s).

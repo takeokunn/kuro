@@ -191,7 +191,7 @@ impl TerminalSession {
     ///
     /// # Errors
     /// Returns `Err` if the PTY process fails to spawn or the window size cannot be set.
-    pub fn new(command: &str, rows: u16, cols: u16) -> Result<Self> {
+    pub fn new(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
         let core = TerminalCore::new(rows, cols);
 
         #[cfg(unix)]
@@ -201,7 +201,7 @@ impl TerminalSession {
             // This prevents readline from seeing 0×0 columns on its first TIOCGWINSZ
             // query, which would otherwise put it into dumb terminal mode (causing
             // control characters to echo as ^X instead of moving the cursor).
-            let mut pty = Pty::spawn(command, rows, cols)?;
+            let mut pty = Pty::spawn(command, shell_args, rows, cols)?;
             // Belt-and-suspenders: also call set_winsize after spawn to ensure
             // the slave-side window size is consistent across platforms.
             pty.set_winsize(rows, cols)?;

@@ -40,7 +40,7 @@ impl KuroFFI for EmacsModuleFFI {
         )]
         let cols = cols as u16;
 
-        init_session(command, rows, cols)
+        init_session(command, &[], rows, cols)
             .map_or(ptr::null_mut(), |_id| ptr::dangling_mut::<emacs_value>())
     }
 

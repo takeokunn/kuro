@@ -106,7 +106,7 @@ destroy in-progress terminal session state."
 
 ;; These functions are provided by the Rust dynamic module at runtime.
 ;; declare-function suppresses byte/native compiler "not known to be defined" warnings.
-(declare-function kuro-core-init                    "ext:kuro-core" (command rows cols))
+(declare-function kuro-core-init                    "ext:kuro-core" (command shell-args rows cols))
 (declare-function kuro-core-send-key                "ext:kuro-core" (session-id bytes))
 (declare-function kuro-core-poll-updates-with-faces "ext:kuro-core" (session-id))
 (declare-function kuro-core-resize                  "ext:kuro-core" (session-id rows cols))
@@ -194,8 +194,10 @@ Usage:
 
 ;;; Session lifecycle
 
-(defun kuro--init (command &optional rows cols)
+(defun kuro--init (command &optional shell-args rows cols)
   "Initialize Kuro with COMMAND (e.g., \"bash\").
+SHELL-ARGS is an optional list of string arguments passed to the shell
+(e.g., \\='(\"--norc\" \"--noprofile\")); nil means no extra arguments.
 ROWS and COLS specify the initial terminal dimensions.  When omitted,
 `kuro--default-rows' and `kuro--default-cols' are used.  Callers should always
 pass the actual window dimensions so full-screen programs start with the correct
@@ -207,7 +209,7 @@ Returns the session ID (a non-negative integer) on success, nil otherwise."
              (c (or cols kuro--default-cols))
              (_ (when (fboundp 'kuro--ensure-module-loaded)
                   (kuro--ensure-module-loaded)))
-             (result (kuro-core-init command r c)))
+             (result (kuro-core-init command (or shell-args nil) r c)))
         (when result
           (setq kuro--session-id result)
           (setq kuro--initialized t))

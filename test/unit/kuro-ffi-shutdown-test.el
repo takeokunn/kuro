@@ -42,7 +42,7 @@ Reduces the repeated `(let ((kuro--initialized t)) (cl-letf ...))' boilerplate."
   "kuro--init stores the integer returned by kuro-core-init as kuro--session-id."
   (let ((kuro--initialized nil)
         (kuro--session-id 0))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _r _c) 7)))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _sa _r _c) 7)))
       (kuro--init "bash")
       (should (= kuro--session-id 7)))))
 
@@ -50,7 +50,7 @@ Reduces the repeated `(let ((kuro--initialized t)) (cl-letf ...))' boilerplate."
   "kuro--init leaves kuro--session-id unchanged when kuro-core-init returns nil."
   (let ((kuro--initialized nil)
         (kuro--session-id 5))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _r _c) nil)))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _sa _r _c) nil)))
       (kuro--init "bash")
       (should (= kuro--session-id 5)))))
 
@@ -190,7 +190,7 @@ variable survives `kill-all-local-variables' (called on major-mode activation)."
   "kuro--init returns the integer session-id (not just t) when kuro-core-init succeeds."
   (let ((kuro--initialized nil)
         (kuro--session-id 0))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _r _c) 3)))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _sa _r _c) 3)))
       (let ((result (kuro--init "bash")))
         (should (integerp result))
         (should (= result 3))))))

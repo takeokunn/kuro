@@ -60,7 +60,7 @@ impl KuroFFI for RawFFI {
         let cols = cols as u16;
 
         // Initialize session
-        match init_session(command, rows, cols) {
+        match init_session(command, &[], rows, cols) {
             Ok(_) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }

@@ -41,9 +41,9 @@ macro_rules! lock_terminals {
 ///
 /// # Safety
 /// This function modifies a global static mutex and must be called safely.
-pub fn init_session(command: &str, rows: u16, cols: u16) -> Result<u64> {
+pub fn init_session(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<u64> {
     let id = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let session = TerminalSession::new(command, rows, cols)?;
+    let session = TerminalSession::new(command, shell_args, rows, cols)?;
     lock_terminals!().insert(id, session);
     Ok(id)
 }

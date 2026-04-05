@@ -66,42 +66,43 @@ Reduces the repeated `(let ((kuro--initialized t)) (cl-letf ...))' boilerplate."
 (ert-deftest kuro-ffi-init-sets-initialized-on-success ()
   "kuro--init sets kuro--initialized to t when kuro-core-init returns non-nil."
   (let ((kuro--initialized nil))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _rows _cols) t)))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _shell-args _rows _cols) t)))
       (kuro--init "bash")
       (should kuro--initialized))))
 
 (ert-deftest kuro-ffi-init-leaves-uninitialized-on-nil-result ()
   "kuro--init leaves kuro--initialized nil when kuro-core-init returns nil."
   (let ((kuro--initialized nil))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _rows _cols) nil)))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _shell-args _rows _cols) nil)))
       (kuro--init "bash")
       (should-not kuro--initialized))))
 
 (ert-deftest kuro-ffi-init-returns-nil-on-error ()
   "kuro--init returns nil and does not raise when kuro-core-init errors."
   (let ((kuro--initialized nil))
-    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _rows _cols) (error "no PTY"))))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_cmd _shell-args _rows _cols) (error "no PTY"))))
       (let ((result (kuro--init "bash")))
         (should-not result)
         (should-not kuro--initialized)))))
 
 (ert-deftest kuro-ffi-init-passes-correct-rows-cols ()
-  "kuro--init forwards rows/cols to kuro-core-init correctly.
-Verifies that the actual row and col values reach the Rust FFI,
+  "kuro--init forwards shell-args/rows/cols to kuro-core-init correctly.
+Verifies that the actual shell-args, row, and col values reach the Rust FFI,
 catching regressions where dimensions might be silently dropped
 or defaulted incorrectly."
   (let ((kuro--initialized nil)
         (received-args nil))
     (cl-letf (((symbol-function 'kuro-core-init)
-               (lambda (cmd rows cols)
-                 (setq received-args (list cmd rows cols))
+               (lambda (cmd shell-args rows cols)
+                 (setq received-args (list cmd shell-args rows cols))
                  t)))
-      ;; Pass explicit rows/cols
-      (kuro--init "bash" 30 120)
+      ;; Pass explicit shell-args / rows / cols
+      (kuro--init "bash" '("--norc") 30 120)
       (should received-args)
       (should (equal (nth 0 received-args) "bash"))
-      (should (= (nth 1 received-args) 30))
-      (should (= (nth 2 received-args) 120)))))
+      (should (equal (nth 1 received-args) '("--norc")))
+      (should (= (nth 2 received-args) 30))
+      (should (= (nth 3 received-args) 120)))))
 
 (ert-deftest kuro-ffi-init-ensures-module-loaded-before-core-init ()
   "kuro--init loads the native module before calling kuro-core-init.
@@ -113,7 +114,7 @@ has not been loaded yet."
     (cl-letf (((symbol-function 'kuro--ensure-module-loaded)
                (lambda () (push 'ensure call-order)))
               ((symbol-function 'kuro-core-init)
-               (lambda (_cmd _rows _cols)
+               (lambda (_cmd _shell-args _rows _cols)
                  (push 'init call-order)
                  t)))
       (kuro--init "bash")
@@ -124,14 +125,14 @@ has not been loaded yet."
   (let ((kuro--initialized nil)
         (received-args nil))
     (cl-letf (((symbol-function 'kuro-core-init)
-               (lambda (cmd rows cols)
-                 (setq received-args (list cmd rows cols))
+               (lambda (cmd shell-args rows cols)
+                 (setq received-args (list cmd shell-args rows cols))
                  t)))
-      ;; Omit rows/cols — should use defaults
+      ;; Omit shell-args/rows/cols — should use defaults
       (kuro--init "bash")
       (should received-args)
-      (should (= (nth 1 received-args) 24))  ; default rows
-      (should (= (nth 2 received-args) 80))))) ; default cols
+      (should (= (nth 2 received-args) 24))  ; default rows
+      (should (= (nth 3 received-args) 80))))) ; default cols
 
 ;;; Group 3: kuro--shutdown
 

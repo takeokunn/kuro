@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
         with:
           toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
@@ -87,6 +87,16 @@ jobs:
       - name: Run cargo test (release)
         run: cargo test --workspace --release
 
+      - name: Byte-compile all Elisp files
+        run: |
+          emacs -Q --batch \
+            -L emacs-lisp \
+            --eval "(setq byte-compile-error-on-warn t)" \
+            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
+                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
+                       (unless (byte-compile-file f)
+                         (kill-emacs 1))))"
+
       - name: Run Elisp ERT tests
         run: make test-elisp
 
@@ -97,16 +107,6 @@ jobs:
             --eval "(require 'package-lint)" \
             -f package-lint-batch-and-exit \
             emacs-lisp/kuro.el
-
-      - name: Byte-compile all Elisp files
-        run: |
-          emacs -Q --batch \
-            -L emacs-lisp \
-            --eval "(setq byte-compile-error-on-warn t)" \
-            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
-                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
-                       (unless (byte-compile-file f)
-                         (kill-emacs 1))))"
 
       - name: Run checkdoc
         run: |
@@ -137,10 +137,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
 
       - name: Setup WSL
-        uses: Vampire/setup-wsl@3b46b44374d5d0ae94654c45d114a3ed7a0e07a8  # v5
+        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278  # v6.0.0
         with:
           distribution: Ubuntu-24.04
 
@@ -165,10 +165,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
         with:
           toolchain: stable
 
@@ -180,7 +180,7 @@ jobs:
         continue-on-error: true  # tarpaulin may crash on PTY fork/exec under ptrace
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
+        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24  # v5.4.3
         with:
           file: ./cobertura.xml
 
@@ -188,9 +188,9 @@ jobs:
     name: Fuzz (nightly, regression check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
       - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # nightly
         with:
           toolchain: nightly
       - name: Install cargo-fuzz
@@ -226,10 +226,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9  # stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}

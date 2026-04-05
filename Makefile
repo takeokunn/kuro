@@ -55,7 +55,7 @@ bench-validate:
 
 # Run Elisp ERT tests (no Rust module required)
 test-elisp:
-	rm -f emacs-lisp/*.elc
+	rm -f emacs-lisp/*.elc test/unit/*.elc test/integration/*.elc
 	$(EMACS) -Q --batch \
 		-L emacs-lisp \
 		-L test/unit \
@@ -90,7 +90,7 @@ check:
 # Clean build artifacts
 clean:
 	$(CARGO) clean
-	rm -f emacs-lisp/*.elc
+	rm -f emacs-lisp/*.elc test/unit/*.elc test/integration/*.elc
 
 # Install the compiled binary to XDG install directory
 install:

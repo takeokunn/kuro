@@ -289,12 +289,14 @@ operation instead of two separate `=' comparisons."
     (defsubst kuro--apply-ffi-face-text-properties (start-pos end-pos face)
       "Apply FACE to START-POS..END-POS using `add-face-text-property' (Emacs ≥29).
 Load-time dispatch: the bytecode for each Emacs version contains no runtime
-version check — eliminates one branch per face range in the innermost render loop."
+version check — eliminates one branch per face range in the innermost
+render loop."
       (add-face-text-property start-pos end-pos face))
   (defsubst kuro--apply-ffi-face-text-properties (start-pos end-pos face)
     "Apply FACE to START-POS..END-POS using add-text-properties (Emacs <29).
 Load-time dispatch: the bytecode for each Emacs version contains no runtime
-version check — eliminates one branch per face range in the innermost render loop."
+version check — eliminates one branch per face range in the innermost
+render loop."
     (setcar (cdr kuro--face-prop-template) face)
     (add-text-properties start-pos end-pos kuro--face-prop-template)))
 
@@ -327,7 +329,8 @@ Applies the face, blink overlays (SGR 5/6), and invisible property (SGR 8).
 
 (defun kuro--call-with-normalized-ffi-face-range (range line-start line-end continuation)
   "Normalize FFI face RANGE and call CONTINUATION with the computed arguments.
-RANGE is a 6-element vector [START-BUF END-BUF FG-ENC BG-ENC FLAGS UL-COLOR-ENC].
+RANGE is a 6-element vector [START-BUF END-BUF FG-ENC BG-ENC FLAGS
+UL-COLOR-ENC].
 LINE-START and LINE-END bound the inserted line. CONTINUATION runs only for
 non-empty ranges after clamping. Returns non-nil when CONTINUATION ran."
   (let* ((start-pos (min (+ line-start (aref range 0)) line-end))

@@ -260,7 +260,8 @@ See `encode_screen_binary' in rust-core/src/ffi/codec.rs for the wire format."
 ;;; Optimised decoder using native Emacs strings from Rust
 
 (defun kuro--decode-binary-updates-with-strings (text-strings vec)
-  "Decode binary VEC using pre-supplied native TEXT-STRINGS, without funcall overhead.
+  "Decode binary VEC using pre-supplied native TEXT-STRINGS, without
+funcall overhead.
 TEXT-STRINGS is a vector of strings (one per dirty row) from
 `kuro-core-poll-updates-binary-with-strings'.  VEC carries only
 face/col-to-buf data; `text_byte_len' is always 0 in this path.

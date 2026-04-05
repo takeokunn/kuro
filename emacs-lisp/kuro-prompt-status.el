@@ -87,7 +87,8 @@
 
 (defun kuro--update-prompt-status (marks)
   "Update prompt status annotations from MARKS.
-MARKS is a list of (MARK-TYPE ROW COL EXIT-CODE) as from `kuro--poll-prompt-marks'.
+MARKS is a list of (MARK-TYPE ROW COL EXIT-CODE) as from
+`kuro--poll-prompt-marks'.
 Only processes \"command-end\" marks that have an exit code."
   (when kuro-prompt-status-annotations
     (dolist (mark marks)

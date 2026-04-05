@@ -93,6 +93,9 @@ When BUFFER-NAME is nil, generate a fresh name from `kuro--buffer-name-default'.
    (get-buffer-create (or buffer-name
                           (generate-new-buffer-name kuro--buffer-name-default)))))
 
+(defvar-local kuro--shell-command nil
+  "The shell command used to create this terminal session.")
+
 (defun kuro--start-session-in-buffer (buffer command)
   "Start COMMAND in BUFFER and initialize the terminal display.
 Returns BUFFER after attempting startup."
@@ -297,9 +300,6 @@ always computes fresh cursor position from Rust."
 ;; kuro-faces.el
 (defvar kuro--font-remap-cookie nil
   "Forward reference; defvar-local in kuro-faces.el.")
-
-(defvar-local kuro--shell-command nil
-  "The shell command used to create this terminal session.")
 
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)

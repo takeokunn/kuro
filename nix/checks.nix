@@ -102,7 +102,11 @@ in {
   kuro-test = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
 
   # Security audit against the rustsec advisory database.
-  kuro-audit = craneLib.cargoAudit { inherit src advisory-db; };
+  # --ignore RUSTSEC-2026-0073: upstream advisory uses CVSS 4.0 which cargo-audit cannot parse yet.
+  kuro-audit = craneLib.cargoAudit {
+    inherit src advisory-db;
+    cargoAuditExtraArgs = "--ignore RUSTSEC-2026-0073";
+  };
 
   # ERT test suite (Emacs 30).
   kuro-elisp = ertCheck;

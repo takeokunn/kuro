@@ -3,8 +3,8 @@
 //! Tests terminal emulator compliance with VT100/VT220 standards.
 //! These tests exercise the full `advance()` pipeline without any Emacs runtime.
 
-use kuro_core::types::cell::SgrFlags;
 use kuro_core::TerminalCore;
+use kuro_core::types::cell::SgrFlags;
 
 // === VT100 Basic Cursor Movement ===
 

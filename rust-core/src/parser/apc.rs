@@ -1,7 +1,7 @@
 //! APC (Application Program Command) pre-scanner for Kitty Graphics Protocol
 
-use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
 use crate::TerminalCore;
+use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
 
 /// State machine for raw APC byte-stream pre-scanning.
 ///
@@ -155,7 +155,7 @@ mod tests;
 /// and optional base64 data, separated by ';').
 pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
     use crate::grid::screen::{ImageData, ImagePlacement};
-    use crate::parser::kitty::{process_apc_payload, KittyCommand};
+    use crate::parser::kitty::{KittyCommand, process_apc_payload};
 
     let Some(cmd) = process_apc_payload(payload, &mut core.kitty.kitty_chunk) else {
         return; // more chunks incoming, or malformed

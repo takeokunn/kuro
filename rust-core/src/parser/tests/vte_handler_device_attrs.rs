@@ -233,7 +233,7 @@ fn test_csi_ich_inserts_blank_at_cursor() {
     let mut term = term_with!(b"ABCD");
     term.advance(b"\x1b[1;3H"); // cursor to (row 0, col 2)
     term.advance(b"\x1b[1@"); // ICH 1: insert 1 blank at col 2
-                              // 'A' and 'B' remain; col 2 is now blank; 'C' shifts to col 3
+    // 'A' and 'B' remain; col 2 is now blank; 'C' shifts to col 3
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, 'B');
     assert_cell_char!(term, row 0, col 2, ' ');
@@ -246,7 +246,7 @@ fn test_csi_dch_deletes_char_at_cursor() {
     let mut term = term_with!(b"ABCD");
     term.advance(b"\x1b[1;2H"); // cursor to col 1
     term.advance(b"\x1b[1P"); // DCH 1: delete 'B'
-                              // 'A' remains; 'C' shifts to col 1; 'D' to col 2; col 3 is blank
+    // 'A' remains; 'C' shifts to col 1; 'D' to col 2; col 3 is blank
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, 'C');
     assert_cell_char!(term, row 0, col 2, 'D');
@@ -260,7 +260,7 @@ fn test_csi_ech_erases_without_moving_cursor() {
     term.advance(b"\x1b[1;2H"); // cursor to col 1
     let col_before = term.screen.cursor().col;
     term.advance(b"\x1b[2X"); // ECH 2: erase 2 chars from col 1
-                              // Col 0 unchanged; cols 1-2 blank; col 3 onward unchanged
+    // Col 0 unchanged; cols 1-2 blank; col 3 onward unchanged
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, ' ');
     assert_cell_char!(term, row 0, col 2, ' ');

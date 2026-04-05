@@ -6,8 +6,8 @@
 
 use std::sync::Arc;
 
-use crate::parser;
 use crate::TerminalCore;
+use crate::parser;
 use unicode_width::UnicodeWidthChar;
 
 impl vte::Perform for TerminalCore {

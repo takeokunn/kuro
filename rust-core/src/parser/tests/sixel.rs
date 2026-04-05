@@ -263,7 +263,7 @@ fn color_no_params_does_not_panic() {
     // `#` followed immediately by a non-digit, non-semicolon character
     let mut d = make_decoder();
     feed(&mut d, b"#~"); // finalize color command with empty params, then paint
-                         // Must not panic; current_color stays 0
+    // Must not panic; current_color stays 0
     assert_eq!(d.current_color, 0);
 }
 

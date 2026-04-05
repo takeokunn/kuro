@@ -88,11 +88,7 @@ macro_rules! test_osc_104_bad_param_no_change {
             core.osc_data.palette[$idx] = Some($initial);
             let params: &[&[u8]] = $params_expr;
             super::handle_osc_104(&mut core, params);
-            assert_eq!(
-                core.osc_data().palette[$idx],
-                Some($initial),
-                $msg
-            );
+            assert_eq!(core.osc_data().palette[$idx], Some($initial), $msg);
             assert!(core.osc_data().palette_dirty);
         }
     };
@@ -175,10 +171,7 @@ test_osc_1337_noop!(
 );
 
 // No second param — missing payload
-test_osc_1337_noop!(
-    test_handle_osc_1337_missing_param_is_noop,
-    &[b"1337"]
-);
+test_osc_1337_noop!(test_handle_osc_1337_missing_param_is_noop, &[b"1337"]);
 
 // ── parse_iterm2_params ────────────────────────────────────────────────────────
 

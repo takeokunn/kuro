@@ -121,8 +121,8 @@ fn test_encode_line_wide_chars_no_placeholder_space() {
     // Simulate what screen.rs does for CJK: テ at col0 + placeholder at col1
     let mut wide_cell = Cell::new('テ');
     wide_cell.width = CellWidth::Half; // main cell is Half (it's the glyph cell)
-                                       // Actually the main cell width is set by unicode_width, not CellWidth::Wide.
-                                       // The placeholder is the second cell with CellWidth::Wide and grapheme=" ".
+    // Actually the main cell width is set by unicode_width, not CellWidth::Wide.
+    // The placeholder is the second cell with CellWidth::Wide and grapheme=" ".
     let placeholder = Cell {
         width: CellWidth::Wide,
         grapheme: CompactString::new(" "),

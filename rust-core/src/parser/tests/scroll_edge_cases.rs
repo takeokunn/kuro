@@ -117,11 +117,14 @@ macro_rules! test_scroll_bce_propagated {
 // Row 0 must receive what was in row 1.
 test_scroll_zero_param_is_one!(
     test_su_zero_param_treated_as_one,
-    seq    = b"\x1b[0S",
-    fill   = b'0',
-    rows   = 5,
-    row0   = '1', "CSI 0 S must scroll up by 1",
-    bottom = 4, ' ', "bottom row must be blank after SU 0→1",
+    seq = b"\x1b[0S",
+    fill = b'0',
+    rows = 5,
+    row0 = '1',
+    "CSI 0 S must scroll up by 1",
+    bottom = 4,
+    ' ',
+    "bottom row must be blank after SU 0→1",
 );
 
 /// SD by 0 lines: CSI 0 T is treated as CSI 1 T.
@@ -150,19 +153,19 @@ fn test_sd_zero_param_treated_as_one() {
 // SU with count equal to screen height blanks the whole visible area.
 test_scroll_full_height_blanks_all!(
     test_su_full_screen_height_blanks_all,
-    seq  = b"\x1b[4S",
+    seq = b"\x1b[4S",
     fill = 'X',
     rows = 4,
-    msg  = "must be blank after full-height SU",
+    msg = "must be blank after full-height SU",
 );
 
 // SD with count equal to screen height blanks the whole visible area.
 test_scroll_full_height_blanks_all!(
     test_sd_full_screen_height_blanks_all,
-    seq  = b"\x1b[4T",
+    seq = b"\x1b[4T",
     fill = 'Y',
     rows = 4,
-    msg  = "must be blank after full-height SD",
+    msg = "must be blank after full-height SD",
 );
 
 /// SU inside a scroll region that is only 1 row tall: no content to displace,
@@ -391,11 +394,14 @@ fn test_decstbm_cursor_moves_to_home() {
 // so the screen scrolls up by exactly 1 line. This is distinct from a no-op.
 test_scroll_zero_param_is_one!(
     test_su_zero_lines_is_one_line,
-    seq    = b"\x1b[0S",
-    fill   = b'0',
-    rows   = 5,
-    row0   = '1', "CSI 0 S scrolls up by 1 (0 is clamped to 1)",
-    bottom = 4, ' ', "bottom row must be blank after CSI 0 S",
+    seq = b"\x1b[0S",
+    fill = b'0',
+    rows = 5,
+    row0 = '1',
+    "CSI 0 S scrolls up by 1 (0 is clamped to 1)",
+    bottom = 4,
+    ' ',
+    "bottom row must be blank after CSI 0 S",
 );
 
 /// CSI 0 T — parameter 0 is clamped to 1 by the implementation,
@@ -428,24 +434,24 @@ fn test_sd_zero_lines_is_one_line() {
 // carry the current SGR background color, not `Color::Default`.
 test_scroll_bce_propagated!(
     test_su_bce_background_propagated,
-    seq         = b"\x1b[2S",
-    fill        = 'X',
-    sgr         = b"\x1b[44m",
+    seq = b"\x1b[2S",
+    fill = 'X',
+    sgr = b"\x1b[44m",
     blank_range = 3..5,
-    msg_char    = "must be blank",
-    msg_bg      = "SU blank line must carry BCE background",
+    msg_char = "must be blank",
+    msg_bg = "SU blank line must carry BCE background",
 );
 
 // SD with a non-default SGR background: newly introduced blank lines at the
 // top of the scroll region must carry the current SGR background color.
 test_scroll_bce_propagated!(
     test_sd_bce_background_propagated,
-    seq         = b"\x1b[2T",
-    fill        = 'Y',
-    sgr         = b"\x1b[41m",
+    seq = b"\x1b[2T",
+    fill = 'Y',
+    sgr = b"\x1b[41m",
     blank_range = 0..2,
-    msg_char    = "must be blank",
-    msg_bg      = "SD blank line must carry BCE background",
+    msg_char = "must be blank",
+    msg_bg = "SD blank line must carry BCE background",
 );
 
 /// SD marks affected rows dirty — symmetry with `test_scroll_marks_dirty` for SU.

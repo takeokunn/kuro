@@ -3,6 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    # nixpkgs-unstable is used only for cargo-llvm-cov, which is marked broken
+    # in nixos-25.11 (0.6.20) but works in unstable (0.8.5+).
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -14,17 +17,33 @@
     };
   };
 
-  outputs = { self, nixpkgs, fenix, crane, treefmt-nix }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nixpkgs-unstable,
+      fenix,
+      crane,
+      treefmt-nix,
+    }:
     let
-      supportedSystems =
-        [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
-      mkKuro = system:
+      mkKuro =
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          pkgsUnstable = nixpkgs-unstable.legacyPackages.${system};
           rustToolchain = fenix.packages.${system}.stable.toolchain;
           nightlyToolchain = fenix.packages.${system}.latest.toolchain;
+          llvmTools = fenix.packages.${system}.stable.llvm-tools;
+          cargoLlvmCov = pkgsUnstable.cargo-llvm-cov;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
           src = craneLib.path ./.;
           elispSrc = pkgs.lib.cleanSource ./.;
@@ -33,71 +52,102 @@
             pname = "kuro";
             version = "0.1.0";
             strictDeps = true;
-            buildInputs =
-              pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
+            buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
             nativeBuildInputs = [ pkgs.pkg-config ];
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-          kuro-core =
-            craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
-        in {
-          inherit pkgs craneLib src elispSrc commonArgs cargoArtifacts kuro-core
-            rustToolchain nightlyToolchain;
+          kuro-core = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
+        in
+        {
+          inherit
+            pkgs
+            craneLib
+            src
+            elispSrc
+            commonArgs
+            cargoArtifacts
+            kuro-core
+            rustToolchain
+            nightlyToolchain
+            llvmTools
+            cargoLlvmCov
+            ;
         };
 
       # Shared treefmt evaluation — produces both formatter and check.
-      mkTreefmt = system:
-        treefmt-nix.lib.evalModule nixpkgs.legacyPackages.${system}
-        (import ./nix/treefmt.nix);
-    in {
+      mkTreefmt =
+        system: treefmt-nix.lib.evalModule nixpkgs.legacyPackages.${system} (import ./nix/treefmt.nix);
+    in
+    {
       # nix fmt — format Nix files (nixfmt via treefmt).
       # Rust formatting is checked by `kuro-fmt` in `nix flake check`.
-      formatter =
-        forAllSystems (system: (mkTreefmt system).config.build.wrapper);
+      formatter = forAllSystems (system: (mkTreefmt system).config.build.wrapper);
 
-      packages = forAllSystems (system:
-        let ctx = mkKuro system;
-        in {
+      packages = forAllSystems (
+        system:
+        let
+          ctx = mkKuro system;
+        in
+        {
           default = ctx.kuro-core;
           inherit (ctx) kuro-core;
-        });
+        }
+      );
 
-      checks = forAllSystems (system:
-        let ctx = mkKuro system;
-        in (import ./nix/checks.nix {
+      checks = forAllSystems (
+        system:
+        let
+          ctx = mkKuro system;
+        in
+        (import ./nix/checks.nix {
           inherit (ctx)
-            pkgs craneLib src elispSrc commonArgs cargoArtifacts kuro-core;
-        }) // {
+            pkgs
+            craneLib
+            src
+            elispSrc
+            commonArgs
+            cargoArtifacts
+            kuro-core
+            ;
+        })
+        // {
           # Verify that all Nix files are formatted (treefmt).
           treefmt = (mkTreefmt system).config.build.check self;
-        });
+        }
+      );
 
-      apps = forAllSystems (system:
-        let ctx = mkKuro system;
-        in import ./nix/apps.nix {
-          inherit (ctx) pkgs rustToolchain nightlyToolchain;
-        });
+      apps = forAllSystems (
+        system:
+        let
+          ctx = mkKuro system;
+        in
+        import ./nix/apps.nix {
+          inherit (ctx) pkgs rustToolchain nightlyToolchain llvmTools cargoLlvmCov;
+        }
+      );
 
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           ctx = mkKuro system;
           pkgs = ctx.pkgs;
           stableShell = fenix.packages.${system}.stable.withComponents [
             "cargo"
             "clippy"
+            "llvm-tools"
             "rust-src"
             "rustc"
             "rustfmt"
           ];
-          darwinInputs =
-            pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
-        in {
-          # Default development shell — stable Rust + Emacs + tarpaulin.
+          darwinInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
+        in
+        {
+          # Default development shell — stable Rust + Emacs + llvm-cov.
           default = pkgs.mkShell {
             packages = [
               stableShell
               pkgs.emacs
-              pkgs.cargo-tarpaulin
+              ctx.cargoLlvmCov
               pkgs.pkg-config
               pkgs.rust-analyzer
               pkgs.cargo-audit
@@ -124,14 +174,40 @@
           };
 
           # Fuzz shell — nightly Rust + cargo-fuzz for libFuzzer targets.
-          fuzz = pkgs.mkShell {
-            packages = [ ctx.nightlyToolchain pkgs.cargo-fuzz pkgs.pkg-config ]
-              ++ darwinInputs;
-            shellHook = ''
-              echo "Kuro fuzz shell (nightly Rust + cargo-fuzz)"
-              echo "  cd rust-core/fuzz && cargo fuzz run advance -- -max_total_time=30 -runs=1000"
-            '';
-          };
-        });
+          fuzz =
+            let
+              # cctools ld 1010.6 (Nix-packaged) segfaults on large ASAN link
+              # operations on macOS 15.  Route through LLVM lld instead.
+              # The cdylib issue (lld -init_offsets + ASAN global ctors) is
+              # avoided by the kuro-core-proxy crate (rlib only, no cdylib).
+              # For the final executable link, lld handles ASAN correctly.
+              #
+              # CARGO_TARGET_*_RUSTFLAGS is overridden by cargo-fuzz's RUSTFLAGS;
+              # CARGO_TARGET_*_LINKER is a separate key and is not overridden.
+              darwinFuzzLinker = pkgs.writeShellScriptBin "fuzz-linker" ''
+                exec ${pkgs.llvmPackages.clang}/bin/clang \
+                  -fuse-ld=${pkgs.llvmPackages.lld}/bin/ld64.lld \
+                  "$@"
+              '';
+            in
+            pkgs.mkShell {
+              packages = [
+                ctx.nightlyToolchain
+                pkgs.cargo-fuzz
+                pkgs.pkg-config
+              ]
+              ++ darwinInputs
+              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ darwinFuzzLinker ];
+              env = pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+                CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
+                CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
+              };
+              shellHook = ''
+                echo "Kuro fuzz shell (nightly Rust + cargo-fuzz)"
+                echo "  cd rust-core/fuzz && cargo fuzz run advance -- -max_total_time=30 -runs=1000"
+              '';
+            };
+        }
+      );
     };
 }

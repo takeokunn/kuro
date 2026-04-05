@@ -46,8 +46,8 @@ fn test_parse_iterm2_params_height_percent_suffix() {
 /// called from `handle_osc_default_colors`.
 #[test]
 fn test_handle_osc_default_colors_set_fg_via_rgb_4digit() {
-    use crate::types::Color;
     use crate::TerminalCore;
+    use crate::types::Color;
     let mut core = TerminalCore::new(24, 80);
     // "rgb:ff00/8000/0000" → R=0xff, G=0x80, B=0x00 (upper 8 bits of each channel)
     let params: &[&[u8]] = &[b"10", b"rgb:ff00/8000/0000"];
@@ -183,8 +183,8 @@ fn test_handle_osc_104_double_reset_is_idempotent() {
 /// Sending A → B → C → D must push exactly four events in that order.
 #[test]
 fn test_handle_osc_133_multiple_marks_accumulate_in_order() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     for mark_byte in [b"A" as &[u8], b"B", b"C", b"D"] {
         let params: &[&[u8]] = &[b"133", mark_byte];
@@ -205,8 +205,8 @@ fn test_handle_osc_133_multiple_marks_accumulate_in_order() {
 /// to `c` for Write actions.
 #[test]
 fn test_handle_osc_52_non_c_selection_records_write() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
+    use crate::types::osc::ClipboardAction;
     let mut core = TerminalCore::new(24, 80);
     // base64("hi") = "aGk="
     let params: &[&[u8]] = &[b"52", b"p", b"aGk="];
@@ -222,8 +222,8 @@ fn test_handle_osc_52_non_c_selection_records_write() {
 /// color that was just set (not the fallback grey).
 #[test]
 fn test_handle_osc_default_colors_set_then_query_returns_set_color() {
-    use crate::types::Color;
     use crate::TerminalCore;
+    use crate::types::Color;
     let mut core = TerminalCore::new(24, 80);
     // Set default_fg to (0, 128, 255) via OSC 10.
     let set_params: &[&[u8]] = &[b"10", b"#0080ff"];
@@ -248,8 +248,8 @@ fn test_handle_osc_default_colors_set_then_query_returns_set_color() {
 /// immediately queried must respond with the correct encoded value.
 #[test]
 fn test_handle_osc_default_colors_set_bg_then_query_round_trip() {
-    use crate::types::Color;
     use crate::TerminalCore;
+    use crate::types::Color;
     let mut core = TerminalCore::new(24, 80);
     let set_params: &[&[u8]] = &[b"11", b"#102030"];
     super::handle_osc_default_colors(&mut core, set_params);

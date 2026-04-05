@@ -194,7 +194,7 @@ fn test_insert_range_idempotent_count() {
     let mut ds = BitVecDirtySet::new(24);
     ds.insert(3);
     ds.insert_range(2, 5); // overlaps row 3 already set
-                           // rows 2, 3, 4 — count must be 3, not 4
+    // rows 2, 3, 4 — count must be 3, not 4
     assert_eq!(ds.len(), 3);
 }
 

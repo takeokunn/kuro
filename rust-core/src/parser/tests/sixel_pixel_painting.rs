@@ -7,7 +7,7 @@ fn data_byte_question_mark_paints_no_bits() {
     // `?` = 0x3F = bits 0b000000 — no pixels set
     let mut d = make_decoder();
     feed(&mut d, b"\"1;1;4;6#0?"); // register 0 = black, `?` = 0 bits
-                                   // cursor_x must advance by 1
+    // cursor_x must advance by 1
     assert_eq!(d.cursor_x, 1);
     // No pixels should be opaque (alpha=255) since bits are all zero
     // The pixel buffer should have been allocated but remain transparent
@@ -147,7 +147,7 @@ fn p2_zero_transparent_background() {
     // P2=0 → background pixels start transparent (alpha=0) before painting
     let mut d = make_decoder(); // p2=0
     feed(&mut d, b"\"1;1;2;6?"); // `?` allocates buffer but paints no pixels
-                                 // Allocated pixels should have alpha=0 (transparent)
+    // Allocated pixels should have alpha=0 (transparent)
     assert!(!d.pixels.is_empty());
     let all_transparent = d.pixels.chunks_exact(4).all(|px| px[3] == 0);
     assert!(

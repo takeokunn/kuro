@@ -133,7 +133,9 @@ fn test_viewport_scroll_down_noop_at_zero_offset() {
 fn test_resize_idempotent_same_dimensions() {
     let mut session = make_session();
     session.resize(24, 80).expect("first resize must not fail");
-    session.resize(24, 80).expect("second resize with same dims must not fail");
+    session
+        .resize(24, 80)
+        .expect("second resize with same dims must not fail");
     assert_eq!(
         session.core.screen.rows(),
         24,

@@ -485,10 +485,10 @@ fn test_ed0_erases_from_cursor_to_end() {
     // Write something on row 0 and row 1
     term.advance(b"AAAAAAAAAA"); // fills row 0
     term.advance(b"\nBBBBBBBBBB"); // fills row 1
-                                   // Move cursor to row 0, col 5
+    // Move cursor to row 0, col 5
     term.advance(b"\x1b[1;6H"); // 1-indexed → row 0, col 5
     term.advance(b"\x1b[0J"); // ED 0: erase from cursor to bottom
-                              // col 0..4 on row 0 must still be 'A'
+    // col 0..4 on row 0 must still be 'A'
     for col in 0..5 {
         let cell = term.get_cell(0, col).expect("cell must exist");
         assert_eq!(cell.char(), 'A', "cell (0,{col}) must survive ED 0");
@@ -511,7 +511,7 @@ fn test_ed1_erases_from_start_to_cursor() {
     // Move cursor to row 1, col 4
     term.advance(b"\x1b[2;5H"); // 1-indexed → row 1, col 4
     term.advance(b"\x1b[1J"); // ED 1: erase from top to cursor
-                              // row 0 must be fully erased
+    // row 0 must be fully erased
     let r0 = term.get_cell(0, 0).expect("cell (0,0) must exist");
     assert_eq!(r0.char(), ' ', "row 0 must be erased by ED 1");
     // row 1, cols 0–4 must be erased

@@ -52,7 +52,11 @@ fn test_viewport_scroll_up_then_down_restores_live() {
         session.core.advance(&newlines);
     }
     session.viewport_scroll_up(2);
-    assert_eq!(session.scroll_offset(), 2, "offset must be 2 after scroll_up");
+    assert_eq!(
+        session.scroll_offset(),
+        2,
+        "offset must be 2 after scroll_up"
+    );
     session.viewport_scroll_down(2);
     assert_eq!(
         session.scroll_offset(),
@@ -143,7 +147,11 @@ fn test_encode_line_faces_single_ascii_cell() {
     let (row, text, face_ranges, col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
     assert_eq!(row, 0, "row index must be passed through unchanged");
     assert_eq!(text, "A", "text must be the single character 'A'");
-    assert_eq!(face_ranges.len(), 1, "single-cell line must produce exactly 1 face range");
+    assert_eq!(
+        face_ranges.len(),
+        1,
+        "single-cell line must produce exactly 1 face range"
+    );
     // ASCII fast-path: col_to_buf is empty (identity mapping implied).
     assert!(
         col_to_buf.is_empty(),
@@ -157,11 +165,15 @@ fn test_encode_line_faces_single_ascii_cell() {
 fn test_encode_line_faces_wide_char_has_col_to_buf_entry() {
     use crate::types::cell::{Cell, CellWidth, SgrAttributes};
     // Construct a wide character pair: Full cell + Wide placeholder.
-    let full_cell = Cell::with_char_and_width('\u{3042}', SgrAttributes::default(), CellWidth::Full); // 'あ'
+    let full_cell =
+        Cell::with_char_and_width('\u{3042}', SgrAttributes::default(), CellWidth::Full); // 'あ'
     let placeholder = Cell::with_char_and_width(' ', SgrAttributes::default(), CellWidth::Wide);
     let cells = vec![full_cell, placeholder];
     let (_row, text, _face_ranges, col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
-    assert_eq!(text, "\u{3042}", "wide char text must contain only the base character");
+    assert_eq!(
+        text, "\u{3042}",
+        "wide char text must contain only the base character"
+    );
     assert_eq!(
         col_to_buf.len(),
         2,
@@ -179,11 +191,22 @@ fn test_encode_line_faces_bold_cell_encodes_flag_in_attrs() {
     };
     let cells = vec![Cell::with_char_and_width('X', attrs, CellWidth::Half)];
     let (_row, _text, face_ranges, _col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
-    assert_eq!(face_ranges.len(), 1, "bold cell must produce exactly 1 face range");
+    assert_eq!(
+        face_ranges.len(),
+        1,
+        "bold cell must produce exactly 1 face range"
+    );
     let (_start, _end, _fg, _bg, flags, _ul_color) = face_ranges[0];
-    assert_ne!(flags, 0, "face-range flags must be non-zero for a bold cell");
+    assert_ne!(
+        flags, 0,
+        "face-range flags must be non-zero for a bold cell"
+    );
     // Bit 0 of the encoded attrs corresponds to BOLD (SgrFlags::BOLD = bit 0, maps to encode bit 0).
-    assert_eq!(flags & 1, 1, "bit 0 of face-range flags must be set for BOLD");
+    assert_eq!(
+        flags & 1,
+        1,
+        "bit 0 of face-range flags must be set for BOLD"
+    );
 }
 
 // ---------------------------------------------------------------------------

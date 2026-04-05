@@ -3,8 +3,8 @@
 //! Module under test: `parser/vte_handler.rs`
 //! Tier: T3 — `ProptestConfig::with_cases(256)`
 
-use crate::types::cell::SgrFlags;
 use crate::TerminalCore;
+use crate::types::cell::SgrFlags;
 
 // ── Local test-only macros ─────────────────────────────────────────────────
 

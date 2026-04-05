@@ -2,8 +2,8 @@
 
 use std::fs::File;
 use std::io::Read as _;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// PTY reader that runs in a separate thread
 pub struct PtyReader;

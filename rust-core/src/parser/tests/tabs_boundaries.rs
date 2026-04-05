@@ -59,7 +59,7 @@ fn test_tbc_clears_and_resets_to_defaults() {
     // First set a custom tab stop at column 5
     term.advance(b"\x1b[1;6H"); // move to col 5 (1-indexed)
     term.advance(b"\x1bH"); // HTS: set tab stop at col 5
-                            // Now clear all (resets to defaults)
+    // Now clear all (resets to defaults)
     term.advance(b"\x1b[3g");
     // After reset, the default stop at col 8 should be present
     term.advance(b"\x1b[1;1H"); // move to col 0
@@ -157,7 +157,7 @@ fn test_tbc_zero_clears_specific_stop_via_advance() {
     let mut term = crate::TerminalCore::new(24, 80);
     // Move cursor to col 8 (the stop to remove)
     term.advance(b"\x1b[9G"); // CSI 9 G → 1-indexed col 9 = 0-indexed col 8
-                              // TBC 0: clear stop at current column
+    // TBC 0: clear stop at current column
     term.advance(b"\x1b[g");
     // Move cursor back to col 1
     term.screen.move_cursor(0, 1);

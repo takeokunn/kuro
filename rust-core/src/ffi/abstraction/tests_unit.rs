@@ -1,8 +1,8 @@
 //! Unit tests for FFI abstraction: session management, encode delegates, sync output.
 
 use super::global::{
-    attach_session, detach_session, list_sessions, shutdown_session, with_session,
-    TERMINAL_SESSIONS,
+    TERMINAL_SESSIONS, attach_session, detach_session, list_sessions, shutdown_session,
+    with_session,
 };
 use super::session::{SessionState, TerminalSession};
 use crate::error::KuroError;

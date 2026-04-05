@@ -295,6 +295,6 @@ fn test_csi_rep_does_not_panic() {
     let mut term = term!(24, 80);
     term.advance(b"A"); // print 'A'
     term.advance(b"\x1b[3b"); // REP 3 — silently ignored
-                              // The cursor must not have moved back or wrapped in an unexpected way.
+    // The cursor must not have moved back or wrapped in an unexpected way.
     assert_cursor!(term, row = 0);
 }

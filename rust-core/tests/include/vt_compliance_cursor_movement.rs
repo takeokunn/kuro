@@ -103,7 +103,7 @@ fn vt_irm_ich_inserts_space_before_existing_content() {
     t.advance(b"ABC"); // row 0: A B C
     t.advance(b"\x1b[1;2H"); // cursor to (0, 1) — before 'B'
     t.advance(b"\x1b[1@"); // ICH 1 — insert 1 blank at col 1
-                           // After ICH: col 0='A', col 1=' ' (inserted), col 2='B', col 3='C'
+    // After ICH: col 0='A', col 1=' ' (inserted), col 2='B', col 3='C'
     assert_eq!(
         t.get_cell(0, 0).unwrap().char(),
         'A',

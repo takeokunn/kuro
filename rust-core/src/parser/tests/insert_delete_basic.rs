@@ -45,7 +45,7 @@ fn test_il_respects_scroll_region() {
     assert_eq!(char_at(&term, 0, 0), '0');
     assert_eq!(char_at(&term, 1, 0), '1');
     assert_eq!(char_at(&term, 2, 0), '2'); // cursor was below this row
-                                           // Two blank lines inserted at row 3
+    // Two blank lines inserted at row 3
     assert_eq!(char_at(&term, 3, 0), ' ');
     assert_eq!(char_at(&term, 4, 0), ' ');
     // Original rows 3,4 shifted to 5,6
@@ -240,11 +240,7 @@ macro_rules! test_clear_lines_noop {
             }
             term.screen.clear_lines($start, $end);
             for r in 0..10 {
-                assert_eq!(
-                    char_at(&term, r, 0),
-                    $ch,
-                    "row {r} should be untouched"
-                );
+                assert_eq!(char_at(&term, r, 0), $ch, "row {r} should be untouched");
             }
         }
     };
@@ -296,7 +292,11 @@ macro_rules! test_char_dirty_tracking {
             term.screen.move_cursor($crow, $ccol);
             term.advance($seq);
             let dirty = term.screen.take_dirty_lines();
-            assert!(dirty.contains(&$dirty), "expected row {} to be dirty", $dirty);
+            assert!(
+                dirty.contains(&$dirty),
+                "expected row {} to be dirty",
+                $dirty
+            );
         }
     };
 }
@@ -390,7 +390,7 @@ fn test_ech_basic() {
     assert_eq!(char_at(&term, 0, 2), 'A'); // left: untouched
     assert_eq!(char_at(&term, 0, 3), ' '); // erased
     assert_eq!(char_at(&term, 0, 4), 'A'); // right: untouched
-                                           // Cursor must NOT move
+    // Cursor must NOT move
     assert_eq!(term.screen.cursor().col, 3);
 }
 
@@ -516,7 +516,7 @@ fn test_ech_zero_param_treated_as_one() {
     assert_eq!(char_at(&term, 0, 5), ' '); // erased
     assert_eq!(char_at(&term, 0, 6), 'B'); // right neighbor untouched
     assert_eq!(char_at(&term, 0, 4), 'B'); // left neighbor untouched
-                                           // Cursor must not move
+    // Cursor must not move
     assert_eq!(term.screen.cursor().col, 5);
 }
 

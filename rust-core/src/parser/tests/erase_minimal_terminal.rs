@@ -248,7 +248,7 @@ fn test_written_chars_followed_by_el0_preserves_prefix() {
     );
     // Erase from cursor (col 6) to end of line.
     term.advance(b"\x1b[K"); // EL 0
-                             // Cols 0-5 were written before cursor — unchanged.
+    // Cols 0-5 were written before cursor — unchanged.
     assert_line_char!(term, row 0, cols 0..6, 'J', "after EL0: written region unchanged");
     // Cols 6-19 should be blank.
     assert_line_char!(term, row 0, cols 6..20, ' ', "after EL0: from cursor to EOL cleared");

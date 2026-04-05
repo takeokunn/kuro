@@ -12,7 +12,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-kuro-core = { path = ".." }
+kuro-core = { path = "kuro-core-proxy" }
 base64 = "0.22"
 
 [[bin]]

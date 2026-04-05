@@ -3,7 +3,7 @@
 //! Measures the time for FFI function calls.
 //! Target: <10μs latency.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuro_core::TerminalCore;
 
 /// Benchmark FFI call latency with varying payloads

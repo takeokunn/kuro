@@ -25,7 +25,11 @@ fn hyperlink_ranges_single_contiguous_run() {
         .map(|_| Cell::new('a').with_hyperlink(Arc::from(uri)))
         .collect();
     let ranges = encode_hyperlink_ranges(&cells);
-    assert_eq!(ranges.len(), 1, "single contiguous run must produce 1 range");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "single contiguous run must produce 1 range"
+    );
     assert_eq!(ranges[0], (0, 5, uri.to_owned()));
 }
 
@@ -62,11 +66,7 @@ fn hyperlink_ranges_mixed_with_plain_cells() {
     cells.push(Cell::new('p'));
 
     let ranges = encode_hyperlink_ranges(&cells);
-    assert_eq!(
-        ranges.len(),
-        1,
-        "only linked cells must produce a range"
-    );
+    assert_eq!(ranges.len(), 1, "only linked cells must produce a range");
     assert_eq!(ranges[0], (2, 5, uri.to_owned()));
 }
 

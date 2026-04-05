@@ -19,10 +19,16 @@ pub(crate) mod util;
 #[cfg(test)]
 mod vttest;
 
+// Emacs module registration — excluded when cfg(fuzzing) is active.
+// bridge/test_terminal #[defun] ctor registrations + ASAN + ld64.lld
+// -init_offsets are incompatible on arm64 macOS 15; cargo-fuzz sets this cfg.
+#[cfg(not(fuzzing))]
 use emacs::Env;
 
+#[cfg(not(fuzzing))]
 emacs::plugin_is_GPL_compatible!();
 
+#[cfg(not(fuzzing))]
 #[emacs::module(
     name = "kuro-core",
     defun_prefix = "",
@@ -38,8 +44,10 @@ pub use error::KuroError;
 pub use grid::screen::Screen;
 pub use types::{cell::Cell, cell::UnderlineStyle, color::Color, cursor::CursorShape};
 
-// Re-export FFI abstraction layer
-pub use ffi::{EmacsModuleFFI, KuroFFI, RawFFI, SessionState, TerminalSession, TERMINAL_SESSIONS};
+// Re-export FFI abstraction layer (EmacsModuleFFI only outside fuzzing)
+#[cfg(not(fuzzing))]
+pub use ffi::EmacsModuleFFI;
+pub use ffi::{KuroFFI, RawFFI, SessionState, TERMINAL_SESSIONS, TerminalSession};
 
 /// Result type for Kuro operations
 pub type Result<T> = std::result::Result<T, KuroError>;

@@ -102,7 +102,7 @@ fn test_decawm_enable() {
 fn test_decawm_disable_cursor_stays_at_margin() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[?7l"); // disable auto-wrap
-                            // Write exactly 80 chars → cursor is at col 79 (last col, 0-indexed)
+    // Write exactly 80 chars → cursor is at col 79 (last col, 0-indexed)
     t.advance(&[b'A'; 80]);
     assert_eq!(
         t.cursor_col(),

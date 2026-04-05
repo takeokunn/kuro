@@ -51,16 +51,20 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Generate coverage report
-        run: nix develop --command cargo-tarpaulin --workspace --timeout 300 --out Xml
+        run: nix run .#coverage
         continue-on-error: true
       - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24  # v5.4.3
         with:
-          file: ./cobertura.xml
+          files: ./lcov.info
 
   fuzz:
-    name: Fuzz (nightly, regression check)
-    runs-on: ubuntu-latest
+    name: Fuzz (${{ matrix.os }}, nightly, regression check)
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
       - uses: ./.github/actions/setup-nix

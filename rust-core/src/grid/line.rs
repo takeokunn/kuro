@@ -1,6 +1,6 @@
 //! Line type representing a single row in the terminal screen
 
-use crate::types::{cell::CellWidth, Cell, Color, SgrAttributes};
+use crate::types::{Cell, Color, SgrAttributes, cell::CellWidth};
 use compact_str::CompactString;
 use std::fmt;
 

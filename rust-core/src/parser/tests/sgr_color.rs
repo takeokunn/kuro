@@ -359,7 +359,7 @@ fn test_sgr_reset_clears_all_flags_and_colors() {
     term.advance(b"\x1b[31m"); // red fg
     term.advance(b"\x1b[41m"); // red bg
     term.advance(b"\x1b[58;2;255;0;255m"); // underline_color
-                                           // Now reset.
+    // Now reset.
     term.advance(b"\x1b[0m");
     assert!(
         term.current_attrs.flags.is_empty(),

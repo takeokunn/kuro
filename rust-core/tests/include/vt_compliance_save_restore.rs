@@ -285,7 +285,7 @@ fn vt_ss3_with_letter_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[5;10H"); // position away from home
     t.advance(b"\x1bOA"); // SS3 A — application cursor up (used by app keypad)
-                          // Must not panic; cursor stays in bounds
+    // Must not panic; cursor stays in bounds
     assert!(
         t.cursor_row() < 24,
         "cursor row must be in bounds after SS3 A"

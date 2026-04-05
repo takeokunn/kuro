@@ -40,6 +40,11 @@
 //! 4. Future-proofing for alternative FFI implementations
 
 pub mod abstraction;
+// bridge and test_terminal contain #[defun] registrations (emacs ctor).
+// ASAN instruments those global constructors, and ld64.lld on arm64 macOS 15
+// rejects __mod_init_func cross-section references under -init_offsets.
+// Exclude them when cfg(fuzzing) is active (set by cargo-fuzz).
+#[cfg(not(fuzzing))]
 pub mod bridge;
 pub mod codec;
 pub mod error;
@@ -47,23 +52,25 @@ pub mod fallback;
 pub mod init;
 pub mod kuro_ffi;
 pub mod safe_ref;
+#[cfg(not(fuzzing))]
 pub mod test_terminal;
 
 // Re-export the trait and implementations
+pub use abstraction::{SessionState, TERMINAL_SESSIONS, TerminalSession};
 pub use abstraction::{
     attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session,
     with_session_readonly,
 };
-pub use abstraction::{SessionState, TerminalSession, TERMINAL_SESSIONS};
+#[cfg(not(fuzzing))]
 pub use bridge::EmacsModuleFFI;
 pub use error::{InitError, RuntimeError, StateError};
 pub use fallback::RawFFI;
 pub use init::{
-    get_exported_symbols, get_init_state, initialize, is_initialized, MIN_EMACS_VERSION,
+    MIN_EMACS_VERSION, get_exported_symbols, get_init_state, initialize, is_initialized,
 };
-pub use kuro_ffi::{emacs_env, emacs_value, KuroFFI};
+pub use kuro_ffi::{KuroFFI, emacs_env, emacs_value};
 pub use safe_ref::{
-    env_ref_count, register_env_ref, unregister_env_ref, EnvRefRegistry, SafeEnvRef, ScopedEnvRef,
+    EnvRefRegistry, SafeEnvRef, ScopedEnvRef, env_ref_count, register_env_ref, unregister_env_ref,
 };
 
 // Re-export for backward compatibility

@@ -7,7 +7,7 @@ fn test_decom_cursor_moves_to_scroll_region_top_on_set() {
     let mut term = crate::TerminalCore::new(24, 80);
     // Set a scroll region (rows 3–20, 0-indexed) via DECSTBM
     term.advance(b"\x1b[4;20r"); // CSI 4 ; 20 r — sets scroll region rows 3..19
-                                 // Move cursor away first
+    // Move cursor away first
     term.advance(b"\x1b[10;5H");
     // Enable DECOM — must move cursor to scroll-region top (row 3)
     term.advance(b"\x1b[?6h");

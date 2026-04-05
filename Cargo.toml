@@ -22,6 +22,11 @@ nix = { version = "0.29", features = ["process", "term", "signal"] }
 png = "0.17"
 ahash = "0.8"
 
+[workspace.lints.rust]
+# cargo-fuzz injects --cfg fuzzing; declare it workspace-wide so rustc/clippy
+# does not warn about unexpected_cfgs in ffi.rs and lib.rs.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

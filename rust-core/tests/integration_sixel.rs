@@ -8,8 +8,8 @@
 
 mod common;
 
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use kuro_core::TerminalCore;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ fn sixel_unterminated_data_does_not_panic() {
     // process it without errors (VTE parser may be in DCS state, so this is
     // a graceful-degradation check).
     t.advance(b"\x1b\\"); // Explicit ST to close the dangling DCS
-                          // After ST, the terminal is back in Ground state — normal input must work.
+    // After ST, the terminal is back in Ground state — normal input must work.
     t.advance(b"\x1b[H"); // CUP home — must not panic
     assert!(
         t.cursor_row() < 24,

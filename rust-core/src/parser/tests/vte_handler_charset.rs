@@ -131,7 +131,7 @@ fn g0_g1_independent_designations() {
 fn reset_clears_gl_shift_state() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b)0\x0E"); // G1=line drawing, SO
-    term.advance(b"\x1bc");      // RIS
+    term.advance(b"\x1bc"); // RIS
     term.advance(b"j");
     assert_cell_char!(term, row 0, col 0, 'j');
 }
@@ -141,7 +141,7 @@ fn reset_clears_gl_shift_state() {
 fn soft_reset_clears_gl_shift_state() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b)0\x0E"); // G1=line drawing, SO
-    term.advance(b"\x1b[!p");    // DECSTR
+    term.advance(b"\x1b[!p"); // DECSTR
     term.advance(b"j");
     assert_cell_char!(term, row 0, col 0, 'j');
 }

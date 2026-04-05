@@ -105,7 +105,7 @@ fn test_integration_erase_display() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     term.advance(b"\x1b[2J"); // erase entire display
-                              // cursor position may vary, but must remain in bounds
+    // cursor position may vary, but must remain in bounds
     assert!(term.cursor_row() < 24);
     assert!(term.cursor_col() < 80);
 }
@@ -151,7 +151,7 @@ fn test_integration_erase_line_clears_cells() {
 fn test_integration_scroll_region_set() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[5;20r"); // set scroll region rows 5-20
-                                 // must not panic
+    // must not panic
     assert!(term.cursor_row() < 24);
 }
 
@@ -552,7 +552,7 @@ fn test_title_dirty_resets_on_second_osc2() {
 #[test]
 fn test_tab_stops_available_after_resize_grow() {
     let mut term = TerminalCore::new(24, 16); // only cols 8 is a tab stop
-                                              // Tab from col 0 should land on col 8
+    // Tab from col 0 should land on col 8
     term.advance(b"\t");
     assert_eq!(
         term.cursor_col(),

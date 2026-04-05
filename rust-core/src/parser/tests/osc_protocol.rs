@@ -41,8 +41,8 @@ macro_rules! test_osc_default_colors_query_set {
     ($name:ident, $osc_num:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
         #[test]
         fn $name() {
-            use crate::types::Color;
             use crate::TerminalCore;
+            use crate::types::Color;
             let mut core = TerminalCore::new(24, 80);
             core.osc_data.$field = Some(Color::Rgb($r, $g, $b));
             let params: &[&[u8]] = &[$osc_num, b"?"];
@@ -105,8 +105,8 @@ macro_rules! test_osc_133_mark {
     ($name:ident, $byte:expr, $variant:ident) => {
         #[test]
         fn $name() {
-            use crate::types::osc::PromptMark;
             use crate::TerminalCore;
+            use crate::types::osc::PromptMark;
             let mut core = TerminalCore::new(24, 80);
             let params: &[&[u8]] = &[b"133", $byte];
             super::handle_osc_133(&mut core, params);
@@ -125,8 +125,8 @@ macro_rules! test_osc_default_colors_set {
     ($name:ident, $osc_num:expr, $spec:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
         #[test]
         fn $name() {
-            use crate::types::Color;
             use crate::TerminalCore;
+            use crate::types::Color;
             let mut core = TerminalCore::new(24, 80);
             let params: &[&[u8]] = &[$osc_num, $spec];
             super::handle_osc_default_colors(&mut core, params);
@@ -226,8 +226,8 @@ test_parse_color_spec_none!(
 
 #[test]
 fn test_handle_osc_52_write_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
+    use crate::types::osc::ClipboardAction;
     let mut core = TerminalCore::new(24, 80);
     // base64("hello") = "aGVsbG8="
     let params: &[&[u8]] = &[b"52", b"c", b"aGVsbG8="];
@@ -241,8 +241,8 @@ fn test_handle_osc_52_write_clipboard() {
 
 #[test]
 fn test_handle_osc_52_query_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
+    use crate::types::osc::ClipboardAction;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"52", b"c", b"?"];
     super::handle_osc_52(&mut core, params);
@@ -286,11 +286,12 @@ fn test_handle_osc_104_reset_all_when_empty_arg() {
     // Empty byte slice for index arg → reset all
     let params: &[&[u8]] = &[b"104", b""];
     super::handle_osc_104(&mut core, params);
-    assert!(core
-        .osc_data()
-        .palette
-        .iter()
-        .all(std::option::Option::is_none));
+    assert!(
+        core.osc_data()
+            .palette
+            .iter()
+            .all(std::option::Option::is_none)
+    );
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -302,11 +303,12 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     // No index param at all
     let params: &[&[u8]] = &[b"104"];
     super::handle_osc_104(&mut core, params);
-    assert!(core
-        .osc_data()
-        .palette
-        .iter()
-        .all(std::option::Option::is_none));
+    assert!(
+        core.osc_data()
+            .palette
+            .iter()
+            .all(std::option::Option::is_none)
+    );
     assert!(core.osc_data().palette_dirty);
 }
 
@@ -337,8 +339,8 @@ fn test_handle_osc_133_missing_param_is_noop() {
 
 #[test]
 fn test_handle_osc_133_mark_records_cursor_position() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     // Move cursor to a known position before emitting the mark
     core.advance(b"\x1b[5;10H"); // row 5, col 10 (1-based → 4, 9 zero-based)
@@ -356,8 +358,8 @@ fn test_handle_osc_133_mark_records_cursor_position() {
 
 #[test]
 fn test_handle_osc_133_command_end_exit_code_zero() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D", b"0"];
     super::handle_osc_133(&mut core, params);
@@ -369,8 +371,8 @@ fn test_handle_osc_133_command_end_exit_code_zero() {
 
 #[test]
 fn test_handle_osc_133_command_end_exit_code_one() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D", b"1"];
     super::handle_osc_133(&mut core, params);
@@ -382,8 +384,8 @@ fn test_handle_osc_133_command_end_exit_code_one() {
 
 #[test]
 fn test_handle_osc_133_command_end_exit_code_127() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D", b"127"];
     super::handle_osc_133(&mut core, params);
@@ -395,8 +397,8 @@ fn test_handle_osc_133_command_end_exit_code_127() {
 
 #[test]
 fn test_handle_osc_133_command_end_exit_code_negative() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D", b"-1"];
     super::handle_osc_133(&mut core, params);
@@ -408,8 +410,8 @@ fn test_handle_osc_133_command_end_exit_code_negative() {
 
 #[test]
 fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D", b"abc"];
     super::handle_osc_133(&mut core, params);
@@ -421,8 +423,8 @@ fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
 
 #[test]
 fn test_handle_osc_133_command_end_no_exit_code_param() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"133", b"D"];
     super::handle_osc_133(&mut core, params);
@@ -434,8 +436,8 @@ fn test_handle_osc_133_command_end_no_exit_code_param() {
 
 #[test]
 fn test_handle_osc_133_prompt_start_exit_code_always_none() {
-    use crate::types::osc::PromptMark;
     use crate::TerminalCore;
+    use crate::types::osc::PromptMark;
     let mut core = TerminalCore::new(24, 80);
     // Even if a third param is provided, non-D marks should have exit_code: None
     let params: &[&[u8]] = &[b"133", b"A", b"0"];

@@ -63,7 +63,18 @@ macro_rules! test_transmit_nxn_image {
                     assert_eq!(format, ImageFormat::$fmt_var);
                     assert_eq!(pixel_width, $n);
                     assert_eq!(pixel_height, $n);
-                    assert_eq!(pixels.len(), $nbytes, concat!(stringify!($n), "×", stringify!($n), " ", stringify!($fmt_var), " byte count"));
+                    assert_eq!(
+                        pixels.len(),
+                        $nbytes,
+                        concat!(
+                            stringify!($n),
+                            "×",
+                            stringify!($n),
+                            " ",
+                            stringify!($fmt_var),
+                            " byte count"
+                        )
+                    );
                 }
                 other => panic!("expected Transmit, got {other:?}"),
             }
@@ -290,14 +301,14 @@ fn test_parse_params_no_equals_at_index1_skipped() {
 test_unsupported_transmission!(
     test_unsupported_transmission_temp_file_returns_none,
     payload = b"a=t,t=t,i=1;",
-    label   = "temp-file (t=t)",
+    label = "temp-file (t=t)",
 );
 
 // `process_apc_payload` must reject `t=s` (shared-memory) transmission type.
 test_unsupported_transmission!(
     test_unsupported_transmission_shared_mem_returns_none,
     payload = b"a=t,t=s,i=2;",
-    label   = "shared-memory (t=s)",
+    label = "shared-memory (t=s)",
 );
 
 /// When no `a=` key is present, `build_command` defaults the action to `'T'`
@@ -430,21 +441,21 @@ fn test_parse_params_r_and_c_keys() {
 // A 2×2 RGB image (4 pixels × 3 channels = 12 bytes)
 test_transmit_nxn_image!(
     test_transmit_rgb_2x2_image,
-    fmt_key  = 24,
+    fmt_key = 24,
     image_id = 50,
-    n        = 2,
-    nbytes   = 12,
-    fmt_var  = Rgb,
+    n = 2,
+    nbytes = 12,
+    fmt_var = Rgb,
 );
 
 // A 2×2 RGBA image (4 pixels × 4 channels = 16 bytes)
 test_transmit_nxn_image!(
     test_transmit_rgba_2x2_image,
-    fmt_key  = 32,
+    fmt_key = 32,
     image_id = 51,
-    n        = 2,
-    nbytes   = 16,
-    fmt_var  = Rgba,
+    n = 2,
+    nbytes = 16,
+    fmt_var = Rgba,
 );
 
 // Query command with no image_id returns Query { image_id: None }
@@ -499,22 +510,22 @@ fn test_transmit_and_display_no_placement_id_when_absent() {
 test_png_pixel_round_trip!(
     test_kitty_png_rgb_black_pixel_round_trips,
     color_type = png::ColorType::Rgb,
-    pixel      = &[0x00, 0x00, 0x00],
-    image_id   = 70,
-    fmt_var    = Rgb,
-    expected   = vec![0u8, 0u8, 0u8],
-    msg        = "black pixel must round-trip as [0,0,0]",
+    pixel = &[0x00, 0x00, 0x00],
+    image_id = 70,
+    fmt_var = Rgb,
+    expected = vec![0u8, 0u8, 0u8],
+    msg = "black pixel must round-trip as [0,0,0]",
 );
 
 // PNG with a pure white RGBA pixel round-trips correctly
 test_png_pixel_round_trip!(
     test_kitty_png_rgba_white_pixel_round_trips,
     color_type = png::ColorType::Rgba,
-    pixel      = &[0xFF, 0xFF, 0xFF, 0xFF],
-    image_id   = 71,
-    fmt_var    = Rgba,
-    expected   = vec![0xFFu8, 0xFF, 0xFF, 0xFF],
-    msg        = "white pixel must round-trip",
+    pixel = &[0xFF, 0xFF, 0xFF, 0xFF],
+    image_id = 71,
+    fmt_var = Rgba,
+    expected = vec![0xFFu8, 0xFF, 0xFF, 0xFF],
+    msg = "white pixel must round-trip",
 );
 
 // Chunk state is None when m=0 is the only chunk (no prior m=1)

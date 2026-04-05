@@ -8,8 +8,8 @@
 //! including memory management, type conversions, and error handling.
 
 use super::abstraction::{
-    emacs_env, emacs_value, init_session, shutdown_session, with_session, with_session_readonly,
-    KuroFFI,
+    KuroFFI, emacs_env, emacs_value, init_session, shutdown_session, with_session,
+    with_session_readonly,
 };
 use crate::error::KuroError;
 

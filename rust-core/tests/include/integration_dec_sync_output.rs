@@ -34,9 +34,9 @@ fn test_sync_output_claude_code_startup_sequence() {
     // Separator line (box-drawing chars U+2500 = 0xE2 0x94 0x80)
     term.advance(b"\x1b[2;1H");
     term.advance("\u{2500}".repeat(40).as_bytes()); // 40 × ─
-                                                    // Input prompt area
+    // Input prompt area
     term.advance(b"\x1b[3;1H\xe2\x9d\xaf "); // ❯  (U+275F prompt)
-                                             // Status bar at bottom
+    // Status bar at bottom
     term.advance(b"\x1b[24;1H");
     term.advance(b"\xef\x93\x93 Sonnet 4.6"); // NerdFont icon + model name
 

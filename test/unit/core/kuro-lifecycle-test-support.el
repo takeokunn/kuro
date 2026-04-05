@@ -10,51 +10,11 @@
 
 (require 'cl-lib)
 
-(dolist (sym '(kuro-core-init
-               kuro-core-send-key
-               kuro-core-poll-updates
-               kuro-core-poll-updates-with-faces
-               kuro-core-resize
-               kuro-core-shutdown
-               kuro-core-get-cursor
-               kuro-core-get-cursor-visible
-               kuro-core-get-cursor-shape
-               kuro-core-get-scroll-offset
-               kuro-core-get-and-clear-title
-               kuro-core-get-default-colors
-               kuro-core-get-palette-updates
-               kuro-core-get-image
-               kuro-core-take-bell-pending
-               kuro-core-get-focus-events
-               kuro-core-get-app-cursor-keys
-               kuro-core-get-app-keypad
-               kuro-core-get-bracketed-paste
-               kuro-core-get-mouse-mode
-               kuro-core-get-mouse-sgr
-               kuro-core-get-mouse-pixel
-               kuro-core-get-keyboard-flags
-               kuro-core-get-scrollback-count
-               kuro-core-get-scrollback
-               kuro-core-get-sync-output
-               kuro-core-get-cwd
-               kuro-core-has-pending-output
-               kuro-core-is-process-alive
-               kuro-core-poll-clipboard-actions
-               kuro-core-poll-image-notifications
-               kuro-core-poll-prompt-marks
-               kuro-core-scroll-up
-               kuro-core-scroll-down
-               kuro-core-consume-scroll-events
-               kuro-core-clear-scrollback
-               kuro-core-set-scrollback-max-lines
-               kuro-core-detach
-               kuro-core-attach
-               kuro-core-list-sessions))
-  (unless (fboundp sym)
-    (fset sym (lambda (&rest _) nil))))
-
-(unless (fboundp 'module-load)
-  (fset 'module-load (lambda (_path) nil)))
+(let* ((this-dir (file-name-directory
+                  (or load-file-name buffer-file-name default-directory)))
+       (unit-dir (expand-file-name ".." this-dir)))
+  (add-to-list 'load-path unit-dir))
+(require 'kuro-test-stubs)
 
 (let* ((this-dir (file-name-directory
                   (or load-file-name buffer-file-name default-directory)))

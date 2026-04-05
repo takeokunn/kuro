@@ -23,7 +23,7 @@ fn test_apc_payload_at_cap() {
 fn test_apc_payload_exceeds_cap_is_truncated() {
     let mut core = super::make_term();
     let mut input = vec![0x1b, b'_']; // ESC _
-                                      // Send MORE than the cap
+    // Send MORE than the cap
     input.extend(std::iter::repeat_n(b'X', MAX_APC_PAYLOAD_BYTES + 100));
     input.extend_from_slice(b"\x1b\\"); // ESC \
     core.advance(&input);
@@ -355,8 +355,10 @@ fn test_mixed_content_all_sequences_processed() {
     // "Start" should be at position 0
     assert_eq!(core.get_cell(0, 0).unwrap().char(), 'S');
     // Should not have current bold (reset)
-    assert!(!core
-        .current_attrs
-        .flags
-        .contains(crate::types::cell::SgrFlags::BOLD));
+    assert!(
+        !core
+            .current_attrs
+            .flags
+            .contains(crate::types::cell::SgrFlags::BOLD)
+    );
 }

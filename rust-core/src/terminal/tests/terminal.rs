@@ -561,7 +561,7 @@ fn test_csi_il_inserts_blank_line() {
     term.advance(b"First line content");
     term.advance(b"\x1b[1;1H"); // cursor to row 0, col 0
     term.advance(b"\x1b[1L"); // IL 1: insert blank line above current row
-                              // Row 0 should now be blank (the inserted line)
+    // Row 0 should now be blank (the inserted line)
     assert_cell_char!(term, row 0, col 0, ' ');
     // Previous row 0 content should be at row 1
     assert_cell_char!(term, row 1, col 0, 'F');
@@ -577,7 +577,7 @@ fn test_csi_dl_deletes_current_line() {
     // Move cursor back to row 0
     term.advance(b"\x1b[1;1H");
     term.advance(b"\x1b[1M"); // DL 1: delete row 0
-                              // 'X' from row 1 must shift up to row 0
+    // 'X' from row 1 must shift up to row 0
     assert_cell_char!(term, row 0, col 0, 'X');
     // Row 1 is now blank (shifted in at the bottom)
     assert_cell_char!(term, row 1, col 0, ' ');

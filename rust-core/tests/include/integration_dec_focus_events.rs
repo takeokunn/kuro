@@ -167,7 +167,7 @@ fn test_decscusr_reset_after_ris() {
 fn test_decscusr_unknown_param_does_not_panic() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[99 q"); // out-of-range parameter — must not panic
-                             // Must not panic; cursor shape should be BlinkingBlock (fallback)
+    // Must not panic; cursor shape should be BlinkingBlock (fallback)
     assert!(
         t.cursor_row() < 24,
         "cursor must be in bounds after unknown DECSCUSR"

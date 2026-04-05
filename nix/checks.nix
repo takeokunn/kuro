@@ -8,7 +8,15 @@
 #   commonArgs     - shared cargo build arguments
 #   cargoArtifacts - pre-built dependency artifacts
 #   kuro-core      - the main built package (included as a check)
-{ pkgs, craneLib, src, elispSrc, commonArgs, cargoArtifacts, kuro-core }:
+{
+  pkgs,
+  craneLib,
+  src,
+  elispSrc,
+  commonArgs,
+  cargoArtifacts,
+  kuro-core,
+}:
 
 let
   emacs = pkgs.emacs30;
@@ -16,8 +24,9 @@ let
   # Run ERT unit tests (pure Elisp, no Rust module loaded).
   #
   # Load order is load-bearing:
-  #   1. kuro-test.el  — defines stub replacements for all Rust FFI C-level symbols
-  #   2. remaining test/unit/**/*.el — depend on stubs being present
+  #   1. kuro-test-stubs.el — canonical Rust FFI stubs (required by kuro-test.el)
+  #   2. kuro-test.el       — loads kuro.el and defines ERT tests for kuro.el
+  #   3. remaining test/unit/**/*.el — depend on stubs being present
   # Do not reorder these --eval expressions.
   ertCheck = pkgs.stdenv.mkDerivation {
     name = "kuro-elisp-ert";
@@ -26,6 +35,7 @@ let
     buildPhase = ''
       emacs -Q --batch \
         -L emacs-lisp/core \
+        -L test/unit \
         -L test/unit/core \
         -L test/unit/ffi \
         -L test/unit/rendering \
@@ -62,31 +72,36 @@ let
   };
 
   # Run package-lint on the main entry point.
-  packageLintCheck = let
-    emacsWithLint = (pkgs.emacsPackagesFor emacs).withPackages
-      (epkgs: [ epkgs.package-lint ]);
-  in pkgs.stdenv.mkDerivation {
-    name = "kuro-package-lint";
-    src = elispSrc;
-    nativeBuildInputs = [ emacsWithLint ];
-    buildPhase = ''
-      emacs -Q --batch \
-        --eval "(require 'package-lint)" \
-        -f package-lint-batch-and-exit \
-        emacs-lisp/core/kuro.el
-    '';
-    installPhase = "touch $out";
-  };
+  packageLintCheck =
+    let
+      emacsWithLint = (pkgs.emacsPackagesFor emacs).withPackages (epkgs: [ epkgs.package-lint ]);
+    in
+    pkgs.stdenv.mkDerivation {
+      name = "kuro-package-lint";
+      src = elispSrc;
+      nativeBuildInputs = [ emacsWithLint ];
+      buildPhase = ''
+        emacs -Q --batch \
+          --eval "(require 'package-lint)" \
+          -f package-lint-batch-and-exit \
+          emacs-lisp/core/kuro.el
+      '';
+      installPhase = "touch $out";
+    };
 
-in {
+in
+{
   # Build check — the package itself must build cleanly.
   inherit kuro-core;
 
   # Rust linting.
-  kuro-clippy = craneLib.cargoClippy (commonArgs // {
-    inherit cargoArtifacts;
-    cargoClippyExtraArgs = "--workspace -- -D warnings";
-  });
+  kuro-clippy = craneLib.cargoClippy (
+    commonArgs
+    // {
+      inherit cargoArtifacts;
+      cargoClippyExtraArgs = "--workspace -- -D warnings";
+    }
+  );
 
   # Rust formatting.
   kuro-fmt = craneLib.cargoFmt {

@@ -1,0 +1,30 @@
+[package]
+name = "kuro-core"
+version = "1.0.0"
+edition = "2021"
+
+[lints.rust]
+# cargo-fuzz sets --cfg fuzzing; declare it here so rustc doesn't warn.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+# rlib only — cdylib is deliberately excluded.
+# cctools ld 1010.6 (Nix-packaged) crashes when linking large
+# ASAN-instrumented dylibs on macOS 15.  The Emacs module (cdylib)
+# is not needed for fuzzing; only the rlib is used.
+[lib]
+crate-type = ["rlib"]
+path = "../../src/lib.rs"
+
+[dependencies]
+vte = "0.15.0"
+# emacs excluded: all emacs usage in lib.rs is gated behind #[cfg(not(fuzzing))].
+# Including it would link emacs-module-rs (which uses ctor) into the fuzz binary,
+# potentially triggering the same ld64.lld -init_offsets ASAN incompatibility.
+unicode-width = "0.2"
+nix = { version = "0.29", features = ["process", "term", "signal"] }
+png = "0.17"
+ahash = "0.8"
+compact_str = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

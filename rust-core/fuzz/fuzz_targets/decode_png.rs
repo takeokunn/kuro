@@ -1,7 +1,7 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
-use kuro_core::TerminalCore;
 use base64::Engine as _;
+use kuro_core::TerminalCore;
+use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // Exercise PNG decode path by sending a Kitty image sequence with PNG format

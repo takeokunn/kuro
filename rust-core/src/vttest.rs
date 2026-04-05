@@ -103,7 +103,7 @@ mod tests {
         // So nothing should be erased
         feed(&mut term, &csi("5;1H"));
         feed(&mut term, &csi("J")); // ED 0: Erase below
-                                    // Row 0 should still have content
+        // Row 0 should still have content
         if let Some(cell) = term.screen.get_cell(0, 0) {
             assert_eq!(cell.char(), 'X', "First row should have content");
         }
@@ -114,8 +114,8 @@ mod tests {
         let mut term = create_terminal();
         feed(&mut term, b"Hello World");
         feed(&mut term, &csi("2J")); // ED 2: Erase all
-                                     // After ED 2, cursor may be at home or content cleared
-                                     // Just verify no crash and screen is accessible
+        // After ED 2, cursor may be at home or content cleared
+        // Just verify no crash and screen is accessible
         let _cell = term.screen.get_cell(0, 0);
         // No panic occurred - ED 2 cleared screen without crash
     }

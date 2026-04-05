@@ -179,7 +179,7 @@ fn finish_unterminated_repeat_does_not_paint() {
     // Without any prior pixel allocation the result is None.
     let mut d = make_decoder();
     feed(&mut d, b"!5"); // repeat count accumulating, no data byte, no raster
-                         // finish() hits the `Repeat | Normal` no-op arm
+    // finish() hits the `Repeat | Normal` no-op arm
     let result = d.finish();
     // No sixel data was painted so finish returns None
     assert!(

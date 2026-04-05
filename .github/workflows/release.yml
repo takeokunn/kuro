@@ -19,7 +19,7 @@ jobs:
           - os: macos-latest
             release-name: libkuro_core-macos-aarch64.dylib
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -30,13 +30,30 @@ jobs:
           find target/release -maxdepth 1 -name "libkuro_core.*" -not -name "*.d" \
             | head -1 \
             | xargs -I{} cp {} ${{ matrix.release-name }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
           name: kuro-${{ matrix.release-name }}
           path: ${{ matrix.release-name }}
           retention-days: 90
-      - uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844  # v1
+      - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe  # v2.6.1
         with:
           files: ${{ matrix.release-name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  elisp-release:
+    name: Release (kuro-elisp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Package Emacs Lisp
+        run: |
+          mkdir kuro-elisp
+          find emacs-lisp -name "*.el" -exec cp {} kuro-elisp/ \;
+          tar czf kuro-elisp-${{ github.ref_name }}.tar.gz kuro-elisp/
+      - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe  # v2.6.1
+        with:
+          files: kuro-elisp-${{ github.ref_name }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

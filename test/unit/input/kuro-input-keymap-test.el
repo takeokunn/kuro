@@ -318,5 +318,665 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
       (should-not (or (<= ?a c ?z) (<= ?A c ?Z) (<= ?0 c ?9))))))
 
 
+;;; Group 8: kuro--nav-key-bindings and kuro--mouse-bindings tables
+
+(ert-deftest kuro-input-keymap-nav-bindings-has-13-entries ()
+  "kuro--nav-key-bindings contains exactly 13 entries."
+  (should (= (length kuro--nav-key-bindings) 13)))
+
+(ert-deftest kuro-input-keymap-nav-bindings-entries-are-cons-pairs ()
+  "Every entry in kuro--nav-key-bindings is a (VECTOR . SYMBOL) cons pair."
+  (dolist (entry kuro--nav-key-bindings)
+    (should (consp entry))
+    (should (vectorp (car entry)))
+    (should (symbolp (cdr entry)))))
+
+(ert-deftest kuro-input-keymap-nav-bindings-spot-check-home ()
+  "[home] maps to kuro--HOME in kuro--nav-key-bindings."
+  (should (eq (cdr (assoc [home] kuro--nav-key-bindings)) 'kuro--HOME)))
+
+(ert-deftest kuro-input-keymap-nav-bindings-spot-check-s-prior ()
+  "[S-prior] maps to kuro-scroll-up in kuro--nav-key-bindings."
+  (should (eq (cdr (assoc [S-prior] kuro--nav-key-bindings)) 'kuro-scroll-up)))
+
+(ert-deftest kuro-input-keymap-mouse-bindings-has-8-entries ()
+  "kuro--mouse-bindings contains exactly 8 entries."
+  (should (= (length kuro--mouse-bindings) 8)))
+
+(ert-deftest kuro-input-keymap-mouse-bindings-entries-are-cons-pairs ()
+  "Every entry in kuro--mouse-bindings is a (VECTOR . SYMBOL) cons pair."
+  (dolist (entry kuro--mouse-bindings)
+    (should (consp entry))
+    (should (vectorp (car entry)))
+    (should (symbolp (cdr entry)))))
+
+(ert-deftest kuro-input-keymap-mouse-bindings-spot-check-mouse-4 ()
+  "[mouse-4] maps to kuro--mouse-scroll-up in kuro--mouse-bindings."
+  (should (eq (cdr (assoc [mouse-4] kuro--mouse-bindings)) 'kuro--mouse-scroll-up)))
+
+(ert-deftest kuro-input-keymap-mouse-bindings-down-mouse-count ()
+  "kuro--mouse-bindings has exactly 3 down-mouse entries."
+  (let ((count (cl-count-if (lambda (e) (string-prefix-p "down-mouse"
+                                                         (symbol-name (aref (car e) 0))))
+                            kuro--mouse-bindings)))
+    (should (= count 3))))
+
+(ert-deftest kuro-input-keymap-build-has-home-end-bindings ()
+  "[home] and [end] are bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map [home]))
+    (should (lookup-key map [end]))))
+
+(ert-deftest kuro-input-keymap-build-has-page-bindings ()
+  "[prior] (Page Up) and [next] (Page Down) are bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map [prior]))
+    (should (lookup-key map [next]))))
+
+(ert-deftest kuro-input-keymap-build-has-fkey-bindings ()
+  "F1 through F12 are all bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (dolist (fkey '([f1] [f2] [f3] [f4] [f5] [f6]
+                    [f7] [f8] [f9] [f10] [f11] [f12]))
+      (should (lookup-key map fkey)))))
+
+(ert-deftest kuro-input-keymap-build-has-meta-punct-bindings ()
+  "M-. M-< M-> M-? M-/ M-_ are all bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (dolist (key (mapcar (lambda (e) (kbd (car e))) kuro--meta-punct-bindings))
+      (should (lookup-key map key)))))
+
+
+;;; Group 9: kuro--fkey-handlers table
+
+(ert-deftest kuro-input-keymap-fkey-handlers-has-12-entries ()
+  "kuro--fkey-handlers contains exactly 12 entries (F1-F12)."
+  (should (= (length kuro--fkey-handlers) 12)))
+
+(ert-deftest kuro-input-keymap-fkey-handlers-entries-are-cons-pairs ()
+  "Every entry in kuro--fkey-handlers is a (SYMBOL . SYMBOL) cons pair."
+  (dolist (entry kuro--fkey-handlers)
+    (should (consp entry))
+    (should (symbolp (car entry)))
+    (should (symbolp (cdr entry)))))
+
+(ert-deftest kuro-input-keymap-fkey-handlers-spot-check-f1 ()
+  "f1 maps to kuro--F1 in kuro--fkey-handlers."
+  (should (eq (cdr (assq 'f1 kuro--fkey-handlers)) 'kuro--F1)))
+
+(ert-deftest kuro-input-keymap-fkey-handlers-spot-check-f12 ()
+  "f12 maps to kuro--F12 in kuro--fkey-handlers."
+  (should (eq (cdr (assq 'f12 kuro--fkey-handlers)) 'kuro--F12)))
+
+(ert-deftest kuro-input-keymap-fkey-handlers-all-keys-are-fN ()
+  "All key symbols in kuro--fkey-handlers match the pattern fN (f1-f12)."
+  (dolist (entry kuro--fkey-handlers)
+    (should (string-match-p "\\`f[0-9]+\\'" (symbol-name (car entry))))))
+
+
+;;; Group 10: kuro--keymap-setup-special — C-m, C-i, C-h, DEL aliases
+
+(ert-deftest kuro-input-keymap-build-c-m-is-ret ()
+  "C-m is bound to kuro--RET (same as [return]) in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "C-m")) #'kuro--RET))))
+
+(ert-deftest kuro-input-keymap-build-c-i-is-tab ()
+  "C-i is bound to kuro--TAB (same as [tab]) in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "C-i")) #'kuro--TAB))))
+
+(ert-deftest kuro-input-keymap-build-c-h-is-del ()
+  "C-h is bound to kuro--DEL (same as [backspace]) in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "C-h")) #'kuro--DEL))))
+
+(ert-deftest kuro-input-keymap-build-del-is-del ()
+  "DEL (kbd \"DEL\") is bound to kuro--DEL in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "DEL")) #'kuro--DEL))))
+
+
+;;; Group 11: kuro-keymap-exceptions — exception removal clears binding
+
+(ert-deftest kuro-input-keymap-exception-removes-binding ()
+  "A key listed in kuro-keymap-exceptions is absent from the built keymap."
+  (let* ((kuro-keymap-exceptions '("M-x"))
+         (orig kuro--keymap)
+         (map (unwind-protect
+                  (kuro--build-keymap)
+                (setq kuro--keymap orig))))
+    ;; The binding for M-x must be nil (removed)
+    (should-not (lookup-key map (kbd "M-x")))))
+
+(ert-deftest kuro-input-keymap-exception-also-clears-esc-prefix-fallback ()
+  "A M-CHAR exception also clears the ESC+char two-key fallback vector binding."
+  (let* ((kuro-keymap-exceptions '("M-b"))
+         (orig kuro--keymap)
+         (map (unwind-protect
+                  (kuro--build-keymap)
+                (setq kuro--keymap orig))))
+    ;; The raw [\e ?b] two-key form must also be cleared
+    (should-not (lookup-key map (vector ?\e ?b)))))
+
+
+;;; Group 12: kuro--send-meta-backspace behavior
+
+(ert-deftest kuro-input-keymap-send-meta-backspace-sends-esc-del ()
+  "`kuro--send-meta-backspace' sends ESC+DEL (\\e\\x7f) via kuro--send-key."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'kuro--send-key)
+               (lambda (s) (push s sent)))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () nil)))
+      (kuro--send-meta-backspace)
+      (should (equal (car sent) (string ?\e ?\x7f))))))
+
+(ert-deftest kuro-input-keymap-send-meta-backspace-schedules-render ()
+  "`kuro--send-meta-backspace' calls `kuro--schedule-immediate-render'."
+  (let ((render-called nil))
+    (cl-letf (((symbol-function 'kuro--send-key) (lambda (_) nil))
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () (setq render-called t))))
+      (kuro--send-meta-backspace)
+      (should render-called))))
+
+(ert-deftest kuro-input-keymap-build-m-del-bound-to-meta-backspace ()
+  "M-DEL is bound to `kuro--send-meta-backspace' in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "M-DEL")) #'kuro--send-meta-backspace))))
+
+(ert-deftest kuro-input-keymap-build-m-backspace-bound-to-meta-backspace ()
+  "M-<backspace> is bound to `kuro--send-meta-backspace' in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map (kbd "M-<backspace>")) #'kuro--send-meta-backspace))))
+
+
+;;; Group 13: ctrl setup — escape sends byte 27; selected ctrl bytes
+
+(ert-deftest kuro-input-keymap-escape-sends-ctrl-27 ()
+  "[escape] binding sends byte 27 (ESC) via kuro--send-ctrl."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map [escape]))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
+               (lambda (byte) (push byte sent))))
+      (funcall binding)
+      (should (equal sent '(27))))))
+
+(ert-deftest kuro-input-keymap-c-a-sends-ctrl-1 ()
+  "C-a binding sends byte 1 via kuro--send-ctrl."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map (kbd "C-a")))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
+               (lambda (byte) (push byte sent))))
+      (funcall binding)
+      (should (equal sent '(1))))))
+
+(ert-deftest kuro-input-keymap-c-z-sends-ctrl-26 ()
+  "C-z binding sends byte 26 via kuro--send-ctrl."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map (kbd "C-z")))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-ctrl)
+               (lambda (byte) (push byte sent))))
+      (funcall binding)
+      (should (equal sent '(26))))))
+
+(ert-deftest kuro-input-keymap-ctrl-all-entries-have-live-binding ()
+  "Every entry in kuro--ctrl-key-table corresponds to a live keymap binding."
+  (let ((map (kuro-keymap-test--built-map)))
+    (dolist (entry kuro--ctrl-key-table)
+      (should (lookup-key map (kbd (car entry)))))))
+
+
+;;; Group 14: meta loop — M-digit and ESC+letter two-key fallbacks
+
+(ert-deftest kuro-input-keymap-m-0-is-bound ()
+  "M-0 is bound in the built keymap (digit range)."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map (kbd "M-0")))))
+
+(ert-deftest kuro-input-keymap-m-9-is-bound ()
+  "M-9 is bound in the built keymap (digit range)."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map (kbd "M-9")))))
+
+(ert-deftest kuro-input-keymap-m-digits-send-correct-char ()
+  "M-5 sends character ?5 via kuro--send-meta."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map (kbd "M-5")))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-meta)
+               (lambda (c) (push c sent))))
+      (funcall binding)
+      (should (equal sent (list ?5))))))
+
+(ert-deftest kuro-input-keymap-esc-letter-two-key-fallback-is-bound ()
+  "The raw [\\e ?a] two-key fallback is bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map (vector ?\e ?a)))))
+
+(ert-deftest kuro-input-keymap-esc-letter-two-key-sends-correct-char ()
+  "The [\\e ?b] binding sends ?b via kuro--send-meta."
+  (let* ((map (kuro-keymap-test--built-map))
+         (binding (lookup-key map (vector ?\e ?b)))
+         (sent nil))
+    (should (functionp binding))
+    (cl-letf (((symbol-function 'kuro--send-meta)
+               (lambda (c) (push c sent))))
+      (funcall binding)
+      (should (equal sent (list ?b))))))
+
+(ert-deftest kuro-input-keymap-esc-uppercase-letter-two-key-is-bound ()
+  "The raw [\\e ?Z] two-key fallback is bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map (vector ?\e ?Z)))))
+
+
+;;; Group 15: navigation — scrollback viewport, insert/delete keys
+
+(ert-deftest kuro-input-keymap-s-prior-bound-to-scroll-up ()
+  "[S-prior] is bound to `kuro-scroll-up' in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [S-prior]) #'kuro-scroll-up))))
+
+(ert-deftest kuro-input-keymap-s-next-bound-to-scroll-down ()
+  "[S-next] is bound to `kuro-scroll-down' in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [S-next]) #'kuro-scroll-down))))
+
+(ert-deftest kuro-input-keymap-s-end-bound-to-scroll-bottom ()
+  "[S-end] is bound to `kuro-scroll-bottom' in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [S-end]) #'kuro-scroll-bottom))))
+
+(ert-deftest kuro-input-keymap-insert-key-is-bound ()
+  "[insert] is bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map [insert]))))
+
+(ert-deftest kuro-input-keymap-delete-key-is-bound ()
+  "[delete] is bound in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (lookup-key map [delete]))))
+
+(ert-deftest kuro-input-keymap-nav-all-entries-have-live-binding ()
+  "Every entry in kuro--nav-key-bindings corresponds to a live keymap binding."
+  (let ((map (kuro-keymap-test--built-map)))
+    (pcase-dolist (`(,key . ,_cmd) kuro--nav-key-bindings)
+      (should (lookup-key map key)))))
+
+(ert-deftest kuro-input-keymap-modifier-arrow-all-12-bound ()
+  "All 12 modifier+arrow combinations (3 mods x 4 dirs) are bound in the keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (dolist (mod kuro--xterm-modifier-codes)
+      (dolist (arrow kuro--xterm-arrow-codes)
+        (let ((event (intern (format "%s-%s" (car mod) (car arrow)))))
+          (should (lookup-key map (vector event))))))))
+
+
+;;; Group 16: Setup functions in isolation — fresh keymap per function
+
+;; Each test creates a bare sparse keymap, calls one setup function, and
+;; asserts that the expected keys are bound.  This exercises the six
+;; kuro--keymap-setup-* functions directly rather than through
+;; kuro--build-keymap, ensuring each function is independently correct.
+
+;; --- kuro--keymap-setup-special ---
+
+(ert-deftest kuro-input-keymap-setup-special-return-bound ()
+  "`kuro--keymap-setup-special' binds [return] to `kuro--RET'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km [return]) #'kuro--RET))))
+
+(ert-deftest kuro-input-keymap-setup-special-c-m-bound ()
+  "`kuro--keymap-setup-special' binds C-m to `kuro--RET'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km (kbd "C-m")) #'kuro--RET))))
+
+(ert-deftest kuro-input-keymap-setup-special-tab-bound ()
+  "`kuro--keymap-setup-special' binds [tab] to `kuro--TAB'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km [tab]) #'kuro--TAB))))
+
+(ert-deftest kuro-input-keymap-setup-special-c-i-bound ()
+  "`kuro--keymap-setup-special' binds C-i to `kuro--TAB'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km (kbd "C-i")) #'kuro--TAB))))
+
+(ert-deftest kuro-input-keymap-setup-special-backspace-bound ()
+  "`kuro--keymap-setup-special' binds [backspace] to `kuro--DEL'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km [backspace]) #'kuro--DEL))))
+
+(ert-deftest kuro-input-keymap-setup-special-c-h-bound ()
+  "`kuro--keymap-setup-special' binds C-h to `kuro--DEL'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km (kbd "C-h")) #'kuro--DEL))))
+
+(ert-deftest kuro-input-keymap-setup-special-del-bound ()
+  "`kuro--keymap-setup-special' binds DEL to `kuro--DEL'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should (eq (lookup-key km (kbd "DEL")) #'kuro--DEL))))
+
+(ert-deftest kuro-input-keymap-setup-special-does-not-bind-escape ()
+  "`kuro--keymap-setup-special' does not bind [escape] (that belongs to ctrl setup)."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-special km)
+    (should-not (lookup-key km [escape]))))
+
+;; --- kuro--keymap-setup-ctrl ---
+
+(ert-deftest kuro-input-keymap-setup-ctrl-c-a-sends-byte-1 ()
+  "`kuro--keymap-setup-ctrl' binds C-a so it sends byte 1 via `kuro--send-ctrl'."
+  (let* ((km (make-sparse-keymap))
+         (sent nil))
+    (kuro--keymap-setup-ctrl km)
+    (let ((binding (lookup-key km (kbd "C-a"))))
+      (should (functionp binding))
+      (cl-letf (((symbol-function 'kuro--send-ctrl)
+                 (lambda (byte) (push byte sent))))
+        (funcall binding)
+        (should (equal sent '(1)))))))
+
+(ert-deftest kuro-input-keymap-setup-ctrl-c-z-sends-byte-26 ()
+  "`kuro--keymap-setup-ctrl' binds C-z so it sends byte 26 via `kuro--send-ctrl'."
+  (let* ((km (make-sparse-keymap))
+         (sent nil))
+    (kuro--keymap-setup-ctrl km)
+    (let ((binding (lookup-key km (kbd "C-z"))))
+      (should (functionp binding))
+      (cl-letf (((symbol-function 'kuro--send-ctrl)
+                 (lambda (byte) (push byte sent))))
+        (funcall binding)
+        (should (equal sent '(26)))))))
+
+(ert-deftest kuro-input-keymap-setup-ctrl-escape-sends-byte-27 ()
+  "`kuro--keymap-setup-ctrl' binds [escape] so it sends byte 27 via `kuro--send-ctrl'."
+  (let* ((km (make-sparse-keymap))
+         (sent nil))
+    (kuro--keymap-setup-ctrl km)
+    (let ((binding (lookup-key km [escape])))
+      (should (functionp binding))
+      (cl-letf (((symbol-function 'kuro--send-ctrl)
+                 (lambda (byte) (push byte sent))))
+        (funcall binding)
+        (should (equal sent '(27)))))))
+
+(ert-deftest kuro-input-keymap-setup-ctrl-c-v-bound-to-scroll-aware ()
+  "`kuro--keymap-setup-ctrl' binds C-v to `kuro--scroll-aware-ctrl-v'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-ctrl km)
+    (should (eq (lookup-key km (kbd "C-v")) #'kuro--scroll-aware-ctrl-v))))
+
+(ert-deftest kuro-input-keymap-setup-ctrl-all-table-entries-bound ()
+  "`kuro--keymap-setup-ctrl' installs a live binding for every entry in `kuro--ctrl-key-table'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-ctrl km)
+    (dolist (entry kuro--ctrl-key-table)
+      (should (lookup-key km (kbd (car entry)))))))
+
+(ert-deftest kuro-input-keymap-setup-ctrl-fresh-map-not-polluted ()
+  "`kuro--keymap-setup-ctrl' does not install any special-key binding ([return], [tab], [backspace])."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-ctrl km)
+    (should-not (lookup-key km [return]))
+    (should-not (lookup-key km [tab]))
+    (should-not (lookup-key km [backspace]))))
+
+;; --- kuro--keymap-setup-meta ---
+
+(ert-deftest kuro-input-keymap-setup-meta-m-a-bound ()
+  "`kuro--keymap-setup-meta' binds M-a."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (kbd "M-a")))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-z-bound ()
+  "`kuro--keymap-setup-meta' binds M-z."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (kbd "M-z")))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-uppercase-bound ()
+  "`kuro--keymap-setup-meta' binds M-A and M-Z (uppercase range)."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (kbd "M-A")))
+    (should (lookup-key km (kbd "M-Z")))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-digit-bound ()
+  "`kuro--keymap-setup-meta' binds M-0 and M-9 (digit range)."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (kbd "M-0")))
+    (should (lookup-key km (kbd "M-9")))))
+
+(ert-deftest kuro-input-keymap-setup-meta-esc-letter-fallback-bound ()
+  "`kuro--keymap-setup-meta' installs the raw [\\e ?a] two-key fallback."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (vector ?\e ?a)))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-v-bound-to-scroll-aware ()
+  "`kuro--keymap-setup-meta' binds M-v to `kuro--scroll-aware-meta-v'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (eq (lookup-key km (kbd "M-v")) #'kuro--scroll-aware-meta-v))))
+
+(ert-deftest kuro-input-keymap-setup-meta-esc-v-fallback-bound-to-scroll-aware ()
+  "`kuro--keymap-setup-meta' binds [\\e ?v] two-key fallback to `kuro--scroll-aware-meta-v'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (eq (lookup-key km (vector ?\e ?v)) #'kuro--scroll-aware-meta-v))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-del-bound-to-meta-backspace ()
+  "`kuro--keymap-setup-meta' binds M-DEL to `kuro--send-meta-backspace'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (eq (lookup-key km (kbd "M-DEL")) #'kuro--send-meta-backspace))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-backspace-bound-to-meta-backspace ()
+  "`kuro--keymap-setup-meta' binds M-<backspace> to `kuro--send-meta-backspace'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (should (eq (lookup-key km (kbd "M-<backspace>")) #'kuro--send-meta-backspace))))
+
+(ert-deftest kuro-input-keymap-setup-meta-punct-all-entries-bound ()
+  "`kuro--keymap-setup-meta' installs a live binding for every entry in `kuro--meta-punct-bindings'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-meta km)
+    (dolist (entry kuro--meta-punct-bindings)
+      (should (lookup-key km (kbd (car entry)))))))
+
+(ert-deftest kuro-input-keymap-setup-meta-m-b-sends-char-b ()
+  "`kuro--keymap-setup-meta' wires M-b so it sends ?b via `kuro--send-meta'."
+  (let* ((km (make-sparse-keymap))
+         (sent nil))
+    (kuro--keymap-setup-meta km)
+    (let ((binding (lookup-key km (kbd "M-b"))))
+      (should (functionp binding))
+      (cl-letf (((symbol-function 'kuro--send-meta)
+                 (lambda (c) (push c sent))))
+        (funcall binding)
+        (should (equal sent (list ?b)))))))
+
+;; --- kuro--keymap-setup-navigation ---
+
+(ert-deftest kuro-input-keymap-setup-navigation-arrow-keys-bound ()
+  "`kuro--keymap-setup-navigation' binds all four arrow keys."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (should (lookup-key km [up]))
+    (should (lookup-key km [down]))
+    (should (lookup-key km [left]))
+    (should (lookup-key km [right]))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-home-end-bound ()
+  "`kuro--keymap-setup-navigation' binds [home] and [end]."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (should (eq (lookup-key km [home]) #'kuro--HOME))
+    (should (eq (lookup-key km [end])  #'kuro--END))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-page-keys-bound ()
+  "`kuro--keymap-setup-navigation' binds [prior] and [next]."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (should (eq (lookup-key km [prior]) #'kuro--PAGE-UP))
+    (should (eq (lookup-key km [next])  #'kuro--PAGE-DOWN))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-insert-delete-bound ()
+  "`kuro--keymap-setup-navigation' binds [insert] and [delete]."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (should (eq (lookup-key km [insert]) #'kuro--INSERT))
+    (should (eq (lookup-key km [delete]) #'kuro--DELETE))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-scrollback-keys-bound ()
+  "`kuro--keymap-setup-navigation' binds [S-prior], [S-next], [S-end]."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (should (eq (lookup-key km [S-prior]) #'kuro-scroll-up))
+    (should (eq (lookup-key km [S-next])  #'kuro-scroll-down))
+    (should (eq (lookup-key km [S-end])   #'kuro-scroll-bottom))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-fkeys-all-bound ()
+  "`kuro--keymap-setup-navigation' binds all 12 function keys."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (dolist (fkey '([f1] [f2] [f3] [f4] [f5] [f6]
+                    [f7] [f8] [f9] [f10] [f11] [f12]))
+      (should (lookup-key km fkey)))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-modifier-arrows-all-bound ()
+  "`kuro--keymap-setup-navigation' binds all 12 modifier+arrow combinations."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (dolist (mod kuro--xterm-modifier-codes)
+      (dolist (arrow kuro--xterm-arrow-codes)
+        (let ((event (intern (format "%s-%s" (car mod) (car arrow)))))
+          (should (lookup-key km (vector event))))))))
+
+(ert-deftest kuro-input-keymap-setup-navigation-all-nav-table-entries-bound ()
+  "`kuro--keymap-setup-navigation' installs a live binding for every entry in `kuro--nav-key-bindings'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-navigation km)
+    (pcase-dolist (`(,key . ,_cmd) kuro--nav-key-bindings)
+      (should (lookup-key km key)))))
+
+;; --- kuro--keymap-setup-mouse ---
+
+(ert-deftest kuro-input-keymap-setup-mouse-down-mouse-1-bound ()
+  "`kuro--keymap-setup-mouse' binds [down-mouse-1] to `kuro--mouse-press'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [down-mouse-1]) #'kuro--mouse-press))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-mouse-1-bound ()
+  "`kuro--keymap-setup-mouse' binds [mouse-1] to `kuro--mouse-release'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [mouse-1]) #'kuro--mouse-release))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-mouse-4-scroll-up-bound ()
+  "`kuro--keymap-setup-mouse' binds [mouse-4] to `kuro--mouse-scroll-up'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [mouse-4]) #'kuro--mouse-scroll-up))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-mouse-5-scroll-down-bound ()
+  "`kuro--keymap-setup-mouse' binds [mouse-5] to `kuro--mouse-scroll-down'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [mouse-5]) #'kuro--mouse-scroll-down))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-all-three-buttons-press-bound ()
+  "`kuro--keymap-setup-mouse' binds [down-mouse-2] and [down-mouse-3] to `kuro--mouse-press'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [down-mouse-2]) #'kuro--mouse-press))
+    (should (eq (lookup-key km [down-mouse-3]) #'kuro--mouse-press))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-all-three-buttons-release-bound ()
+  "`kuro--keymap-setup-mouse' binds [mouse-2] and [mouse-3] to `kuro--mouse-release'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (should (eq (lookup-key km [mouse-2]) #'kuro--mouse-release))
+    (should (eq (lookup-key km [mouse-3]) #'kuro--mouse-release))))
+
+(ert-deftest kuro-input-keymap-setup-mouse-all-table-entries-bound ()
+  "`kuro--keymap-setup-mouse' installs a live binding for every entry in `kuro--mouse-bindings'."
+  (let ((km (make-sparse-keymap)))
+    (kuro--keymap-setup-mouse km)
+    (pcase-dolist (`(,key . ,_cmd) kuro--mouse-bindings)
+      (should (lookup-key km key)))))
+
+;; --- kuro--keymap-setup-yank ---
+
+(ert-deftest kuro-input-keymap-setup-yank-remap-yank-bound ()
+  "`kuro--keymap-setup-yank' remaps `yank' to `kuro--yank'."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions nil))
+    (kuro--keymap-setup-yank km)
+    (should (eq (lookup-key km [remap yank]) #'kuro--yank))))
+
+(ert-deftest kuro-input-keymap-setup-yank-remap-yank-pop-bound ()
+  "`kuro--keymap-setup-yank' remaps `yank-pop' to `kuro--yank-pop'."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions nil))
+    (kuro--keymap-setup-yank km)
+    (should (eq (lookup-key km [remap yank-pop]) #'kuro--yank-pop))))
+
+(ert-deftest kuro-input-keymap-setup-yank-remap-clipboard-yank-bound ()
+  "`kuro--keymap-setup-yank' remaps `clipboard-yank' to `kuro--yank'."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions nil))
+    (kuro--keymap-setup-yank km)
+    (should (eq (lookup-key km [remap clipboard-yank]) #'kuro--yank))))
+
+(ert-deftest kuro-input-keymap-setup-yank-exception-clears-binding ()
+  "`kuro--keymap-setup-yank' clears a binding listed in `kuro-keymap-exceptions'."
+  ;; First install meta bindings so M-x is present, then yank-setup should
+  ;; clear it when it appears in exceptions.
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions '("M-x")))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (kbd "M-x")))   ; confirm it is installed
+    (kuro--keymap-setup-yank km)
+    (should-not (lookup-key km (kbd "M-x")))))
+
+(ert-deftest kuro-input-keymap-setup-yank-exception-clears-esc-fallback ()
+  "`kuro--keymap-setup-yank' clears the ESC+char fallback for an M-CHAR exception."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions '("M-b")))
+    (kuro--keymap-setup-meta km)
+    (should (lookup-key km (vector ?\e ?b)))  ; confirm installed
+    (kuro--keymap-setup-yank km)
+    (should-not (lookup-key km (vector ?\e ?b)))))
+
+(ert-deftest kuro-input-keymap-setup-yank-no-exceptions-keeps-yank-remap ()
+  "With an empty exceptions list, all three yank remaps remain after `kuro--keymap-setup-yank'."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions nil))
+    (kuro--keymap-setup-yank km)
+    (should (lookup-key km [remap yank]))
+    (should (lookup-key km [remap yank-pop]))
+    (should (lookup-key km [remap clipboard-yank]))))
+
+
 (provide 'kuro-input-keymap-test)
 ;;; kuro-input-keymap-test.el ends here

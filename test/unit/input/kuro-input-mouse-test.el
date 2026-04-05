@@ -511,5 +511,599 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
     (kuro--dispatch-mouse-event 2 nil)
     (should (equal sent "\e[<2;5;15m"))))
 
+;;; Group 19: kuro--encode-mouse — mode 1002/1003 at boundary coordinates
+
+(ert-deftest kuro-input-mouse-mode-1002-at-x10-limit-returns-nil ()
+  "kuro--mouse-mode=1002 with col1=224 (overflow) returns nil like mode 1000."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1002)
+    (setq-local kuro--mouse-sgr nil)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 223 0
+      (should-not (kuro--encode-mouse 'fake-event 0 t)))))
+
+(ert-deftest kuro-input-mouse-mode-1003-with-sgr-no-overflow-guard ()
+  "kuro--mouse-mode=1003 with SGR set ignores overflow guard."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1003)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 300 300
+      ;; col1=301, row1=301 — SGR has no overflow guard
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (equal result "\e[<0;301;301M"))))))
+
+;;; Group 20: kuro--def-mouse-cmd generated handlers — unknown event type
+;;  kuro--mouse-press and kuro--mouse-release use pcase over event-basic-type;
+;;  an unrecognised type produces nil btn, which must be a no-op.
+
+(ert-deftest kuro-input-mouse-press-unknown-event-type-is-noop ()
+  "kuro--mouse-press sends nothing when event-basic-type returns an unknown symbol."
+  (kuro-input-mouse-test--with-send-and-type 1000 nil nil 0 0 'mouse-99
+    (kuro--mouse-press)
+    (should-not sent)))
+
+(ert-deftest kuro-input-mouse-release-unknown-event-type-is-noop ()
+  "kuro--mouse-release sends nothing when event-basic-type returns an unknown symbol."
+  (kuro-input-mouse-test--with-send-and-type 1000 nil nil 0 0 'mouse-99
+    (kuro--mouse-release)
+    (should-not sent)))
+
+(ert-deftest kuro-input-mouse-press-mouse1-sends-button0 ()
+  "kuro--mouse-press maps mouse-1 event type to button 0 in SGR mode."
+  (kuro-input-mouse-test--with-send-and-type 1000 t nil 0 0 'mouse-1
+    (kuro--mouse-press)
+    ;; SGR: button=0, col1=1, row1=1, press → M
+    (should (equal sent "\e[<0;1;1M"))))
+
+(ert-deftest kuro-input-mouse-release-mouse2-sends-button1 ()
+  "kuro--mouse-release maps mouse-2 event type to button 1 in SGR mode."
+  (kuro-input-mouse-test--with-send-and-type 1000 t nil 2 3 'mouse-2
+    (kuro--mouse-release)
+    ;; SGR: button=1, col1=3, row1=4, release → m
+    (should (equal sent "\e[<1;3;4m"))))
+
+(ert-deftest kuro-input-mouse-scroll-up-sends-button64-sgr ()
+  "kuro--mouse-scroll-up sends button=64 press in SGR mode."
+  (kuro-input-mouse-test--with-send 1000 t nil 4 7
+    (kuro--mouse-scroll-up)
+    ;; SGR: button=64, col1=5, row1=8, press → M
+    (should (equal sent "\e[<64;5;8M"))))
+
+(ert-deftest kuro-input-mouse-scroll-down-sends-button65-sgr ()
+  "kuro--mouse-scroll-down sends button=65 press in SGR mode."
+  (kuro-input-mouse-test--with-send 1000 t nil 0 0
+    (kuro--mouse-scroll-down)
+    ;; SGR: button=65, col1=1, row1=1, press → M
+    (should (equal sent "\e[<65;1;1M"))))
+
+(ert-deftest kuro-input-mouse-scroll-up-x10-sends-correct-bytes ()
+  "kuro--mouse-scroll-up in X10 mode sends button=64 (btn-byte=96)."
+  (kuro-input-mouse-test--with-send 1000 nil nil 0 0
+    (kuro--mouse-scroll-up)
+    ;; X10: btn-byte = 64+32 = 96, col-byte = 1+32 = 33, row-byte = 1+32 = 33
+    (should (equal sent (format "\e[M%c%c%c" 96 33 33)))))
+
+(ert-deftest kuro-input-mouse-press-mouse3-sends-button2 ()
+  "kuro--mouse-press maps mouse-3 event type to button 2 in SGR mode."
+  (kuro-input-mouse-test--with-send-and-type 1000 t nil 1 2 'mouse-3
+    (kuro--mouse-press)
+    ;; SGR: button=2, col1=2, row1=3, press → M
+    (should (equal sent "\e[<2;2;3M"))))
+
+(ert-deftest kuro-input-mouse-scroll-up-mode-off-is-noop ()
+  "kuro--mouse-scroll-up sends nothing when kuro--mouse-mode is 0."
+  (kuro-input-mouse-test--with-send 0 nil nil 0 0
+    (kuro--mouse-scroll-up)
+    (should-not sent)))
+
+(ert-deftest kuro-input-mouse-scroll-down-mode-off-is-noop ()
+  "kuro--mouse-scroll-down sends nothing when kuro--mouse-mode is 0."
+  (kuro-input-mouse-test--with-send 0 nil nil 0 0
+    (kuro--mouse-scroll-down)
+    (should-not sent)))
+
+
+;;; Group 21: kuro--encode-mouse — modifier button bits (Shift/Meta/Ctrl)
+;;  The terminal protocol encodes modifier keys by adding to the button number:
+;;  +4 = Shift, +8 = Meta, +16 = Ctrl. These compound values must be
+;;  embedded verbatim in SGR sequences (no overflow guard applies).
+
+(ert-deftest kuro-input-mouse-sgr-shift-modifier-button ()
+  "SGR mode: Shift+left-click encodes as button=4 (0 + Shift=4)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 4 t) "\e[<4;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-meta-modifier-button ()
+  "SGR mode: Meta+left-click encodes as button=8 (0 + Meta=8)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 8 t) "\e[<8;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-ctrl-modifier-button ()
+  "SGR mode: Ctrl+left-click encodes as button=16 (0 + Ctrl=16)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 16 t) "\e[<16;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-meta-shift-modifier-button ()
+  "SGR mode: Meta+Shift+left-click encodes as button=12 (0 + Meta=8 + Shift=4)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 12 t) "\e[<12;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-ctrl-meta-shift-modifier-button ()
+  "SGR mode: Ctrl+Meta+Shift+left-click encodes as button=28 (0+4+8+16)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 5 3
+      ;; col1=6, row1=4
+      (should (equal (kuro--encode-mouse 'fake-event 28 t) "\e[<28;6;4M")))))
+
+(ert-deftest kuro-input-mouse-sgr-shift-scroll-up ()
+  "SGR mode: Shift+scroll-up encodes as button=68 (64 + Shift=4)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 68 t) "\e[<68;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-ctrl-scroll-down ()
+  "SGR mode: Ctrl+scroll-down encodes as button=81 (65 + Ctrl=16)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (should (equal (kuro--encode-mouse 'fake-event 81 t) "\e[<81;1;1M")))))
+
+(ert-deftest kuro-input-mouse-sgr-modifier-release-uses-lowercase-m ()
+  "SGR mode: modifier+button release still uses lowercase 'm' terminator."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr t)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 1 1
+      ;; col1=2, row1=2; button=4 (Shift+left), release → m
+      (should (equal (kuro--encode-mouse 'fake-event 4 nil) "\e[<4;2;2m")))))
+
+(ert-deftest kuro-input-mouse-x10-shift-modifier-btn4-overflow-check ()
+  "X10 mode: Shift+button0 = button=4; btn-byte = 4+32 = 36, within range."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr nil)
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (let ((result (kuro--encode-mouse 'fake-event 4 t)))
+        ;; btn-byte = 4+32 = 36; col-byte = 1+32 = 33; row-byte = 1+32 = 33
+        (should (equal result (format "\e[M%c%c%c" 36 33 33)))))))
+
+(ert-deftest kuro-input-mouse-pixel-mode-modifier-button ()
+  "Pixel mode: modifier+button embeds modifier bits in SGR sequence without offset."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000)
+    (setq-local kuro--mouse-sgr nil)
+    (setq-local kuro--mouse-pixel-mode t)
+    ;; posn-x-y returns pixel coords directly (no +1)
+    (kuro-mouse-test--with-event 120 80
+      ;; Meta+right = button=10 (2+8); col=120, row=80
+      (should (equal (kuro--encode-mouse 'fake-event 10 t) "\e[<10;120;80M")))))
+
+;;; Group 22: kuro--mouse-button-to-code, col-row extraction, clamping
+
+(defmacro kuro-mouse-test--full-stub (col row btn-type &rest body)
+  "Stub all event functions and run BODY with COL/ROW position and BTN-TYPE basic type."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'event-start)
+               (lambda (_ev) 'fake-pos))
+              ((symbol-function 'event-basic-type)
+               (lambda (_ev) ,btn-type))
+              ((symbol-function 'posn-col-row)
+               (lambda (_pos) (cons ,col ,row)))
+              ((symbol-function 'posn-x-y)
+               (lambda (_pos) (cons ,col ,row))))
+     ,@body))
+
+(ert-deftest kuro-input-mouse-button-code-mouse1-is-zero ()
+  "mouse-1 event basic type maps to button code 0 (left button)."
+  ;; kuro--def-mouse-cmd uses pcase over event-basic-type: mouse-1 → 0
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
+        (kuro-mouse-test--full-stub 0 0 'mouse-1
+          (kuro--mouse-press)))
+      ;; SGR button=0, col1=1, row1=1 → ESC[<0;1;1M
+      (should (equal sent "\e[<0;1;1M")))))
+
+(ert-deftest kuro-input-mouse-button-code-mouse3-is-two ()
+  "mouse-3 event basic type maps to button code 2 (right button)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
+        (kuro-mouse-test--full-stub 0 0 'mouse-3
+          (kuro--mouse-press)))
+      ;; SGR button=2, col1=1, row1=1 → ESC[<2;1;1M
+      (should (equal sent "\e[<2;1;1M")))))
+
+(ert-deftest kuro-input-mouse-scroll-up-button-code-is-64 ()
+  "kuro--mouse-scroll-up encodes as button 64 (scroll-up) in X10 format."
+  (kuro-input-mouse-test--with-send 1000 nil nil 0 0
+    (kuro--mouse-scroll-up)
+    ;; X10: btn-byte = 64+32 = 96
+    (should (= (aref sent 3) 96))))
+
+(ert-deftest kuro-input-mouse-scroll-down-button-code-is-65 ()
+  "kuro--mouse-scroll-down encodes as button 65 (scroll-down) in X10 format."
+  (kuro-input-mouse-test--with-send 1000 nil nil 0 0
+    (kuro--mouse-scroll-down)
+    ;; X10: btn-byte = 65+32 = 97
+    (should (= (aref sent 3) 97))))
+
+(ert-deftest kuro-input-mouse-x10-format-is-esclm-bxy ()
+  "X10 encoding produces ESC[M followed by three bytes (btn, col, row)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 2 5
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        ;; Prefix is ESC[M (3 chars) + 3 byte values = 6 chars total
+        (should (string-prefix-p "\e[M" result))
+        (should (= (length result) 6))))))
+
+(ert-deftest kuro-input-mouse-sgr-press-format-is-esclangle ()
+  "SGR format for press uses ESC[< prefix and uppercase M terminator."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (string-prefix-p "\e[<" result))
+        (should (string-suffix-p "M" result))))))
+
+(ert-deftest kuro-input-mouse-sgr-release-format-uses-lowercase-m ()
+  "SGR format for release uses lowercase m terminator, not uppercase M."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 0 0
+      (let ((press-result   (kuro--encode-mouse 'fake-event 0 t))
+            (release-result (kuro--encode-mouse 'fake-event 0 nil)))
+        (should (string-suffix-p "M" press-result))
+        (should (string-suffix-p "m" release-result))
+        (should-not (string-suffix-p "m" press-result))))))
+
+(ert-deftest kuro-input-mouse-pixel-sends-pixel-coords ()
+  "Pixel mode reports posn-x-y coordinates (not col+1/row+1)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode t)
+    ;; posn-x-y stub returns (42 . 99); pixel mode uses these directly
+    (kuro-mouse-test--with-event 42 99
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (equal result "\e[<0;42;99M"))))))
+
+(ert-deftest kuro-input-mouse-col-row-extraction-cell-mode ()
+  "kuro--mouse-coords extracts posn-col-row and adds 1 to each coordinate."
+  (with-temp-buffer
+    (setq-local kuro--mouse-pixel-mode nil)
+    (kuro-mouse-test--with-event 7 13
+      (let ((coords (kuro--mouse-coords 'fake-event)))
+        ;; 0-based (7,13) → 1-based (8,14)
+        (should (= (car coords) 8))
+        (should (= (cdr coords) 14))))))
+
+(ert-deftest kuro-input-mouse-x10-overflow-past-terminal-width-returns-nil ()
+  "X10 mode returns nil when column exceeds the 223-cell limit (past terminal width)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr nil
+                kuro--mouse-pixel-mode nil)
+    ;; col=300 → col1=301, overflows the (< col1 224) guard → returns nil
+    (kuro-mouse-test--with-event 300 0
+      (should-not (kuro--encode-mouse 'fake-event 0 t)))))
+
+(ert-deftest kuro-input-mouse-sgr-large-coords-not-clamped ()
+  "SGR mode does not clamp large coordinates; values above 223 pass through."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 1000
+                kuro--mouse-sgr t
+                kuro--mouse-pixel-mode nil)
+    ;; col=500 → col1=501, should appear verbatim in SGR sequence
+    (kuro-mouse-test--with-event 500 300
+      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
+        (should (equal result "\e[<0;501;301M"))))))
+
+;;; Group 23: kuro--mouse-scroll-up/down scrollback fallback path
+;;
+;; When kuro--mouse-mode is 0 (mouse tracking off) and kuro--initialized is
+;; non-nil, scroll-up/down should scroll the terminal scrollback instead of
+;; sending PTY events.  When NOT initialized, both should be no-ops.
+
+(ert-deftest kuro-input-mouse-scroll-up-mode0-increments-offset ()
+  "kuro--mouse-scroll-up with mouse-mode=0 calls kuro--scroll-up and updates offset."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized t
+                kuro--scroll-offset 0)
+    (let ((scroll-called nil)
+          (render-called nil))
+      (cl-letf (((symbol-function 'kuro--scroll-up)
+                 (lambda (n) (setq scroll-called n)))
+                ((symbol-function 'kuro--get-scroll-offset)
+                 (lambda () 5))
+                ((symbol-function 'kuro--render-cycle)
+                 (lambda () (setq render-called t))))
+        (kuro-mouse-test--with-event 0 0
+          (kuro--mouse-scroll-up)))
+      ;; kuro--scroll-up must have been called with kuro--mouse-scroll-lines
+      (should (= scroll-called kuro--mouse-scroll-lines))
+      ;; kuro--get-scroll-offset returned 5 → offset should be 5
+      (should (= kuro--scroll-offset 5))
+      ;; render-cycle must have been triggered
+      (should render-called))))
+
+(ert-deftest kuro-input-mouse-scroll-down-mode0-decrements-offset ()
+  "kuro--mouse-scroll-down with mouse-mode=0 calls kuro--scroll-down and updates offset."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized t
+                kuro--scroll-offset 10)
+    (let ((scroll-called nil)
+          (render-called nil))
+      (cl-letf (((symbol-function 'kuro--scroll-down)
+                 (lambda (n) (setq scroll-called n)))
+                ((symbol-function 'kuro--get-scroll-offset)
+                 (lambda () 5))
+                ((symbol-function 'kuro--render-cycle)
+                 (lambda () (setq render-called t))))
+        (kuro-mouse-test--with-event 0 0
+          (kuro--mouse-scroll-down)))
+      (should (= scroll-called kuro--mouse-scroll-lines))
+      ;; kuro--get-scroll-offset returned 5 → offset should be 5
+      (should (= kuro--scroll-offset 5))
+      (should render-called))))
+
+(ert-deftest kuro-input-mouse-scroll-down-mode0-offset-floor-at-zero ()
+  "kuro--mouse-scroll-down with offset=0 stays at 0 (never goes negative).
+When kuro--get-scroll-offset returns nil, the fallback formula
+(max 0 (- 0 5)) = 0 prevents negative offsets."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized t
+                kuro--scroll-offset 0)
+    (cl-letf (((symbol-function 'kuro--scroll-down)
+               (lambda (_n) nil))
+              ((symbol-function 'kuro--get-scroll-offset)
+               (lambda () nil))
+              ((symbol-function 'kuro--render-cycle)
+               (lambda () nil)))
+      (kuro-mouse-test--with-event 0 0
+        (kuro--mouse-scroll-down)))
+    ;; (max 0 (- 0 5)) = 0
+    (should (= kuro--scroll-offset 0))))
+
+(ert-deftest kuro-input-mouse-scroll-up-not-initialized-is-noop ()
+  "kuro--mouse-scroll-up is a no-op when kuro--initialized is nil (mode=0)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized nil
+                kuro--scroll-offset 0)
+    (let ((scroll-called nil)
+          (render-called nil))
+      (cl-letf (((symbol-function 'kuro--scroll-up)
+                 (lambda (_n) (setq scroll-called t)))
+                ((symbol-function 'kuro--get-scroll-offset)
+                 (lambda () 0))
+                ((symbol-function 'kuro--render-cycle)
+                 (lambda () (setq render-called t))))
+        (kuro-mouse-test--with-event 0 0
+          (kuro--mouse-scroll-up)))
+      (should-not scroll-called)
+      (should-not render-called)
+      (should (= kuro--scroll-offset 0)))))
+
+(ert-deftest kuro-input-mouse-scroll-down-not-initialized-is-noop ()
+  "kuro--mouse-scroll-down is a no-op when kuro--initialized is nil (mode=0)."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized nil
+                kuro--scroll-offset 5)
+    (let ((scroll-called nil)
+          (render-called nil))
+      (cl-letf (((symbol-function 'kuro--scroll-down)
+                 (lambda (_n) (setq scroll-called t)))
+                ((symbol-function 'kuro--get-scroll-offset)
+                 (lambda () 0))
+                ((symbol-function 'kuro--render-cycle)
+                 (lambda () (setq render-called t))))
+        (kuro-mouse-test--with-event 0 0
+          (kuro--mouse-scroll-down)))
+      (should-not scroll-called)
+      (should-not render-called)
+      ;; offset must remain unchanged
+      (should (= kuro--scroll-offset 5)))))
+
+(ert-deftest kuro-input-mouse-scroll-up-mode-positive-sends-pty-event ()
+  "kuro--mouse-scroll-up with mouse-mode>0 sends PTY event, does NOT scroll scrollback."
+  (let ((scroll-called nil))
+    (kuro-input-mouse-test--with-send 1000 t nil 0 0
+      (setq-local kuro--initialized t
+                  kuro--scroll-offset 0)
+      (cl-letf (((symbol-function 'kuro--scroll-up)
+                 (lambda (_n) (setq scroll-called t))))
+        (kuro--mouse-scroll-up))
+      ;; PTY event must have been sent (button=64, SGR)
+      (should (equal sent "\e[<64;1;1M"))
+      ;; kuro--scroll-up must NOT have been called
+      (should-not scroll-called)
+      ;; offset must remain unchanged
+      (should (= kuro--scroll-offset 0)))))
+
+(ert-deftest kuro-input-mouse-scroll-up-mode0-fallback-when-get-offset-nil ()
+  "kuro--mouse-scroll-up falls back to (+ offset lines) when kuro--get-scroll-offset returns nil."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized t
+                kuro--scroll-offset 10)
+    (cl-letf (((symbol-function 'kuro--scroll-up)
+               (lambda (_n) nil))
+              ((symbol-function 'kuro--get-scroll-offset)
+               (lambda () nil))
+              ((symbol-function 'kuro--render-cycle)
+               (lambda () nil)))
+      (kuro-mouse-test--with-event 0 0
+        (kuro--mouse-scroll-up)))
+    ;; (max 0 (+ 10 5)) = 15
+    (should (= kuro--scroll-offset 15))))
+
+(ert-deftest kuro-input-mouse-scroll-down-mode0-fallback-clamps-to-zero ()
+  "kuro--mouse-scroll-down fallback (- offset lines) clamps to 0 when offset < lines."
+  (with-temp-buffer
+    (setq-local kuro--mouse-mode 0
+                kuro--initialized t
+                kuro--scroll-offset 2)
+    (cl-letf (((symbol-function 'kuro--scroll-down)
+               (lambda (_n) nil))
+              ((symbol-function 'kuro--get-scroll-offset)
+               (lambda () nil))
+              ((symbol-function 'kuro--render-cycle)
+               (lambda () nil)))
+      (kuro-mouse-test--with-event 0 0
+        (kuro--mouse-scroll-down)))
+    ;; (max 0 (- 2 5)) = 0
+    (should (= kuro--scroll-offset 0))))
+
+;;; Group 24: kuro--def-mouse-cmd macro — code generation and runtime dispatch
+;;
+;; kuro--def-mouse-cmd expands to a single `defun' that calls
+;; `kuro--dispatch-mouse-event' with a btn-form and a literal press value.
+;; Tests verify:
+;;   (a) code-generation: the generated symbol is fboundp and commandp after
+;;       the macro fires at load time (kuro--mouse-press / kuro--mouse-release
+;;       are the canonical instances defined at top-level in the source file),
+;;   (b) custom invocation: a test-local symbol defined by the macro is also
+;;       fboundp immediately after expansion,
+;;   (c) runtime/press path: a literal-btn command (press=t) forwards the
+;;       correct button number to the PTY via kuro--send-key,
+;;   (d) runtime/release path: a literal-btn command (press=nil) sends a
+;;       release-encoded sequence.
+
+(ert-deftest kuro-input-mouse-def-cmd-press-is-fboundp ()
+  "kuro--def-mouse-cmd generates kuro--mouse-press as a defined function."
+  (should (fboundp 'kuro--mouse-press)))
+
+(ert-deftest kuro-input-mouse-def-cmd-release-is-fboundp ()
+  "kuro--def-mouse-cmd generates kuro--mouse-release as a defined function."
+  (should (fboundp 'kuro--mouse-release)))
+
+(ert-deftest kuro-input-mouse-def-cmd-press-is-interactive ()
+  "kuro--mouse-press is an interactive command (commandp returns t)."
+  (should (commandp 'kuro--mouse-press)))
+
+(ert-deftest kuro-input-mouse-def-cmd-release-is-interactive ()
+  "kuro--mouse-release is an interactive command (commandp returns t)."
+  (should (commandp 'kuro--mouse-release)))
+
+(ert-deftest kuro-input-mouse-def-cmd-custom-symbol-becomes-fboundp ()
+  "kuro--def-mouse-cmd with a fresh name defines that symbol as a function.
+The macro expansion produces a defun, so the symbol is fboundp afterward."
+  ;; Unintern the test symbol first to ensure a clean state.
+  (unintern 'kuro--test-mouse-cmd-probe obarray)
+  (eval '(kuro--def-mouse-cmd kuro--test-mouse-cmd-probe
+           42
+           t
+           "Test-only probe command generated by kuro--def-mouse-cmd.")
+        t)
+  (should (fboundp 'kuro--test-mouse-cmd-probe))
+  ;; Clean up: remove the test symbol from obarray.
+  (unintern 'kuro--test-mouse-cmd-probe obarray))
+
+(ert-deftest kuro-input-mouse-def-cmd-press-path-sends-correct-sequence ()
+  "Generated press command (press=t, literal btn=1) sends the correct SGR sequence.
+kuro--def-mouse-cmd expands btn-form at call time; with a literal integer the
+dispatch macro resolves to a single kuro--send-key call with the right bytes."
+  ;; Define a test-local command with btn=1 and press=t.
+  (eval '(kuro--def-mouse-cmd kuro--test-mouse-press-btn1
+           1
+           t
+           "Test press command for button 1.")
+        t)
+  (unwind-protect
+      (kuro-input-mouse-test--with-send 1000 t nil 0 0
+        (kuro--test-mouse-press-btn1)
+        ;; SGR: button=1, col1=1, row1=1, press → ESC[<1;1;1M
+        (should (equal sent "\e[<1;1;1M")))
+    (unintern 'kuro--test-mouse-press-btn1 obarray)))
+
+(ert-deftest kuro-input-mouse-def-cmd-release-path-sends-correct-sequence ()
+  "Generated release command (press=nil, literal btn=2) sends the correct SGR sequence.
+The release path must produce a lowercase 'm' terminator in SGR mode."
+  (eval '(kuro--def-mouse-cmd kuro--test-mouse-release-btn2
+           2
+           nil
+           "Test release command for button 2.")
+        t)
+  (unwind-protect
+      (kuro-input-mouse-test--with-send 1000 t nil 3 4
+        (kuro--test-mouse-release-btn2)
+        ;; SGR: button=2, col1=4, row1=5, release → ESC[<2;4;5m
+        (should (equal sent "\e[<2;4;5m")))
+    (unintern 'kuro--test-mouse-release-btn2 obarray)))
+
+(ert-deftest kuro-input-mouse-def-cmd-press-mode0-is-noop ()
+  "Generated press command sends nothing when kuro--mouse-mode is 0.
+kuro--dispatch-mouse-event guards on (> kuro--mouse-mode 0)."
+  (eval '(kuro--def-mouse-cmd kuro--test-mouse-press-noop
+           0
+           t
+           "Test press command that should be a no-op when mode is 0.")
+        t)
+  (unwind-protect
+      (kuro-input-mouse-test--with-send 0 nil nil 0 0
+        (kuro--test-mouse-press-noop)
+        (should-not sent))
+    (unintern 'kuro--test-mouse-press-noop obarray)))
+
+(ert-deftest kuro-input-mouse-def-cmd-x10-release-uses-button3 ()
+  "Generated release command in X10 mode (sgr=nil) encodes with button-3 convention.
+X10 release always substitutes 3 for the button number (btn-byte = 3+32 = 35)."
+  (eval '(kuro--def-mouse-cmd kuro--test-mouse-release-x10
+           0
+           nil
+           "Test release command for X10 mode.")
+        t)
+  (unwind-protect
+      (kuro-input-mouse-test--with-send 1000 nil nil 0 0
+        (kuro--test-mouse-release-x10)
+        ;; X10 release: btn-byte=35 (3+32), col-byte=33 (1+32), row-byte=33 (1+32)
+        (should (equal sent (format "\e[M%c%c%c" 35 33 33))))
+    (unintern 'kuro--test-mouse-release-x10 obarray)))
+
 (provide 'kuro-input-mouse-test)
 ;;; kuro-input-mouse-test.el ends here

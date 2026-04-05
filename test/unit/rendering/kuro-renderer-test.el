@@ -17,8 +17,13 @@
 ;;     Group 9:  kuro--update-tui-streaming-timer
 ;;     Group 10: kuro--handle-clipboard-actions
 ;;     Group 10b: blink overlay clearing during line update
+;;     Group 12: kuro--install-render-timer
+;;     Group 13: kuro--reset-cursor-cache
+;;     Group 14: kuro--sanitize-title edge cases
+;;     Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
+;;     FR-007:   render cycle timing (performance)
+;;     FR-008:   post-insert face position correctness
 ;;
-;; Extended tests (Groups 12-25) are in kuro-renderer-ext-test.el.
 ;; Pipeline, resize, coalescing, and render-cycle tests are in
 ;; kuro-renderer-pipeline-test.el (Groups 11+).
 ;;
@@ -30,9 +35,12 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'kuro-faces)
 (require 'kuro-renderer)
 (require 'kuro-render-buffer)
 (require 'kuro-binary-decoder)
+(require 'kuro-overlays)
+(require 'kuro-ffi)
 
 ;; kuro--last-rows and kuro--last-cols are defined in kuro.el (the main
 ;; entry-point file), which is not required here to avoid pulling in PTY
@@ -305,9 +313,682 @@
         (kuro--apply-title-update)
         (should (equal frame-name-set "htop"))))))
 
-;; Groups 7-11 are in kuro-renderer-ext2-test.el.
-;; Remaining pipeline and render-cycle tests are in kuro-renderer-pipeline-test.el.
-;; Groups 12-25 are in kuro-renderer-ext-test.el.
+;;; Group 7: kuro--process-scroll-events
+
+(ert-deftest kuro-renderer-process-scroll-events-calls-apply-buffer-scroll ()
+  "kuro--process-scroll-events calls kuro--apply-buffer-scroll with FFI values."
+  (kuro-renderer-helpers-test--with-buffer
+    (insert (make-string 24 ?\n))  ; 24 lines matching kuro--last-rows
+    (let ((apply-args nil))
+      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
+                 (lambda () '(2 . 0)))
+                ((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (up down) (push (cons up down) apply-args))))
+        (kuro--process-scroll-events)
+        (should (= (length apply-args) 1))
+        (should (equal (car apply-args) '(2 . 0)))))))
+
+(ert-deftest kuro-renderer-process-scroll-events-noop-on-nil ()
+  "kuro--process-scroll-events does nothing when FFI returns nil."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((apply-called nil))
+      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
+                 (lambda () nil))
+                ((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (_up _down) (setq apply-called t))))
+        (kuro--process-scroll-events)
+        (should-not apply-called)))))
+
+(ert-deftest kuro-renderer-process-scroll-events-noop-when-last-rows-zero ()
+  "kuro--process-scroll-events does nothing when kuro--last-rows is 0."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 0)
+    (let ((apply-called nil))
+      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
+                 (lambda () '(1 . 0)))
+                ((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (_up _down) (setq apply-called t))))
+        (kuro--process-scroll-events)
+        (should-not apply-called)))))
+
+;;; Group 8: kuro--detect-tui-mode (pure TUI mode heuristic)
+
+(ert-deftest kuro-renderer-detect-tui-mode-above-threshold ()
+  "High dirty fraction should return t."
+  (should (kuro--detect-tui-mode 9 10 0.8)))  ; 90% dirty > 80% threshold
+
+(ert-deftest kuro-renderer-detect-tui-mode-below-threshold ()
+  "Low dirty fraction should return nil."
+  (should-not (kuro--detect-tui-mode 1 10 0.8)))  ; 10% dirty < 80% threshold
+
+(ert-deftest kuro-renderer-detect-tui-mode-at-exact-threshold ()
+  "Dirty fraction exactly at threshold (ceiling) should return t."
+  ;; ceiling(0.8 * 10) = 8; 8 dirty rows >= 8 → t
+  (should (kuro--detect-tui-mode 8 10 0.8)))
+
+(ert-deftest kuro-renderer-detect-tui-mode-one-below-threshold ()
+  "One row below ceiling threshold should return nil."
+  ;; ceiling(0.8 * 10) = 8; 7 dirty rows < 8 → nil
+  (should-not (kuro--detect-tui-mode 7 10 0.8)))
+
+(ert-deftest kuro-renderer-detect-tui-mode-all-dirty ()
+  "All rows dirty should always return t."
+  (should (kuro--detect-tui-mode 24 24 0.8)))
+
+(ert-deftest kuro-renderer-detect-tui-mode-zero-dirty ()
+  "Zero dirty rows should return nil."
+  (should-not (kuro--detect-tui-mode 0 24 0.8)))
+
+(ert-deftest kuro-renderer-detect-tui-mode-zero-total-rows ()
+  "With total-rows=0, ceiling(threshold*0)=0 so any dirty count >= 0 returns t.
+This is the degenerate case before the first resize; the guard in
+`kuro--update-tui-streaming-timer' (> kuro--last-rows 0) prevents calling
+kuro--detect-tui-mode with total-rows=0 in the real render loop."
+  ;; ceiling(0.8 * 0) = 0; dirty-lines(0) >= 0 → t
+  (should (kuro--detect-tui-mode 0 0 0.8)))
+
+;;; Group 9: kuro--update-tui-streaming-timer (TUI streaming timer management)
+
+(ert-deftest kuro-renderer-update-tui-increments-frame-count-when-full-dirty ()
+  "kuro--update-tui-streaming-timer increments kuro--tui-mode-frame-count on full-dirty frames."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 24
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 1)))))
+
+(ert-deftest kuro-renderer-update-tui-resets-count-when-below-threshold ()
+  "kuro--update-tui-streaming-timer resets frame count when dirty-row fraction is below threshold."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 24
+          kuro--tui-mode-frame-count 3
+          kuro--last-dirty-count 5)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 0)))))
+
+(ert-deftest kuro-renderer-update-tui-stops-idle-timer-at-threshold ()
+  "kuro--update-tui-streaming-timer calls kuro--stop-stream-idle-timer when threshold is reached."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 24
+          kuro--tui-mode-frame-count (1- kuro--tui-mode-threshold)
+          kuro--last-dirty-count 20)
+    (let ((stop-called nil)
+          (switch-rate nil))
+      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
+                 (lambda () (setq stop-called t)))
+                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+                ((symbol-function 'kuro--switch-render-timer)
+                 (lambda (rate) (setq switch-rate rate))))
+        (kuro--update-tui-streaming-timer)
+        (should stop-called)
+        (should (= kuro--tui-mode-frame-count kuro--tui-mode-threshold))
+        (should kuro--tui-mode-active)
+        (should (= switch-rate kuro-tui-frame-rate))))))
+
+(ert-deftest kuro-renderer-update-tui-restarts-idle-timer-on-tui-exit ()
+  "kuro--update-tui-streaming-timer calls kuro--start-stream-idle-timer when leaving TUI mode."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 24
+          kuro--tui-mode-frame-count kuro--tui-mode-threshold
+          kuro--tui-mode-active t
+          kuro--last-dirty-count 5)
+    (let ((start-called nil)
+          (switch-rate nil))
+      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+                ((symbol-function 'kuro--start-stream-idle-timer)
+                 (lambda () (setq start-called t)))
+                ((symbol-function 'kuro--switch-render-timer)
+                 (lambda (rate) (setq switch-rate rate))))
+        (kuro--update-tui-streaming-timer)
+        (should start-called)
+        (should (= kuro--tui-mode-frame-count 0))
+        (should-not kuro--tui-mode-active)
+        (should (= switch-rate kuro-frame-rate))))))
+
+(ert-deftest kuro-renderer-update-tui-noop-when-streaming-mode-disabled ()
+  "kuro--update-tui-streaming-timer is a no-op when kuro-streaming-latency-mode is nil."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro-streaming-latency-mode nil
+          kuro--last-rows 24
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
+               (lambda () (error "should not be called")))
+              ((symbol-function 'kuro--start-stream-idle-timer)
+               (lambda () (error "should not be called")))
+              ((symbol-function 'kuro--switch-render-timer)
+               (lambda (_rate) (error "should not be called"))))
+      (should-not (condition-case err
+                      (progn (kuro--update-tui-streaming-timer) nil)
+                    (error err)))
+      (should (= kuro--tui-mode-frame-count 0)))))
+
+(ert-deftest kuro-renderer-update-tui-noop-when-last-rows-zero ()
+  "kuro--update-tui-streaming-timer is a no-op when kuro--last-rows is 0."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 0
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 20)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (kuro--update-tui-streaming-timer)
+      (should (= kuro--tui-mode-frame-count 0)))))
+
+(ert-deftest kuro-renderer-update-tui-noop-on-zero-dirty ()
+  "kuro--update-tui-streaming-timer handles zero dirty rows without error."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--last-rows 24
+          kuro--tui-mode-frame-count 0
+          kuro--last-dirty-count 0)
+    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
+              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
+      (should-not (condition-case err
+                      (progn (kuro--update-tui-streaming-timer) nil)
+                    (error err)))
+      (should (= kuro--tui-mode-frame-count 0)))))
+
+;;; Group 10: kuro--handle-clipboard-actions
+
+(ert-deftest kuro-renderer-handle-clipboard-write-only-policy-calls-kill-new ()
+  "kuro--handle-clipboard-actions calls kill-new for write actions under write-only policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called-with nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write . "hello from terminal"))))
+                ((symbol-function 'kill-new)
+                 (lambda (text) (setq kill-new-called-with text)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should (equal kill-new-called-with "hello from terminal"))))))
+
+(ert-deftest kuro-renderer-handle-clipboard-allow-policy-calls-kill-new ()
+  "kuro--handle-clipboard-actions calls kill-new for write actions under allow policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil)
+          (kuro-clipboard-policy 'allow))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write . "data"))))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-deny-policy-does-not-call-kill-new ()
+  "kuro--handle-clipboard-actions does NOT call kill-new under an unknown/deny policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil)
+          ;; 'deny is not a defined policy value; the pcase falls through
+          ;; without matching any branch, so kill-new must never be called.
+          (kuro-clipboard-policy 'deny))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write . "secret"))))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-write-only-blocks-query ()
+  "kuro--handle-clipboard-actions does NOT respond to query actions under write-only policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((send-key-called nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((query))))
+                ((symbol-function 'kuro--send-key)
+                 (lambda (_s) (setq send-key-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not send-key-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-empty-actions-noop ()
+  "kuro--handle-clipboard-actions is a no-op when the action list is nil."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () nil))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-multiple-write-actions ()
+  "kuro--handle-clipboard-actions processes multiple write actions in sequence."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((killed-texts nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write . "first") (write . "second"))))
+                ((symbol-function 'kill-new)
+                 (lambda (text) (push text killed-texts)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should (= (length killed-texts) 2))
+        (should (member "first" killed-texts))
+        (should (member "second" killed-texts))))))
+
+;;; Group 10b: Blink overlay clearing during line update
+
+(ert-deftest test-kuro-update-line-full-clears-blink-overlays-on-row ()
+  "Updating a line removes blink overlays on that row."
+  (with-temp-buffer
+    (insert "old text\n")
+    (insert "other row\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--blink-overlays-by-row nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 0
+      (let ((ov (make-overlay 1 5)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'slow)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should clear blink overlay on that row
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (null kuro--blink-overlays)))))
+
+(ert-deftest test-kuro-update-line-full-preserves-blink-overlays-other-row ()
+  "Updating a line preserves blink overlays on other rows."
+  (with-temp-buffer
+    (insert "row zero\n")
+    (insert "row one\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 1
+      (let ((ov (make-overlay 10 15)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'fast)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should NOT clear blink overlay on row 1
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (= 1 (length kuro--blink-overlays))))))
+
+;;; Group 12: kuro--install-render-timer
+
+(ert-deftest kuro-renderer-install-render-timer-creates-timer ()
+  "kuro--install-render-timer creates a live timer object."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (kuro--install-render-timer 30)
+    (should (timerp kuro--timer))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+(ert-deftest kuro-renderer-install-render-timer-cancels-existing ()
+  "kuro--install-render-timer cancels any pre-existing timer before installing.
+Verification: after a second install the old timer is no longer in `timer-list'."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    ;; Install a first timer.
+    (kuro--install-render-timer 30)
+    (let ((first kuro--timer))
+      ;; Install a second timer — must cancel the first.
+      (kuro--install-render-timer 60)
+      ;; The new timer must differ from the first.
+      (should-not (eq kuro--timer first))
+      ;; The first timer must no longer be in the active timer list.
+      (should-not (memq first timer-list))
+      (cancel-timer kuro--timer)
+      (setq kuro--timer nil))))
+
+(ert-deftest kuro-renderer-install-render-timer-interval-from-rate ()
+  "kuro--install-render-timer sets the repeat interval to 1/rate seconds."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (kuro--install-render-timer 60)
+    ;; timer--repeat-delay holds the repeat interval.
+    (let ((interval (timer--repeat-delay kuro--timer)))
+      (should (floatp interval))
+      ;; 1/60 ≈ 0.01667 — allow 1% tolerance.
+      (should (< (abs (- interval (/ 1.0 60))) 0.001)))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+(ert-deftest kuro-renderer-install-render-timer-nil-when-no-prior ()
+  "kuro--install-render-timer with no pre-existing timer does not error."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (should-not (condition-case err
+                    (progn (kuro--install-render-timer 30) nil)
+                  (error err)))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+;;; Group 13: kuro--reset-cursor-cache macro
+
+(ert-deftest kuro-renderer-reset-cursor-cache-clears-all-four-fields ()
+  "kuro--reset-cursor-cache sets all four cursor cache vars to nil."
+  (with-temp-buffer
+    (let ((kuro--last-cursor-row    5)
+          (kuro--last-cursor-col    10)
+          (kuro--last-cursor-visible t)
+          (kuro--last-cursor-shape  'box))
+      (kuro--reset-cursor-cache)
+      (should (null kuro--last-cursor-row))
+      (should (null kuro--last-cursor-col))
+      (should (null kuro--last-cursor-visible))
+      (should (null kuro--last-cursor-shape)))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-idempotent ()
+  "Calling kuro--reset-cursor-cache twice is safe and keeps all vars nil."
+  (with-temp-buffer
+    (let ((kuro--last-cursor-row    3)
+          (kuro--last-cursor-col    7)
+          (kuro--last-cursor-visible t)
+          (kuro--last-cursor-shape  '(hbar . 2)))
+      (kuro--reset-cursor-cache)
+      (kuro--reset-cursor-cache)
+      (should (null kuro--last-cursor-row))
+      (should (null kuro--last-cursor-col))
+      (should (null kuro--last-cursor-visible))
+      (should (null kuro--last-cursor-shape)))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-already-nil-is-noop ()
+  "kuro--reset-cursor-cache with all fields already nil does not error."
+  (with-temp-buffer
+    (let (kuro--last-cursor-row
+          kuro--last-cursor-col
+          kuro--last-cursor-visible
+          kuro--last-cursor-shape)
+      (should-not (condition-case err
+                      (progn (kuro--reset-cursor-cache) nil)
+                    (error err))))))
+
+;;; Group 14: kuro--sanitize-title edge cases
+
+(ert-deftest kuro-renderer-sanitize-title-strips-rlm ()
+  "kuro--sanitize-title strips U+200F RIGHT-TO-LEFT MARK."
+  (should (equal (kuro--sanitize-title (concat "a" "\u200f" "b")) "ab")))
+
+(ert-deftest kuro-renderer-sanitize-title-strips-null-byte ()
+  "kuro--sanitize-title strips embedded null bytes (U+0000)."
+  (should (equal (kuro--sanitize-title (concat "a" (string 0) "b")) "ab")))
+
+(ert-deftest kuro-renderer-sanitize-title-strips-tab ()
+  "kuro--sanitize-title strips TAB (U+0009, a C0 control char)."
+  (should (equal (kuro--sanitize-title (concat "a" (string 9) "b")) "ab")))
+
+(ert-deftest kuro-renderer-sanitize-title-all-bidi-overrides ()
+  "kuro--sanitize-title strips the full U+202A-U+202E bidi override range."
+  (dolist (cp '(#x202a #x202b #x202c #x202d #x202e))
+    (should (equal (kuro--sanitize-title (concat "x" (string cp) "y")) "xy"))))
+
+(ert-deftest kuro-renderer-sanitize-title-all-isolates ()
+  "kuro--sanitize-title strips the full U+2066-U+2069 directional isolate range."
+  (dolist (cp '(#x2066 #x2067 #x2068 #x2069))
+    (should (equal (kuro--sanitize-title (concat "x" (string cp) "y")) "xy"))))
+
+(ert-deftest kuro-renderer-sanitize-title-preserves-unicode-non-bidi ()
+  "kuro--sanitize-title passes through harmless non-ASCII Unicode unchanged."
+  (should (equal (kuro--sanitize-title "日本語") "日本語"))
+  (should (equal (kuro--sanitize-title "émoji 🎉") "émoji 🎉")))
+
+(ert-deftest test-kuro-update-line-full-nil-col-to-buf-removes-stale ()
+  "Nil col-to-buf removes stale mapping from hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Pre-populate stale CJK mapping for row 0
+      (puthash 0 [0 0 1 1 2 2] kuro--col-to-buf-map)
+      ;; Update with nil col-to-buf (pure ASCII line)
+      (kuro--update-line-full 0 "ascii" nil nil)
+      ;; Stale mapping should be removed
+      (should (null (gethash 0 kuro--col-to-buf-map))))))
+
+(ert-deftest test-kuro-update-line-full-vector-col-to-buf-stores ()
+  "Vector col-to-buf is stored in hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Update with a vector col-to-buf
+      (kuro--update-line-full 0 "日本" nil [0 0 1 1])
+      ;; Mapping should be stored
+      (should (equal (gethash 0 kuro--col-to-buf-map) [0 0 1 1])))))
+
+;;; Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
+
+(ert-deftest kuro-renderer-timed-returns-body-value ()
+  "kuro--timed returns the value produced by body."
+  (let ((ms 0))
+    (should (eq 42 (kuro--timed ms 42)))))
+
+(ert-deftest kuro-renderer-timed-sets-ms-var ()
+  "kuro--timed sets the ms variable to a non-negative number."
+  (let ((ms 0))
+    (kuro--timed ms (sit-for 0))
+    (should (>= ms 0.0))))
+
+(ert-deftest kuro-renderer-timed-body-side-effects-execute ()
+  "kuro--timed executes body so its side effects take effect."
+  (let ((ms 0) (ran nil))
+    (kuro--timed ms (setq ran t))
+    (should ran)))
+
+(ert-deftest kuro-renderer-pipeline-face-count-nil-returns-zero ()
+  "kuro--pipeline-face-count returns 0 for a nil updates list."
+  (should (= 0 (kuro--pipeline-face-count nil))))
+
+(ert-deftest kuro-renderer-pipeline-face-count-counts-faces ()
+  "kuro--pipeline-face-count sums face-range counts across all updates.
+face-ranges is a stride-6 flat vector: (/ (length fr) 6) gives the count.
+Row 0 has 2 ranges (12 elements) and row 1 has 3 ranges (18 elements) = 5 total."
+  ;; updates is a vector of flat [row text face-ranges col-to-buf] entries.
+  (let ((updates (vector (vector 0 "a" (make-vector 12 0) [])
+                         (vector 1 "b" (make-vector 18 0) []))))
+    (should (= 5 (kuro--pipeline-face-count updates)))))
+
+(ert-deftest kuro-renderer-pipeline-step-apply-skips-nil ()
+  "kuro--pipeline-step-apply does not call kuro--apply-dirty-lines for nil."
+  (let ((called 0))
+    (cl-letf (((symbol-function 'kuro--apply-dirty-lines)
+               (lambda (&rest _) (cl-incf called))))
+      (kuro--pipeline-step-apply nil)
+      (should (= 0 called)))))
+
+;;; Group 15: title-polling renames the buffer
+
+(ert-deftest kuro-renderer-title-polling-renames-buffer ()
+  "Title polling: render cycle renames buffer when kuro--get-and-clear-title returns a string."
+  (require 'kuro-renderer)
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      (cl-letf (((symbol-function 'kuro--get-and-clear-title)
+                 (lambda () "my title")))
+        ;; Simulate the title-handling path of kuro--render-cycle
+        (let ((title (kuro--get-and-clear-title)))
+          (when (and (stringp title) (not (string-empty-p title)))
+            (let ((safe-title (kuro--sanitize-title title)))
+              (rename-buffer (format "*kuro: %s*" safe-title) t))))
+        ;; Verify the buffer was renamed correctly
+        (should (string-match-p "\\*kuro: my title\\*" (buffer-name buf)))))))
+
+;;; FR-007 / FR-008: Performance and correctness helpers
+
+(defmacro kuro-perf-test--with-buffer (&rest body)
+  "Run BODY in a temporary buffer with all kuro buffer-local state initialized."
+  `(with-temp-buffer
+     (let ((inhibit-read-only t)
+           (inhibit-modification-hooks t)
+           ;; kuro-ffi state
+           (kuro--initialized nil)
+           (kuro--col-to-buf-map (make-hash-table :test 'eql))
+           (kuro--resize-pending nil)
+           ;; kuro-renderer state
+           (kuro--cursor-marker nil)
+           (kuro--mode-poll-frame-count 9)
+           (kuro--scroll-offset 0)
+           (kuro-timer nil)
+           ;; kuro-overlays state
+           (kuro--blink-overlays nil)
+           (kuro--image-overlays nil)
+           (kuro--hyperlink-overlays nil)
+           (kuro--prompt-positions nil)
+           (kuro--blink-frame-count 0)
+           (kuro--blink-visible-slow t)
+           (kuro--blink-visible-fast t)
+           ;; kuro-ffi mode state (polled every 10 frames)
+           (kuro--application-cursor-keys-mode nil)
+           (kuro--app-keypad-mode nil)
+           (kuro--mouse-mode nil)
+           (kuro--mouse-sgr nil)
+           (kuro--mouse-pixel-mode nil)
+           (kuro--bracketed-paste-mode nil)
+           (kuro--keyboard-flags 0)
+           ;; resize tracking
+           (kuro--last-rows 0)
+           (kuro--last-cols 0))
+       ,@body)))
+
+(defun kuro-perf-test--make-stub-updates (rows cols)
+  "Build a vector of simulated `kuro--poll-updates-with-faces' results.
+Each entry simulates one dirty row with COLS colored cells."
+  (let ((result (make-vector rows nil)))
+    (dotimes (row rows)
+      (let* ((text (make-string cols ?A))
+             (mid (/ cols 2))
+             (fg1 (logior (ash (mod (* row 7)  256) 16)
+                          (ash (mod (* row 13) 256) 8)
+                          (mod (* row 17) 256)))
+             (fg2 (logior (ash (mod (* row 11) 256) 16)
+                          (ash (mod (* row 19) 256) 8)
+                          (mod (* row 23) 256)))
+             (face-ranges (vector 0   mid fg1 #xFF000000 0 0
+                                  mid cols fg2 #xFF000000 0 0))
+             (col-to-buf (let ((v (make-vector cols 0)))
+                           (dotimes (i cols) (aset v i i))
+                           v)))
+        (aset result row (vector row text face-ranges col-to-buf))))
+    result))
+
+(defun kuro-perf-test--get-face-at-col (line-num col)
+  "Return the `face' text property at column COL of LINE-NUM (0-indexed)."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line line-num)
+    (get-text-property (+ (point) col) 'face)))
+
+;;; FR-007: Render cycle timing test
+
+(ert-deftest test-kuro-render-cycle-timing ()
+  "Measure render cycle time for a full-dirty 24x80 update (cmatrix scenario).
+Threshold: must complete under 10ms per frame with all FFI stubbed.
+Skips if the kuro-core Rust module is not available."
+  :tags '(performance kuro)
+  (skip-unless (fboundp 'kuro-core-init))
+  (let* ((rows 24)
+         (cols 80)
+         (stub-updates (kuro-perf-test--make-stub-updates rows cols))
+         (iterations 50)
+         elapsed-ms)
+    (kuro-perf-test--with-buffer
+      ;; Pre-fill buffer with blank lines to match terminal rows
+      (erase-buffer)
+      (dotimes (_ rows) (insert "\n"))
+      (setq kuro--cursor-marker (point-marker)
+            kuro--initialized t
+            kuro--last-rows rows
+            kuro--last-cols cols)
+      ;; Stub all FFI calls so we measure only Elisp render work.
+      (let ((kuro-use-binary-ffi nil))
+      (cl-letf (((symbol-function 'kuro--poll-updates-with-faces)
+                 (lambda () stub-updates))
+                ((symbol-function 'kuro-core-bell-pending)
+                 (lambda () nil))
+                ((symbol-function 'kuro-core-clear-bell)
+                 (lambda () nil))
+                ((symbol-function 'kuro--get-and-clear-title)
+                 (lambda () nil))
+                ((symbol-function 'kuro--get-cursor)
+                 (lambda () '(0 . 0)))
+                ((symbol-function 'kuro--get-cursor-visible)
+                 (lambda () t))
+                ((symbol-function 'kuro--get-cursor-shape)
+                 (lambda () 0))
+                ((symbol-function 'kuro--get-cwd)
+                 (lambda () nil))
+                ((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () nil))
+                ((symbol-function 'kuro--poll-prompt-marks)
+                 (lambda () nil))
+                ((symbol-function 'kuro--poll-image-notifications)
+                 (lambda () nil))
+                ((symbol-function 'kuro--apply-palette-updates)
+                 (lambda () nil))
+                ((symbol-function 'kuro--apply-default-colors)
+                 (lambda () nil))
+                ((symbol-function 'kuro--has-pending-output)
+                 (lambda () nil)))
+        ;; Warm-up pass: populates face cache, JIT-compiles hot paths
+        (kuro--render-cycle)
+        ;; Timed run
+        (let ((t0 (float-time)))
+          (dotimes (_ iterations)
+            (kuro--render-cycle))
+          (setq elapsed-ms (* 1000.0 (- (float-time) t0))))))
+      (let ((per-frame-ms (/ elapsed-ms iterations)))
+        (message "kuro render cycle: %.2fms/frame for %dx%d full-dirty (%d iterations)"
+                 per-frame-ms rows cols iterations)
+        ;; 10ms threshold per frame: conservative target for Elisp-only rendering
+        (should (< per-frame-ms 10.0))))))
+
+;;; FR-008: Post-insert face position correctness test for kuro--update-line-full
+
+(ert-deftest test-kuro-update-line-full-face-position ()
+  "Verify kuro--update-line-full applies face ranges at correct buffer positions
+after variable-length text replacement in a single-pass batch update."
+  :tags '(correctness kuro)
+  ;; Fresh face cache per test to avoid cross-test pollution.
+  (let ((kuro--face-cache (make-hash-table :test 'equal)))
+    (kuro-perf-test--with-buffer
+      ;; Pre-fill with 5 rows of identical-length ASCII content.
+      (erase-buffer)
+      (dotimes (_ 5) (insert "AAAAAAAAAA\n"))  ; rows 0-4: 10 chars each
+
+      ;; ---- Test 1: single row, text grows longer ----
+      (kuro--update-line-full 0 "XXXXXXXXXXXXXXXXXXX"        ; 19 chars (was 10)
+                              (vector 3 6 #x00FF0000 #xFF000000 0 0)
+                              nil)
+      (save-excursion
+        (goto-char (point-min))
+        (should (string= (buffer-substring-no-properties (point) (line-end-position))
+                         "XXXXXXXXXXXXXXXXXXX")))
+      (should (kuro-perf-test--get-face-at-col 0 3))
+      (should (kuro-perf-test--get-face-at-col 0 5))
+      (should-not (kuro-perf-test--get-face-at-col 0 6))
+
+      ;; ---- Test 2: batch update, face position isolation ----
+      (kuro--update-line-full 1 "SHORT" nil nil)
+      (kuro--update-line-full 2 "LONGERLONGER"              ; 12 chars (was 10)
+                              (vector 4 8 #x000000FF #xFF000000 0 0)
+                              nil)
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line 2)
+        (should (string= (buffer-substring-no-properties (point) (line-end-position))
+                         "LONGERLONGER")))
+      (should (kuro-perf-test--get-face-at-col 2 4))
+      (should (kuro-perf-test--get-face-at-col 2 7))
+      (should-not (kuro-perf-test--get-face-at-col 2 8))
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line 3)
+        (should (string= (buffer-substring-no-properties (point) (line-end-position))
+                         "AAAAAAAAAA")))
+      (should-not (kuro-perf-test--get-face-at-col 3 0)))))
 
 (provide 'kuro-renderer-test)
 

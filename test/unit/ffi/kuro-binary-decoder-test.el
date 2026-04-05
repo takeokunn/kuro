@@ -373,6 +373,436 @@ Row 1: text \"CD\", 2 face ranges:
                    (kuro-binary-decoder-test--make-u32-le 0)))))
     (should (= (kuro--read-u32-le v 4) #x12345678))))
 
+;;; Group 8: kuro--decode-row-text — additional cases
+
+(ert-deftest kuro-binary-decoder-decode-row-text-multibyte-utf8 ()
+  "kuro--decode-row-text decodes 3-byte UTF-8 (U+2603 SNOWMAN) correctly."
+  ;; U+2603 encodes as E2 98 83 in UTF-8
+  (let* ((v (vector #xE2 #x98 #x83))
+         (result (kuro--decode-row-text v 0 3)))
+    (should (string= (car result) "\u2603"))
+    (should (= (cdr result) 3))))
+
+(ert-deftest kuro-binary-decoder-decode-row-text-two-byte-utf8 ()
+  "kuro--decode-row-text decodes 2-byte UTF-8 (U+00E9 é) correctly."
+  ;; U+00E9 encodes as C3 A9 in UTF-8
+  (let* ((v (vector #xC3 #xA9))
+         (result (kuro--decode-row-text v 0 2)))
+    (should (string= (car result) "\u00E9"))
+    (should (= (cdr result) 2))))
+
+(ert-deftest kuro-binary-decoder-decode-row-text-advances-pos-correctly ()
+  "kuro--decode-row-text advances pos by exactly text-byte-len."
+  ;; Vector with padding before and after the text region
+  ;; Use offset 4, text = "AB" (2 bytes), expect new-pos = 6
+  (let* ((v (vector 0 0 0 0 #x41 #x42 0 0))
+         (result (kuro--decode-row-text v 4 2)))
+    (should (string= (car result) "AB"))
+    (should (= (cdr result) 6))))
+
+;;; Group 9: kuro--decode-face-ranges — additional cases
+
+(ert-deftest kuro-binary-decoder-decode-face-ranges-max-flags ()
+  "kuro--decode-face-ranges decodes the maximum wire-format flags value.
+`encode_attrs' in Rust produces values in 0..=0xBFF (9 SGR flag bits + 3
+underline-style bits).  The decoder reads `flags' as a u32 (low 4 bytes of
+the 8-byte wire field) because the upper 4 bytes are always zero.  The
+maximum representable u32 value 0xFFFFFFFF is used here to exercise the
+decoder boundary."
+  ;; flags = 0xFFFFFFFF (max u32; upper 4 bytes on the wire are 0x00000000)
+  (let* ((v (apply #'vector
+                   (append
+                    (kuro-binary-decoder-test--make-u32-le 0)   ; start_buf
+                    (kuro-binary-decoder-test--make-u32-le 10)  ; end_buf
+                    (kuro-binary-decoder-test--make-u32-le 0)   ; fg
+                    (kuro-binary-decoder-test--make-u32-le 0)   ; bg
+                    (kuro-binary-decoder-test--make-u64-le #xFFFFFFFF)))) ; flags (u32 max)
+         (result (kuro--decode-face-ranges v 0 1 nil))
+         (new-pos kuro--decode-pos))
+    ;; Stride-6: 1 range × 6 = 6 elements; flags at index 4 (base 0 + 4).
+    (should (= (/ (length result) 6) 1))
+    (should (= (aref result 4) #xFFFFFFFF))
+    (should (= new-pos 24))))
+
+(ert-deftest kuro-binary-decoder-decode-face-ranges-pos-advances-per-range ()
+  "kuro--decode-face-ranges advances pos by 24 bytes per face range."
+  (let* ((range-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u64-le 0)))
+         ;; Three identical ranges
+         (v (apply #'vector (append range-bytes range-bytes range-bytes)))
+         (result (kuro--decode-face-ranges v 0 3 nil))
+         (new-pos kuro--decode-pos))
+    ;; Stride-6: 3 ranges × 6 = 18 elements.
+    (should (= (/ (length result) 6) 3))
+    (should (= new-pos 72))))    ; 3 × 24 bytes
+
+;;; Group 10: kuro--decode-col-to-buf — additional cases
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-single-entry ()
+  "kuro--decode-col-to-buf decodes a single-entry col-to-buf mapping."
+  ;; Format: len=1 (u32 LE), then 1 u32 entry [7]
+  (let ((v (kuro-binary-decoder-test--make-vec
+            1 0 0 0    ; length = 1
+            7 0 0 0))) ; entry 0 = 7
+    (let* ((col-to-buf (kuro--decode-col-to-buf v 0))
+           (new-pos kuro--decode-pos))
+      (should (vectorp col-to-buf))
+      (should (= (length col-to-buf) 1))
+      (should (= (aref col-to-buf 0) 7))
+      (should (= new-pos 8)))))
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-preserves-large-values ()
+  "kuro--decode-col-to-buf correctly stores large u32 values."
+  ;; Entry value = 0xFFFFFF (large but fits in u32)
+  (let ((v (apply #'vector
+                  (append
+                   (kuro-binary-decoder-test--make-u32-le 1)
+                   (kuro-binary-decoder-test--make-u32-le #xFFFFFF)))))
+    (let ((col-to-buf (kuro--decode-col-to-buf v 0)))
+      (should (= (aref col-to-buf 0) #xFFFFFF)))))
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-with-offset ()
+  "kuro--decode-col-to-buf reads from a non-zero offset."
+  ;; 4 bytes padding, then len=1, then entry=5
+  (let ((v (apply #'vector
+                  (append
+                   (kuro-binary-decoder-test--make-u32-le 0)  ; padding
+                   (kuro-binary-decoder-test--make-u32-le 1)  ; length
+                   (kuro-binary-decoder-test--make-u32-le 5)))) ; entry
+         )
+    (let* ((col-to-buf (kuro--decode-col-to-buf v 4))
+           (new-pos kuro--decode-pos))
+      (should (= (aref col-to-buf 0) 5))
+      (should (= new-pos 12)))))
+
+;;; Group 11: kuro--decode-binary-updates — frame structure edge cases
+
+(ert-deftest kuro-binary-decoder-decode-updates-row-with-col-to-buf ()
+  "kuro--decode-binary-updates correctly passes a non-empty col_to_buf."
+  ;; Row: index=5, text="A", 0 face ranges, col_to_buf=[0, 1, 2]
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
+           (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
+           (kuro-binary-decoder-test--make-u32-le 5)   ; row_index = 5
+           (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 1)   ; text_byte_len ("A")
+           '(#x41)                                      ; text: 'A'
+           (kuro-binary-decoder-test--make-u32-le 3)   ; col_to_buf_len = 3
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 2)))
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-updates v)))
+    (should (= (length result) 1))
+    (let* ((entry (aref result 0))
+           (c2b   (aref entry 3)))
+      (should (vectorp c2b))
+      (should (= (length c2b) 3))
+      (should (= (aref c2b 0) 0))
+      (should (= (aref c2b 1) 1))
+      (should (= (aref c2b 2) 2)))))
+
+(ert-deftest kuro-binary-decoder-decode-updates-preserves-row-order ()
+  "kuro--decode-binary-updates returns rows in ascending row-index order."
+  ;; 3 rows: indices 10, 20, 30 — verify order is preserved
+  (let* ((make-row
+          (lambda (row-idx text-char)
+            (append
+             (kuro-binary-decoder-test--make-u32-le row-idx)
+             (kuro-binary-decoder-test--make-u32-le 0)    ; 0 face ranges
+             (kuro-binary-decoder-test--make-u32-le 1)    ; 1 text byte
+             (list text-char)
+             (kuro-binary-decoder-test--make-u32-le 0)))) ; 0 col_to_buf
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
+           (kuro-binary-decoder-test--make-u32-le 3)
+           (funcall make-row 10 ?A)
+           (funcall make-row 20 ?B)
+           (funcall make-row 30 ?C)))
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-updates v)))
+    (should (= (length result) 3))
+    ;; Each entry is a flat vector [row-index text face-ranges col-to-buf].
+    (should (= (aref (aref result 0) 0) 10))
+    (should (= (aref (aref result 1) 0) 20))
+    (should (= (aref (aref result 2) 0) 30))))
+
+;;; Group 12: kuro--decode-binary-updates — high row indices and face ordering
+
+(ert-deftest kuro-binary-decoder-decode-updates-high-row-index ()
+  "kuro--decode-binary-updates preserves a large row index value."
+  ;; row_index = 65535 — ensure u32 round-trips through the decoder
+  (let* ((row-idx #xFFFF)
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 1)         ; format_version
+           (kuro-binary-decoder-test--make-u32-le 1)         ; num_rows
+           (kuro-binary-decoder-test--make-u32-le row-idx)   ; row_index
+           (kuro-binary-decoder-test--make-u32-le 0)         ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)         ; text_byte_len
+           (kuro-binary-decoder-test--make-u32-le 0)))       ; col_to_buf_len
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-updates v)))
+    (should (= (length result) 1))
+    (should (= (aref (aref result 0) 0) row-idx))))
+
+(ert-deftest kuro-binary-decoder-decode-updates-face-order-preserved ()
+  "kuro--decode-binary-updates returns face ranges in ascending start_buf order.
+The encoder writes them in order; the decoder must not reverse them."
+  ;; Two face ranges: range0 start=0, range1 start=5
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 1)    ; format_version
+           (kuro-binary-decoder-test--make-u32-le 1)    ; num_rows
+           (kuro-binary-decoder-test--make-u32-le 0)    ; row_index
+           (kuro-binary-decoder-test--make-u32-le 2)    ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)    ; text_byte_len
+           ;; range 0: start=0, end=5, fg=1, bg=2, flags=3
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 5)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 2)
+           (kuro-binary-decoder-test--make-u64-le 3)
+           ;; range 1: start=5, end=10, fg=4, bg=5, flags=6
+           (kuro-binary-decoder-test--make-u32-le 5)
+           (kuro-binary-decoder-test--make-u32-le 10)
+           (kuro-binary-decoder-test--make-u32-le 4)
+           (kuro-binary-decoder-test--make-u32-le 5)
+           (kuro-binary-decoder-test--make-u64-le 6)
+           (kuro-binary-decoder-test--make-u32-le 0)))  ; col_to_buf_len
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-updates v)))
+    (let* ((entry     (aref result 0))
+           (face-list (aref entry 2)))
+      ;; Stride-6: 2 ranges × 6 = 12 elements.
+      (should (= (/ (length face-list) 6) 2))
+      ;; Range 0 at base 0: start_buf=0
+      (should (= (aref face-list 0) 0))
+      ;; Range 1 at base 6: start_buf=5
+      (should (= (aref face-list 6) 5)))))
+
+(ert-deftest kuro-binary-decoder-decode-updates-three-rows-different-col-to-buf ()
+  "kuro--decode-binary-updates decodes 3 rows with varying col_to_buf sizes."
+  ;; row 0: col_to_buf size 0; row 1: size 1; row 2: size 2
+  (let* ((make-row
+          (lambda (row-idx ctb-entries)
+            (let ((ctb-len (length ctb-entries)))
+              (append
+               (kuro-binary-decoder-test--make-u32-le row-idx)
+               (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
+               (kuro-binary-decoder-test--make-u32-le 0)   ; text_byte_len
+               (kuro-binary-decoder-test--make-u32-le ctb-len)
+               (mapcan #'kuro-binary-decoder-test--make-u32-le ctb-entries)))))
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 1)   ; format_version
+           (kuro-binary-decoder-test--make-u32-le 3)
+           (funcall make-row 0 '())
+           (funcall make-row 1 '(42))
+           (funcall make-row 2 '(10 20))))
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-updates v)))
+    (should (= (length result) 3))
+    ;; Each entry: flat vector [row text face-ranges col-to-buf]; col-to-buf at index 3.
+    (should (= (length (aref (aref result 0) 3)) 0))         ; row 0: empty col-to-buf
+    (should (= (length (aref (aref result 1) 3)) 1))         ; row 1: 1 entry
+    (should (= (aref (aref (aref result 1) 3) 0) 42))        ; row 1 entry value
+    (should (= (length (aref (aref result 2) 3)) 2))         ; row 2: 2 entries
+    (should (= (aref (aref (aref result 2) 3) 0) 10))
+    (should (= (aref (aref (aref result 2) 3) 1) 20))))
+
+(ert-deftest kuro-binary-decoder-decode-updates-result-is-vector ()
+  "kuro--decode-binary-updates returns a vector for non-empty frames, nil for 0 rows."
+  ;; 0-row frame → nil (callers guard on (when updates ...))
+  (let* ((empty-frame
+          (apply #'vector
+                 (append (kuro-binary-decoder-test--make-u32-le 1)
+                         (kuro-binary-decoder-test--make-u32-le 0))))
+         (empty-result (kuro--decode-binary-updates empty-frame)))
+    (should (null empty-result)))
+  ;; 1-row frame → vector
+  (let* ((one-row-frame
+          (apply #'vector
+                 (append
+                  (kuro-binary-decoder-test--make-u32-le 1)  ; format_version
+                  (kuro-binary-decoder-test--make-u32-le 1)  ; num_rows=1
+                  (kuro-binary-decoder-test--make-u32-le 0)  ; row_index
+                  (kuro-binary-decoder-test--make-u32-le 0)  ; num_face_ranges
+                  (kuro-binary-decoder-test--make-u32-le 0)  ; text_byte_len
+                  (kuro-binary-decoder-test--make-u32-le 0)))) ; col_to_buf_len
+         (result (kuro--decode-binary-updates one-row-frame)))
+    (should (vectorp result))
+    (should (= (length result) 1))))
+
+;;; Group 13: kuro--decode-row-text — 4-byte UTF-8 and offset advancement
+
+(ert-deftest kuro-binary-decoder-decode-row-text-four-byte-utf8 ()
+  "kuro--decode-row-text decodes a 4-byte UTF-8 codepoint (U+1F600 GRINNING FACE)."
+  ;; U+1F600 encodes as F0 9F 98 80 in UTF-8
+  (let* ((v (vector #xF0 #x9F #x98 #x80))
+         (result (kuro--decode-row-text v 0 4)))
+    (should (string= (car result) "\U0001F600"))
+    (should (= (cdr result) 4))))
+
+(ert-deftest kuro-binary-decoder-decode-row-text-mixed-ascii-and-utf8 ()
+  "kuro--decode-row-text decodes a mix of ASCII and UTF-8 multi-byte sequences."
+  ;; 'A' (1 byte) + U+00E9 é (2 bytes C3 A9) + 'Z' (1 byte) = 4 bytes total
+  (let* ((v (vector ?A #xC3 #xA9 ?Z))
+         (result (kuro--decode-row-text v 0 4)))
+    (should (string= (car result) "A\u00E9Z"))
+    (should (= (cdr result) 4))))
+
+(ert-deftest kuro-binary-decoder-decode-row-text-with-start-offset ()
+  "kuro--decode-row-text reads text starting at a non-zero byte offset."
+  ;; Padding: 2 bytes, then 'H' 'i' at offset 2
+  (let* ((v (vector 0 0 ?H ?i 0 0))
+         (result (kuro--decode-row-text v 2 2)))
+    (should (string= (car result) "Hi"))
+    (should (= (cdr result) 4))))
+
+(ert-deftest kuro-binary-decoder-decode-row-text-single-byte ()
+  "kuro--decode-row-text decodes a single ASCII byte."
+  (let* ((v (vector ?X))
+         (result (kuro--decode-row-text v 0 1)))
+    (should (string= (car result) "X"))
+    (should (= (cdr result) 1))))
+
+;;; Group 14: kuro--decode-binary-frame-rows — CPS text-fn continuation
+
+(ert-deftest kuro-binary-decoder-frame-rows-custom-text-fn-called-with-correct-args ()
+  "kuro--decode-binary-frame-rows calls text-fn with correct idx and text-byte-len."
+  (let* ((calls nil)
+         (text-fn (lambda (idx pos text-byte-len)
+                    (push (list idx text-byte-len) calls)
+                    (cons "" pos)))
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)   ; format_version=2
+           (kuro-binary-decoder-test--make-u32-le 2)   ; num_rows
+           (kuro-binary-decoder-test--make-u32-le 0)   ; row_index
+           (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)   ; text_byte_len
+           (kuro-binary-decoder-test--make-u32-le 0)   ; col_to_buf_len
+           (kuro-binary-decoder-test--make-u32-le 1)   ; row_index
+           (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)   ; text_byte_len
+           (kuro-binary-decoder-test--make-u32-le 0))) ; col_to_buf_len
+         (v (apply #'vector frame-bytes)))
+    (kuro--decode-binary-frame-rows v text-fn)
+    (let ((sorted (nreverse calls)))
+      (should (= (length sorted) 2))
+      (should (equal (car sorted) '(0 0)))
+      (should (equal (cadr sorted) '(1 0))))))
+
+(ert-deftest kuro-binary-decoder-frame-rows-returns-text-fn-result ()
+  "kuro--decode-binary-frame-rows uses the text returned by text-fn."
+  (let* ((text-fn (lambda (_idx pos _text-byte-len) (cons "CUSTOM" pos)))
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)   ; format_version=2
+           (kuro-binary-decoder-test--make-u32-le 1)   ; num_rows
+           (kuro-binary-decoder-test--make-u32-le 0)   ; row_index
+           (kuro-binary-decoder-test--make-u32-le 0)   ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)   ; text_byte_len
+           (kuro-binary-decoder-test--make-u32-le 0))) ; col_to_buf_len
+         (v (apply #'vector frame-bytes))
+         (result (kuro--decode-binary-frame-rows v text-fn)))
+    (should (= (length result) 1))
+    ;; Flat vector [row text face-ranges col-to-buf]: text is at index 1.
+    (should (equal (aref (aref result 0) 1) "CUSTOM"))))
+
+(ert-deftest kuro-binary-decoder-frame-rows-errors-on-unknown-version ()
+  "kuro--decode-binary-frame-rows signals an error for an unsupported format version."
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 99)  ; format_version=99
+           (kuro-binary-decoder-test--make-u32-le 0))) ; num_rows
+         (v (apply #'vector frame-bytes))
+         (text-fn (lambda (_idx pos _len) (cons "" pos))))
+    (should-error (kuro--decode-binary-frame-rows v text-fn))))
+
+(ert-deftest kuro-binary-decoder-frame-rows-empty-frame-returns-empty-list ()
+  "kuro--decode-binary-frame-rows with num_rows=0 returns nil."
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)   ; format_version=2
+           (kuro-binary-decoder-test--make-u32-le 0))) ; num_rows=0
+         (v (apply #'vector frame-bytes))
+         (text-fn (lambda (_idx pos _len) (cons "" pos))))
+    (should (null (kuro--decode-binary-frame-rows v text-fn)))))
+
+;;; Group 15: kuro--decode-binary-updates-with-strings
+
+(defun kuro-binary-decoder-test--make-v2-frame-no-text (row-index num-face-ranges)
+  "Build a minimal v2 binary frame for ROW-INDEX with NUM-FACE-RANGES and text_byte_len=0.
+col_to_buf section is also empty (length 0).  Each face range is 28 zero bytes."
+  (let* ((face-bytes (make-list (* num-face-ranges 28) 0))
+         (frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)              ; format_version=2
+           (kuro-binary-decoder-test--make-u32-le 1)              ; num_rows=1
+           ;; row descriptor
+           (kuro-binary-decoder-test--make-u32-le row-index)      ; row_index
+           (kuro-binary-decoder-test--make-u32-le num-face-ranges) ; num_face_ranges
+           (kuro-binary-decoder-test--make-u32-le 0)              ; text_byte_len=0
+           face-bytes
+           (kuro-binary-decoder-test--make-u32-le 0))))           ; col_to_buf_len=0
+    (apply #'vector frame-bytes)))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-returns-one-row ()
+  "kuro--decode-binary-updates-with-strings returns one entry for a 1-row frame."
+  (let* ((text-strings (vector "hello"))
+         (vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 1))
+         (result (kuro--decode-binary-updates-with-strings text-strings vec)))
+    (should (= (length result) 1))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-uses-text-vector ()
+  "kuro--decode-binary-updates-with-strings takes row text from TEXT-STRINGS.
+Each entry is a flat vector [row-index text face-ranges col-to-buf]."
+  (let* ((text-strings (vector "row-text"))
+         (vec (kuro-binary-decoder-test--make-v2-frame-no-text 3 0))
+         (result (kuro--decode-binary-updates-with-strings text-strings vec))
+         (entry (aref result 0)))
+    ;; text is at index 1 of the flat entry vector
+    (should (equal (aref entry 1) "row-text"))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-row-index-preserved ()
+  "kuro--decode-binary-updates-with-strings preserves the row index from binary data."
+  (let* ((text-strings (vector "x"))
+         (vec (kuro-binary-decoder-test--make-v2-frame-no-text 7 0))
+         (result (kuro--decode-binary-updates-with-strings text-strings vec))
+         (entry (aref result 0)))
+    ;; row-index is at index 0 of the flat entry vector
+    (should (= (aref entry 0) 7))))
+
+;;; Group 16: kuro--poll-updates-binary-optimised
+
+(ert-deftest kuro-binary-decoder-poll-optimised-returns-nil-when-ffi-nil ()
+  "kuro--poll-updates-binary-optimised returns nil when FFI returns nil."
+  (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+             (lambda (_id) nil)))
+    (should (null (kuro--poll-updates-binary-optimised 'fake-id)))))
+
+(ert-deftest kuro-binary-decoder-poll-optimised-decodes-when-ffi-returns-cons ()
+  "kuro--poll-updates-binary-optimised decodes when FFI returns a cons."
+  (let* ((text-strings (vector "decoded-row"))
+         (vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+               (lambda (_id) (cons text-strings vec))))
+      (let* ((result (kuro--poll-updates-binary-optimised 'fake-id))
+             (entry (aref result 0)))
+        (should result)
+        (should (= (length result) 1))
+        ;; entry is a flat vector [row-index text face-ranges col-to-buf]
+        (should (equal (aref entry 1) "decoded-row"))))))
+
 (provide 'kuro-binary-decoder-test)
 
 ;;; kuro-binary-decoder-test.el ends here

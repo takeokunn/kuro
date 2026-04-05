@@ -1,0 +1,48 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.os }}, nightly, regression check)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: rust-core/fuzz/corpus
+          key: fuzz-corpus-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-${{ runner.os }}-
+      - name: Run fuzz targets (30s each)
+        run: |
+          nix develop .#fuzz --command bash -c "
+            cd rust-core/fuzz
+            cargo fuzz run advance -- -max_total_time=30 -runs=1000
+            cargo fuzz run kitty_params -- -max_total_time=30 -runs=1000
+            cargo fuzz run apc_payload -- -max_total_time=30 -runs=1000
+            cargo fuzz run decode_png -- -max_total_time=30 -runs=1000
+            cargo fuzz run csi_sequence -- -max_total_time=30 -runs=1000
+            cargo fuzz run utf8_input -- -max_total_time=30 -runs=1000
+            cargo fuzz run sgr -- -max_total_time=30 -runs=1000
+            cargo fuzz run insert_delete -- -max_total_time=30 -runs=1000
+          "
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: fuzz-artifacts-${{ runner.os }}
+          path: rust-core/fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -30,6 +30,9 @@ tarpaulin-report.html
 cobertura.xml
 lcov.info
 
+# Fuzz corpus (generated locally, cached in CI)
+rust-core/fuzz/corpus/
+
 .env*
 .claude/
 .serena/

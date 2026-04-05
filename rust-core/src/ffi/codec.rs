@@ -564,6 +564,7 @@ pub(crate) const BINARY_FORMAT_VERSION: u32 = 2;
 ///
 /// The Emacs side decodes this with `kuro--decode-binary-updates`, which uses
 /// `aref` + `logior`/`ash` to reconstruct little-endian integers.
+#[cfg_attr(fuzzing, expect(dead_code, reason = "called only from ffi::bridge::render which is excluded in fuzz builds"))]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     // Pre-compute total capacity to avoid repeated reallocation.

@@ -13,20 +13,15 @@ echo "--- Building Rust core ---"
 cd "$PROJECT_DIR"
 cargo build --release 2>&1
 
-# Collect all test/unit subdirectories for load-path
-UNIT_PATHS=""
-for dir in "$PROJECT_DIR"/test/unit/*/; do
-  [ -d "$dir" ] && UNIT_PATHS="$UNIT_PATHS -L $dir"
-done
-
 echo ""
 echo "--- Running E2E tests ---"
 export KURO_MODULE_PATH="$PROJECT_DIR/target/release"
 emacs -Q --batch \
   -L "$PROJECT_DIR/emacs-lisp/core" \
-  $UNIT_PATHS \
-  -L "$PROJECT_DIR/test/integration" \
+  -L "$PROJECT_DIR/test/e2e" \
   --eval "(require 'kuro)" \
-  --eval "(require 'kuro-e2e-test)" \
+  --eval "(require 'kuro-e2e-helpers)" \
+  --eval "(mapc #'load (directory-files-recursively \
+    \"$PROJECT_DIR/test/e2e\" \"-test\\\\.el\$\"))" \
   --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")" \
   2>&1

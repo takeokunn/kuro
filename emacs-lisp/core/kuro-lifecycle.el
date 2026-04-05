@@ -47,12 +47,12 @@
 
 (defun kuro--shell-integration-dir ()
   "Return the directory containing kuro shell integration scripts, or nil.
-Resolves the `etc/' directory relative to the Elisp source location."
+Resolves the `shell/' directory relative to the Elisp source location."
   (when kuro-shell-integration
     (let* ((lib (or (locate-library "kuro-lifecycle")
                     (locate-library "kuro")))
            (dir (and lib (expand-file-name
-                          "etc"
+                          "shell"
                           (file-name-directory
                            (directory-file-name
                             (file-name-directory lib)))))))

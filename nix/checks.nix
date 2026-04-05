@@ -16,12 +16,10 @@ let
   emacs = pkgs.emacs30;
 
   # Run ERT unit tests (pure Elisp, no Rust module loaded).
-  # Mirrors the make test-elisp command exactly.
   #
   # Load order is load-bearing:
   #   1. kuro-test.el  — defines stub replacements for all Rust FFI C-level symbols
-  #   2. kuro-performance-test.el — requires kuro-ffi → kuro-renderer-pipeline, safe only after stubs
-  #   3. remaining test/unit/*.el — depend on stubs being present
+  #   2. remaining test/unit/**/*.el — depend on stubs being present
   # Do not reorder these --eval expressions.
   ertCheck = pkgs.stdenv.mkDerivation {
     name = "kuro-elisp-ert";
@@ -29,15 +27,20 @@ let
     nativeBuildInputs = [ emacs ];
     buildPhase = ''
       emacs -Q --batch \
-        -L emacs-lisp \
-        -L test/unit \
+        -L emacs-lisp/core \
+        -L test/unit/core \
+        -L test/unit/ffi \
+        -L test/unit/rendering \
+        -L test/unit/input \
+        -L test/unit/faces \
+        -L test/unit/features \
+        -L test/unit/support \
         --eval "(setq load-prefer-newer t)" \
-        --eval "(load (expand-file-name \"test/unit/kuro-test.el\"))" \
-        --eval "(load (expand-file-name \"test/integration/kuro-performance-test.el\"))" \
+        --eval "(load (expand-file-name \"test/unit/core/kuro-test.el\"))" \
         --eval "(mapc (function load) \
                   (seq-remove \
                     (lambda (f) (string-suffix-p \"/kuro-test.el\" f)) \
-                    (directory-files (expand-file-name \"test/unit\") t \"\\.el\$\")))" \
+                    (directory-files-recursively (expand-file-name \"test/unit\") \"\\.el\$\")))" \
         --eval "(ert-run-tests-batch-and-exit)"
     '';
     installPhase = "touch $out";
@@ -50,11 +53,12 @@ let
     nativeBuildInputs = [ emacs ];
     buildPhase = ''
       emacs -Q --batch \
-        -L emacs-lisp \
+        -L emacs-lisp/core \
+        --eval "(require 'kuro)" \
         --eval "(setq byte-compile-error-on-warn t)" \
-        --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\.el\$\")) \
+        --eval "(dolist (f (directory-files-recursively \"emacs-lisp\" \"\\.el\$\")) \
                   (unless (string-match-p \"-pkg\\.el\$\" f) \
-                    (unless (byte-compile-file f) \
+                    (unless (byte-compile-file (expand-file-name f)) \
                       (kill-emacs 1))))"
     '';
     installPhase = "touch $out";
@@ -72,7 +76,7 @@ let
       emacs -Q --batch \
         --eval "(require 'package-lint)" \
         -f package-lint-batch-and-exit \
-        emacs-lisp/kuro.el
+        emacs-lisp/core/kuro.el
     '';
     installPhase = "touch $out";
   };

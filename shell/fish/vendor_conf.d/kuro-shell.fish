@@ -1,5 +1,5 @@
 # Kuro shell integration autoload for Fish
-# Sourced automatically via XDG_DATA_DIRS when kuro prepends etc/ to it.
+# Sourced automatically via XDG_DATA_DIRS when kuro prepends shell/ to it.
 
 string match -q '*kuro*' "$INSIDE_EMACS"; or return
 

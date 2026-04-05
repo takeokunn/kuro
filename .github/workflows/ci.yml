@@ -39,7 +39,7 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run E2E tests
-        run: nix develop --command bash test/shell/run-e2e.sh
+        run: nix develop --command bash test/scripts/runners/run-e2e.sh
 
   coverage:
     name: Code coverage
@@ -69,11 +69,15 @@ jobs:
       - name: Run fuzz targets (30s each)
         run: |
           nix develop .#fuzz --command bash -c "
-            cd fuzz
-            cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
-            cargo fuzz run fuzz_kitty_params -- -max_total_time=30 -runs=1000
-            cargo fuzz run fuzz_apc_payload -- -max_total_time=30 -runs=1000
-            cargo fuzz run fuzz_decode_png -- -max_total_time=30 -runs=1000
+            cd rust-core/fuzz
+            cargo fuzz run advance -- -max_total_time=30 -runs=1000
+            cargo fuzz run kitty_params -- -max_total_time=30 -runs=1000
+            cargo fuzz run apc_payload -- -max_total_time=30 -runs=1000
+            cargo fuzz run decode_png -- -max_total_time=30 -runs=1000
+            cargo fuzz run csi_sequence -- -max_total_time=30 -runs=1000
+            cargo fuzz run utf8_input -- -max_total_time=30 -runs=1000
+            cargo fuzz run sgr -- -max_total_time=30 -runs=1000
+            cargo fuzz run insert_delete -- -max_total_time=30 -runs=1000
           "
 
   release:

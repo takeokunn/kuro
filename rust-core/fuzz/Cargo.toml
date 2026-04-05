@@ -1,0 +1,61 @@
+[package]
+name = "kuro-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+kuro-core = { path = ".." }
+base64 = "0.22"
+
+[[bin]]
+name = "advance"
+path = "fuzz_targets/advance.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "kitty_params"
+path = "fuzz_targets/kitty_params.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "apc_payload"
+path = "fuzz_targets/apc_payload.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "decode_png"
+path = "fuzz_targets/decode_png.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sgr"
+path = "fuzz_targets/sgr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "csi_sequence"
+path = "fuzz_targets/csi_sequence.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "utf8_input"
+path = "fuzz_targets/utf8_input.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "insert_delete"
+path = "fuzz_targets/insert_delete.rs"
+test = false
+doc = false

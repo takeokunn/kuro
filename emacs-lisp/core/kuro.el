@@ -20,6 +20,15 @@
 
 ;;; Code:
 
+;; Add subdirectories to load-path so that (require 'kuro-xxx) works
+;; regardless of which subdirectory the file lives in.
+(let ((base (file-name-directory
+             (directory-file-name
+              (file-name-directory (or load-file-name buffer-file-name
+                                      (locate-library "kuro")))))))
+  (dolist (subdir '("core" "rendering" "input" "ffi" "faces" "features"))
+    (add-to-list 'load-path (expand-file-name subdir base) t)))
+
 (require 'kuro-module)
 (require 'kuro-config)
 (require 'kuro-ffi)

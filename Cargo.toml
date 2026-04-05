@@ -1,6 +1,6 @@
 [workspace]
 members = ["rust-core"]
-exclude = ["fuzz"]
+exclude = ["rust-core/fuzz"]
 resolver = "2"
 
 [workspace.package]

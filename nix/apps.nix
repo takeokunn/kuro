@@ -55,7 +55,7 @@ in {
     cp "target/release/$LIB" "$INSTALL_DIR/$LIB"
     REPO_DIR="$(pwd)"
     exec emacs -Q \
-      --eval "(add-to-list 'load-path \"$REPO_DIR/emacs-lisp\")" \
+      --eval "(add-to-list 'load-path \"$REPO_DIR/emacs-lisp/core\")" \
       --eval "(setenv \"KURO_MODULE_PATH\" \"$REPO_DIR/target/release\")" \
       --eval "(require 'kuro)" \
       --eval "(kuro-create \"/bin/bash\")"

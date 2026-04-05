@@ -98,11 +98,13 @@ V2-P is a pre-computed boolean (non-nil when format-version ≥ 2) that the
 caller evaluates once per frame rather than once per row, eliminating a
 redundant integer comparison per dirty row.
   v2-p non-nil: 28 bytes per range — adds ul-color(u32) at offset 24.
-  v2-p nil:     24 bytes — start-buf(u32) end-buf(u32) fg(u32) bg(u32) flags(u64)
+  v2-p nil:     24 bytes — start-buf(u32) end-buf(u32) fg(u32)
+    bg(u32) flags(u64)
 Returns FACE-RANGES-FLAT-VECTOR directly: nil when NUM-FACE-RANGES is 0
 (callers may guard on null), or a FLAT vector of (* 6 NUM-FACE-RANGES)
-integers otherwise.  Sets `kuro--decode-pos' to the byte offset immediately
-after the decoded section — eliminates the (RESULT . NEW-POS) cons at ~3,600/sec.
+integers otherwise.  Sets `kuro--decode-pos' to the byte offset
+immediately after the decoded section — eliminates the (RESULT .
+NEW-POS) cons at ~3,600/sec.
 Layout: [s0 e0 fg0 bg0 f0 ul0 s1 e1 fg1 bg1 f1 ul1 ...] — stride 6.
 Stride-6 eliminates the N inner-vector allocations that the old
 vector-of-vectors layout required, cutting ~21,600 allocs/sec at 120fps

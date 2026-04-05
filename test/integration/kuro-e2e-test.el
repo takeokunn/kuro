@@ -3120,12 +3120,12 @@ Bright background codes (SGR 100-107) are distinct from normal backgrounds
   :expected-result kuro-test--e2e-expected-result
   "CUU (cursor up, ESC[NA) moves the cursor up by N rows."
   (kuro-test--with-terminal
-   (kuro-test--send "printf 'KCUU_A\nKCUU_B\033[1AX'; sleep 0.3")
+   (kuro-test--send "printf 'KCUU_A\\nKCUU_B\\033[1AX'; sleep 0.3")
    (kuro-test--send "\r")
    (sleep-for 0.1)
    (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
    (with-current-buffer buf
-     (should (string-match-p "KCUU_BAX" (buffer-string))))))
+     (should (string-match-p "KCUU_AX" (buffer-string))))))
 
 (ert-deftest kuro-e2e-cursor-backward-cub ()
   :expected-result kuro-test--e2e-expected-result
@@ -3287,55 +3287,40 @@ Unlike SU, SD does not save to scrollback — dropped rows are truly lost."
 (ert-deftest kuro-e2e-erase-line-to-cursor ()
   :expected-result kuro-test--e2e-expected-result
   "CSI 1 K (EL 1) erases from start of line to cursor position.
-  Fills a line with text, positions cursor mid-line, sends CSI 1 K, and
-  verifies that characters from SOL to cursor are erased."
+  Prints text, positions cursor at col 20, sends CSI 1 K in one atomic
+  printf so all escape sequences apply to the same row."
   (kuro-test--with-terminal
-   ;; Fill line with text and position cursor mid-line (at col 20)
-   (kuro-test--send "printf 'KEL1_START1234567890END\\033[20G'")
+   ;; Single printf: print text, move to col 20, EL1 erase SOL-to-cursor.
+   ;; Using \\033 so bash single-quotes pass literal \033 to printf for
+   ;; interpretation as ESC (real ESC bytes would be consumed by readline).
+   (kuro-test--send "printf 'KEL1_START1234567890END\\033[20G\\033[1K\\n'")
    (kuro-test--send "\r")
-   (should (kuro-test--wait-for buf "KEL1_START"))
    (sleep-for 0.2)
-   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
-   ;; Send CSI 1 K to erase from SOL to cursor
-   (kuro-test--send "printf '\\033[1KEND\\n'")
-   (kuro-test--send "\r")
-   (should (kuro-test--wait-for buf "END"))
-   (sleep-for 0.2)
-   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
-   ;; Verify the start portion was erased - only END and cursor-position content remain
+   (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
+   ;; After EL1: cols 1-20 erased to spaces; cols 21-23 retain original 'END'.
    (with-current-buffer buf
       (let ((content (buffer-string)))
-        ;; Should contain END but not the full KEL1_START prefix that was erased
         (should (string-match-p "END" content))
-        ;; The prefix before cursor position should not appear (erased)
         (should-not (string-match-p "KEL1_START" content))))))
 
 (ert-deftest kuro-e2e-erase-entire-line ()
   :expected-result kuro-test--e2e-expected-result
   "CSI 2 K (EL 2) erases the entire current line.
-  Fills a line with text and sends CSI 2 K, verifying that the entire
-  line becomes blank."
+  Prints text then immediately sends EL 2 in one atomic printf so the
+  erase applies to the same row the text was written on."
   (kuro-test--with-terminal
-   ;; Fill a line with text
-   (kuro-test--send "printf 'KEL2_ENTIRE_LINE_TEXT_HERE'")
-   (kuro-test--send "\r")
-   (should (kuro-test--wait-for buf "KEL2_ENTIRE"))
-   (sleep-for 0.2)
-   (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
-   ;; Move cursor back to start of that line (CUU 1)
-   (kuro-test--send "printf '\\033[1A'")
-   (kuro-test--send "\r")
-   (sleep-for 0.1)
-   (dotimes (_ 2) (kuro-test--render buf) (sleep-for 0.05))
-   ;; Send CSI 2 K to erase entire line
-   (kuro-test--send "printf '\\033[2KLINE_CLEARED'")
+   ;; Single printf: print text, EL2 erase entire line, then LINE_CLEARED marker.
+   ;; Using \\033 so bash single-quotes pass literal \033 to printf for
+   ;; interpretation as ESC (real ESC bytes would be consumed by readline).
+   (kuro-test--send "printf 'KEL2_ENTIRE_LINE_TEXT_HERE\\033[2KLINE_CLEARED\\n'")
    (kuro-test--send "\r")
    (should (kuro-test--wait-for buf "LINE_CLEARED"))
    (sleep-for 0.2)
    (dotimes (_ 3) (kuro-test--render buf) (sleep-for 0.05))
-   ;; Verify the original line text is gone
-    (with-current-buffer buf
-      (should-not (string-match-p "KEL2_ENTIRE_LINE_TEXT" (buffer-string))))))
+   ;; After EL2: the entire line is blank; only LINE_CLEARED (written after EL2)
+   ;; should appear.  The original KEL2_ENTIRE_LINE_TEXT is gone.
+   (with-current-buffer buf
+     (should-not (string-match-p "KEL2_ENTIRE_LINE_TEXT" (buffer-string))))))
 
 (ert-deftest kuro-e2e-erase-from-start-to-cursor ()
   :expected-result kuro-test--e2e-expected-result
@@ -3455,12 +3440,12 @@ prompt returns and overwrites the position."
   :expected-result kuro-test--e2e-expected-result
   "CSI P (DCH) deletes N characters at cursor position."
   (kuro-test--with-terminal
-   (kuro-test--send "printf 'hello\033[2G\033[2P'; sleep 0.3")
+   (kuro-test--send "printf 'hello\\033[2G\\033[2P'; sleep 0.3")
    (kuro-test--send "\r")
    (sleep-for 0.1)
    (dotimes (_ 4) (kuro-test--render buf) (sleep-for 0.05))
    (with-current-buffer buf
-     (should (string-match-p "helloGP" (buffer-string))))))
+     (should (string-match-p "hlo" (buffer-string))))))
 
 (ert-deftest kuro-e2e-erase-characters ()
   :expected-result kuro-test--e2e-expected-result

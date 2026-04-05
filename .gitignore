@@ -31,6 +31,7 @@ tarpaulin-report.html
 cobertura.xml
 lcov.info
 
+.env*
 .claude/
 .serena/
 .sisyphus/

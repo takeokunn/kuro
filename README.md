@@ -129,8 +129,8 @@ nix run .#run       # Build + install + launch Emacs
 
 ```bash
 nix flake check                                        # All checks (Rust + ERT + byte-compile + audit)
-nix develop --command bash test/shell/run-e2e.sh       # E2E tests (PTY — outside sandbox)
-nix develop --command bash test/shell/vttest-compliance.sh  # VTE compliance
+nix develop --command bash test/scripts/runners/run-e2e.sh       # E2E tests (PTY — outside sandbox)
+nix develop --command bash test/scripts/runners/vttest-compliance.sh  # VTE compliance
 ```
 
 ### Quality
@@ -146,12 +146,12 @@ nix run .#bench     # Criterion benchmarks (nightly Rust)
 
 ```bash
 nix develop .#fuzz --command bash -c "
-  cd fuzz
-  cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
+  cd rust-core/fuzz
+  cargo fuzz run advance -- -max_total_time=30 -runs=1000
 "
 ```
 
-The `fuzz` devShell provides nightly Rust + cargo-fuzz. Available targets: `fuzz_advance`, `fuzz_kitty_params`, `fuzz_apc_payload`, `fuzz_decode_png`.
+The `fuzz` devShell provides nightly Rust + cargo-fuzz. Available targets: `advance`, `kitty_params`, `apc_payload`, `decode_png`, `csi_sequence`, `utf8_input`, `sgr`, `insert_delete`.
 
 ### Nix flake checks
 

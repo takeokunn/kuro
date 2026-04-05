@@ -377,7 +377,7 @@ All tests run in CI via GitHub Actions. The CI runs:
 4. `cargo audit` - Security audit
 5. `cargo test --workspace` - Rust tests
 6. `cargo test --workspace --release` - Rust tests (release mode)
-7. `bash test/shell/run-e2e.sh` - Elisp ERT tests
+7. `bash test/scripts/runners/run-e2e.sh` - Elisp ERT tests
 
 See `.github/workflows/` for CI configuration.
 

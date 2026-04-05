@@ -6,7 +6,7 @@
 #   collects kuro-debug-perf timing and Emacs CPU profiler report.
 set -euo pipefail
 
-KURO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+KURO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 SOCKET_NAME="kuro-perf-debug-$$"
 DURATION="${1:-20}"
 DYLIB="$KURO_ROOT/target/release/libkuro_core.dylib"
@@ -59,7 +59,7 @@ EC="emacsclient --socket-name=$SOCKET_NAME"
 echo "[2/6] Loading kuro, enabling kuro-debug-perf, starting CPU profiler..."
 $EC -e "
 (progn
-  (add-to-list 'load-path \"$KURO_ROOT/emacs-lisp\")
+  (add-to-list 'load-path \"$KURO_ROOT/emacs-lisp/core\")
   (setq kuro-module-binary-path \"$DYLIB\")
   (require 'kuro)
   (setq kuro-debug-perf t)

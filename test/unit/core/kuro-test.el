@@ -78,7 +78,7 @@
 
 (let* ((this-dir (file-name-directory
                   (or load-file-name buffer-file-name default-directory)))
-       (el-dir (expand-file-name "../../emacs-lisp" this-dir)))
+       (el-dir (expand-file-name "../../../emacs-lisp/core" this-dir)))
   (add-to-list 'load-path el-dir t))
 
 (require 'kuro)

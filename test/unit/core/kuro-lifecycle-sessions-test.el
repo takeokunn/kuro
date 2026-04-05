@@ -1,4 +1,4 @@
-;;; kuro-lifecycle-ext-test.el --- Unit tests for kuro-lifecycle.el (Groups 9–16)  -*- lexical-binding: t; -*-
+;;; kuro-lifecycle-sessions-test.el --- Unit tests for kuro-lifecycle.el (Groups 9–16)  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025 takeokunn
 

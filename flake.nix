@@ -121,8 +121,8 @@
                 nix run .#install        # Install to ~/.local/share/kuro
                 nix run .#run            # Build + install + launch Emacs
                 nix run .#bench          # Criterion benchmarks (nightly Rust)
-                nix develop --command bash test/shell/run-e2e.sh  # E2E (PTY, outside sandbox)
-                nix develop .#fuzz --command bash -c "cd fuzz && cargo fuzz run fuzz_advance"
+                nix develop --command bash test/scripts/runners/run-e2e.sh  # E2E (PTY, outside sandbox)
+                nix develop .#fuzz --command bash -c "cd rust-core/fuzz && cargo fuzz run advance"
 
               EOF
             '';
@@ -134,7 +134,7 @@
               ++ darwinInputs;
             shellHook = ''
               echo "Kuro fuzz shell (nightly Rust + cargo-fuzz)"
-              echo "  cd fuzz && cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000"
+              echo "  cd rust-core/fuzz && cargo fuzz run advance -- -max_total_time=30 -runs=1000"
             '';
           };
         });

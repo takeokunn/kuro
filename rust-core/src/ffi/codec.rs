@@ -660,6 +660,7 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
 #[cfg(test)]
 #[inline]
 pub(crate) fn compute_row_hash(row: &crate::grid::line::Line, col_to_buf: &[usize]) -> u64 {
+    use std::hash::DefaultHasher;
     let mut h = DefaultHasher::new();
     for cell in &row.cells {
         // Hash the grapheme bytes directly — no allocation needed.

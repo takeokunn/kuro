@@ -361,7 +361,7 @@ the \"red\" entry in kuro--named-colors."
   "kuro--set-font does not call kuro--apply-font-to-buffer on non-kuro buffers."
   (let ((apply-called nil))
     (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
-               (lambda () (setq apply-called t))))
+               (lambda (_buf) (setq apply-called t))))
       (with-temp-buffer
         ;; This buffer is NOT in kuro-mode.
         (defvar kuro--test-font-sym3 nil)

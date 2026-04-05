@@ -55,6 +55,7 @@ bench-validate:
 
 # Run Elisp ERT tests (no Rust module required)
 test-elisp:
+	rm -f emacs-lisp/*.elc
 	$(EMACS) -Q --batch \
 		-L emacs-lisp \
 		-L test/unit \

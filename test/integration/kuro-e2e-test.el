@@ -176,11 +176,22 @@ initialized before running BODY, avoiding false prompt detection."
                 (kuro-test--wait-for buf ".")
                 ;; Let startup output quiesce instead of paying a fixed delay.
                 (kuro-test--render-until-idle buf)
+                ;; Brief pause to ensure bash has finished multi-stage startup
+                ;; (e.g. macOS bash 3.2 deprecation warning + prompt in two phases).
+                (sleep-for 0.1)
                 ;; Confirm readiness by echoing a known marker and waiting for it.
-                (kuro--send-key (concat "echo " kuro-test--ready-marker))
-                (kuro--send-key "\r")
-                (unless (kuro-test--wait-for buf kuro-test--ready-marker)
-                  (error "Timed out waiting for shell ready marker"))
+                ;; Retry up to 3 times in case the first echo arrives before bash
+                ;; is ready to process interactive input.
+                (let ((found nil)
+                      (attempts 0))
+                  (while (and (not found) (< attempts 3))
+                    (kuro--send-key (concat "echo " kuro-test--ready-marker))
+                    (kuro--send-key "\r")
+                    (setq attempts (1+ attempts))
+                    (when (setq found (kuro-test--wait-for buf kuro-test--ready-marker))
+                      (setq attempts 3)))
+                  (unless found
+                    (error "Timed out waiting for shell ready marker")))
                 ;; Silence subsequent command echo and clear the display so E2E
                 ;; assertions do not need to fight prompt noise or startup text.
                 (kuro--send-key "stty -echo")

@@ -54,6 +54,10 @@ fn setup_child_env(rows: u16, cols: u16, shell_path: &Path) {
     std::env::remove_var("EMACS_SOCKET_NAME");
     // Advertise the kuro environment to programs that wish to detect it.
     std::env::set_var("KURO_TERMINAL", "1");
+    // Suppress the macOS bash 3.2 deprecation warning ("Please switch to zsh").
+    // Without this, bash writes the warning to stderr before the prompt, which
+    // can cause shell-ready detection to race against the multi-stage startup output.
+    std::env::set_var("BASH_SILENCE_DEPRECATION_WARNING", "1");
     // Terminal capability declarations for readline / ncurses / color-aware programs.
     std::env::set_var("TERM", "xterm-256color");
     std::env::set_var("COLORTERM", "truecolor");

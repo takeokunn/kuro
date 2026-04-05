@@ -16,6 +16,7 @@ jobs:
   test:
     name: Test on ${{ matrix.os }} (Emacs ${{ matrix.emacs-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

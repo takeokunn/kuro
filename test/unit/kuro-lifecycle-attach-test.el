@@ -232,7 +232,7 @@ and that the session was not started."
   (let (result)
     (kuro-lifecycle-test--with-create-stubs
       (cl-letf (((symbol-function 'kuro--init)
-                 (lambda (_cmd _rows _cols) nil)))
+                 (lambda (_cmd _shell-args _rows _cols) nil)))
         (setq result (kuro-create "echo" "*kuro-create-fail-test*"))))
     (unwind-protect
         ;; kuro-create always returns the buffer; the init failure just means
@@ -247,7 +247,7 @@ and that the session was not started."
         result)
     (kuro-lifecycle-test--with-create-stubs
       (cl-letf (((symbol-function 'kuro--init)
-                 (lambda (_cmd _rows _cols) nil))
+                 (lambda (_cmd _shell-args _rows _cols) nil))
                 ((symbol-function 'kuro--start-render-loop)
                  (lambda () (setq render-started t))))
         (setq result (kuro-create "echo" "*kuro-create-no-render-test*"))))
@@ -262,7 +262,7 @@ and that the session was not started."
         result)
     (kuro-lifecycle-test--with-create-stubs
       (cl-letf (((symbol-function 'kuro--init)
-                 (lambda (_cmd _rows _cols) t))
+                 (lambda (_cmd _shell-args _rows _cols) t))
                 ((symbol-function 'kuro--start-render-loop)
                  (lambda () (setq render-started t))))
         (setq result (kuro-create "echo" "*kuro-create-success-test*"))))

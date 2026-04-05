@@ -1,7 +1,7 @@
 //! OSC sequence tests.
 
-use std::sync::Arc;
 use super::super::*;
+use std::sync::Arc;
 
 #[test]
 fn test_osc_title_set() {

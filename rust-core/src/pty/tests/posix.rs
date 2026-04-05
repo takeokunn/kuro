@@ -401,7 +401,10 @@ fn test_setup_child_env_removes_multiplexer_vars() {
     // Hold ENV_FORK_LOCK for the full critical section (set_var + fork + cleanup)
     // so no concurrent test can hold the env RwLock when fork() is called.
     let _lock = ENV_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    #[allow(deprecated, reason = "set_var deprecated but fork lock serializes access")]
+    #[allow(
+        deprecated,
+        reason = "set_var deprecated but fork lock serializes access"
+    )]
     unsafe {
         std::env::set_var("TMUX", "some-socket");
         std::env::set_var("STY", "some-screen");
@@ -417,7 +420,10 @@ fn test_setup_child_env_removes_multiplexer_vars() {
             && std::env::var("EMACS_SOCKET_NAME").is_err()
     });
     // Clean up in the parent regardless of test outcome.
-    #[allow(deprecated, reason = "remove_var deprecated but fork lock serializes access")]
+    #[allow(
+        deprecated,
+        reason = "remove_var deprecated but fork lock serializes access"
+    )]
     unsafe {
         std::env::remove_var("TMUX");
         std::env::remove_var("STY");

@@ -1,6 +1,5 @@
 //! Cursor state and shape
 
-
 /// Cursor shape variants (DECSCUSR)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum CursorShape {

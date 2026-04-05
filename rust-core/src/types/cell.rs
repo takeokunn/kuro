@@ -129,7 +129,6 @@ impl std::ops::Not for SgrFlags {
     }
 }
 
-
 /// Cell width for Unicode/CJK character support
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CellWidth {
@@ -152,17 +151,17 @@ pub enum CellWidth {
 pub enum UnderlineStyle {
     /// No underline (default)
     #[default]
-    None     = 0,
+    None = 0,
     /// Single straight line (SGR 4 or 4:1)
     Straight = 1,
     /// Double line (SGR 4:2 or SGR 21)
-    Double   = 2,
+    Double = 2,
     /// Curly/wavy line (SGR 4:3, undercurl)
-    Curly    = 3,
+    Curly = 3,
     /// Dotted line (SGR 4:4)
-    Dotted   = 4,
+    Dotted = 4,
     /// Dashed line (SGR 4:5)
-    Dashed   = 5,
+    Dashed = 5,
 }
 
 /// SGR (Select Graphic Rendition) attributes for a cell

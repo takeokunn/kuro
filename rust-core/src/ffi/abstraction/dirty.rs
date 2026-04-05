@@ -49,7 +49,8 @@ impl TerminalSession {
             self.texts_scratch.clear();
             self.texts_scratch.reserve(rows);
             self.buf_scratch.clear();
-            self.buf_scratch.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
+            self.buf_scratch
+                .extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
             let num_rows_offset = self.buf_scratch.len();
             self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // placeholder — backfilled below
             for row in 0..rows {
@@ -68,7 +69,8 @@ impl TerminalSession {
                         clippy::cast_possible_truncation,
                         reason = "row index is a terminal row (≤ 65535); fits u32"
                     )]
-                    self.buf_scratch.extend_from_slice(&(row as u32).to_le_bytes());
+                    self.buf_scratch
+                        .extend_from_slice(&(row as u32).to_le_bytes());
                     self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
                     self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
                     self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
@@ -116,7 +118,8 @@ impl TerminalSession {
         // mem::take'd on return — eliminating two heap allocations per frame at 120fps.
         self.texts_scratch.clear();
         self.buf_scratch.clear();
-        self.buf_scratch.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
+        self.buf_scratch
+            .extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
         let num_rows_offset = self.buf_scratch.len();
         self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // placeholder
 
@@ -137,14 +140,15 @@ impl TerminalSession {
                         row,
                         &mut self.buf_scratch,
                     );
-                    let hash =
-                        crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
+                    let hash = crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
                     self.row_hashes[row] = Some((line.version, hash, epoch));
                     self.texts_scratch.push(text);
                 }
             }
         } else {
-            self.core.screen.take_dirty_lines_into(&mut self.dirty_scratch);
+            self.core
+                .screen
+                .take_dirty_lines_into(&mut self.dirty_scratch);
             let epoch = self.palette_epoch;
             self.texts_scratch.reserve(self.dirty_scratch.len());
             // Pre-size row_hashes to the screen height once before the loop.
@@ -180,8 +184,7 @@ impl TerminalSession {
                         row,
                         &mut self.buf_scratch,
                     );
-                    let new_hash =
-                        crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
+                    let new_hash = crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
 
                     // Hash-skip: use already-fetched cached value — no second lookup.
                     if let Some((_stored_ver, stored_hash, stored_epoch)) = cached {
@@ -307,7 +310,11 @@ impl TerminalSession {
                     );
                     // encode_line_with_pool uses mem::take, so pool is empty here.
                     // Hash the returned data directly instead of the pool.
-                    let hash = crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
+                    let hash = crate::ffi::codec::compute_row_hash_from_encoded(
+                        &text,
+                        &face_ranges,
+                        &col_to_buf,
+                    );
                     self.row_hashes[row] = Some((line.version, hash, epoch));
                     result.push((row, text, face_ranges, col_to_buf));
                 }
@@ -315,7 +322,9 @@ impl TerminalSession {
             return result;
         }
 
-        self.core.screen.take_dirty_lines_into(&mut self.dirty_scratch);
+        self.core
+            .screen
+            .take_dirty_lines_into(&mut self.dirty_scratch);
         let mut result = Vec::with_capacity(self.dirty_scratch.len());
         let epoch = self.palette_epoch;
         // Pre-size row_hashes to screen height before the loop — same pattern as
@@ -340,10 +349,17 @@ impl TerminalSession {
                     }
                 }
 
-                let (text, face_ranges, col_to_buf) =
-                    crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, &mut self.encode_pool);
+                let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line_with_pool(
+                    &line.cells,
+                    line.has_wide,
+                    &mut self.encode_pool,
+                );
                 // encode_line_with_pool uses mem::take, so pool is empty here.
-                let new_hash = crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
+                let new_hash = crate::ffi::codec::compute_row_hash_from_encoded(
+                    &text,
+                    &face_ranges,
+                    &col_to_buf,
+                );
 
                 // Slow path: use already-fetched cached value — no second lookup.
                 if let Some((_stored_ver, stored_hash, stored_epoch)) = cached {

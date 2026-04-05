@@ -394,7 +394,11 @@ fn fill_encode_pool(cells: &[Cell], has_wide: bool, pool: &mut EncodePool) {
 ///
 /// Does not panic; identical logic to [`encode_line`].
 #[inline]
-pub(crate) fn encode_line_with_pool(cells: &[Cell], has_wide: bool, pool: &mut EncodePool) -> EncodedLineData {
+pub(crate) fn encode_line_with_pool(
+    cells: &[Cell],
+    has_wide: bool,
+    pool: &mut EncodePool,
+) -> EncodedLineData {
     pool.clear();
     if cells.is_empty() {
         return (String::new(), Vec::new(), Vec::new());

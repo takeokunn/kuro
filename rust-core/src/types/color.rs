@@ -1,6 +1,5 @@
 //! Color representations and conversions
 
-
 const SYSTEM_COLOR_MAX: u8 = 15;
 const COLOR_CUBE_BASE: u8 = 16;
 const COLOR_CUBE_LAST: u8 = 231;

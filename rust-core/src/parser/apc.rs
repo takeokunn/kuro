@@ -104,9 +104,7 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // ASCII fast-path: scan for printable ASCII run at start of buffer.
     // Disabled when a non-ASCII charset (e.g. DEC line drawing) is active,
     // since those bytes need per-character translation via VTE print().
-    if core.parser_in_ground
-        && core.active_charset() == crate::types::charset::CharsetType::Ascii
-    {
+    if core.parser_in_ground && core.active_charset() == crate::types::charset::CharsetType::Ascii {
         while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
             pos += 1;
         }

@@ -18,8 +18,7 @@ impl vte::Perform for TerminalCore {
 
         // Charset translation: apply DEC line drawing substitution if active.
         // The comparison is nearly always false (branch predictor friendly).
-        let c = if self.active_charset()
-            == crate::types::charset::CharsetType::DecLineDrawing
+        let c = if self.active_charset() == crate::types::charset::CharsetType::DecLineDrawing
             && c.is_ascii()
         {
             crate::types::charset::translate_dec_line_drawing(c)
@@ -80,14 +79,13 @@ impl vte::Perform for TerminalCore {
             // The cell was written at (pre_row, pre_col) unless a wide char
             // at the last column caused a wrap, in which case it's at (new_row, 0).
             let cursor_after = *self.screen.cursor();
-            let (write_row, write_col) = if cursor_after.row != pre_row
-                || cursor_after.col < pre_col
-            {
-                // Wrap occurred — cell was placed at start of new row
-                (cursor_after.row, 0)
-            } else {
-                (pre_row, pre_col)
-            };
+            let (write_row, write_col) =
+                if cursor_after.row != pre_row || cursor_after.col < pre_col {
+                    // Wrap occurred — cell was placed at start of new row
+                    (cursor_after.row, 0)
+                } else {
+                    (pre_row, pre_col)
+                };
             if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
                 cell.set_hyperlink_id(Some(Arc::clone(uri)));
             }
@@ -120,8 +118,8 @@ impl vte::Perform for TerminalCore {
             }
             0x0A..=0x0C => self.screen.line_feed(self.current_attrs.background),
             0x0D => self.screen.carriage_return(),
-            0x0E => self.gl_is_g1 = true,  // SO — Shift Out (switch GL to G1)
-            0x0F => self.gl_is_g1 = false,  // SI — Shift In (switch GL to G0)
+            0x0E => self.gl_is_g1 = true, // SO — Shift Out (switch GL to G1)
+            0x0F => self.gl_is_g1 = false, // SI — Shift In (switch GL to G0)
             _ => {}
         }
     }

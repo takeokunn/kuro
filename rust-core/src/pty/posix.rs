@@ -298,10 +298,8 @@ fn exec_in_child(
     if let Ok(rcfile) = std::env::var("KURO_BASH_RCFILE") {
         std::env::remove_var("KURO_BASH_RCFILE");
         rcfile_flag = std::ffi::CString::new("--rcfile").expect("static flag");
-        rcfile_path_cstr =
-            std::ffi::CString::new(rcfile).map_err(|e| {
-                pty_spawn_error(command, &format!("Invalid rcfile path: {e}"))
-            })?;
+        rcfile_path_cstr = std::ffi::CString::new(rcfile)
+            .map_err(|e| pty_spawn_error(command, &format!("Invalid rcfile path: {e}")))?;
         argv.push(rcfile_flag.as_c_str());
         argv.push(rcfile_path_cstr.as_c_str());
     }

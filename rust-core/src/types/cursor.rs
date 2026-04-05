@@ -26,8 +26,16 @@ pub struct Cursor {
     /// Row position (0-indexed)
     pub(crate) row: usize,
     /// Cursor shape
+    #[expect(
+        dead_code,
+        reason = "set by VTE parser; read only in #[cfg(test)] blocks"
+    )]
     pub(crate) shape: CursorShape,
     /// Cursor is visible
+    #[expect(
+        dead_code,
+        reason = "set by VTE parser; read only in #[cfg(test)] blocks"
+    )]
     pub(crate) visible: bool,
     /// DEC pending wrap flag (DECAWM last-column behavior).
     ///

@@ -28,7 +28,7 @@
 use crate::types::cell::{Cell, CellWidth, SgrAttributes};
 use crate::types::color::Color;
 use ahash::AHasher;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::mem;
 
 // -------------------------------------------------------------------------
@@ -485,12 +485,16 @@ pub(crate) fn encode_line_into_buf(
     // At 30 dirty rows × 6 ranges × 120fps = 21,600 range writes/sec, this
     // reduces Vec dispatch calls by ~108,000/sec.
     for &(start_buf, end_buf, fg, bg, flags, ul_color) in &pool.face_ranges {
+        let mut range_buf = [0u8; 28];
         #[expect(
             clippy::cast_possible_truncation,
             reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
         )]
-        let mut range_buf = [0u8; 28];
         range_buf[0..4].copy_from_slice(&(start_buf as u32).to_le_bytes());
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "end_buf is a buffer char offset (≤ line length ≤ 65535); fits u32"
+        )]
         range_buf[4..8].copy_from_slice(&(end_buf as u32).to_le_bytes());
         range_buf[8..12].copy_from_slice(&fg.to_le_bytes());
         range_buf[12..16].copy_from_slice(&bg.to_le_bytes());

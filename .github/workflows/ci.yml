@@ -8,281 +8,106 @@ on:
   pull_request:
     branches: [main, develop]
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
-  test:
-    name: Test on ${{ matrix.os }} (Emacs ${{ matrix.emacs-version }})
+  check:
+    name: nix flake check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        emacs-version: ['29.1', '29.4', '30.1']
-        rust:
-          - stable
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: ./.github/actions/setup-nix
         with:
-          toolchain: ${{ matrix.rust }}
-          components: rustfmt, clippy
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Run nix flake check
+        run: nix flake check
 
-      - name: Cache Cargo registry
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+  e2e:
+    name: E2E tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: ./.github/actions/setup-nix
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache Cargo index
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache Cargo build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-target-
-
-      - name: Install Emacs
-        uses: jcs090218/setup-emacs@ffd830bca5865932d99c3d179263d8b0ebdd00c0  # v3
-        with:
-          version: ${{ matrix.emacs-version }}
-
-      - name: Run cargo fmt --check
-        run: cargo fmt --all -- --check
-
-      - name: Run cargo clippy
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: Build documentation (no warnings)
-        run: cargo doc --workspace --no-deps 2>&1 | { ! grep -q "^warning:"; }
-
-      - name: Cache cargo-audit binary
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit-v1
-
-      # Security audit - if emacs crate 0.19.0 is flagged by RUSTSEC,
-      # document the advisory in .cargo/audit.toml with a rationale comment.
-      - name: Security audit
-        run: |
-          cargo install cargo-audit --quiet
-          cargo audit
-        continue-on-error: false
-
-      - name: Run cargo test
-        run: cargo test --workspace
-
-      - name: Run cargo test (release)
-        run: cargo test --workspace --release
-
-      - name: Byte-compile all Elisp files
-        run: |
-          emacs -Q --batch \
-            -L emacs-lisp \
-            --eval "(setq byte-compile-error-on-warn t)" \
-            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
-                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
-                       (unless (byte-compile-file f)
-                         (kill-emacs 1))))"
-
-      - name: Run Elisp ERT tests
-        run: make test-elisp
-
-      - name: Run package-lint
-        run: |
-          emacs -Q --batch \
-            --eval "(progn (require 'package) (push '(\"melpa\" . \"https://melpa.org/packages/\") package-archives) (package-initialize) (package-refresh-contents) (package-install 'package-lint))" \
-            --eval "(require 'package-lint)" \
-            -f package-lint-batch-and-exit \
-            emacs-lisp/kuro.el
-
-      - name: Run checkdoc
-        run: |
-          emacs -Q --batch \
-            -L emacs-lisp \
-            --eval "(require 'checkdoc)" \
-            --eval "(setq sentence-end-double-space nil)" \
-            --eval "(dolist (f (directory-files \"emacs-lisp\" t \"\\\\.el\\$\"))
-                     (unless (string-match-p \"-pkg\\\\.el\\$\" f)
-                       (checkdoc-file f)))"
-        continue-on-error: true
-
-      - name: Install tmux
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update -qq && sudo apt-get install -y tmux
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            brew install tmux
-          fi
-
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run E2E tests
-        run: bash test/shell/run-e2e.sh
-        if: runner.os != 'Windows'
-
-  test-windows:
-    name: Test on Windows (WSL2)
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
-
-      - name: Setup WSL
-        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278  # v6.0.0
-        with:
-          distribution: Ubuntu-24.04
-
-      - name: Install build dependencies (WSL)
-        shell: wsl-bash {0}
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y build-essential
-
-      - name: Install Rust toolchain (WSL)
-        shell: wsl-bash {0}
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-
-      - name: Run cargo test
-        shell: wsl-bash {0}
-        run: |
-          source $HOME/.cargo/env
-          cargo test --workspace
+        run: nix develop --command bash test/shell/run-e2e.sh
 
   coverage:
     name: Code coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: ./.github/actions/setup-nix
         with:
-          toolchain: stable
-
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Generate coverage report
-        run: cargo tarpaulin --workspace --timeout 300 --out Xml
-        continue-on-error: true  # tarpaulin may crash on PTY fork/exec under ptrace
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24  # v5.4.3
+        run: nix develop --command cargo-tarpaulin --workspace --timeout 300 --out Xml
+        continue-on-error: true
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24  # v5.4.3
         with:
           file: ./cobertura.xml
 
   fuzz:
     name: Fuzz (nightly, regression check)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
-      - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # nightly
+      - uses: ./.github/actions/setup-nix
         with:
-          toolchain: nightly
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run fuzz targets (30s each)
         run: |
-          cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
-          cargo fuzz run fuzz_kitty_params -- -max_total_time=30 -runs=1000
-          cargo fuzz run fuzz_apc_payload -- -max_total_time=30 -runs=1000
-          cargo fuzz run fuzz_decode_png -- -max_total_time=30 -runs=1000
-        working-directory: fuzz
+          nix develop .#fuzz --command bash -c "
+            cd fuzz
+            cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
+            cargo fuzz run fuzz_kitty_params -- -max_total_time=30 -runs=1000
+            cargo fuzz run fuzz_apc_payload -- -max_total_time=30 -runs=1000
+            cargo fuzz run fuzz_decode_png -- -max_total_time=30 -runs=1000
+          "
 
   release:
-    name: Build Release Artifacts
+    name: Release (${{ matrix.release-name }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact-name: libkuro_core.so
             release-name: libkuro_core-linux-x86_64.so
           - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact-name: libkuro_core.dylib
-            release-name: libkuro_core-macos-x86_64.dylib
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact-name: libkuro_core.dylib
             release-name: libkuro_core-macos-aarch64.dylib
-    if: startsWith(github.ref, 'refs/tags/v')
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # stable
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: ./.github/actions/setup-nix
         with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo registry
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache Cargo index
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache Cargo build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-${{ matrix.target }}-
-
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Rename artifact
+        run: nix develop --command cargo build --release
+      - name: Collect artifact
         run: |
-          cd target/${{ matrix.target }}/release
-          mv ${{ matrix.artifact-name }} ${{ matrix.release-name }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+          find target/release -maxdepth 1 -name "libkuro_core.*" -not -name "*.d" \
+            | head -1 \
+            | xargs -I{} cp {} ${{ matrix.release-name }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: kuro-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/${{ matrix.release-name }}
+          name: kuro-${{ matrix.release-name }}
+          path: ${{ matrix.release-name }}
           retention-days: 90
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844  # v1
+      - uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844  # v1
         with:
-          files: |
-            target/${{ matrix.target }}/release/${{ matrix.release-name }}
+          files: ${{ matrix.release-name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

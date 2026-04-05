@@ -1,0 +1,17 @@
+name: Setup Nix
+description: Install Nix and configure Cachix for kuro
+inputs:
+  cachix-auth-token:
+    required: true
+    description: Cachix authentication token for takeokunn-kuro cache
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@4eae8bea4afaa8f8ea8aa638ab9a7fead2f3d21e  # v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be  # v14
+      with:
+        name: takeokunn-kuro
+        authToken: ${{ inputs.cachix-auth-token }}

@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/takeokunn/kuro/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Emacs](https://img.shields.io/badge/Emacs-29.1%2B-purple)
+![Emacs](https://img.shields.io/badge/Emacs-29.4%2B-purple)
 ![Rust](https://img.shields.io/badge/rust-1.84.0%2B-orange)
 
 A high-performance terminal emulator for Emacs, powered by a Rust dynamic module with an Emacs Lisp display layer.
@@ -24,27 +24,31 @@ A high-performance terminal emulator for Emacs, powered by a Rust dynamic module
 
 ### Requirements
 
-- Emacs 29.1 or later
+- Emacs 29.4 or later
 - Rust 1.84.0 or later (MSRV)
-- Linux, macOS, or Windows (WSL2)
+- Linux or macOS
+- [Nix](https://nixos.org/download) (recommended — provides all other dependencies)
 
-### From Source
+### With Nix (recommended)
 
 ```bash
 git clone https://github.com/takeokunn/kuro.git
 cd kuro
-make build
-make install
+nix run .#install   # build release + copy to ~/.local/share/kuro
 ```
 
-The `make install` target copies the compiled dynamic module to `~/.local/share/kuro/`.
-
-### With Nix
+Optionally add the `takeokunn-kuro` Cachix binary cache to avoid recompiling:
 
 ```bash
-nix develop  # Enter development shell with all dependencies
-make build
-make install
+cachix use takeokunn-kuro
+```
+
+### From Source (without Nix)
+
+```bash
+git clone https://github.com/takeokunn/kuro.git
+cd kuro
+make install        # cargo build --release + copy to ~/.local/share/kuro
 ```
 
 ### MELPA
@@ -79,7 +83,7 @@ M-x package-install RET kuro RET
 
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs in pedantic + nursery mode with 0 warnings. CI covers Linux, macOS, and WSL2 across Emacs 29.1/29.4/30.1 with Rust stable. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS across Emacs 29.4 and 30.1 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 
@@ -107,37 +111,74 @@ graph LR
 
 ## Development
 
+### Enter development shell
+
+```bash
+nix develop         # Rust toolchain + Emacs + cargo-tarpaulin on PATH
+```
+
 ### Build
 
 ```bash
-make build       # Release build
-make dev         # Debug build
+nix build           # Release build → result/
+nix run .#install   # Build + install to ~/.local/share/kuro
+nix run .#run       # Build + install + launch Emacs
 ```
 
 ### Test
 
 ```bash
-make test        # Rust unit + integration tests (debug & release)
-make test-elisp  # ERT tests
-make test-e2e    # End-to-end shell tests (requires tmux)
-make test-all    # Full suite: Rust + ERT + e2e
+nix flake check                                        # All checks (Rust + ERT + byte-compile + audit)
+nix develop --command bash test/shell/run-e2e.sh       # E2E tests (PTY — outside sandbox)
+nix develop --command bash test/shell/vttest-compliance.sh  # VTE compliance
 ```
 
 ### Quality
 
 ```bash
-make lint        # Clippy (pedantic, -D warnings)
-make check       # Format check (cargo fmt --check)
-make check-all   # fmt + lint + test
-make bench       # Criterion benchmarks (requires nightly)
+nix fmt             # Format Rust + Nix files (treefmt: rustfmt + nixfmt-rfc-style)
+nix run .#doc       # Generate + open Rust API docs
+nix run .#coverage  # cargo-tarpaulin coverage (stdout)
+nix run .#bench     # Criterion benchmarks (nightly Rust)
 ```
 
-### Nix Development
-
-The project includes a `flake.nix` for reproducible development:
+### Fuzzing
 
 ```bash
-nix develop      # Shell with Rust toolchain, Emacs, and all dependencies
+nix develop .#fuzz --command bash -c "
+  cd fuzz
+  cargo fuzz run fuzz_advance -- -max_total_time=30 -runs=1000
+"
+```
+
+The `fuzz` devShell provides nightly Rust + cargo-fuzz. Available targets: `fuzz_advance`, `fuzz_kitty_params`, `fuzz_apc_payload`, `fuzz_decode_png`.
+
+### Nix flake checks
+
+`nix flake check` runs all of the following in the Nix sandbox:
+
+| Check | What it verifies |
+|-------|-----------------|
+| `kuro-core` | Package builds cleanly |
+| `kuro-clippy` | Clippy with `-D warnings` |
+| `kuro-fmt` | `cargo fmt --check` |
+| `kuro-test` | Rust unit + integration tests |
+| `kuro-audit` | Security audit (rustsec advisory-db) |
+| `kuro-elisp-emacs-29` | ERT test suite on Emacs 29.4 |
+| `kuro-elisp-emacs-30` | ERT test suite on Emacs 30.1 |
+| `kuro-byte-compile-emacs-29` | Byte-compile on Emacs 29.4 |
+| `kuro-byte-compile-emacs-30` | Byte-compile on Emacs 30.1 |
+| `kuro-package-lint` | `package-lint` on `kuro.el` |
+| `treefmt` | Rust + Nix files are formatted (treefmt) |
+
+### Nix file layout
+
+```
+flake.nix          # Inputs + outputs wiring (~85 lines)
+nix/
+  treefmt.nix      # treefmt formatter config (Rust + Nix)
+  checks.nix       # All flake check derivations
+  apps.nix         # nix run .#<name> app definitions
 ```
 
 ## Contributing

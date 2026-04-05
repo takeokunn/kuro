@@ -308,6 +308,15 @@ Requires kuro native module >= 1.1."
   :type 'boolean
   :group 'kuro)
 
+;; Migration guard: `defcustom' uses `defvar' semantics and will not override a
+;; variable that is already bound.  Daemons that loaded an older kuro-config.el
+;; where the default was `nil' therefore retain `nil' even after reload.
+;; Reset to `t' only when the user has not explicitly saved a custom value so
+;; that deliberate `nil' customisations are preserved.
+(when (and (null kuro-use-binary-ffi)
+           (null (get 'kuro-use-binary-ffi 'saved-value)))
+  (setq kuro-use-binary-ffi t))
+
 (defcustom kuro-typewriter-chars-per-second 120
   "Number of characters to display per second in typewriter mode.
 Higher values look faster; lower values are more dramatic.

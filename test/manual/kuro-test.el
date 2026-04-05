@@ -97,7 +97,7 @@
       (kuro-send-string "echo -e '\\033[38;5;196m256-color Red\\033[0m'\n")
       (sit-for 1)
       ;; Test true color
-      (kuro-send-string "echo -e '\\033[38;2;255;128;0mTrue Color Orange\\033[0m'\n"))
+      (kuro-send-string "echo -e '\\033[38;2;255;128;0mTrue Color Orange\\033[0m'\n")))
   (message "Color test: Check buffer for colored text"))
 
 ;;;###autoload

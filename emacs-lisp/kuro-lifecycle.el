@@ -24,6 +24,9 @@
 (require 'kuro-renderer)
 (require 'kuro-faces)
 (require 'kuro-render-buffer)
+(require 'kuro-dnd)
+(require 'kuro-compilation)
+(require 'kuro-bookmark)
 
 ;; Forward-declare functions defined in kuro.el to avoid circular require
 (declare-function kuro-mode "kuro" ())

@@ -257,6 +257,13 @@ impl Screen {
             return;
         };
 
+        // Track the last row we marked dirty to avoid redundant dirty_set.insert +
+        // version.wrapping_add inside the per-byte loop.  On an 80-col ASCII run,
+        // these would otherwise fire 80 times for the same row; after the first cell
+        // changes the row, subsequent writes to the same row are already captured
+        // by the next re-encode cycle.  Saves ~80× dirty_set.insert per run.
+        let mut last_marked_dirty_row = usize::MAX;
+
         for &byte in bytes {
             // Handle pending wrap from previous print
             if screen.cursor.pending_wrap {
@@ -264,6 +271,8 @@ impl Screen {
                 if auto_wrap {
                     screen.cursor.col = 0;
                     screen.line_feed_impl(attrs.background, is_primary);
+                    // Row changed by line_feed — allow dirty-mark on the new row.
+                    last_marked_dirty_row = usize::MAX;
                 }
             }
 
@@ -278,11 +287,13 @@ impl Screen {
                     // Direct byte comparison: avoid encode_utf8 + str compare overhead.
                     // For ASCII bytes, checking the raw byte is faster than encoding
                     // to UTF-8 and comparing &str slices.
-                    let grapheme_matches =
-                        cell.grapheme.len() == 1 && cell.grapheme.as_bytes()[0] == byte;
+                    // Bind the byte slice once to share the fat-pointer load
+                    // across both .len() and [0] accesses.
+                    let gb = cell.grapheme.as_bytes();
+                    let grapheme_matches = gb.len() == 1 && gb[0] == byte;
                     if !grapheme_matches
-                        || cell.attrs != attrs
                         || cell.width != CellWidth::Half
+                        || cell.attrs != attrs
                         || cell.extras.is_some()
                     {
                         if !grapheme_matches {
@@ -295,9 +306,15 @@ impl Screen {
                         cell.attrs = attrs;
                         cell.width = CellWidth::Half;
                         cell.extras = None;
-                        line.is_dirty = true;
-                        line.version = line.version.wrapping_add(1);
-                        screen.dirty_set.insert(row);
+                        // Guard: mark dirty only on the first changed cell per row.
+                        // All subsequent cells on the same row are captured by the
+                        // next re-encode; dirty_set.insert is idempotent but not free.
+                        if row != last_marked_dirty_row {
+                            line.is_dirty = true;
+                            line.version = line.version.wrapping_add(1);
+                            screen.dirty_set.insert(row);
+                            last_marked_dirty_row = row;
+                        }
                     }
                 }
 

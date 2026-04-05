@@ -1,12 +1,18 @@
 ;;; kuro-input-paste.el --- Bracketed paste for Kuro terminal emulator  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
 
 ;;; Commentary:
-;; Bracketed paste mode support (mode 2004) with security sanitization.
+
+;; Bracketed paste mode (DEC mode 2004) support for the Kuro terminal.
+;;
+;; When bracketed paste is active, yanked text is wrapped with
+;; ESC[200~ / ESC[201~ escape sequences and sanitized to remove
+;; ESC (0x1b) and C1 CSI (0x9b) bytes that could escape the paste
+;; bracket and allow command injection.
 
 ;;; Code:
 

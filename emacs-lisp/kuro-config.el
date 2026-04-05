@@ -1,6 +1,6 @@
 ;;; kuro-config.el --- User configuration for Kuro terminal emulator  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -224,6 +224,12 @@ Also accessible via the alias `kuro-default-shell' for backward compatibility."
   :type 'string
   :group 'kuro
   :set #'kuro--set-shell)
+
+(defcustom kuro-shell-integration t
+  "When non-nil, automatically inject shell integration scripts.
+Provides directory tracking, prompt navigation, and title updates."
+  :type 'boolean
+  :group 'kuro)
 
 (defcustom kuro-scrollback-size 10000
   "Maximum number of lines retained in the scrollback buffer.

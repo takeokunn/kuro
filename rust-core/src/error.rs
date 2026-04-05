@@ -1,43 +1,82 @@
 //! Error types for Kuro
 
 use std::ffi::NulError;
+use std::fmt;
 use std::io;
-use thiserror::Error;
 
 // Re-export FFI-specific error types
 pub use crate::ffi::error::{InitError, RuntimeError, StateError};
 
 /// Main error type for Kuro operations
-#[derive(Error, Debug)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum KuroError {
     /// IO-related errors
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
+    Io(io::Error),
 
     /// Null pointer in FFI
-    #[error("Null pointer")]
     NullPointer,
 
     /// UTF-8 conversion error
-    #[error("UTF-8 error: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
+    Utf8(std::string::FromUtf8Error),
 
     /// Nul error in string conversion
-    #[error("Nul error in string")]
-    NulError(#[from] NulError),
+    NulError(NulError),
 
     /// Initialization errors
-    #[error("Initialization error: {0}")]
     Init(InitError),
 
     /// State errors
-    #[error("State error: {0}")]
     State(StateError),
 
     /// Runtime errors
-    #[error("Runtime error: {0}")]
     Runtime(RuntimeError),
+}
+
+impl fmt::Display for KuroError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::NullPointer => write!(f, "Null pointer"),
+            Self::Utf8(e) => write!(f, "UTF-8 error: {e}"),
+            Self::NulError(_) => write!(f, "Nul error in string"),
+            Self::Init(e) => write!(f, "Initialization error: {e}"),
+            Self::State(e) => write!(f, "State error: {e}"),
+            Self::Runtime(e) => write!(f, "Runtime error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for KuroError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Utf8(e) => Some(e),
+            Self::NulError(e) => Some(e),
+            Self::Init(e) => Some(e),
+            Self::State(e) => Some(e),
+            Self::Runtime(e) => Some(e),
+            Self::NullPointer => None,
+        }
+    }
+}
+
+impl From<io::Error> for KuroError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for KuroError {
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::Utf8(e)
+    }
+}
+
+impl From<NulError> for KuroError {
+    fn from(e: NulError) -> Self {
+        Self::NulError(e)
+    }
 }
 
 impl From<String> for KuroError {

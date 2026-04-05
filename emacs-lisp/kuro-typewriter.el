@@ -1,6 +1,6 @@
 ;;; kuro-typewriter.el --- Typewriter animation effect for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -33,10 +33,8 @@
 
 ;;; Configuration (defcustoms live in kuro-config.el)
 
-(defvar kuro-typewriter-effect nil
-  "Forward reference; defined in kuro-config.el.")
-(defvar kuro-typewriter-chars-per-second nil
-  "Forward reference; defined in kuro-config.el.")
+(defvar kuro-typewriter-effect)
+(defvar kuro-typewriter-chars-per-second)
 
 ;;; Internal state
 
@@ -58,6 +56,12 @@ Fires at `kuro-typewriter-chars-per-second' Hz when
 
 (kuro--defvar-permanent-local kuro--typewriter-written-len 0
   "Number of characters already written for the current typewriter row.")
+
+(kuro--defvar-permanent-local kuro--typewriter-current-text-len 0
+  "Cached (length kuro--typewriter-current-text).
+Pre-computed when a row is dequeued in `kuro--typewriter-queue-next' to avoid
+an O(chars) `length' call on every timer tick (fired at
+`kuro-typewriter-chars-per-second' Hz, up to 120+ times/second).")
 
 ;;; Typewriter timer
 
@@ -92,8 +96,7 @@ Called by `kuro--typewriter-timer' at `kuro-typewriter-chars-per-second' Hz."
     ;; If we have a current row in progress, display next character
     (cond
      ((and kuro--typewriter-current-row kuro--typewriter-current-text
-           (< kuro--typewriter-written-len
-              (length kuro--typewriter-current-text)))
+           (< kuro--typewriter-written-len kuro--typewriter-current-text-len))
       ;; Write one more character of the current row
       (let* ((row kuro--typewriter-current-row)
              (next-len (1+ kuro--typewriter-written-len)))
@@ -103,9 +106,10 @@ Called by `kuro--typewriter-timer' at `kuro-typewriter-chars-per-second' Hz."
      (t
       ;; Try to advance to the next queued row; if none, reset state
       (or (kuro--typewriter-queue-next)
-          (setq kuro--typewriter-current-row nil
-                kuro--typewriter-current-text nil
-                kuro--typewriter-written-len 0))))))
+          (setq kuro--typewriter-current-row      nil
+                kuro--typewriter-current-text     nil
+                kuro--typewriter-current-text-len 0
+                kuro--typewriter-written-len      0))))))
 
 (defun kuro--typewriter-queue-next ()
   "Pop the next item from the typewriter queue and begin writing it.
@@ -114,21 +118,22 @@ Returns non-nil if an item was dequeued."
     (let* ((item (pop kuro--typewriter-queue))
            (row (car item))
            (text (cdr item)))
-      (setq kuro--typewriter-current-row row
-            kuro--typewriter-current-text text
-            kuro--typewriter-written-len 0)
+      (setq kuro--typewriter-current-row        row
+            kuro--typewriter-current-text       text
+            kuro--typewriter-current-text-len   (length text)
+            kuro--typewriter-written-len        0)
       t)))
 
 (defun kuro--typewriter-write-partial (row text)
-  "Write partial TEXT to ROW in the buffer (without triggering a full render)."
+  "Write partial TEXT to ROW in the buffer (without triggering a full render).
+Uses `kuro--ensure-buffer-row-exists' for O(1) row navigation via the
+row-position cache instead of the O(row) `forward-line' traversal."
   (kuro--with-buffer-edit
-   (goto-char (point-min))
-   (let ((not-moved (forward-line row)))
-     (when (= not-moved 0)
-       (let ((line-start (point))
-             (line-end (line-end-position)))
-         (delete-region line-start line-end)
-         (insert text))))))
+   (kuro--ensure-buffer-row-exists row)
+   (let ((line-start (point))
+         (line-end (line-end-position)))
+     (delete-region line-start line-end)
+     (insert text))))
 
 (provide 'kuro-typewriter)
 

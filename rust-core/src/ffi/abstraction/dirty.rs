@@ -45,32 +45,34 @@ impl TerminalSession {
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
             self.core.screen.clear_scroll_dirty();
             let rows = self.core.screen.rows() as usize;
-            let mut texts: Vec<String> = Vec::with_capacity(rows);
-            // Header placeholder: format_version(4) + num_rows placeholder(4).
-            let mut buf = Vec::with_capacity(8 + rows * 16);
-            buf.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
-            let num_rows_offset = buf.len();
-            buf.extend_from_slice(&0u32.to_le_bytes()); // placeholder — backfilled below
+            // Reuse persistent scratch allocations for scrollback path (same pattern as main path).
+            self.texts_scratch.clear();
+            self.texts_scratch.reserve(rows);
+            self.buf_scratch.clear();
+            self.buf_scratch.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
+            let num_rows_offset = self.buf_scratch.len();
+            self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // placeholder — backfilled below
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_scrollback_viewport_line(row) {
                     let text = crate::ffi::codec::encode_line_into_buf(
                         &line.cells,
+                        line.has_wide,
                         &mut self.encode_pool,
                         row,
-                        &mut buf,
+                        &mut self.buf_scratch,
                     );
-                    texts.push(text);
+                    self.texts_scratch.push(text);
                 } else {
                     // Emit an empty row entry.
                     #[expect(
                         clippy::cast_possible_truncation,
                         reason = "row index is a terminal row (≤ 65535); fits u32"
                     )]
-                    buf.extend_from_slice(&(row as u32).to_le_bytes());
-                    buf.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
-                    buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
-                    buf.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
-                    texts.push(String::new());
+                    self.buf_scratch.extend_from_slice(&(row as u32).to_le_bytes());
+                    self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
+                    self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
+                    self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
+                    self.texts_scratch.push(String::new());
                 }
             }
             // Backfill num_rows.
@@ -78,9 +80,12 @@ impl TerminalSession {
                 clippy::cast_possible_truncation,
                 reason = "number of rows is bounded by terminal height (≤ 65535); fits u32"
             )]
-            buf[num_rows_offset..num_rows_offset + 4]
-                .copy_from_slice(&(texts.len() as u32).to_le_bytes());
-            return (texts, buf);
+            self.buf_scratch[num_rows_offset..num_rows_offset + 4]
+                .copy_from_slice(&(self.texts_scratch.len() as u32).to_le_bytes());
+            return (
+                std::mem::take(&mut self.texts_scratch),
+                std::mem::take(&mut self.buf_scratch),
+            );
         }
 
         // Suppress live dirty lines when viewport is scrolled (but not scroll_dirty).
@@ -106,14 +111,14 @@ impl TerminalSession {
             self.palette_epoch = self.palette_epoch.wrapping_add(1);
         }
 
-        // Pre-allocate with a conservative estimate; the header placeholder is
-        // 8 bytes and each row adds at least 16 bytes (row header fields).
-        let mut texts: Vec<String> = Vec::new();
-        // Reserve header placeholder: format_version(4) + num_rows(4).
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
-        let num_rows_offset = buf.len();
-        buf.extend_from_slice(&0u32.to_le_bytes()); // placeholder
+        // Reuse persistent scratch allocations: both the text-strings Vec and the
+        // serialised binary frame buffer are cleared (retaining capacity) and
+        // mem::take'd on return — eliminating two heap allocations per frame at 120fps.
+        self.texts_scratch.clear();
+        self.buf_scratch.clear();
+        self.buf_scratch.extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
+        let num_rows_offset = self.buf_scratch.len();
+        self.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // placeholder
 
         if self.core.screen.is_full_dirty() {
             let rows = self.core.screen.rows() as usize;
@@ -122,32 +127,42 @@ impl TerminalSession {
                 self.row_hashes.resize(rows, None);
             }
             let epoch = self.palette_epoch;
-            texts.reserve(rows);
+            self.texts_scratch.reserve(rows);
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
                     let text = crate::ffi::codec::encode_line_into_buf(
                         &line.cells,
+                        line.has_wide,
                         &mut self.encode_pool,
                         row,
-                        &mut buf,
+                        &mut self.buf_scratch,
                     );
                     let hash =
-                        crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
+                        crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
                     self.row_hashes[row] = Some((line.version, hash, epoch));
-                    texts.push(text);
+                    self.texts_scratch.push(text);
                 }
             }
         } else {
-            let dirty_indices = self.core.screen.take_dirty_lines();
+            self.core.screen.take_dirty_lines_into(&mut self.dirty_scratch);
             let epoch = self.palette_epoch;
-            texts.reserve(dirty_indices.len());
+            self.texts_scratch.reserve(self.dirty_scratch.len());
+            // Pre-size row_hashes to the screen height once before the loop.
+            // Avoids a branch + possible realloc on every dirty row that would
+            // otherwise be triggered by the per-row `if row >= len` guard.
+            let screen_rows = self.core.screen.rows() as usize;
+            if self.row_hashes.len() < screen_rows {
+                self.row_hashes.resize(screen_rows, None);
+            }
 
-            for row in dirty_indices {
+            for &row in &self.dirty_scratch {
                 if let Some(line) = self.core.screen.get_line(row) {
+                    // Direct index: row_hashes is pre-sized to screen_rows above,
+                    // and dirty rows are bounded by screen dimensions — no get+flatten needed.
+                    let cached = self.row_hashes[row];
+
                     // Fast path: version + epoch match → skip without encoding.
-                    if let Some((stored_ver, _stored_hash, stored_epoch)) =
-                        self.row_hashes.get(row).copied().flatten()
-                    {
+                    if let Some((stored_ver, _stored_hash, stored_epoch)) = cached {
                         if line.version == stored_ver && stored_epoch == epoch {
                             continue;
                         }
@@ -155,38 +170,34 @@ impl TerminalSession {
 
                     // Snapshot buf length before encoding so we can roll back if
                     // the hash confirms the row is unchanged.
-                    let buf_snapshot = buf.len();
+                    let buf_snapshot = self.buf_scratch.len();
 
-                    // Encode into pool and serialise to buf.
+                    // Encode into pool and serialise to buf_scratch.
                     let text = crate::ffi::codec::encode_line_into_buf(
                         &line.cells,
+                        line.has_wide,
                         &mut self.encode_pool,
                         row,
-                        &mut buf,
+                        &mut self.buf_scratch,
                     );
                     let new_hash =
-                        crate::ffi::codec::compute_row_hash(line, &self.encode_pool.col_to_buf);
+                        crate::ffi::codec::compute_row_hash_from_pool(&self.encode_pool);
 
-                    // Hash-skip: roll back the partial write if row is unchanged.
-                    if let Some((_stored_ver, stored_hash, stored_epoch)) =
-                        self.row_hashes.get(row).copied().flatten()
-                    {
+                    // Hash-skip: use already-fetched cached value — no second lookup.
+                    if let Some((_stored_ver, stored_hash, stored_epoch)) = cached {
                         if stored_hash == new_hash && stored_epoch == epoch {
-                            buf.truncate(buf_snapshot);
+                            self.buf_scratch.truncate(buf_snapshot);
                             continue;
                         }
                     }
 
-                    if row >= self.row_hashes.len() {
-                        self.row_hashes.resize(row + 1, None);
-                    }
                     self.row_hashes[row] = Some((line.version, new_hash, epoch));
-                    texts.push(text);
+                    self.texts_scratch.push(text);
                 }
             }
         }
 
-        if texts.is_empty() {
+        if self.texts_scratch.is_empty() {
             return (vec![], vec![]);
         }
 
@@ -195,10 +206,13 @@ impl TerminalSession {
             clippy::cast_possible_truncation,
             reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
         )]
-        buf[num_rows_offset..num_rows_offset + 4]
-            .copy_from_slice(&(texts.len() as u32).to_le_bytes());
+        self.buf_scratch[num_rows_offset..num_rows_offset + 4]
+            .copy_from_slice(&(self.texts_scratch.len() as u32).to_le_bytes());
 
-        (texts, buf)
+        (
+            std::mem::take(&mut self.texts_scratch),
+            std::mem::take(&mut self.buf_scratch),
+        )
     }
 
     /// Get dirty lines with face ranges from screen, with scrollback viewport support.
@@ -219,8 +233,13 @@ impl TerminalSession {
             for row in 0..rows {
                 match self.core.screen.get_scrollback_viewport_line(row) {
                     Some(line) => {
-                        let encoded = Self::encode_line_faces(row, &line.cells);
-                        result.push(encoded);
+                        let (text, face_ranges, col_to_buf) =
+                            crate::ffi::codec::encode_line_with_pool(
+                                &line.cells,
+                                line.has_wide,
+                                &mut self.encode_pool,
+                            );
+                        result.push((row, text, face_ranges, col_to_buf));
                     }
                     None => {
                         result.push((row, String::new(), vec![], vec![]));
@@ -278,21 +297,17 @@ impl TerminalSession {
             let mut result = Vec::with_capacity(rows);
             for row in 0..rows {
                 if let Some(line) = self.core.screen.get_line(row) {
-                    // Fast path: version + epoch match → no hash needed, skip row.
-                    if let Some((stored_ver, stored_hash, stored_epoch)) = self.row_hashes[row] {
-                        if line.version == stored_ver && epoch == stored_epoch {
-                            // Re-emit with cached data to keep render state consistent.
-                            // We still need to send the row content because full_dirty
-                            // requires all rows to be returned.
-                            // (fall through to encode below)
-                            let _ = (stored_ver, stored_hash, stored_epoch);
-                        }
-                    }
+                    // full_dirty requires all rows — no version/hash-skip here.
+                    // Row hashes are still updated so the subsequent partial-dirty
+                    // frames can skip unchanged rows.
                     let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line_with_pool(
                         &line.cells,
+                        line.has_wide,
                         &mut self.encode_pool,
                     );
-                    let hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
+                    // encode_line_with_pool uses mem::take, so pool is empty here.
+                    // Hash the returned data directly instead of the pool.
+                    let hash = crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
                     self.row_hashes[row] = Some((line.version, hash, epoch));
                     result.push((row, text, face_ranges, col_to_buf));
                 }
@@ -300,17 +315,25 @@ impl TerminalSession {
             return result;
         }
 
-        let dirty_indices = self.core.screen.take_dirty_lines();
-        let mut result = Vec::with_capacity(dirty_indices.len());
+        self.core.screen.take_dirty_lines_into(&mut self.dirty_scratch);
+        let mut result = Vec::with_capacity(self.dirty_scratch.len());
         let epoch = self.palette_epoch;
+        // Pre-size row_hashes to screen height before the loop — same pattern as
+        // get_dirty_lines_binary_direct (RUST-33).  Eliminates the per-row
+        // `if row >= len` branch + possible realloc on every dirty row.
+        let screen_rows = self.core.screen.rows() as usize;
+        if self.row_hashes.len() < screen_rows {
+            self.row_hashes.resize(screen_rows, None);
+        }
 
-        for row in dirty_indices {
+        for &row in &self.dirty_scratch {
             if let Some(line) = self.core.screen.get_line(row) {
+                // Direct index: row_hashes is pre-sized to screen_rows above.
+                let cached = self.row_hashes[row];
+
                 // Fast path: if version and palette epoch both match the stored
                 // values, the row content is guaranteed unchanged — skip hash.
-                if let Some((stored_ver, _stored_hash, stored_epoch)) =
-                    self.row_hashes.get(row).copied().flatten()
-                {
+                if let Some((stored_ver, _stored_hash, stored_epoch)) = cached {
                     if line.version == stored_ver && epoch == stored_epoch {
                         // Unchanged row — skip without computing hash.
                         continue;
@@ -318,24 +341,18 @@ impl TerminalSession {
                 }
 
                 let (text, face_ranges, col_to_buf) =
-                    crate::ffi::codec::encode_line_with_pool(&line.cells, &mut self.encode_pool);
-                let new_hash = crate::ffi::codec::compute_row_hash(line, &col_to_buf);
+                    crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, &mut self.encode_pool);
+                // encode_line_with_pool uses mem::take, so pool is empty here.
+                let new_hash = crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
 
-                // Slow path: check hash + epoch to guard against false positives
-                // (e.g. version counter wrapped, or palette changed without version bump).
-                if let Some((_stored_ver, stored_hash, stored_epoch)) =
-                    self.row_hashes.get(row).copied().flatten()
-                {
+                // Slow path: use already-fetched cached value — no second lookup.
+                if let Some((_stored_ver, stored_hash, stored_epoch)) = cached {
                     if stored_hash == new_hash && stored_epoch == epoch {
                         // Hash confirms unchanged — do not include in output.
                         continue;
                     }
                 }
 
-                // Grow Vec if needed (row index may exceed current len on first use).
-                if row >= self.row_hashes.len() {
-                    self.row_hashes.resize(row + 1, None);
-                }
                 self.row_hashes[row] = Some((line.version, new_hash, epoch));
                 result.push((row, text, face_ranges, col_to_buf));
             }

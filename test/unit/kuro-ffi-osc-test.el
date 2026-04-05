@@ -49,6 +49,10 @@
   (fset 'kuro-core-scroll-down (lambda (_id _n) nil)))
 (unless (fboundp 'kuro-core-get-scroll-offset)
   (fset 'kuro-core-get-scroll-offset (lambda (_id) 0)))
+(unless (fboundp 'kuro-core-poll-eval-commands)
+  (fset 'kuro-core-poll-eval-commands (lambda (_id) nil)))
+(unless (fboundp 'kuro-core-get-cwd-host)
+  (fset 'kuro-core-get-cwd-host (lambda (_id) nil)))
 
 ;; Also stub kuro-core-init and other functions required transitively.
 (unless (fboundp 'kuro-core-init)
@@ -129,6 +133,8 @@ SYM must be a kuro-- prefixed symbol; the test is named by stripping that prefix
 (kuro-ffi-osc-test--uninit-nil kuro--scroll-up 1)
 (kuro-ffi-osc-test--uninit-nil kuro--scroll-down 1)
 (kuro-ffi-osc-test--uninit-nil kuro--get-scroll-offset)
+(kuro-ffi-osc-test--uninit-nil kuro--poll-eval-commands)
+(kuro-ffi-osc-test--uninit-nil kuro--get-cwd-host)
 
 ;;; Group 2 helper macro
 
@@ -183,6 +189,8 @@ Test name: kuro-ffi-osc-BARE-calls-core-when-init (BARE = name minus kuro-- pref
 (kuro-ffi-osc-test--init-delegates kuro--scroll-up             kuro-core-scroll-up             t                       3)
 (kuro-ffi-osc-test--init-delegates kuro--scroll-down           kuro-core-scroll-down           t                       5)
 (kuro-ffi-osc-test--init-delegates kuro--get-scroll-offset     kuro-core-get-scroll-offset     7)
+(kuro-ffi-osc-test--init-delegates kuro--poll-eval-commands    kuro-core-poll-eval-commands    '("(cd \"/tmp\")"))
+(kuro-ffi-osc-test--init-delegates kuro--get-cwd-host          kuro-core-get-cwd-host          "remote-host")
 
 ;;; Group 3: Behavioral / value semantics when initialized
 ;;

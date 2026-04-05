@@ -1,13 +1,24 @@
 ;;; kuro-input-keymap.el --- Terminal input keymap for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
 
 ;;; Commentary:
-;; Builds the kuro--keymap used as parent of kuro-mode-map.
-;; Organized into per-category helper functions for maintainability.
+
+;; Builds `kuro--keymap', the parent keymap of `kuro-mode-map'.
+;;
+;; Key categories are split into per-function setup helpers:
+;; `kuro--keymap-setup-special' (RET/TAB/DEL/ESC),
+;; `kuro--keymap-setup-ctrl' (C-a..C-z control bytes),
+;; `kuro--keymap-setup-meta' (M-a..M-z and Meta-punctuation via ESC prefix),
+;; `kuro--keymap-setup-navigation' (arrows, home/end, page, F1-F12,
+;; modifier+arrow xterm sequences), `kuro--keymap-setup-mouse' (X10/SGR
+;; mouse events), and `kuro--keymap-setup-yank' (bracketed paste yank).
+;;
+;; Keys listed in `kuro-keymap-exceptions' are removed at build time so
+;; they fall through to the global keymap (e.g. M-x, C-g).
 
 ;;; Code:
 

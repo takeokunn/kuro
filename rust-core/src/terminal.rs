@@ -49,6 +49,18 @@ pub struct TerminalCore {
     /// Flushed via `Screen::print_ascii_run()` when a non-print callback
     /// fires, a non-ASCII char is printed, or VTE `advance()` returns.
     pub(crate) print_buf: Vec<u8>,
+    /// G0 character set designation (ESC ( 0 / ESC ( B)
+    pub(crate) g0_charset: types::charset::CharsetType,
+    /// G1 character set designation (ESC ) 0 / ESC ) B)
+    pub(crate) g1_charset: types::charset::CharsetType,
+    /// Whether GL points to G1 (SO/SI shift state). false = G0, true = G1
+    pub(crate) gl_is_g1: bool,
+    /// Saved G0 charset for DECSC/DECRC (ESC 7 / ESC 8)
+    saved_g0_charset: Option<types::charset::CharsetType>,
+    /// Saved G1 charset for DECSC/DECRC (ESC 7 / ESC 8)
+    saved_g1_charset: Option<types::charset::CharsetType>,
+    /// Saved GL shift state for DECSC/DECRC (ESC 7 / ESC 8)
+    saved_gl_is_g1: Option<bool>,
 }
 
 impl TerminalCore {
@@ -71,6 +83,12 @@ impl TerminalCore {
             vte_callback_count: 0,
             vte_last_ground: true,
             print_buf: Vec::with_capacity(256),
+            g0_charset: types::charset::CharsetType::Ascii,
+            g1_charset: types::charset::CharsetType::Ascii,
+            gl_is_g1: false,
+            saved_g0_charset: None,
+            saved_g1_charset: None,
+            saved_gl_is_g1: None,
         }
     }
 
@@ -82,12 +100,72 @@ impl TerminalCore {
     #[inline]
     pub(crate) fn flush_print_buf(&mut self) {
         if !self.print_buf.is_empty() {
+            let len = self.print_buf.len();
             self.screen.print_ascii_run(
                 &self.print_buf,
                 self.current_attrs,
                 self.dec_modes.auto_wrap,
             );
+            if self.osc_data.hyperlink.uri.is_some() {
+                self.stamp_hyperlink_on_last_n_cells(len);
+            }
             self.print_buf.clear();
+        }
+    }
+
+    /// Stamp the active hyperlink URI on the `n` most recently printed cells.
+    ///
+    /// Walks backward from the current cursor position, handling line wraps.
+    /// Called after `print_ascii_run()` when a hyperlink is active.
+    /// No-op if `n == 0` or no hyperlink URI is set.
+    #[inline]
+    pub(crate) fn stamp_hyperlink_on_last_n_cells(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let uri = match &self.osc_data.hyperlink.uri {
+            Some(u) => u.clone(),
+            None => return,
+        };
+        let cursor = *self.screen.cursor();
+        let cols = self.screen.cols() as usize;
+        let mut remaining = n;
+        let mut row = cursor.row;
+        let mut col = cursor.col;
+
+        // If pending_wrap, the last char written is at cursor.col (cursor
+        // didn't advance past it — it's "stuck" at the last column).
+        if cursor.pending_wrap {
+            if let Some(cell) = self.screen.get_cell_mut(row, col) {
+                cell.set_hyperlink_id(Some(uri.clone()));
+            }
+            remaining -= 1;
+        }
+
+        // Walk backward from cursor position
+        while remaining > 0 {
+            if col == 0 {
+                if row == 0 {
+                    break;
+                }
+                row -= 1;
+                col = cols;
+            }
+            col -= 1;
+            if let Some(cell) = self.screen.get_cell_mut(row, col) {
+                cell.set_hyperlink_id(Some(uri.clone()));
+            }
+            remaining -= 1;
+        }
+    }
+
+    /// Get the currently active charset for GL (the "left" graphic set).
+    #[inline]
+    pub(crate) fn active_charset(&self) -> types::charset::CharsetType {
+        if self.gl_is_g1 {
+            self.g1_charset
+        } else {
+            self.g0_charset
         }
     }
 
@@ -105,19 +183,31 @@ impl TerminalCore {
         self.tab_stops.resize(cols as usize);
     }
 
-    /// Save cursor position and current SGR attributes (DECSC - ESC 7)
+    /// Save cursor position, SGR attributes, and charset state (DECSC - ESC 7)
     pub fn save_cursor(&mut self) {
         self.saved_cursor = Some(*self.screen.cursor());
         self.saved_attrs = Some(self.current_attrs);
+        self.saved_g0_charset = Some(self.g0_charset);
+        self.saved_g1_charset = Some(self.g1_charset);
+        self.saved_gl_is_g1 = Some(self.gl_is_g1);
     }
 
-    /// Restore cursor position and SGR attributes (DECRC - ESC 8)
+    /// Restore cursor position, SGR attributes, and charset state (DECRC - ESC 8)
     pub fn restore_cursor(&mut self) {
         if let Some(cursor) = self.saved_cursor.take() {
             self.screen.move_cursor(cursor.row, cursor.col);
         }
         if let Some(attrs) = self.saved_attrs.take() {
             self.current_attrs = attrs;
+        }
+        if let Some(g0) = self.saved_g0_charset.take() {
+            self.g0_charset = g0;
+        }
+        if let Some(g1) = self.saved_g1_charset.take() {
+            self.g1_charset = g1;
+        }
+        if let Some(gl) = self.saved_gl_is_g1.take() {
+            self.gl_is_g1 = gl;
         }
     }
 
@@ -275,17 +365,11 @@ impl TerminalCore {
 
     /// Get pending image placement notifications (Kitty Graphics + Sixel).
     ///
-    /// Returns notifications that have accumulated since the last call to
-    /// [`Self::clear_pending_image_notifications`] or terminal construction.
+    /// Returns notifications that have accumulated since terminal construction.
     /// Each notification describes one image that was placed on the terminal grid.
     #[must_use]
     pub fn pending_image_notifications(&self) -> &[crate::grid::screen::ImageNotification] {
         &self.kitty.pending_image_notifications
-    }
-
-    /// Clear all pending image placement notifications.
-    pub fn clear_pending_image_notifications(&mut self) {
-        self.kitty.pending_image_notifications.clear();
     }
 
     /// Re-encode a stored image as a base64-encoded PNG string.
@@ -329,6 +413,10 @@ impl TerminalCore {
         self.dec_modes.keyboard_flags_stack.clear();
         // Clear alt-screen SGR snapshot so a subsequent ?1049l cannot restore stale attrs
         self.saved_primary_attrs = None;
+        // Reset character set designations to US ASCII
+        self.g0_charset = types::charset::CharsetType::Ascii;
+        self.g1_charset = types::charset::CharsetType::Ascii;
+        self.gl_is_g1 = false;
         // Note: does NOT clear scrollback, does NOT switch screens, does NOT clear screen
     }
 
@@ -346,6 +434,9 @@ impl TerminalCore {
         self.saved_cursor = None;
         self.saved_attrs = None;
         self.saved_primary_attrs = None;
+        self.saved_g0_charset = None;
+        self.saved_g1_charset = None;
+        self.saved_gl_is_g1 = None;
         // Reset DEC private modes to correct terminal defaults
         self.dec_modes = DecModes::new();
         // Reset tab stops to every 8th column
@@ -370,5 +461,9 @@ impl TerminalCore {
         self.parser_in_ground = true;
         // Clear any buffered print characters
         self.print_buf.clear();
+        // Reset character set designations to US ASCII
+        self.g0_charset = types::charset::CharsetType::Ascii;
+        self.g1_charset = types::charset::CharsetType::Ascii;
+        self.gl_is_g1 = false;
     }
 }

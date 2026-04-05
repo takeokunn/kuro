@@ -369,8 +369,8 @@ fn vt_osc8_hyperlink() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri,
-        Some("https://example.com".to_owned())
+        t.osc_data().hyperlink.uri.as_deref(),
+        Some("https://example.com")
     );
     t.advance(b"\x1b]8;;\x07");
     assert!(t.osc_data().hyperlink.uri.is_none());

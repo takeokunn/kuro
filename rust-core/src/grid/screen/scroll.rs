@@ -135,9 +135,11 @@ impl Screen {
             self.dirty_set.shift_right(n_actual);
 
             // Replace the now-stale head lines with fresh blank lines.
+            // Use clear_with_bg instead of new_with_bg to reuse the existing
+            // Vec<Cell> allocation — avoids one heap alloc+dealloc per rotated line.
             for i in 0..n_actual {
                 if let Some(line) = self.lines.get_mut(i) {
-                    *line = Line::new_with_bg(self.cols as usize, bg);
+                    line.clear_with_bg(bg);
                 }
             }
 

@@ -1,6 +1,6 @@
 ;;; kuro.el --- Main entry point for Kuro terminal emulator  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn <takeokunn@users.noreply.github.com>
 ;; URL: https://github.com/takeokunn/kuro

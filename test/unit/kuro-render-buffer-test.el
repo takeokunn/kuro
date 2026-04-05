@@ -318,17 +318,17 @@ exactly (1+ (line-end-position-of-row-0))."
       (should (= cached-row1 9)))))
 
 (ert-deftest kuro-render-buffer-update-line-full-cache-length-change-clears-later-rows ()
-  "When line length changes, cache entries for rows beyond row+1 are cleared to nil.
-Rows +2 and beyond cannot be cheaply recomputed so they are invalidated."
+  "When line length changes, cache entries for rows beyond row+1 are delta-adjusted.
+Rows +2 and beyond are shifted by (new-len - old-len) so they remain valid."
   (kuro-render-buffer-test--with-buffer
     (insert "abc\ndef\nghi\n")
     (setq-local kuro--row-positions (vector 1 5 9))
     (cl-letf (((symbol-function 'kuro--apply-ffi-face-at) #'ignore)
               ((symbol-function 'kuro--clear-row-image-overlays) #'ignore))
-      ;; Replace row 0 with a longer string — length changes, so rows 2+ cleared.
+      ;; Replace row 0 "abc" (3 chars) with "longer-text" (11 chars) → delta=+8.
       (kuro--update-line-full 0 "longer-text" nil nil))
-    ;; Row 2 (index 2) must be cleared to nil.
-    (should (null (aref kuro--row-positions 2)))))
+    ;; Row 2 (index 2) must be shifted by +8: 9 + 8 = 17.
+    (should (= (aref kuro--row-positions 2) 17))))
 
 ;;; Group 9: kuro--with-buffer-edit — error/inhibit-read-only cleanup
 

@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;; Extended unit tests for kuro-renderer.el (timer installation, cursor cache,
-;; sanitize-title edge cases, col-to-buf handling, ring-average, and pipeline helpers).
+;; sanitize-title edge cases, col-to-buf handling, and pipeline helpers).
 ;; Tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
 ;; All FFI and stream functions are stubbed with cl-letf.
 ;;
@@ -10,7 +10,6 @@
 ;;     Group 12: kuro--install-render-timer
 ;;     Group 13: kuro--reset-cursor-cache
 ;;     Group 14: kuro--sanitize-title edge cases
-;;     Group 24: kuro--ring-average
 ;;     Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
 ;;
 ;; Core renderer tests (Groups 1-10b) are in kuro-renderer-test.el.
@@ -212,34 +211,6 @@ Verification: after a second install the old timer is no longer in `timer-list'.
       ;; Mapping should be stored
       (should (equal (gethash 0 kuro--col-to-buf-map) [0 0 1 1])))))
 
-;;; Group 24: kuro--ring-average
-
-(ert-deftest test-kuro-ring-average-uniform-values ()
-  "kuro--ring-average returns correct mean for uniform ring contents."
-  (let ((ring (make-vector 4 2.0)))
-    (should (= (kuro--ring-average ring 4) 2.0))))
-
-(ert-deftest test-kuro-ring-average-mixed-values ()
-  "kuro--ring-average computes (0+1+2+3)/4 = 1.5."
-  (let ((ring (vector 0.0 1.0 2.0 3.0)))
-    (should (= (kuro--ring-average ring 4) 1.5))))
-
-(ert-deftest test-kuro-ring-average-single-element ()
-  "kuro--ring-average of a 1-element ring equals that element."
-  (let ((ring (vector 7.5)))
-    (should (= (kuro--ring-average ring 1) 7.5))))
-
-(ert-deftest test-kuro-ring-average-all-zeros ()
-  "kuro--ring-average of an all-zero ring is 0.0."
-  (let ((ring (make-vector 10 0.0)))
-    (should (= (kuro--ring-average ring 10) 0.0))))
-
-(ert-deftest test-kuro-ring-average-size-smaller-than-ring ()
-  "kuro--ring-average only averages SIZE elements, not the full ring."
-  (let ((ring (vector 1.0 2.0 100.0 100.0)))
-    ;; Only first 2 elements: (1+2)/2 = 1.5
-    (should (= (kuro--ring-average ring 2) 1.5))))
-
 ;;; Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
 
 (ert-deftest kuro-renderer-timed-returns-body-value ()
@@ -264,9 +235,12 @@ Verification: after a second install the old timer is no longer in `timer-list'.
   (should (= 0 (kuro--pipeline-face-count nil))))
 
 (ert-deftest kuro-renderer-pipeline-face-count-counts-faces ()
-  "kuro--pipeline-face-count sums face-list lengths across all updates."
-  (let ((updates (list (cons (cons (cons 0 "a") (list 1 2 3)) [])
-                       (cons (cons (cons 1 "b") (list 4 5)) []))))
+  "kuro--pipeline-face-count sums face-range counts across all updates.
+face-ranges is a stride-6 flat vector: (/ (length fr) 6) gives the count.
+Row 0 has 2 ranges (12 elements) and row 1 has 3 ranges (18 elements) = 5 total."
+  ;; updates is a vector of flat [row text face-ranges col-to-buf] entries.
+  (let ((updates (vector (vector 0 "a" (make-vector 12 0) [])
+                         (vector 1 "b" (make-vector 18 0) []))))
     (should (= 5 (kuro--pipeline-face-count updates)))))
 
 (ert-deftest kuro-renderer-pipeline-step-apply-skips-nil ()

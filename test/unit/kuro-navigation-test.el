@@ -8,9 +8,10 @@
 ;; Tests kuro-previous-prompt and kuro-next-prompt using mock
 ;; kuro--prompt-positions data.  No Rust module required.
 ;;
-;; Data format: kuro--prompt-positions is a list of (MARK-TYPE ROW COL) proper
-;; lists where MARK-TYPE is a string such as "prompt-start", ROW and COL are
-;; 0-based integers, matching the FFI output of kuro-core-poll-prompt-marks.
+;; Data format: kuro--prompt-positions is a list of (MARK-TYPE ROW COL EXIT-CODE)
+;; proper lists where MARK-TYPE is a string such as "prompt-start", ROW and COL
+;; are 0-based integers, and EXIT-CODE is an integer or nil.  Matches the FFI
+;; output of kuro-core-poll-prompt-marks.
 ;; Navigation compares ROW (cadr entry) against (1- (line-number-at-pos)).
 ;;
 ;; Group 5 covers kuro--update-prompt-positions (moved from

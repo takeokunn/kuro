@@ -1,6 +1,6 @@
 ;;; kuro-tui-mode.el --- TUI mode detection and adaptive frame rate for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -49,6 +49,12 @@
   "Fraction of dirty lines (0.0-1.0) that triggers TUI mode detection.
 A value of 0.8 means 80% of rows must be dirty before the renderer
 switches to TUI mode.")
+
+(defconst kuro--tui-dirty-threshold-scaled
+  (round (* kuro--tui-dirty-threshold 10))
+  "Pre-scaled integer form of `kuro--tui-dirty-threshold' (threshold × 10).
+Pre-computed so `kuro--detect-tui-mode' can use pure integer arithmetic
+without a float multiply + round on every 120fps timer invocation.")
 
 (defconst kuro--tui-mode-threshold 10
   "Consecutive full-dirty frames before suppressing the streaming idle timer.

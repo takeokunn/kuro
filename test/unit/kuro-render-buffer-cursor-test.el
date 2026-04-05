@@ -361,7 +361,7 @@ This tests the lightweight equality guard."
       (setq-local kuro--has-images t)
       (cl-letf (((symbol-function 'kuro--clear-row-image-overlays) #'ignore)
                 ((symbol-function 'kuro--clear-line-blink-overlays)
-                 (lambda (_pt _row) (setq blink-clear-called t))))
+                 (lambda (_pt _row &optional _pre-end) (setq blink-clear-called t))))
         (kuro--clear-row-overlays 0))
       (should blink-clear-called))))
 

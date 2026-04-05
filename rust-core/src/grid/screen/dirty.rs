@@ -76,6 +76,36 @@ impl Screen {
         }
     }
 
+    /// Fill `out` with dirty row indices and clear the dirty set.
+    ///
+    /// Clears `out` first, then drains dirty indices into it.  Prefer this
+    /// over [`take_dirty_lines`] in hot paths (120fps render loop) to reuse
+    /// an existing allocation rather than allocating a fresh `Vec` each frame.
+    pub fn take_dirty_lines_into(&mut self, out: &mut Vec<usize>) {
+        out.clear();
+        if self.is_alternate_active {
+            if let Some(alt) = self.alternate_screen.as_mut() {
+                if alt.full_dirty {
+                    alt.full_dirty = false;
+                    alt.dirty_set.clear();
+                    out.extend(0..alt.rows as usize);
+                    return;
+                }
+                out.extend(alt.dirty_set.iter_ones_direct());
+                alt.dirty_set.clear();
+                return;
+            }
+        }
+        if self.full_dirty {
+            self.full_dirty = false;
+            self.dirty_set.clear();
+            out.extend(0..self.rows as usize);
+        } else {
+            out.extend(self.dirty_set.iter_ones_direct());
+            self.dirty_set.clear();
+        }
+    }
+
     /// Get dirty lines and clear the dirty set
     pub fn take_dirty_lines(&mut self) -> Vec<usize> {
         if self.is_alternate_active {

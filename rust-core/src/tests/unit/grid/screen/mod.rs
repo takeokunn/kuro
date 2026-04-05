@@ -11,7 +11,7 @@ pub(super) mod scrollback;
 // ── Shared test helpers ───────────────────────────────────────────────────────
 
 /// Construct a standard 24×80 [`Screen`] for screen unit tests.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "shared helper; not every test submodule calls it")]
 pub(super) fn make_screen() -> crate::grid::screen::Screen {
     crate::grid::screen::Screen::new(24, 80)
 }

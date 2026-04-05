@@ -1,12 +1,21 @@
 ;;; kuro-input-mouse.el --- Mouse tracking for Kuro terminal emulator  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
 
 ;;; Commentary:
-;; Mouse encoding and tracking event handlers for X10, SGR, and pixel modes.
+
+;; Mouse event encoding and tracking for the Kuro terminal emulator.
+;;
+;; Supports three mouse coordinate modes: X10 (legacy 8-bit encoding),
+;; SGR extended coordinates (mode 1006), and pixel coordinates
+;; (mode 1016).  Provides press/release/scroll handlers that dispatch
+;; through `kuro--encode-mouse' or `kuro--encode-mouse-sgr'.
+;;
+;; Also defines `kuro--def-scroll-command', a macro for scroll commands
+;; shared with `kuro-input.el'.
 
 ;;; Code:
 

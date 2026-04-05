@@ -366,14 +366,14 @@ The stubs return deterministic values so tests do not depend on display state."
       ;; Both calls must return the same cached object (eq, not just equal).
       (should (eq face-zero face-sentinel)))))
 
-(ert-deftest kuro-faces-color--cached-face-raw-ul-nil-normalized ()
-  "ul-enc=nil is normalized to 0 and hits the same cache slot as ul-enc=0."
+(ert-deftest kuro-faces-color--cached-face-raw-ul-maxu32-not-normalized ()
+  "ul-enc=#xFFFFFFFF (max u32) is NOT normalized to 0 — distinct cache slot."
   (require 'kuro-faces)
   (kuro-faces-color-test--with-face-stubs
     (kuro--clear-face-cache)
-    (let ((face-zero (kuro--get-cached-face-raw 0 0 0 0))
-          (face-nil  (kuro--get-cached-face-raw 0 0 0 nil)))
-      (should (eq face-zero face-nil)))))
+    (let ((face-zero   (kuro--get-cached-face-raw 0 0 0 0))
+          (face-maxu32 (kuro--get-cached-face-raw 0 0 0 #xFFFFFFFF)))
+      (should-not (eq face-zero face-maxu32)))))
 
 (ert-deftest kuro-faces-color--cached-face-raw-nonzero-ul-distinct-from-zero ()
   "A non-zero, non-sentinel ul-enc is kept distinct from ul-enc=0 in the cache."

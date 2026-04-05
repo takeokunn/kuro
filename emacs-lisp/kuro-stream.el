@@ -1,6 +1,6 @@
 ;;; kuro-stream.el --- Smooth streaming output for AI agents in Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -79,18 +79,19 @@ triggers `kuro--render-cycle' to flush the new data immediately."
   (when (and (buffer-live-p buf)
              kuro-streaming-latency-mode)
     (with-current-buffer buf
-      (when (and kuro--initialized
-                 (kuro--has-pending-output)
-                 ;; Rate-limit: fire render at most kuro-frame-rate times/sec.
-                 ;; kuro--has-pending-output is checked at full idle frequency
-                 ;; (not rate-limited) so streaming detection stays responsive.
-                 (let ((now (float-time)))
-                   (>= (- now kuro--stream-last-render-time)
-                       (or kuro--stream-min-interval
-                           (setq kuro--stream-min-interval
-                                 (/ 1.0 kuro-frame-rate))))))
-        (setq kuro--stream-last-render-time (float-time))
-        (kuro--render-cycle)))))
+      (when kuro--initialized
+        (when (kuro--has-pending-output)
+          ;; Rate-limit: fire render at most kuro-frame-rate times/sec.
+          ;; kuro--has-pending-output is checked at full idle frequency
+          ;; (not rate-limited) so streaming detection stays responsive.
+          (let ((now (float-time)))
+            (when (>= (- now kuro--stream-last-render-time)
+                      (or kuro--stream-min-interval
+                          (setq kuro--stream-min-interval
+                                (/ 1.0 kuro-frame-rate))))
+              ;; Reuse `now' to avoid a second gettimeofday syscall.
+              (setq kuro--stream-last-render-time now)
+              (kuro--render-cycle))))))))
 
 (defun kuro--start-stream-idle-timer ()
   "Start the zero-delay idle timer for low-latency streaming output.

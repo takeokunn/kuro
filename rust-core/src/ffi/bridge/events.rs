@@ -56,7 +56,8 @@ fn kuro_core_poll_clipboard_actions(env: &Env, session_id: u64) -> EmacsResult<V
         super::super::abstraction::session::TerminalSession::take_clipboard_actions,
     );
 
-    let mut list = false.into_lisp(env)?;
+    let nil = false.into_lisp(env)?;
+    let mut list = nil;
     for action in actions.into_iter().rev() {
         let item = match action {
             crate::types::osc::ClipboardAction::Write(text) => {
@@ -66,7 +67,6 @@ fn kuro_core_poll_clipboard_actions(env: &Env, session_id: u64) -> EmacsResult<V
             }
             crate::types::osc::ClipboardAction::Query => {
                 let tag = "query".into_lisp(env)?;
-                let nil = false.into_lisp(env)?;
                 env.cons(tag, nil)?
             }
         };
@@ -78,8 +78,9 @@ fn kuro_core_poll_clipboard_actions(env: &Env, session_id: u64) -> EmacsResult<V
 /// Poll for pending prompt mark events from OSC 133 and clear them.
 ///
 /// Returns a list of prompt mark descriptors, each of the form:
-///   (MARK-TYPE ROW COL)
+///   (MARK-TYPE ROW COL EXIT-CODE)
 /// where MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end"
+/// and EXIT-CODE is an integer for command-end marks or nil for others.
 #[defun]
 #[expect(
     clippy::cast_possible_wrap,
@@ -93,7 +94,8 @@ fn kuro_core_poll_prompt_marks(env: &Env, session_id: u64) -> EmacsResult<Value<
         super::super::abstraction::session::TerminalSession::take_prompt_marks,
     );
 
-    let mut list = false.into_lisp(env)?;
+    let nil = false.into_lisp(env)?;
+    let mut list = nil;
     for event in marks.into_iter().rev() {
         let mark_str = match event.mark {
             crate::types::osc::PromptMark::PromptStart => "prompt-start",
@@ -104,15 +106,44 @@ fn kuro_core_poll_prompt_marks(env: &Env, session_id: u64) -> EmacsResult<Value<
         let mark_val = mark_str.into_lisp(env)?;
         let row_val = (event.row as i64).into_lisp(env)?;
         let col_val = (event.col as i64).into_lisp(env)?;
+        let exit_val = match event.exit_code {
+            Some(code) => i64::from(code).into_lisp(env)?,
+            None => nil,
+        };
 
-        // Build proper list: (mark-type row col)
-        let nil = false.into_lisp(env)?;
-        let item = env.cons(col_val, nil)?;
+        // Build proper list: (mark-type row col exit-code)
+        let item = env.cons(exit_val, nil)?;
+        let item = env.cons(col_val, item)?;
         let item = env.cons(row_val, item)?;
         let item = env.cons(mark_val, item)?;
         list = env.cons(item, list)?;
     }
     Ok(list)
+}
+
+/// Poll for pending OSC 51 eval commands and clear them.
+/// Returns a list of command strings.
+#[defun]
+fn kuro_core_poll_eval_commands(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    let commands = drain_session_vec(
+        env,
+        session_id,
+        "poll_eval_commands",
+        super::super::abstraction::session::TerminalSession::take_eval_commands,
+    );
+    let mut list = false.into_lisp(env)?;
+    for cmd in commands.into_iter().rev() {
+        let val = cmd.into_lisp(env)?;
+        list = env.cons(val, list)?;
+    }
+    Ok(list)
+}
+
+/// Get the hostname from the last OSC 7 notification.
+/// Returns the hostname string or nil if localhost/unset.
+#[defun]
+fn kuro_core_get_cwd_host(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    query_session_opt(env, session_id, |s| Ok(s.get_cwd_host()))
 }
 
 /// Check if the PTY has pending unread output (non-blocking).
@@ -153,18 +184,58 @@ fn kuro_core_get_palette_updates(env: &Env, session_id: u64) -> EmacsResult<Valu
         .unwrap_or_else(|_| Ok(Vec::new()))
         .unwrap_or_default();
 
-    let mut list = false.into_lisp(env)?;
+    let nil = false.into_lisp(env)?;
+    let mut list = nil;
     for (idx, r, g, b) in updates.into_iter().rev() {
         let idx_val = i64::from(idx).into_lisp(env)?;
         let r_val = i64::from(r).into_lisp(env)?;
         let g_val = i64::from(g).into_lisp(env)?;
         let b_val = i64::from(b).into_lisp(env)?;
 
-        let nil = false.into_lisp(env)?;
         let item = env.cons(b_val, nil)?;
         let item = env.cons(g_val, item)?;
         let item = env.cons(r_val, item)?;
         let item = env.cons(idx_val, item)?;
+        list = env.cons(item, list)?;
+    }
+    Ok(list)
+}
+
+/// Poll hyperlink ranges for all visible terminal rows.
+///
+/// Returns a flat list of `(ROW START END URI)` entries, one per hyperlink
+/// range per row.  `START` and `END` are buffer character offsets.
+/// Rows without hyperlinks are omitted.
+#[defun]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "row/start/end are terminal dimensions (≤ 65535); usize→i64 never wraps"
+)]
+fn kuro_core_poll_hyperlink_ranges(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    let ranges: Vec<(usize, usize, usize, String)> =
+        catch_unwind(AssertUnwindSafe(|| -> crate::Result<Vec<_>> {
+            let global = lock_session!();
+            Ok(global
+                .get(&session_id)
+                .map(super::super::abstraction::session::TerminalSession::get_hyperlink_ranges)
+                .unwrap_or_default())
+        }))
+        .unwrap_or_else(|_| Ok(Vec::new()))
+        .unwrap_or_default();
+
+    let nil = false.into_lisp(env)?;
+    let mut list = nil;
+    for (row, start, end, uri) in ranges.into_iter().rev() {
+        let row_val = (row as i64).into_lisp(env)?;
+        let start_val = (start as i64).into_lisp(env)?;
+        let end_val = (end as i64).into_lisp(env)?;
+        let uri_val = uri.into_lisp(env)?;
+
+        // Build proper list: (ROW START END URI)
+        let item = env.cons(uri_val, nil)?;
+        let item = env.cons(end_val, item)?;
+        let item = env.cons(start_val, item)?;
+        let item = env.cons(row_val, item)?;
         list = env.cons(item, list)?;
     }
     Ok(list)

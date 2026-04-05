@@ -407,6 +407,7 @@ fn test_standalone_emoji_still_wide() {
     );
 }
 
+include!("vte_handler_charset.rs");
 include!("vte_handler_device_attrs.rs");
 include!("vte_handler_esc.rs");
 include!("vte_handler_osc.rs");

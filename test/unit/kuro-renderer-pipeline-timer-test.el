@@ -127,8 +127,9 @@
     (setq kuro--last-rows 2)
     ;; Put 5 entries to exceed 2*2=4 threshold.
     (dotimes (i 5) (puthash i [0 1] kuro--col-to-buf-map))
-    ;; dirty-rows: row 0 has empty vector (CJK→ASCII transition).
-    (let ((dirty-rows '((((0 . "ascii") . nil) . []))))
+    ;; dirty-rows: row 0 has empty col-to-buf vector (CJK→ASCII transition).
+    ;; Structure: flat [row text face-ranges col-to-buf] vectors.
+    (let ((dirty-rows (vector (vector 0 "ascii" nil []))))
       (kuro--evict-stale-col-to-buf-entries dirty-rows))
     ;; Row 0 should be evicted (empty c2b) + rows 2,3,4 (out-of-bounds >= 2).
     (should-not (gethash 0 kuro--col-to-buf-map))
@@ -295,7 +296,7 @@
     (let ((call-count 0))
       (cl-letf (((symbol-function 'kuro--update-line-full)
                  (lambda (_row _text _faces _c2b) (cl-incf call-count))))
-        (kuro--apply-dirty-lines '((((0 . "hello") . nil) . nil)))
+        (kuro--apply-dirty-lines (vector (vector 0 "hello" nil nil)))
         (should (= call-count 1))))))
 
 ;;; Group 25: kuro--pipeline-step-ffi
@@ -332,54 +333,78 @@
   "kuro--update-frame-budget-ratio nudges ratio down when avg frame time exceeds 0.9 * budget."
   (kuro-renderer-pipeline-test--with-buffer
     ;; Fill ring with durations that average to 95% of the frame budget.
-    ;; Budget = 1/30 ≈ 0.0333s.  0.95 * budget ≈ 0.0317s → avg > 0.9 * budget triggers decrease.
-    (let ((kuro--frame-budget-ratio 0.8)
-          (kuro--frame-duration-ring (make-vector 10 (* 0.95 (/ 1.0 kuro-frame-rate))))
-          (kuro--frame-duration-ring-index 0)
-          (kuro-frame-rate kuro-frame-rate))
-      (kuro--update-frame-budget-ratio (* 0.95 (/ 1.0 kuro-frame-rate)))
+    ;; Budget = 1/rate.  0.95 * budget > 0.9 * budget triggers decrease.
+    (let* ((rate kuro-frame-rate)
+           (budget (/ 1.0 rate))
+           (dur    (* 0.95 budget))
+           (kuro--frame-budget-ratio 0.8)
+           (kuro--frame-budget-seconds budget)
+           (kuro--budget-threshold-high (* 0.9 budget))
+           (kuro--budget-threshold-low  (* 0.5 budget))
+           (kuro--frame-duration-ring (make-vector 10 dur))
+           (kuro--frame-duration-ring-sum (* 10 dur))
+           (kuro--frame-duration-ring-index 0))
+      (kuro--update-frame-budget-ratio dur)
       (should (< kuro--frame-budget-ratio 0.8)))))
 
 (ert-deftest kuro-renderer-update-frame-budget-ratio-increases-when-under-budget ()
   "kuro--update-frame-budget-ratio nudges ratio up when avg frame time is below 0.5 * budget."
   (kuro-renderer-pipeline-test--with-buffer
     ;; Fill ring with very short durations — 10% of the frame budget.
-    (let ((kuro--frame-budget-ratio 0.6)
-          (kuro--frame-duration-ring (make-vector 10 (* 0.1 (/ 1.0 kuro-frame-rate))))
-          (kuro--frame-duration-ring-index 0)
-          (kuro-frame-rate kuro-frame-rate))
-      (kuro--update-frame-budget-ratio (* 0.1 (/ 1.0 kuro-frame-rate)))
+    (let* ((budget (/ 1.0 kuro-frame-rate))
+           (dur    (* 0.1 budget))
+           (kuro--frame-budget-ratio 0.6)
+           (kuro--frame-budget-seconds budget)
+           (kuro--budget-threshold-high (* 0.9 budget))
+           (kuro--budget-threshold-low  (* 0.5 budget))
+           (kuro--frame-duration-ring (make-vector 10 dur))
+           (kuro--frame-duration-ring-sum (* 10 dur))
+           (kuro--frame-duration-ring-index 0))
+      (kuro--update-frame-budget-ratio dur)
       (should (> kuro--frame-budget-ratio 0.6)))))
 
 (ert-deftest kuro-renderer-update-frame-budget-ratio-clamped-at-minimum ()
   "kuro--update-frame-budget-ratio does not decrease below 0.5."
   (kuro-renderer-pipeline-test--with-buffer
-    (let ((kuro--frame-budget-ratio 0.5)
-          (kuro--frame-duration-ring (make-vector 10 1.0))
-          (kuro--frame-duration-ring-index 0)
-          (kuro-frame-rate kuro-frame-rate))
+    (let* ((budget (/ 1.0 kuro-frame-rate))
+           (kuro--frame-budget-ratio 0.5)
+           (kuro--frame-budget-seconds budget)
+           (kuro--budget-threshold-high (* 0.9 budget))
+           (kuro--budget-threshold-low  (* 0.5 budget))
+           (kuro--frame-duration-ring (make-vector 10 1.0))
+           (kuro--frame-duration-ring-sum 10.0)
+           (kuro--frame-duration-ring-index 0))
       (kuro--update-frame-budget-ratio 1.0)
       (should (>= kuro--frame-budget-ratio 0.5)))))
 
 (ert-deftest kuro-renderer-update-frame-budget-ratio-clamped-at-maximum ()
   "kuro--update-frame-budget-ratio does not increase above 0.8."
   (kuro-renderer-pipeline-test--with-buffer
-    (let ((kuro--frame-budget-ratio 0.78)
-          (kuro--frame-duration-ring (make-vector 10 0.0))
-          (kuro--frame-duration-ring-index 0)
-          (kuro-frame-rate kuro-frame-rate))
+    (let* ((budget (/ 1.0 kuro-frame-rate))
+           (kuro--frame-budget-ratio 0.78)
+           (kuro--frame-budget-seconds budget)
+           (kuro--budget-threshold-high (* 0.9 budget))
+           (kuro--budget-threshold-low  (* 0.5 budget))
+           (kuro--frame-duration-ring (make-vector 10 0.0))
+           (kuro--frame-duration-ring-sum 0.0)
+           (kuro--frame-duration-ring-index 0))
       (kuro--update-frame-budget-ratio 0.0)
       (should (<= kuro--frame-budget-ratio 0.8)))))
 
 (ert-deftest kuro-renderer-update-frame-budget-ratio-stable-in-midrange ()
   "kuro--update-frame-budget-ratio leaves ratio unchanged when avg is between 0.5 and 0.9 of budget."
   (kuro-renderer-pipeline-test--with-buffer
-    ;; 70% of frame budget — in the stable zone.
-    (let* ((duration (* 0.7 (/ 1.0 kuro-frame-rate)))
+    ;; 70% of frame budget — in the stable zone (between 0.5 and 0.9).
+    (let* ((rate kuro-frame-rate)
+           (budget (/ 1.0 rate))
+           (duration (* 0.7 budget))
            (kuro--frame-budget-ratio 0.65)
+           (kuro--frame-budget-seconds budget)
+           (kuro--budget-threshold-high (* 0.9 budget))
+           (kuro--budget-threshold-low  (* 0.5 budget))
            (kuro--frame-duration-ring (make-vector 10 duration))
-           (kuro--frame-duration-ring-index 0)
-           (kuro-frame-rate kuro-frame-rate))
+           (kuro--frame-duration-ring-sum (* 10 duration))
+           (kuro--frame-duration-ring-index 0))
       (kuro--update-frame-budget-ratio duration)
       (should (= kuro--frame-budget-ratio 0.65)))))
 

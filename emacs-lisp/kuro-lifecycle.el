@@ -1,6 +1,6 @@
 ;;; kuro-lifecycle.el --- Terminal lifecycle management for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -19,7 +19,6 @@
 
 ;;; Code:
 
-(require 'cl-lib)
 (require 'seq)
 (require 'kuro-ffi)
 (require 'kuro-renderer)
@@ -42,6 +41,29 @@
 
 (defconst kuro--startup-render-delay 0.05
   "Delay in seconds before the first render after terminal startup.")
+
+(defun kuro--shell-integration-dir ()
+  "Return the directory containing kuro shell integration scripts, or nil.
+Resolves the `etc/' directory relative to the Elisp source location."
+  (when kuro-shell-integration
+    (let* ((lib (or (locate-library "kuro-lifecycle")
+                    (locate-library "kuro")))
+           (dir (and lib (expand-file-name
+                          "etc"
+                          (file-name-directory
+                           (directory-file-name
+                            (file-name-directory lib)))))))
+      (when (and dir (file-directory-p dir))
+        dir))))
+
+(defun kuro--setup-shell-integration-env ()
+  "Set KURO_SHELL_INTEGRATION_DIR for the next PTY spawn.
+The Rust child process reads this variable and configures shell-specific
+integration.  The variable is removed by Rust after reading."
+  (let ((dir (kuro--shell-integration-dir)))
+    (if dir
+        (setenv "KURO_SHELL_INTEGRATION_DIR" dir)
+      (setenv "KURO_SHELL_INTEGRATION_DIR" nil))))
 
 (defconst kuro--buffer-name-default "*kuro*"
   "Default buffer name for new Kuro terminal instances.")
@@ -73,6 +95,7 @@ When BUFFER-NAME is nil, generate a fresh name from `kuro--buffer-name-default'.
 Returns BUFFER after attempting startup."
   (with-current-buffer buffer
     (kuro-mode)
+    (setq kuro--shell-command command)
     ;; Measure AFTER kuro-mode: kuro--assign-mono-fonts changes the fontset
     ;; via set-fontset-font, which can change effective line height (replacing
     ;; taller fallback fonts with the ASCII monospace font).  This changes
@@ -82,7 +105,7 @@ Returns BUFFER after attempting startup."
     (pcase-let ((`(,rows . ,cols) (kuro--terminal-dimensions)))
       (let ((inhibit-read-only t))
         (kuro--prefill-buffer rows))
-      ;; Spawn PTY with the correct dimensions from the start — no resize needed.
+      (kuro--setup-shell-integration-env)
       (when (kuro--init command rows cols)
         (kuro--init-session-buffer buffer rows cols)
         (kuro--start-render-loop)
@@ -176,7 +199,11 @@ always computes fresh cursor position from Rust."
     (kuro--setup-char-width-table)
     (kuro--setup-fontset)
     (kuro--remap-default-face kuro-color-white kuro-color-black)
-    (kuro--reset-cursor-cache)))
+    (kuro--reset-cursor-cache)
+    (kuro--ensure-left-margin)
+    (kuro--setup-dnd)
+    (kuro--setup-compilation)
+    (kuro--setup-bookmark)))
 
 ;; kuro--set-scrollback-max-lines is defined in kuro-ffi-osc.el (loaded via kuro-renderer)
 (declare-function kuro--set-scrollback-max-lines "kuro-ffi-osc" (max-lines))
@@ -201,6 +228,24 @@ always computes fresh cursor position from Rust."
 ;; kuro--clear-all-image-overlays is defined in kuro-overlays.el
 (declare-function kuro--clear-all-image-overlays "kuro-overlays" ())
 
+;; kuro--clear-hyperlink-overlays is defined in kuro-hyperlinks.el
+(declare-function kuro--clear-hyperlink-overlays "kuro-hyperlinks" ())
+
+;; kuro-dnd.el
+(declare-function kuro--setup-dnd    "kuro-dnd" ())
+(declare-function kuro--teardown-dnd "kuro-dnd" ())
+
+;; kuro-compilation.el
+(declare-function kuro--setup-compilation    "kuro-compilation" ())
+(declare-function kuro--teardown-compilation "kuro-compilation" ())
+
+;; kuro-bookmark.el
+(declare-function kuro--setup-bookmark "kuro-bookmark" ())
+
+;; kuro-prompt-status.el
+(declare-function kuro--ensure-left-margin           "kuro-prompt-status" ())
+(declare-function kuro--clear-prompt-status-overlays "kuro-prompt-status" ())
+
 ;; Forward reference: defvar-local in kuro-input-mouse.el
 (defvar kuro--mouse-pixel-mode nil
   "Forward reference; defvar-local in kuro-input-mouse.el.")
@@ -220,6 +265,10 @@ always computes fresh cursor position from Rust."
   "Forward reference; defvar-local in kuro-input.el.")
 ;; kuro-overlays.el
 (defvar kuro--blink-overlays nil
+  "Forward reference; defvar-local in kuro-overlays.el.")
+(defvar kuro--blink-overlays-slow nil
+  "Forward reference; defvar-local in kuro-overlays.el.")
+(defvar kuro--blink-overlays-fast nil
   "Forward reference; defvar-local in kuro-overlays.el.")
 ;; kuro-tui-mode.el (TUI mode state)
 (defvar kuro--tui-mode-active nil
@@ -245,6 +294,9 @@ always computes fresh cursor position from Rust."
 ;; kuro-faces.el
 (defvar kuro--font-remap-cookie nil
   "Forward reference; defvar-local in kuro-faces.el.")
+
+(defvar-local kuro--shell-command nil
+  "The shell command used to create this terminal session.")
 
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)
@@ -291,13 +343,19 @@ and font remap cookie.  Idempotent: safe to call more than once."
         kuro--tui-mode-frame-count 0
         kuro--last-dirty-count    0)
   (remove-overlays (point-min) (point-max) 'kuro-blink t)
-  (setq kuro--blink-overlays nil)
+  (setq kuro--blink-overlays      nil
+        kuro--blink-overlays-slow nil
+        kuro--blink-overlays-fast nil)
   (kuro--clear-all-image-overlays)
+  (kuro--clear-hyperlink-overlays)
+  (kuro--clear-prompt-status-overlays)
   (setq kuro--mouse-mode       0
         kuro--mouse-sgr        nil
         kuro--mouse-pixel-mode nil
         kuro--scroll-offset    0)
-  (kuro--with-face-remap kuro--font-remap-cookie))
+  (kuro--with-face-remap kuro--font-remap-cookie)
+  (kuro--teardown-compilation)
+  (kuro--teardown-dnd))
 
 ;;;###autoload
 (defun kuro-kill ()

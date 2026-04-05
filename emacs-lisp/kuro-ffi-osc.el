@@ -1,14 +1,20 @@
 ;;; kuro-ffi-osc.el --- OSC event, scrollback, and streaming wrappers for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
 
 ;;; Commentary:
 
-;; Wrappers for OSC title/CWD/clipboard/prompts, Kitty images,
-;; scrollback management, scroll events, and streaming detection.
+;; FFI wrappers for OSC-related terminal features: window title
+;; (OSC 2), current working directory (OSC 7), clipboard actions
+;; (OSC 52), prompt marks (OSC 133), palette updates (OSC 4),
+;; and default color queries (OSC 10/11/12).
+;;
+;; Also provides Kitty Graphics image retrieval, scrollback buffer
+;; management (get/clear/set-max/scroll-up/scroll-down), scroll event
+;; consumption, and pending-output detection for streaming.
 
 ;;; Code:
 
@@ -31,6 +37,9 @@
 (declare-function kuro-core-scroll-up                "ext:kuro-core" (session-id n))
 (declare-function kuro-core-scroll-down              "ext:kuro-core" (session-id n))
 (declare-function kuro-core-get-scroll-offset        "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-eval-commands       "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-cwd-host             "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-hyperlink-ranges    "ext:kuro-core" (session-id))
 
 (kuro--define-ffi-getters
  (kuro--get-and-clear-title
@@ -54,8 +63,10 @@ Returns nil if no actions are pending.")
  (kuro--poll-prompt-marks
   kuro-core-poll-prompt-marks nil
   "Poll for pending OSC 133 shell prompt mark notifications.
-Returns a list of (ROW . MARK-TYPE) pairs where MARK-TYPE is a symbol
-such as `prompt-start', `prompt-end', `command-start', or `command-end'.
+Returns a list of (MARK-TYPE ROW COL EXIT-CODE) proper lists where
+MARK-TYPE is a string such as \"prompt-start\", \"prompt-end\",
+\"command-start\", or \"command-end\".  EXIT-CODE is an integer for
+command-end marks (from OSC 133;D;N), or nil.
 Returns nil if no marks are pending.")
 
  (kuro--poll-image-notifications
@@ -103,7 +114,22 @@ Returns an integer, or nil if not initialized.")
  (kuro--get-scroll-offset
   kuro-core-get-scroll-offset 0
   "Get the current scrollback viewport offset from the Rust core.
-Returns 0 if not initialized."))
+Returns 0 if not initialized.")
+
+ (kuro--poll-eval-commands
+  kuro-core-poll-eval-commands nil
+  "Poll for pending OSC 51 eval commands from the terminal.
+Returns a list of command strings, or nil if none are pending.")
+
+ (kuro--get-cwd-host
+  kuro-core-get-cwd-host nil
+  "Get the hostname from the last OSC 7 notification.
+Returns the hostname string or nil if localhost/unset.")
+
+ (kuro--poll-hyperlink-ranges
+  kuro-core-poll-hyperlink-ranges nil
+  "Poll for OSC 8 hyperlink ranges on visible terminal rows.
+Returns a list of (ROW START END URI) entries, or nil if none."))
 
 (kuro--define-ffi-unary-getters
  (kuro--get-image

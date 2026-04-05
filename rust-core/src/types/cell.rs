@@ -1,8 +1,9 @@
 //! Cell and attribute types
 
+use std::sync::Arc;
+
 use super::color::Color;
 use compact_str::CompactString;
-use serde::{Deserialize, Serialize};
 
 /// SGR boolean attribute flags — packed into a single byte per cell.
 ///
@@ -128,21 +129,9 @@ impl std::ops::Not for SgrFlags {
     }
 }
 
-impl Serialize for SgrFlags {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.bits().serialize(s)
-    }
-}
-
-impl<'de> Deserialize<'de> for SgrFlags {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let bits = u8::deserialize(d)?;
-        Ok(Self::from_bits_truncate(bits))
-    }
-}
 
 /// Cell width for Unicode/CJK character support
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CellWidth {
     /// Single-width character (ASCII, most symbols)
     #[default]
@@ -154,25 +143,30 @@ pub enum CellWidth {
 }
 
 /// Underline style for SGR 4:x sub-parameters
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+///
+/// `#[repr(u8)]` with sequential discriminants allows `encode_attrs` in
+/// `ffi/codec.rs` to cast directly to `u64` instead of using a 5-arm match
+/// table.  The discriminant values (0-5) match the wire encoding exactly.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnderlineStyle {
     /// No underline (default)
     #[default]
-    None,
+    None     = 0,
     /// Single straight line (SGR 4 or 4:1)
-    Straight,
+    Straight = 1,
     /// Double line (SGR 4:2 or SGR 21)
-    Double,
+    Double   = 2,
     /// Curly/wavy line (SGR 4:3, undercurl)
-    Curly,
+    Curly    = 3,
     /// Dotted line (SGR 4:4)
-    Dotted,
+    Dotted   = 4,
     /// Dashed line (SGR 4:5)
-    Dashed,
+    Dashed   = 5,
 }
 
 /// SGR (Select Graphic Rendition) attributes for a cell
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgrAttributes {
     /// Foreground color
     pub foreground: Color,
@@ -211,20 +205,39 @@ impl SgrAttributes {
     pub fn underline(&self) -> bool {
         self.underline_style != UnderlineStyle::None
     }
+
+    /// Returns `true` when every attribute is at its terminal default value.
+    ///
+    /// Used in [`fill_encode_pool`] as a fast path that skips four
+    /// `encode_color`/`encode_attrs` calls for the common case of
+    /// unstyled cells (shell prompts, plain text, man-page output, etc.).
+    ///
+    /// The test order is cheapest-first to short-circuit early:
+    /// `flags` and `underline_style` are integer/discriminant comparisons;
+    /// color comparisons come last.
+    #[inline]
+    #[must_use]
+    pub fn is_all_default(&self) -> bool {
+        self.flags.is_empty()
+            && self.underline_style == UnderlineStyle::None
+            && self.foreground == Color::Default
+            && self.background == Color::Default
+            && self.underline_color == Color::Default
+    }
 }
 
 /// Extended cell data for rarely-used features (hyperlinks, images).
 /// Stored behind `Option<Box<CellExtras>>` to keep the common Cell small.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellExtras {
     /// Hyperlink ID (if any)
-    pub hyperlink_id: Option<String>,
+    pub hyperlink_id: Option<Arc<str>>,
     /// Image ID for Kitty Graphics Protocol (if any)
     pub image_id: Option<u32>,
 }
 
 /// A single cell in the terminal grid
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Cell {
     /// Grapheme cluster at this position (may include combining characters)
     pub(crate) grapheme: CompactString,
@@ -282,7 +295,7 @@ impl Cell {
     /// Set hyperlink ID
     #[inline]
     #[must_use]
-    pub fn with_hyperlink(mut self, id: String) -> Self {
+    pub fn with_hyperlink(mut self, id: Arc<str>) -> Self {
         self.set_hyperlink_id(Some(id));
         self
     }
@@ -303,7 +316,7 @@ impl Cell {
 
     /// Set hyperlink ID, allocating or deallocating extras as needed
     #[inline]
-    pub fn set_hyperlink_id(&mut self, id: Option<String>) {
+    pub fn set_hyperlink_id(&mut self, id: Option<Arc<str>>) {
         if id.is_none() && self.extras.as_ref().is_none_or(|e| e.image_id.is_none()) {
             self.extras = None;
         } else {
@@ -394,6 +407,8 @@ impl PartialEq for Cell {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[test]
@@ -467,11 +482,11 @@ mod tests {
         assert_eq!(cell.hyperlink_id(), None);
 
         // with_hyperlink sets the hyperlink_id to the given String
-        let linked_cell = cell.with_hyperlink("https://example.com".to_owned());
+        let linked_cell = cell.with_hyperlink(Arc::from("https://example.com"));
         assert_eq!(linked_cell.hyperlink_id(), Some("https://example.com"));
 
         // Replacing an existing hyperlink with a different one works correctly
-        let relinked = linked_cell.with_hyperlink("https://other.com".to_owned());
+        let relinked = linked_cell.with_hyperlink(Arc::from("https://other.com"));
         assert_eq!(relinked.hyperlink_id(), Some("https://other.com"));
 
         // Other fields are preserved after setting a hyperlink
@@ -542,7 +557,7 @@ mod tests {
     #[test]
     fn test_set_hyperlink_id_some_stores_id() {
         let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
         assert_eq!(cell.hyperlink_id(), Some("https://example.com"));
     }
 
@@ -550,7 +565,7 @@ mod tests {
     fn test_set_hyperlink_id_none_clears_but_keeps_image() {
         let mut cell = Cell::new('A');
         // Set both ids
-        cell.set_hyperlink_id(Some("link".to_owned()));
+        cell.set_hyperlink_id(Some(Arc::from("link")));
         cell.set_image_id(Some(42));
         // Clear hyperlink — image should survive
         cell.set_hyperlink_id(None);
@@ -568,7 +583,7 @@ mod tests {
     #[test]
     fn test_set_image_id_none_clears_but_keeps_hyperlink() {
         let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(Some("link".to_owned()));
+        cell.set_hyperlink_id(Some(Arc::from("link")));
         cell.set_image_id(Some(7));
         // Clear image — hyperlink should survive
         cell.set_image_id(None);

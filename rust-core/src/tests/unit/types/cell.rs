@@ -4,6 +4,8 @@
 //! `src/types/cell.rs` and add property-based coverage for mathematical
 //! invariants and boundary conditions.
 
+use std::sync::Arc;
+
 use crate::types::cell::{Cell, CellWidth, SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::color::Color;
 use proptest::prelude::*;
@@ -130,8 +132,8 @@ proptest! {
         b in "[a-z]{1,20}",
     ) {
         let cell = Cell::new('X')
-            .with_hyperlink(a.clone())
-            .with_hyperlink(b.clone());
+            .with_hyperlink(Arc::from(a.as_str()))
+            .with_hyperlink(Arc::from(b.as_str()));
         prop_assert_eq!(
             cell.hyperlink_id(),
             Some(b.as_str()),
@@ -165,7 +167,7 @@ fn test_set_hyperlink_id_none_when_no_extras() {
 // ALLOCATION: set_hyperlink_id(Some(...)) must allocate extras and store the id.
 fn test_set_hyperlink_id_some_allocates_extras() {
     let mut cell = Cell::new('B');
-    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
     assert_eq!(
         cell.hyperlink_id(),
         Some("https://example.com"),
@@ -178,7 +180,7 @@ fn test_set_hyperlink_id_some_allocates_extras() {
 // must deallocate extras entirely (both accessors return None).
 fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
     let mut cell = Cell::new('C');
-    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
     // Now clear the hyperlink while image_id is still None
     cell.set_hyperlink_id(None);
     assert_eq!(
@@ -198,7 +200,7 @@ fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
 fn test_set_hyperlink_id_none_keeps_extras_when_image_some() {
     let mut cell = Cell::new('D');
     cell.set_image_id(Some(7));
-    cell.set_hyperlink_id(Some("https://example.com".to_owned()));
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
     // Clear only the hyperlink — extras must survive because image_id is still set
     cell.set_hyperlink_id(None);
     assert_eq!(
@@ -248,7 +250,7 @@ fn test_set_image_id_some_allocates_extras() {
 // COMBINED CLEAR: set both hyperlink_id and image_id, then clear both → no extras.
 fn test_cell_with_hyperlink_and_image_both_cleared() {
     let mut cell = Cell::new('G');
-    cell.set_hyperlink_id(Some("https://a.com".to_owned()));
+    cell.set_hyperlink_id(Some(Arc::from("https://a.com")));
     cell.set_image_id(Some(5));
     // Clear in reverse order: image first, then hyperlink
     cell.set_image_id(None);

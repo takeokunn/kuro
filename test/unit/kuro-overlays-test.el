@@ -263,7 +263,7 @@ must be called to update the cached values."
   (let (captured)
     (should
      (kuro--call-with-normalized-ffi-face-range
-      '(1 99 10 20 30 40) 5 10
+      [1 99 10 20 30 40] 5 10
       (lambda (&rest args)
         (setq captured args))))
     (should (equal captured '(6 10 10 20 30 40)))))
@@ -273,7 +273,7 @@ must be called to update the cached values."
   (let ((called nil))
     (should-not
      (kuro--call-with-normalized-ffi-face-range
-      '(3 3 10 20 30 40) 5 10
+      [3 3 10 20 30 40] 5 10
       (lambda (&rest _args)
         (setq called t))))
     (should-not called)))

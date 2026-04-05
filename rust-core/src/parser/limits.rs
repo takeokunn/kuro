@@ -35,6 +35,10 @@ pub const MAX_TITLE_BYTES: usize = 1024;
 /// Matches Linux `PATH_MAX` (4096).
 pub const OSC7_MAX_PATH_BYTES: usize = 4096;
 
+/// Maximum OSC 51 eval command length in bytes.
+/// 4 KiB is generous for any legitimate Elisp eval command.
+pub const OSC51_MAX_EVAL_BYTES: usize = 4096;
+
 /// Maximum URI length for OSC 8 (hyperlink).
 ///
 /// 8 KiB is a practical upper bound used by Alacritty and kitty;

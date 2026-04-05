@@ -72,6 +72,25 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
     }
 }
 
+/// Handle OSC 51 — Emacs eval command request.
+/// Stores the command string for Elisp-side whitelist filtering.
+pub(crate) fn handle_osc_51(core: &mut TerminalCore, params: &[&[u8]]) {
+    // Wire format: OSC 51 ; e ; COMMAND ST
+    // params[1] should be "e" (eval subcommand)
+    // params[2] is the command string
+    if let Some(sub) = params.get(1) {
+        if *sub == b"e" {
+            if let Some(cmd_raw) = params.get(2) {
+                if cmd_raw.len() <= crate::parser::limits::OSC51_MAX_EVAL_BYTES {
+                    if let Ok(cmd) = std::str::from_utf8(cmd_raw) {
+                        core.osc_data.eval_commands.push(cmd.to_owned());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Handle OSC 52 — Clipboard access.
 pub(crate) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(data_raw) = params.get(2) {
@@ -128,6 +147,11 @@ pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
             _ => None,
         };
         if let Some(m) = mark {
+            let exit_code = if m == crate::types::osc::PromptMark::CommandEnd {
+                parse_osc133_exit_code(params)
+            } else {
+                None
+            };
             let cursor = *core.screen.cursor();
             core.osc_data
                 .prompt_marks
@@ -135,9 +159,16 @@ pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
                     mark: m,
                     row: cursor.row,
                     col: cursor.col,
+                    exit_code,
                 });
         }
     }
+}
+
+#[inline]
+fn parse_osc133_exit_code(params: &[&[u8]]) -> Option<i32> {
+    let code_raw = params.get(2)?;
+    std::str::from_utf8(code_raw).ok()?.parse().ok()
 }
 
 /// Handle OSC 10/11/12 — Set/query default fg/bg/cursor color.

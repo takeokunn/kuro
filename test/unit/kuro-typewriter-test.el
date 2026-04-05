@@ -41,7 +41,8 @@
            kuro--typewriter-timer
            kuro--typewriter-current-row
            kuro--typewriter-current-text
-           (kuro--typewriter-written-len 0))
+           (kuro--typewriter-written-len 0)
+           (kuro--typewriter-current-text-len 0))
        ,@body)))
 
 (defmacro kuro-typewriter-test--with-timer-stub (var &rest body)
@@ -65,6 +66,7 @@ arguments without actually scheduling real timers."
     (insert "hello\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "hello"
+          kuro--typewriter-current-text-len 5
           kuro--typewriter-written-len 2)
     (let ((written-args nil))
       (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
@@ -81,6 +83,7 @@ arguments without actually scheduling real timers."
     (insert "abc\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "abc"
+          kuro--typewriter-current-text-len 3
           kuro--typewriter-written-len 0)
     (let ((written-args nil))
       (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
@@ -168,6 +171,7 @@ arguments without actually scheduling real timers."
     (insert "x\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "x"
+          kuro--typewriter-current-text-len 1
           kuro--typewriter-written-len 0)
     (let ((written-args nil))
       (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
@@ -185,6 +189,7 @@ A row whose written-len is already positive advances by exactly 1 per tick."
     (insert "hello\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "hello"
+          kuro--typewriter-current-text-len 5
           kuro--typewriter-written-len 3)
     (let ((write-count 0)
           (last-written nil))
@@ -285,6 +290,7 @@ the next tick (with empty queue) resets state."
     (insert "abc\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "abc"
+          kuro--typewriter-current-text-len 3
           kuro--typewriter-written-len 0
           kuro--typewriter-queue nil)
     (let ((write-calls nil))

@@ -88,7 +88,10 @@
              ((symbol-function 'kuro--setup-char-width-table)     (lambda () nil))
              ((symbol-function 'kuro--setup-fontset)              (lambda () nil))
              ((symbol-function 'kuro--remap-default-face)         (lambda (_fg _bg) nil))
-             ((symbol-function 'kuro--reset-cursor-cache)         (lambda () nil)))
+             ((symbol-function 'kuro--reset-cursor-cache)         (lambda () nil))
+             ((symbol-function 'kuro--setup-dnd)                  (lambda () nil))
+             ((symbol-function 'kuro--setup-compilation)          (lambda () nil))
+             ((symbol-function 'kuro--setup-bookmark)             (lambda () nil)))
      ,@body))
 
 (defmacro kuro-lifecycle-test--with-attach-stubs (&rest body)

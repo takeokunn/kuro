@@ -1,6 +1,6 @@
 ;;; kuro-faces-attrs.el --- SGR attribute decoding for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -110,7 +110,7 @@ Index 0 (None) maps to nil; indices 1–5 map to the symbol used in Emacs face
 :underline property lists.  Style 1 (Straight) is special: without a color it
 becomes the atom t (plain underline) rather than `(list :style \='line)'.")
 
-(defun kuro--underline-style-to-face-prop (style underline-color)
+(defsubst kuro--underline-style-to-face-prop (style underline-color)
   "Convert underline STYLE integer and UNDERLINE-COLOR to an :underline value.
 STYLE is 0–5 per the SGR underline style encoding
 \(see `kuro--underline-style-face-symbols').
@@ -165,14 +165,17 @@ that `kuro--decode-attrs' would allocate on every call."
                   (list :color underline-color :style 'line)
                 t)))))
     (let (result)
-      (when inverse (setq result (nconc (list :inverse-video t) result)))
-      (when strikethrough (setq result (nconc (list :strike-through t) result)))
-      (when underline-val (setq result (nconc (list :underline underline-val) result)))
-      (when italic (setq result (nconc (list :slant 'italic) result)))
-      (cond (bold (setq result (nconc (list :weight 'bold) result)))
-            (dim  (setq result (nconc (list :weight 'light) result))))
-      (when bg-color (setq result (nconc (list :background bg-color) result)))
-      (when fg-color (setq result (nconc (list :foreground fg-color) result)))
+      ;; `push' is O(1) cons — avoids the (list :k v) + nconc list traversal
+      ;; that the previous nconc pattern required per attribute.
+      ;; Push in reverse desired order so the final plist has :foreground first.
+      (when inverse     (push t result) (push :inverse-video result))
+      (when strikethrough (push t result) (push :strike-through result))
+      (when underline-val (push underline-val result) (push :underline result))
+      (when italic      (push 'italic result) (push :slant result))
+      (cond (bold       (push 'bold result)  (push :weight result))
+            (dim        (push 'light result) (push :weight result)))
+      (when bg-color    (push bg-color result) (push :background result))
+      (when fg-color    (push fg-color result) (push :foreground result))
       result)))
 
 (provide 'kuro-faces-attrs)

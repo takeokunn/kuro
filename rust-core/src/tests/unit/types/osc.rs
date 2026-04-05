@@ -1,5 +1,7 @@
 //! Unit tests for `crate::types::osc` (`OscData`, `HyperlinkState`, `PromptMark`, `ClipboardAction`).
 
+use std::sync::Arc;
+
 use crate::types::color::Color;
 use crate::types::osc::{ClipboardAction, HyperlinkState, OscData, PromptMark, PromptMarkEvent};
 use proptest::prelude::*;
@@ -91,7 +93,7 @@ fn hyperlink_state_default_uri_none() {
 #[test]
 fn hyperlink_state_set_uri() {
     let h = HyperlinkState {
-        uri: Some("https://example.com".to_owned()),
+        uri: Some(Arc::from("https://example.com")),
     };
     assert_eq!(h.uri.as_deref(), Some("https://example.com"));
 }
@@ -99,7 +101,7 @@ fn hyperlink_state_set_uri() {
 #[test]
 fn hyperlink_state_clear_uri() {
     let mut h = HyperlinkState {
-        uri: Some("https://example.com".to_owned()),
+        uri: Some(Arc::from("https://example.com")),
     };
     h.uri = None;
     assert!(h.uri.is_none());
@@ -123,10 +125,12 @@ fn prompt_mark_event_fields_accessible() {
         mark: PromptMark::PromptStart,
         row: 5,
         col: 10,
+        exit_code: None,
     };
     assert!(matches!(event.mark, PromptMark::PromptStart));
     assert_eq!(event.row, 5);
     assert_eq!(event.col, 10);
+    assert!(event.exit_code.is_none());
 }
 
 #[test]
@@ -136,6 +140,7 @@ fn osc_data_push_prompt_mark() {
         mark: PromptMark::CommandEnd,
         row: 3,
         col: 0,
+        exit_code: Some(1),
     });
     assert_eq!(d.prompt_marks.len(), 1);
     assert!(matches!(d.prompt_marks[0].mark, PromptMark::CommandEnd));
@@ -218,7 +223,7 @@ proptest! {
     // INVARIANT: HyperlinkState uri survives clone
     fn prop_hyperlink_clone_preserves_uri(len in 0usize..128usize) {
         let uri: String = "x".repeat(len);
-        let h = HyperlinkState { uri: if len == 0 { None } else { Some(uri) } };
+        let h = HyperlinkState { uri: if len == 0 { None } else { Some(Arc::from(uri.as_str())) } };
         let cloned = h.clone();
         prop_assert_eq!(cloned.uri, h.uri);
     }

@@ -100,8 +100,7 @@ fn test_c0_lf_vt_ff_all_advance_row() {
 }
 
 // SO (0x0E) and SI (0x0F) are character-set shift controls.
-// Kuro does not implement charset switching; they should be silently ignored
-// without panicking and without generating any response.
+// They switch GL between G0 and G1 but must not generate any response.
 assert_no_response!(test_so_no_response, b"\x0e");
 assert_no_response!(test_si_no_response, b"\x0f");
 

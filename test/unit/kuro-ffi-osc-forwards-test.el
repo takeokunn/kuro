@@ -47,6 +47,10 @@
   (fset 'kuro-core-scroll-down (lambda (_id _n) nil)))
 (unless (fboundp 'kuro-core-get-scroll-offset)
   (fset 'kuro-core-get-scroll-offset (lambda (_id) 0)))
+(unless (fboundp 'kuro-core-poll-eval-commands)
+  (fset 'kuro-core-poll-eval-commands (lambda (_id) nil)))
+(unless (fboundp 'kuro-core-get-cwd-host)
+  (fset 'kuro-core-get-cwd-host (lambda (_id) nil)))
 
 ;; Also stub kuro-core-init and other functions required transitively.
 (unless (fboundp 'kuro-core-init)

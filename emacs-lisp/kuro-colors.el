@@ -1,6 +1,6 @@
 ;;; kuro-colors.el --- ANSI color palette defcustoms for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0

@@ -352,6 +352,100 @@ fn test_handle_osc_133_mark_records_cursor_position() {
     assert_eq!(ev.col, 9);
 }
 
+// ── handle_osc_133 exit_code ─────────────────────────────────────────────────
+
+#[test]
+fn test_handle_osc_133_command_end_exit_code_zero() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D", b"0"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, Some(0));
+}
+
+#[test]
+fn test_handle_osc_133_command_end_exit_code_one() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D", b"1"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, Some(1));
+}
+
+#[test]
+fn test_handle_osc_133_command_end_exit_code_127() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D", b"127"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, Some(127));
+}
+
+#[test]
+fn test_handle_osc_133_command_end_exit_code_negative() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D", b"-1"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, Some(-1));
+}
+
+#[test]
+fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D", b"abc"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, None);
+}
+
+#[test]
+fn test_handle_osc_133_command_end_no_exit_code_param() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"133", b"D"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::CommandEnd);
+    assert_eq!(ev.exit_code, None);
+}
+
+#[test]
+fn test_handle_osc_133_prompt_start_exit_code_always_none() {
+    use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // Even if a third param is provided, non-D marks should have exit_code: None
+    let params: &[&[u8]] = &[b"133", b"A", b"0"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1);
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(ev.mark, PromptMark::PromptStart);
+    assert_eq!(ev.exit_code, None);
+}
+
 // ── handle_osc_default_colors ─────────────────────────────────────────────────
 
 test_osc_default_colors_set!(
@@ -392,6 +486,104 @@ test_osc_default_colors_query_set!(
     0,
     0
 );
+
+// ── handle_osc_51 (Elisp eval) ───────────────────────────────────────────────
+
+#[test]
+fn osc51_eval_command_stored() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"(message \"hello\")"];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "(message \"hello\")");
+}
+
+#[test]
+fn osc51_non_e_subcommand_ignored() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"x", b"(evil-stuff)"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_oversized_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let big = vec![b'a'; 4097];
+    let params: &[&[u8]] = &[b"51", b"e", &big];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_invalid_utf8_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let bad_utf8: &[u8] = &[0xFF, 0xFE, 0xFD];
+    let params: &[&[u8]] = &[b"51", b"e", bad_utf8];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_empty_command_stored() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b""];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "");
+}
+
+// ── handle_osc_7 hostname preservation ───────────────────────────────────────
+
+#[test]
+fn osc7_localhost_yields_none_host() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"7", b"file://localhost/home/user"];
+    crate::parser::osc::handle_osc(&mut core, params, false);
+    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
+    assert!(core.osc_data().cwd_host.is_none());
+}
+
+#[test]
+fn osc7_empty_host_yields_none() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"7", b"file:///tmp"];
+    crate::parser::osc::handle_osc(&mut core, params, false);
+    assert_eq!(core.osc_data().cwd.as_deref(), Some("/tmp"));
+    assert!(core.osc_data().cwd_host.is_none());
+}
+
+#[test]
+fn osc7_remote_host_preserved() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"7", b"file://myhost/home/user"];
+    crate::parser::osc::handle_osc(&mut core, params, false);
+    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
+    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("myhost"));
+}
+
+#[test]
+fn osc7_host_cleared_on_localhost() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // First set a remote host
+    let params: &[&[u8]] = &[b"7", b"file://remotehost/srv"];
+    crate::parser::osc::handle_osc(&mut core, params, false);
+    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("remotehost"));
+    // Then set localhost — host should be cleared
+    let params2: &[&[u8]] = &[b"7", b"file://localhost/home"];
+    crate::parser::osc::handle_osc(&mut core, params2, false);
+    assert!(core.osc_data().cwd_host.is_none());
+    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home"));
+}
 
 include!("osc_protocol_colors.rs");
 include!("osc_protocol_coverage.rs");

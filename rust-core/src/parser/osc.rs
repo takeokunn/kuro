@@ -1,9 +1,11 @@
 //! OSC (Operating System Command) sequence handler
 
 use super::osc_protocol::{
-    encode_color_spec, handle_osc_104, handle_osc_133, handle_osc_1337, handle_osc_52,
-    handle_osc_default_colors, parse_color_spec,
+    encode_color_spec, handle_osc_104, handle_osc_133, handle_osc_1337, handle_osc_51,
+    handle_osc_52, handle_osc_default_colors, parse_color_spec,
 };
+
+use std::sync::Arc;
 
 use crate::TerminalCore;
 
@@ -18,6 +20,7 @@ use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_B
 /// - OSC 7: Current Working Directory notification (`file://host/path`).
 /// - OSC 8: Hyperlinks (`ESC]8;params;uri ST`).
 /// - OSC 10/11/12: Set/query default foreground/background/cursor colors.
+/// - OSC 51: Emacs eval command request (security: Elisp-side whitelist filtering).
 /// - OSC 52: Clipboard access.
 /// - OSC 104: Reset color palette.
 /// - OSC 133: Shell integration prompt marks.
@@ -45,6 +48,7 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         b"8" => handle_osc_8(core, params),
         b"4" => handle_osc_4(core, params),
         b"10" | b"11" | b"12" => handle_osc_default_colors(core, params),
+        b"51" => handle_osc_51(core, params),
         b"52" => handle_osc_52(core, params),
         b"104" => handle_osc_104(core, params),
         b"133" => handle_osc_133(core, params),
@@ -63,13 +67,19 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
 fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(raw) = params.get(1) {
         let url = String::from_utf8_lossy(raw);
-        // Strip file://hostname prefix to get just the path
         if let Some(after_scheme) = url.strip_prefix("file://") {
-            // Skip hostname part (up to next /)
-            let path = after_scheme
-                .find('/')
-                .map_or(after_scheme, |i| &after_scheme[i..]);
+            // Extract hostname (everything before the first /)
+            let (host, path) = match after_scheme.find('/') {
+                Some(i) => (&after_scheme[..i], &after_scheme[i..]),
+                None => ("", after_scheme),
+            };
             if path.len() <= OSC7_MAX_PATH_BYTES {
+                // Store hostname only if non-empty and not localhost
+                core.osc_data.cwd_host = if host.is_empty() || host == "localhost" {
+                    None
+                } else {
+                    Some(host.to_owned())
+                };
                 core.osc_data.cwd = Some(path.to_owned());
                 core.osc_data.cwd_dirty = true;
             }
@@ -94,7 +104,7 @@ fn handle_osc_8(core: &mut TerminalCore, params: &[&[u8]]) {
                 core.osc_data.hyperlink = crate::types::osc::HyperlinkState::default();
             } else if uri.len() <= OSC8_MAX_URI_BYTES {
                 core.osc_data.hyperlink = crate::types::osc::HyperlinkState {
-                    uri: Some(uri.into_owned()),
+                    uri: Some(Arc::from(uri.into_owned())),
                 };
             }
         }

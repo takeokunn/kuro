@@ -1,6 +1,7 @@
 //! Core type definitions
 
 pub mod cell;
+pub mod charset;
 pub mod color;
 pub mod cursor;
 pub mod kitty;

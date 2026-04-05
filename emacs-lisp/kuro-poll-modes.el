@@ -1,6 +1,6 @@
 ;;; kuro-poll-modes.el --- Tiered terminal mode polling for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -31,16 +31,24 @@
 ;;; Code:
 
 (require 'kuro-config)
+(require 'kuro-eval)
 (require 'kuro-ffi)
 (require 'kuro-ffi-modes)
 (require 'kuro-ffi-osc)
 (require 'kuro-navigation)
+(require 'kuro-prompt-status)
+(require 'kuro-hyperlinks)
+(require 'kuro-tramp)
 
 (declare-function kuro--apply-palette-updates     "kuro-faces"      ())
 (declare-function kuro--apply-default-colors      "kuro-faces"      ())
 (declare-function kuro--render-image-notification "kuro-overlays"   (notif))
 (declare-function kuro--update-prompt-positions   "kuro-navigation" (marks positions max-count))
+(declare-function kuro--update-prompt-status      "kuro-prompt-status" (marks))
 (declare-function kuro-kill                       "kuro-lifecycle"  ())
+(declare-function kuro--poll-eval-command-updates "kuro-eval"       ())
+(declare-function kuro--apply-hyperlink-ranges    "kuro-hyperlinks" ())
+(declare-function kuro--apply-cwd-with-tramp     "kuro-tramp"      ())
 
 ;; Forward references: these defvar-locals live in their respective modules.
 ;; kuro-input.el
@@ -106,24 +114,24 @@ MODES is the 7-element list from `kuro--get-terminal-modes':
   0: application-cursor-keys  1: app-keypad  2: mouse-mode
   3: mouse-sgr                4: mouse-pixel 5: bracketed-paste
   6: keyboard-flags (nil → 0 when pre-Kitty-KB)."
-  (pcase-let* ((`(,acm ,akm ,mm ,msgr ,mpm ,bpm ,kbf) modes))
-    (setq kuro--application-cursor-keys-mode acm
-          kuro--app-keypad-mode              akm
-          kuro--mouse-mode                   mm
-          kuro--mouse-sgr                    msgr
-          kuro--mouse-pixel-mode             mpm
-          kuro--bracketed-paste-mode         bpm
-          kuro--keyboard-flags               (or kbf 0))))
+  ;; Direct nth avoids pcase-let* pattern-dispatch overhead (12 calls/sec).
+  (setq kuro--application-cursor-keys-mode (nth 0 modes)
+        kuro--app-keypad-mode              (nth 1 modes)
+        kuro--mouse-mode                   (nth 2 modes)
+        kuro--mouse-sgr                    (nth 3 modes)
+        kuro--mouse-pixel-mode             (nth 4 modes)
+        kuro--bracketed-paste-mode         (nth 5 modes)
+        kuro--keyboard-flags               (or (nth 6 modes) 0)))
 
 (defun kuro--poll-cwd ()
-  "Apply a pending working-directory change from OSC 7 (if any)."
-  (when-let ((cwd (kuro--get-cwd)))
-    (when (and (stringp cwd) (not (string-empty-p cwd)))
-      (setq default-directory (file-name-as-directory cwd)))))
+  "Apply a pending working-directory change from OSC 7 (if any).
+Uses Tramp path construction when a remote hostname is detected."
+  (kuro--apply-cwd-with-tramp))
 
 (defun kuro--poll-prompt-mark-updates ()
   "Merge pending OSC 133 prompt marks into `kuro--prompt-positions'."
   (when-let ((marks (kuro--poll-prompt-marks)))
+    (kuro--update-prompt-status marks)
     (setq kuro--prompt-positions
           (kuro--update-prompt-positions
            marks kuro--prompt-positions kuro--max-prompt-positions))))
@@ -180,7 +188,9 @@ Returns nil."
   '(kuro--poll-cwd
     kuro--handle-clipboard-actions
     kuro--poll-prompt-mark-updates
+    kuro--poll-eval-command-updates
     kuro--poll-image-events
+    kuro--apply-hyperlink-ranges
     kuro--check-process-exit)
   "Tier-1 poll functions called in order every `kuro--mode-poll-cadence' frames.
 Add new shell-interaction-timescale polls here; no changes to dispatch loop.")
@@ -195,7 +205,13 @@ replaces 7 individual Mutex acquisitions.  All other tier-1 items
 at shell-interaction timescale so 167 ms lag is imperceptible."
   (when-let ((modes (kuro--get-terminal-modes)))
     (kuro--apply-terminal-modes modes))
-  (mapc #'funcall kuro--tier1-poll-fns))
+  (kuro--poll-cwd)
+  (kuro--handle-clipboard-actions)
+  (kuro--poll-prompt-mark-updates)
+  (kuro--poll-eval-command-updates)
+  (kuro--poll-image-events)
+  (kuro--apply-hyperlink-ranges)
+  (kuro--check-process-exit))
 
 ;;; Top-level gated dispatcher
 

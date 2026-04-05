@@ -1,12 +1,11 @@
 //! Line type representing a single row in the terminal screen
 
-use crate::types::{Cell, Color, SgrAttributes};
+use crate::types::{cell::CellWidth, Cell, Color, SgrAttributes};
 use compact_str::CompactString;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A single line in the terminal grid
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Line {
     /// Cells in this line
     pub cells: Vec<Cell>,
@@ -18,6 +17,11 @@ pub struct Line {
     /// path can skip hash computation for rows that have not changed since the
     /// last frame.  Version `0` is the initial value; any mutation produces `≥ 1`.
     pub(crate) version: u64,
+    /// Whether any cell on this line is a wide-character placeholder
+    /// (`CellWidth::Wide`).  Set incrementally on writes; cleared on full-line
+    /// clear/reset.  Lets `fill_encode_pool` skip the O(cols) pre-scan on the
+    /// ~90% of ASCII-only dirty lines.
+    pub(crate) has_wide: bool,
 }
 
 impl Line {
@@ -29,6 +33,7 @@ impl Line {
             cells: vec![Cell::default(); cols],
             is_dirty: false,
             version: 0,
+            has_wide: false,
         }
     }
 
@@ -46,6 +51,7 @@ impl Line {
             cells: vec![cell; cols],
             is_dirty: false,
             version: 0,
+            has_wide: false,
         }
     }
 
@@ -87,6 +93,11 @@ impl Line {
     #[inline]
     pub fn update_cell_with(&mut self, col: usize, cell: Cell) {
         if col < self.cells.len() && self.cells[col] != cell {
+            // Short-circuit: once has_wide is set it stays set; skip the width
+            // enum load on every subsequent cell write to the same line.
+            if !self.has_wide && cell.width == CellWidth::Wide {
+                self.has_wide = true;
+            }
             self.cells[col] = cell;
             self.is_dirty = true;
             self.version = self.version.wrapping_add(1);
@@ -96,9 +107,8 @@ impl Line {
     /// Clear all cells in line
     #[inline]
     pub fn clear(&mut self) {
-        for cell in &mut self.cells {
-            *cell = Cell::default();
-        }
+        self.cells.fill(Cell::default());
+        self.has_wide = false;
         self.is_dirty = true;
         self.version = self.version.wrapping_add(1);
     }
@@ -111,6 +121,7 @@ impl Line {
         let mut blank = Cell::default();
         blank.attrs.background = bg;
         self.cells.fill(blank);
+        self.has_wide = false;
         self.is_dirty = true;
         self.version = self.version.wrapping_add(1);
     }
@@ -130,12 +141,27 @@ impl Line {
     /// Resize line to new column count
     pub fn resize(&mut self, new_cols: usize) {
         if new_cols > self.cells.len() {
-            // Expand with default cells
+            // Expand with default cells; no wide cells added, has_wide unchanged.
             self.cells.resize(new_cols, Cell::default());
         } else if new_cols < self.cells.len() {
-            // Truncate
+            let old_len = self.cells.len();
+            // Only rescan the retained cells if the removed suffix contained a wide
+            // cell.  On ASCII-only terminals the suffix has no wide cells, so the full
+            // O(new_cols) retained-cell rescan is skipped — O(suffix_len) instead.
+            let removed_had_wide = self.cells[new_cols..old_len]
+                .iter()
+                .any(|c| c.width == CellWidth::Wide);
+            // Truncate. Only shrink allocated capacity when it greatly exceeds the new
+            // length, to avoid repeated reallocs during interactive window-resize drags.
             self.cells.truncate(new_cols);
-            self.cells.shrink_to_fit();
+            if self.cells.capacity() > new_cols * 2 + 16 {
+                // shrink_to retains 16-cell headroom, absorbing the next drag step
+                // without an immediate realloc (unlike shrink_to_fit which drops to exact).
+                self.cells.shrink_to(new_cols + 16);
+            }
+            if removed_had_wide {
+                self.has_wide = self.cells.iter().any(|c| c.width == CellWidth::Wide);
+            }
         }
         self.is_dirty = true;
         self.version = self.version.wrapping_add(1);

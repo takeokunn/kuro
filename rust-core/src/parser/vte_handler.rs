@@ -4,6 +4,8 @@
 //! interface for the VTE parser. Each method handles a different class of
 //! terminal escape sequences.
 
+use std::sync::Arc;
+
 use crate::parser;
 use crate::TerminalCore;
 use unicode_width::UnicodeWidthChar;
@@ -13,6 +15,17 @@ impl vte::Perform for TerminalCore {
     fn print(&mut self, c: char) {
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
+
+        // Charset translation: apply DEC line drawing substitution if active.
+        // The comparison is nearly always false (branch predictor friendly).
+        let c = if self.active_charset()
+            == crate::types::charset::CharsetType::DecLineDrawing
+            && c.is_ascii()
+        {
+            crate::types::charset::translate_dec_line_drawing(c)
+        } else {
+            c
+        };
 
         // ASCII fast-path: buffer printable ASCII and defer to batch flush.
         // This avoids per-character Cell construction + width lookup overhead.
@@ -49,8 +62,43 @@ impl vte::Perform for TerminalCore {
             self.screen.attach_combining(row, col, c);
             return;
         }
+
+        // Capture cursor position before printing so we can stamp the
+        // hyperlink on the correct cell(s) afterward.  Single deref matches
+        // the combining-char path above (line ~48: `let cursor = *self.screen.cursor()`).
+        let pre_cursor = *self.screen.cursor();
+        let pre_row = pre_cursor.row;
+        let pre_col = pre_cursor.col;
+
         self.screen
             .print(c, self.current_attrs, self.dec_modes.auto_wrap);
+
+        // Stamp hyperlink on the just-written cell(s) — nearly free
+        // when no hyperlink is active (branch predictor skips).
+        if let Some(uri) = &self.osc_data.hyperlink.uri {
+            let width = w.unwrap_or(1);
+            // The cell was written at (pre_row, pre_col) unless a wide char
+            // at the last column caused a wrap, in which case it's at (new_row, 0).
+            let cursor_after = *self.screen.cursor();
+            let (write_row, write_col) = if cursor_after.row != pre_row
+                || cursor_after.col < pre_col
+            {
+                // Wrap occurred — cell was placed at start of new row
+                (cursor_after.row, 0)
+            } else {
+                (pre_row, pre_col)
+            };
+            if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
+                cell.set_hyperlink_id(Some(Arc::clone(uri)));
+            }
+            // For wide chars, also stamp the placeholder cell.
+            // Reuse `uri' from the outer borrow — no redundant re-lookup needed.
+            if width > 1 {
+                if let Some(cell) = self.screen.get_cell_mut(write_row, write_col + 1) {
+                    cell.set_hyperlink_id(Some(Arc::clone(uri)));
+                }
+            }
+        }
     }
 
     #[inline]
@@ -72,62 +120,68 @@ impl vte::Perform for TerminalCore {
             }
             0x0A..=0x0C => self.screen.line_feed(self.current_attrs.background),
             0x0D => self.screen.carriage_return(),
+            0x0E => self.gl_is_g1 = true,  // SO — Shift Out (switch GL to G1)
+            0x0F => self.gl_is_g1 = false,  // SI — Shift In (switch GL to G0)
             _ => {}
         }
     }
 
+    #[inline]
     fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _ignore: bool, c: char) {
         self.flush_print_buf();
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
-        // Check for DEC private mode sequences (CSI ? Pm h/l) and CSI ? u (query keyboard flags)
-        if !intermediates.is_empty() && intermediates[0] == b'?' {
-            match c {
-                'h' | 'l' => {
-                    let set = c == 'h';
-                    parser::dec_private::handle_dec_modes(self, params, set);
+        // Handle DEC-private and Kitty-protocol CSI sequences (CSI ? … / CSI > … / CSI < …).
+        // A single `first()` call replaces three separate is_empty()+index checks.
+        // Note: `b' '` (DECSCUSR) and `b'!'` (DECSTR) must fall through to the
+        // standard match below, so only the three DEC-prefix bytes return early here.
+        match intermediates.first() {
+            Some(b'?') => {
+                match c {
+                    'h' | 'l' => {
+                        let set = c == 'h';
+                        parser::dec_private::handle_dec_modes(self, params, set);
+                    }
+                    'u' => {
+                        // CSI ? u — Query keyboard flags
+                        parser::dec_private::handle_kitty_kb_query(self);
+                    }
+                    'p' if intermediates.len() >= 2 && intermediates[1] == b'$' => {
+                        // DECRQM — DEC private mode query
+                        parser::dec_private::handle_decrqm(self, params);
+                    }
+                    _ => {}
                 }
-                'u' => {
-                    // CSI ? u — Query keyboard flags
-                    parser::dec_private::handle_kitty_kb_query(self);
-                }
-                'p' if intermediates.len() >= 2 && intermediates[1] == b'$' => {
-                    // DECRQM — DEC private mode query
-                    parser::dec_private::handle_decrqm(self, params);
-                }
-                _ => {}
+                return;
             }
-            return;
-        }
-
-        // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
-        if !intermediates.is_empty() && intermediates[0] == b'>' {
-            match c {
-                'u' => {
-                    // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
-                    parser::dec_private::handle_kitty_kb_push(self, params);
+            Some(b'>') => {
+                match c {
+                    'u' => {
+                        // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
+                        parser::dec_private::handle_kitty_kb_push(self, params);
+                    }
+                    'c' => {
+                        // DA2 (Secondary Device Attributes): ESC[>c or ESC[>0c
+                        self.meta.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
+                    }
+                    'q' => {
+                        // XTVERSION — terminal version identification: CSI > q → DCS > | name ST
+                        self.meta
+                            .pending_responses
+                            .push(b"\x1bP>|kuro-1.0.0\x1b\\".to_vec());
+                    }
+                    _ => {}
                 }
-                'c' => {
-                    // DA2 (Secondary Device Attributes): ESC[>c or ESC[>0c
-                    self.meta.pending_responses.push(b"\x1b[>1;10;0c".to_vec());
-                }
-                'q' => {
-                    // XTVERSION — terminal version identification: CSI > q → DCS > | name ST
-                    self.meta
-                        .pending_responses
-                        .push(b"\x1bP>|kuro-1.0.0\x1b\\".to_vec());
-                }
-                _ => {}
+                return;
             }
-            return;
-        }
-
-        // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
-        if !intermediates.is_empty() && intermediates[0] == b'<' {
-            if c == 'u' {
-                parser::dec_private::handle_kitty_kb_pop(self);
+            Some(b'<') => {
+                if c == 'u' {
+                    // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
+                    parser::dec_private::handle_kitty_kb_pop(self);
+                }
+                return;
             }
-            return;
+            _ => {}
         }
 
         // Handle standard CSI sequences
@@ -195,6 +249,7 @@ impl vte::Perform for TerminalCore {
         parser::osc::handle_osc(self, params, bell_terminated);
     }
 
+    #[inline]
     fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
         self.flush_print_buf();
         self.vte_callback_count += 1;
@@ -227,6 +282,23 @@ impl vte::Perform for TerminalCore {
             ([], b'>') => {
                 // DECKPNM: normal keypad mode
                 self.dec_modes.app_keypad = false;
+            }
+            // SCS — Select Character Set
+            // ESC ( 0 → designate G0 as DEC Special Graphics (line drawing)
+            // ESC ( B → designate G0 as US ASCII
+            (b"(", b'0') => {
+                self.g0_charset = crate::types::charset::CharsetType::DecLineDrawing;
+            }
+            (b"(", b'B') => {
+                self.g0_charset = crate::types::charset::CharsetType::Ascii;
+            }
+            // ESC ) 0 → designate G1 as DEC Special Graphics (line drawing)
+            // ESC ) B → designate G1 as US ASCII
+            (b")", b'0') => {
+                self.g1_charset = crate::types::charset::CharsetType::DecLineDrawing;
+            }
+            (b")", b'B') => {
+                self.g1_charset = crate::types::charset::CharsetType::Ascii;
             }
             _ => {
                 // Unknown ESC sequence — silently ignore

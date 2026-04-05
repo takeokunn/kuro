@@ -25,10 +25,11 @@
 //! - Bit 7 (`0x080`): hidden
 //! - Bit 8 (`0x100`): strikethrough
 
-use crate::grid::line::Line;
-use crate::types::cell::{Cell, CellWidth, SgrAttributes, UnderlineStyle};
+use crate::types::cell::{Cell, CellWidth, SgrAttributes};
 use crate::types::color::Color;
+use ahash::AHasher;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::mem;
 
 // -------------------------------------------------------------------------
 // Color encoding constants
@@ -185,15 +186,9 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
     if attrs.underline() {
         bits |= ATTRS_UNDERLINE_BIT;
     }
-    let style_bits: u64 = match attrs.underline_style {
-        UnderlineStyle::None => 0,
-        UnderlineStyle::Straight => 1,
-        UnderlineStyle::Double => 2,
-        UnderlineStyle::Curly => 3,
-        UnderlineStyle::Dotted => 4,
-        UnderlineStyle::Dashed => 5,
-    };
-    bits |= style_bits << ATTRS_STYLE_SHIFT;
+    // UnderlineStyle is repr(u8) with discriminants 0-5 matching the wire
+    // encoding exactly — a direct cast replaces the 5-arm match table.
+    bits |= u64::from(attrs.underline_style as u8) << ATTRS_STYLE_SHIFT;
     bits
 }
 
@@ -235,9 +230,23 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
 ///
 /// Trailing spaces are preserved so that the cursor can be placed at any
 /// column, including past the last visible character.
+#[inline]
 pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     let mut pool = EncodePool::new();
-    encode_line_with_pool(cells, &mut pool)
+    let has_wide = cells.iter().any(|c| c.width == CellWidth::Wide);
+    encode_line_with_pool(cells, has_wide, &mut pool)
+}
+
+/// Count Unicode scalars in a grapheme cluster with ≥ 3 UTF-8 bytes.
+///
+/// This path is cold: only reached for multi-scalar graphemes (ZWJ sequences,
+/// combining diacritics on non-ASCII bases, etc.).  Marking it `#[cold]`
+/// moves it off the hot-path instruction cache and lets the compiler optimise
+/// the `len ≤ 2` fast path more aggressively.
+#[cold]
+#[inline(never)]
+fn grapheme_scalar_count(s: &str) -> usize {
+    s.chars().count().max(1)
 }
 
 /// Core cell-encoding kernel: populate `pool` from `cells`.
@@ -250,9 +259,14 @@ pub fn encode_line(cells: &[Cell]) -> EncodedLineData {
     clippy::similar_names,
     reason = "current_fg/current_bg are intentional parallel names for foreground and background color sentinels"
 )]
-fn fill_encode_pool(cells: &[Cell], pool: &mut EncodePool) {
-    pool.text.reserve(cells.len());
-    pool.face_ranges.reserve(8);
+fn fill_encode_pool(cells: &[Cell], has_wide: bool, pool: &mut EncodePool) {
+    // Reserve 2 bytes/cell: Latin Extended, Greek, Cyrillic are 2 UTF-8 bytes each.
+    // Avoids a mid-loop realloc on non-ASCII terminals with ~50% overhead vs 1x reserve.
+    pool.text.reserve(cells.len() * 2);
+    // Reserve for face ranges: 8 is too few for syntax-highlighted terminals
+    // (neovim, helix) where every cell can have a distinct color.  Cap at 64
+    // to avoid over-allocation on wide terminals (240 cols) with few colors.
+    pool.face_ranges.reserve(cells.len().min(64));
 
     let mut buf_offset = 0usize;
     let mut current_start_buf = 0usize;
@@ -267,33 +281,60 @@ fn fill_encode_pool(cells: &[Cell], pool: &mut EncodePool) {
     // where buf_offset.saturating_sub(1) would be wrong.
     let mut last_wide_char_start = 0usize;
 
+    // Pre-scan eliminated: `has_wide` is maintained incrementally on `Line`
+    // via `update_cell_with`, so callers pass it here without an O(cols) scan.
+    // The `col_to_buf` identity mapping is only initialized when actually needed.
+    if has_wide {
+        // resize(n, 0) is a single memset — every entry is overwritten in the loop
+        // below anyway, so the identity pre-fill of extend(0..n) is redundant.
+        pool.col_to_buf.resize(cells.len(), 0);
+    }
+
     for cell in cells {
-        if cell.width == CellWidth::Wide {
-            if pool.col_to_buf.is_empty() {
-                pool.col_to_buf.reserve(cells.len());
-                pool.col_to_buf.extend(0..col);
+        // `match` on a 3-variant enum lets the compiler emit a single discriminant
+        // dispatch instead of two sequential `if` checks.  On the dominant Half path
+        // the compiler can prove the second check is unreachable, eliminating it.
+        match cell.width {
+            CellWidth::Wide => {
+                debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
+                // Override the pre-filled identity entry with the wide char position.
+                pool.col_to_buf[col] = last_wide_char_start;
+                col += 1;
+                continue;
             }
-            debug_assert!(col > 0, "Wide placeholder cannot appear at column 0");
-            pool.col_to_buf.push(last_wide_char_start);
-            col += 1;
-            continue;
+            CellWidth::Full => {
+                last_wide_char_start = buf_offset;
+            }
+            _ => {} // Half — no special action needed
         }
 
-        if cell.width == CellWidth::Full {
-            last_wide_char_start = buf_offset;
-        }
-
-        if !pool.col_to_buf.is_empty() {
-            pool.col_to_buf.push(buf_offset);
+        if has_wide {
+            pool.col_to_buf[col] = buf_offset;
         }
         col += 1;
 
         pool.text.push_str(cell.grapheme.as_str());
 
-        let fg = encode_color(&cell.attrs.foreground);
-        let bg = encode_color(&cell.attrs.background);
-        let flags = encode_attrs(&cell.attrs);
-        let ul_color = encode_color(&cell.attrs.underline_color);
+        // Fast path: skip four encode_color/encode_attrs calls for default-styled
+        // cells (no color, no SGR flags).  Shell prompts, man-page output, and
+        // plain text workloads are overwhelmingly default-styled, so branch
+        // prediction strongly favours this path.  Sentinel constants are used
+        // directly rather than recomputing them through the encode functions.
+        let (fg, bg, flags, ul_color) = if cell.attrs.is_all_default() {
+            (
+                COLOR_DEFAULT_SENTINEL,
+                COLOR_DEFAULT_SENTINEL,
+                0u64,
+                COLOR_DEFAULT_SENTINEL,
+            )
+        } else {
+            (
+                encode_color(&cell.attrs.foreground),
+                encode_color(&cell.attrs.background),
+                encode_attrs(&cell.attrs),
+                encode_color(&cell.attrs.underline_color),
+            )
+        };
 
         if fg != current_fg
             || bg != current_bg
@@ -317,10 +358,15 @@ fn fill_encode_pool(cells: &[Cell], pool: &mut EncodePool) {
             current_ul_color = ul_color;
         }
 
-        buf_offset += if cell.grapheme.len() <= 1 {
+        // A grapheme of len ≤ 2 is always exactly one Unicode scalar:
+        // len=1 → ASCII; len=2 → U+0080..U+07FF (Latin Extended, Greek,
+        // Cyrillic, etc.).  No grapheme cluster can be 2 bytes with 2 scalars
+        // because combining characters start at U+0300 (2 bytes), requiring
+        // a base ≥ 1 byte → minimum multi-scalar length = 3 bytes.
+        buf_offset += if cell.grapheme.len() <= 2 {
             1
         } else {
-            cell.grapheme.chars().count().max(1)
+            grapheme_scalar_count(&cell.grapheme)
         };
     }
 
@@ -348,16 +394,18 @@ fn fill_encode_pool(cells: &[Cell], pool: &mut EncodePool) {
 ///
 /// Does not panic; identical logic to [`encode_line`].
 #[inline]
-pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> EncodedLineData {
+pub(crate) fn encode_line_with_pool(cells: &[Cell], has_wide: bool, pool: &mut EncodePool) -> EncodedLineData {
     pool.clear();
     if cells.is_empty() {
         return (String::new(), Vec::new(), Vec::new());
     }
-    fill_encode_pool(cells, pool);
+    fill_encode_pool(cells, has_wide, pool);
+    // mem::take moves each field out in O(1) (pointer swap), leaving the pool
+    // with empty-but-valid fields.  Avoids three heap malloc+memcpy per dirty row.
     (
-        pool.text.clone(),
-        pool.face_ranges.clone(),
-        pool.col_to_buf.clone(),
+        mem::take(&mut pool.text),
+        mem::take(&mut pool.face_ranges),
+        mem::take(&mut pool.col_to_buf),
     )
 }
 
@@ -386,6 +434,7 @@ pub(crate) fn encode_line_with_pool(cells: &[Cell], pool: &mut EncodePool) -> En
 #[inline]
 pub(crate) fn encode_line_into_buf(
     cells: &[Cell],
+    has_wide: bool,
     pool: &mut EncodePool,
     row_index: usize,
     buf: &mut Vec<u8>,
@@ -399,14 +448,22 @@ pub(crate) fn encode_line_into_buf(
     let row_index_u32 = row_index as u32;
 
     if cells.is_empty() {
-        buf.extend_from_slice(&row_index_u32.to_le_bytes());
-        buf.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
-        buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
-        buf.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
+        // Coalesce 4 × 4-byte writes into a single 16-byte stack-buffer write
+        // (same pattern as RUST-32 for face ranges).  Eliminates 3 extra
+        // capacity-check + length-update pairs from separate extend_from_slice calls.
+        let mut empty_row = [0u8; 16];
+        empty_row[0..4].copy_from_slice(&row_index_u32.to_le_bytes());
+        // bytes 4–15 remain zero: num_face_ranges=0, text_byte_len=0, col_to_buf_len=0
+        buf.extend_from_slice(&empty_row);
         return String::new();
     }
 
-    fill_encode_pool(cells, pool);
+    fill_encode_pool(cells, has_wide, pool);
+
+    // Pre-reserve: 12-byte row header + 28 bytes/face-range + 4 bytes/col_to_buf entry + 4-byte col_to_buf count.
+    // Avoids mid-loop reallocs when buf must grow beyond its current capacity.
+    let row_bytes = 12 + 28 * pool.face_ranges.len() + 4 + 4 * pool.col_to_buf.len();
+    buf.reserve(row_bytes);
 
     // Serialise directly into buf — no clone of face_ranges or col_to_buf.
     buf.extend_from_slice(&row_index_u32.to_le_bytes());
@@ -419,19 +476,23 @@ pub(crate) fn encode_line_into_buf(
 
     buf.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0 (text supplied as native Emacs strings)
 
+    // Coalesce 6 separate extend_from_slice calls (6 bounds-check + length-delta
+    // updates each) into a single 28-byte stack-buffer write per face range.
+    // At 30 dirty rows × 6 ranges × 120fps = 21,600 range writes/sec, this
+    // reduces Vec dispatch calls by ~108,000/sec.
     for &(start_buf, end_buf, fg, bg, flags, ul_color) in &pool.face_ranges {
         #[expect(
             clippy::cast_possible_truncation,
             reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
         )]
-        {
-            buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
-            buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
-        }
-        buf.extend_from_slice(&fg.to_le_bytes());
-        buf.extend_from_slice(&bg.to_le_bytes());
-        buf.extend_from_slice(&flags.to_le_bytes());
-        buf.extend_from_slice(&ul_color.to_le_bytes());
+        let mut range_buf = [0u8; 28];
+        range_buf[0..4].copy_from_slice(&(start_buf as u32).to_le_bytes());
+        range_buf[4..8].copy_from_slice(&(end_buf as u32).to_le_bytes());
+        range_buf[8..12].copy_from_slice(&fg.to_le_bytes());
+        range_buf[12..16].copy_from_slice(&bg.to_le_bytes());
+        range_buf[16..24].copy_from_slice(&flags.to_le_bytes());
+        range_buf[24..28].copy_from_slice(&ul_color.to_le_bytes());
+        buf.extend_from_slice(&range_buf);
     }
 
     #[expect(
@@ -448,7 +509,9 @@ pub(crate) fn encode_line_into_buf(
         buf.extend_from_slice(&(offset as u32).to_le_bytes());
     }
 
-    pool.text.clone()
+    let mut text = String::new();
+    mem::swap(&mut text, &mut pool.text);
+    text
 }
 
 /// Current binary frame format version.
@@ -541,19 +604,23 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
         buf.extend_from_slice(text.as_bytes());
 
         // Per face range: start_buf (u32), end_buf (u32), fg (u32), bg (u32), flags (u64), ul_color (u32)
+        // Coalesce 6 extend_from_slice calls into a single 28-byte stack write —
+        // mirrors the same optimization in encode_line_into_buf.
         for &(start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
+            let mut range_buf = [0u8; 28];
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
             )]
             {
-                buf.extend_from_slice(&(start_buf as u32).to_le_bytes());
-                buf.extend_from_slice(&(end_buf as u32).to_le_bytes());
+                range_buf[0..4].copy_from_slice(&(start_buf as u32).to_le_bytes());
+                range_buf[4..8].copy_from_slice(&(end_buf as u32).to_le_bytes());
             }
-            buf.extend_from_slice(&fg.to_le_bytes());
-            buf.extend_from_slice(&bg.to_le_bytes());
-            buf.extend_from_slice(&flags.to_le_bytes());
-            buf.extend_from_slice(&ul_color.to_le_bytes());
+            range_buf[8..12].copy_from_slice(&fg.to_le_bytes());
+            range_buf[12..16].copy_from_slice(&bg.to_le_bytes());
+            range_buf[16..24].copy_from_slice(&flags.to_le_bytes());
+            range_buf[24..28].copy_from_slice(&ul_color.to_le_bytes());
+            buf.extend_from_slice(&range_buf);
         }
 
         // col_to_buf section: length header + u32 entries
@@ -577,13 +644,14 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
 /// Compute a stable 64-bit hash for a terminal row.
 ///
 /// Hashes every cell's grapheme bytes, encoded foreground/background colors,
-/// encoded SGR flags, and the `col_to_buf` mapping slice.  The result is used
-/// by `get_dirty_lines_with_faces` to detect unchanged rows and skip re-encoding
-/// them (row-hash skip optimisation, Option A).
+/// encoded SGR flags, and the `col_to_buf` mapping slice.
 ///
-/// A new [`DefaultHasher`] is created per call using SipHash-1-3.
+/// This function re-encodes every cell and is retained only for test assertions
+/// in `src/ffi/tests/codec.rs`.  Production call sites use the faster
+/// [`compute_row_hash_from_pool`] which hashes already-encoded pool data.
+#[cfg(test)]
 #[inline]
-pub(crate) fn compute_row_hash(row: &Line, col_to_buf: &[usize]) -> u64 {
+pub(crate) fn compute_row_hash(row: &crate::grid::line::Line, col_to_buf: &[usize]) -> u64 {
     let mut h = DefaultHasher::new();
     for cell in &row.cells {
         // Hash the grapheme bytes directly — no allocation needed.
@@ -601,6 +669,99 @@ pub(crate) fn compute_row_hash(row: &Line, col_to_buf: &[usize]) -> u64 {
     // Hash the col_to_buf mapping so wide-char layout changes are detected.
     col_to_buf.hash(&mut h);
     h.finish()
+}
+
+/// Hash an already-populated [`EncodePool`] to detect row changes.
+///
+/// Equivalent to [`compute_row_hash`] but avoids re-encoding cell data:
+/// `pool.text` encodes all grapheme content; `pool.face_ranges` encodes all
+/// color and attribute data as pre-computed u32/u64 values (with run-length
+/// start/end offsets that also encode grapheme character widths); and
+/// `pool.col_to_buf` encodes wide-char column layout.
+///
+/// Use this at call sites that have already called [`fill_encode_pool`] or
+/// [`encode_line_into_buf`] where the data **remains in the pool** after the
+/// call (e.g. binary-direct path).  For [`encode_line_with_pool`] — which
+/// now uses `mem::take` to return data by ownership — use
+/// [`compute_row_hash_from_encoded`] instead.
+#[inline]
+pub(crate) fn compute_row_hash_from_pool(pool: &EncodePool) -> u64 {
+    let mut h = AHasher::default();
+    pool.text.as_bytes().hash(&mut h);
+    pool.face_ranges.hash(&mut h);
+    pool.col_to_buf.hash(&mut h);
+    h.finish()
+}
+
+/// Hash already-returned encoded line data.
+///
+/// Use this after [`encode_line_with_pool`], which moves data out of the pool
+/// via `mem::take`.  Hashes the same representation as [`compute_row_hash_from_pool`]
+/// but operates on the caller-owned tuple rather than the (now-empty) pool.
+#[inline]
+pub(crate) fn compute_row_hash_from_encoded(
+    text: &str,
+    face_ranges: &[(usize, usize, u32, u32, u64, u32)],
+    col_to_buf: &[usize],
+) -> u64 {
+    let mut h = AHasher::default();
+    text.as_bytes().hash(&mut h);
+    face_ranges.hash(&mut h);
+    col_to_buf.hash(&mut h);
+    h.finish()
+}
+
+/// Extract hyperlink ranges from a line's cells.
+///
+/// Returns `(start_buf_offset, end_buf_offset, uri)` for each contiguous
+/// run of cells sharing the same hyperlink URI.  Cells without a hyperlink
+/// are skipped.  `CellWidth::Wide` placeholder cells are also skipped (the
+/// hyperlink belongs to the preceding `Full` cell).
+///
+/// Buffer offsets use character counts (not byte offsets) — matching the
+/// convention used by `face_ranges` in [`fill_encode_pool`].
+#[must_use]
+pub fn encode_hyperlink_ranges(cells: &[Cell]) -> Vec<(usize, usize, String)> {
+    let mut ranges: Vec<(usize, usize, String)> = Vec::new();
+    let mut buf_offset = 0usize;
+    let mut current_uri: Option<String> = None;
+    let mut range_start = 0usize;
+
+    for cell in cells {
+        if cell.width == CellWidth::Wide {
+            // Placeholder for second half of wide char — skip
+            continue;
+        }
+
+        let cell_ref: Option<&str> = cell.hyperlink_id();
+
+        if cell_ref != current_uri.as_deref() {
+            // Emit previous range (if any)
+            if let Some(prev_uri) = current_uri.take() {
+                ranges.push((range_start, buf_offset, prev_uri));
+            }
+            if cell_ref.is_some() {
+                range_start = buf_offset;
+            }
+            current_uri = cell_ref.map(str::to_owned);
+        }
+
+        // Advance buf_offset — match fill_encode_pool's len ≤ 2 fast path:
+        // len=1 → ASCII; len=2 → U+0080..U+07FF (single scalar, 2 UTF-8 bytes).
+        // len > 2 may be multi-scalar; delegate to the #[cold] helper.
+        buf_offset += if cell.grapheme().len() <= 2 {
+            1
+        } else {
+            grapheme_scalar_count(cell.grapheme())
+        };
+    }
+
+    // Emit final range
+    if let Some(uri) = current_uri {
+        ranges.push((range_start, buf_offset, uri));
+    }
+
+    ranges
 }
 
 #[cfg(test)]

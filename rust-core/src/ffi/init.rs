@@ -105,18 +105,6 @@ pub fn get_init_state() -> Option<InitializationState> {
     INIT_STATE.get().copied()
 }
 
-/// Reset the initialization state (for testing only)
-///
-/// # Safety
-/// This function should only be used in test code to reset the
-/// initialization state between tests.
-#[cfg(test)]
-pub const fn reset_init_state() {
-    // Note: OnceLock doesn't provide a reset method,
-    // so in tests we would need to use a different mechanism.
-    // For now, this is a placeholder.
-}
-
 /// Get the list of exported module symbols
 ///
 /// This function returns a list of symbols that the module exports,

@@ -1,9 +1,8 @@
 //! Cursor state and shape
 
-use serde::{Deserialize, Serialize};
 
 /// Cursor shape variants (DECSCUSR)
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum CursorShape {
     /// Blinking block cursor (DECSCUSR 0 or 1)
     #[default]
@@ -21,7 +20,7 @@ pub enum CursorShape {
 }
 
 /// Cursor state
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Cursor {
     /// Column position (0-indexed)
     pub(crate) col: usize,
@@ -37,7 +36,6 @@ pub struct Cursor {
     /// column and this flag is set.  The actual wrap (col=0, `line_feed`) is
     /// deferred until the next printable character.  Any explicit cursor
     /// movement clears this flag without wrapping.
-    #[serde(skip, default)]
     pub(crate) pending_wrap: bool,
 }
 

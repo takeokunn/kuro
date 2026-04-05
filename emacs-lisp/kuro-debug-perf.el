@@ -1,6 +1,6 @@
 ;;; kuro-debug-perf.el --- Per-frame performance debugging for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -26,11 +26,13 @@
 
 ;;; User-facing toggle
 
-(defvar kuro-debug-perf nil
+(defcustom kuro-debug-perf nil
   "When non-nil, log per-frame timing to the *kuro-perf* buffer.
 Toggle with (setq kuro-debug-perf t) to diagnose rendering bottlenecks.
 Stats are written every `kuro--perf-sample-interval' frames so the
-logging itself does not perturb the measurement.")
+logging itself does not perturb the measurement."
+  :type 'boolean
+  :group 'kuro)
 
 ;;; Sampling state
 

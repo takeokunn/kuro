@@ -1,6 +1,6 @@
 ;;; kuro-renderer.el --- Render loop and frame coalescing for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -64,6 +64,38 @@ only the first actually renders.  Subsequent fires within half a frame
 period are skipped, preventing redundant partial-screen redraws that
 manifest as flickering on complex TUI apps like Claude Code.")
 
+(kuro--defvar-permanent-local kuro--half-frame-interval (/ 0.5 60.0)
+  "Cached half-frame threshold in seconds for `kuro--with-frame-coalescing'.
+Pre-computed from the active frame rate to avoid a floating-point division
+and a branch on every timer tick.  Updated by `kuro--switch-render-timer'
+and `kuro--start-render-loop' whenever the rate changes.")
+
+(kuro--defvar-permanent-local kuro--frame-budget-seconds (/ 1.0 60.0)
+  "Cached full-frame budget in seconds (= 1 / frame-rate).
+Used by `kuro--update-frame-budget-ratio' and `kuro--poll-within-budget'
+instead of computing `(/ 1.0 kuro-frame-rate)' on every 120fps tick.
+Updated alongside `kuro--half-frame-interval' in `kuro--switch-render-timer'
+and `kuro--start-render-loop'.")
+
+(kuro--defvar-permanent-local kuro--budget-threshold-high (* 0.9 (/ 1.0 60.0))
+  "Cached high-watermark budget threshold (= 0.9 * frame-budget-seconds).
+Pre-computed from `kuro--frame-budget-seconds' to avoid two float multiplies
+per frame in `kuro--update-frame-budget-ratio'.  Updated alongside
+`kuro--frame-budget-seconds' in `kuro--start-render-loop' and
+`kuro--switch-render-timer'.")
+
+(kuro--defvar-permanent-local kuro--budget-threshold-low (* 0.5 (/ 1.0 60.0))
+  "Cached low-watermark budget threshold (= 0.5 * frame-budget-seconds).
+Pre-computed from `kuro--frame-budget-seconds'.  Updated alongside
+`kuro--frame-budget-seconds' in `kuro--start-render-loop' and
+`kuro--switch-render-timer'.")
+
+(kuro--defvar-permanent-local kuro--budget-absolute-seconds (* 0.8 (/ 1.0 60.0))
+  "Cached absolute frame budget in seconds (= ratio * frame-budget-seconds).
+Pre-computed to avoid a float multiply per rendered frame in
+`kuro--poll-within-budget'.  Updated in `kuro--start-render-loop',
+`kuro--switch-render-timer', and `kuro--update-frame-budget-ratio'.")
+
 ;;; Render loop lifecycle
 
 (defun kuro--install-render-timer (rate)
@@ -87,6 +119,11 @@ Also starts the low-latency streaming idle timer when
 `kuro-streaming-latency-mode' is non-nil."
   ;; Recompute cached blink intervals in case kuro-frame-rate changed.
   (kuro--recompute-blink-frame-intervals)
+  (setq kuro--half-frame-interval    (/ 0.5 kuro-frame-rate))
+  (setq kuro--frame-budget-seconds   (/ 1.0 kuro-frame-rate))
+  (setq kuro--budget-threshold-high  (* 0.9 kuro--frame-budget-seconds))
+  (setq kuro--budget-threshold-low   (* 0.5 kuro--frame-budget-seconds))
+  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
   (kuro--install-render-timer kuro-frame-rate)
   ;; Start the zero-delay idle timer for streaming latency reduction
   (kuro--start-stream-idle-timer))
@@ -114,11 +151,8 @@ Updates `kuro--last-render-time' on the first non-coalesced call, so that
 `kuro--update-tui-streaming-timer' (which runs outside this guard) always
 observes the dirty count from the most recently rendered frame."
   (declare (indent 0))
-  `(let ((now (float-time))
-         (half-frame (/ 0.5 (if kuro--tui-mode-active
-                                kuro-tui-frame-rate
-                              kuro-frame-rate))))
-     (when (>= (- now kuro--last-render-time) half-frame)
+  `(let ((now (float-time)))
+     (when (>= (- now kuro--last-render-time) kuro--half-frame-interval)
        (setq kuro--last-render-time now)
        ,@body)))
 
@@ -127,6 +161,11 @@ observes the dirty count from the most recently rendered frame."
 (defun kuro--switch-render-timer (new-rate)
   "Cancel the current render timer and recreate it at NEW-RATE fps."
   (kuro--install-render-timer new-rate)
+  (setq kuro--half-frame-interval  (/ 0.5 new-rate))
+  (setq kuro--frame-budget-seconds (/ 1.0 new-rate))
+  (setq kuro--budget-threshold-high   (* 0.9 kuro--frame-budget-seconds))
+  (setq kuro--budget-threshold-low    (* 0.5 kuro--frame-budget-seconds))
+  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
   (kuro--recompute-blink-frame-intervals))
 
 (defun kuro--ring-pending-bell ()

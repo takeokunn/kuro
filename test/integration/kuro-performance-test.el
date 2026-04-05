@@ -54,10 +54,10 @@ Mirrors the pattern used in kuro-renderer-unit-test.el."
 ;;; FR-007: Render cycle timing test
 
 (defun kuro-perf-test--make-stub-updates (rows cols)
-  "Build a list of simulated `kuro--poll-updates-with-faces' results.
+  "Build a vector of simulated `kuro--poll-updates-with-faces' results.
 Each entry simulates one dirty row with COLS colored cells.
-Format per entry: (((row . text) . face-list) . col-to-buf-vector)"
-  (let (result)
+Format per entry: flat vector [row text face-ranges col-to-buf]."
+  (let ((result (make-vector rows nil)))
     (dotimes (row rows)
       ;; Two face spans per row: first half one color, second half another.
       ;; Use distinct RGB colors per row to exercise the face cache.
@@ -69,18 +69,16 @@ Format per entry: (((row . text) . face-list) . col-to-buf-vector)"
              (fg2 (logior (ash (mod (* row 11) 256) 16)
                           (ash (mod (* row 19) 256) 8)
                           (mod (* row 23) 256)))
-             ;; face-range format: (start-col end-col fg-enc bg-enc flags)
-             (face-ranges (list (list 0   mid fg1 #xFF000000 0)
-                                (list mid cols fg2 #xFF000000 0)))
+             ;; face-ranges: stride-6 flat vector [s0 e0 fg0 bg0 f0 ul0 s1 e1 fg1 bg1 f1 ul1]
+             (face-ranges (vector 0   mid fg1 #xFF000000 0 0
+                                  mid cols fg2 #xFF000000 0 0))
              ;; col-to-buf vector: identity mapping for ASCII text
              (col-to-buf (let ((v (make-vector cols 0)))
                            (dotimes (i cols) (aset v i i))
-                           v))
-             ;; line-update = (((row . text) . face-ranges) . col-to-buf)
-             (line-data (cons (cons row text) face-ranges))
-             (entry (cons line-data col-to-buf)))
-        (push entry result)))
-    (nreverse result)))
+                           v)))
+        ;; Flat 4-element vector [row text face-ranges col-to-buf]
+        (aset result row (vector row text face-ranges col-to-buf))))
+    result))
 
 (ert-deftest test-kuro-render-cycle-timing ()
   "Measure render cycle time for a full-dirty 24x80 update (cmatrix scenario).
@@ -182,7 +180,7 @@ fg-enc/bg-enc are raw u32 FFI color values, and flags is a bitmask."
       ;; would be incorrectly clamped to the old 10-char line-end and offsets
       ;; 3-6 would be valid in the new text but could be misclamped.
       (kuro--update-line-full 0 "XXXXXXXXXXXXXXXXXXX"        ; 19 chars (was 10)
-                              (list (list 3 6 #x00FF0000 #xFF000000 0))
+                              (vector 3 6 #x00FF0000 #xFF000000 0 0)
                               nil)
       ;; Text content is the new 19-char string.
       (save-excursion
@@ -203,7 +201,7 @@ fg-enc/bg-enc are raw u32 FFI color values, and flags is a bitmask."
       ;; line-start and are not offset by row 1's content-length change.
       (kuro--update-line-full 1 "SHORT" nil nil)
       (kuro--update-line-full 2 "LONGERLONGER"              ; 12 chars (was 10)
-                              (list (list 4 8 #x000000FF #xFF000000 0))
+                              (vector 4 8 #x000000FF #xFF000000 0 0)
                               nil)
       ;; Row 2 content correct.
       (save-excursion

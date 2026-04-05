@@ -357,7 +357,7 @@ fn test_setup_child_env_sets_term() {
     // Runs in a forked child to isolate env-var mutations from other test threads.
     let _lock = ENV_FORK_LOCK.lock().unwrap();
     let ok = run_in_child_check(|| {
-        super::setup_child_env(24, 80);
+        super::setup_child_env(24, 80, std::path::Path::new("/bin/sh"));
         std::env::var("TERM").as_deref() == Ok("xterm-256color")
             && std::env::var("COLORTERM").as_deref() == Ok("truecolor")
             && std::env::var("KURO_TERMINAL").as_deref() == Ok("1")
@@ -374,7 +374,7 @@ fn test_setup_child_env_propagates_dimensions() {
     // Runs in a forked child to isolate env-var mutations from other test threads.
     let _lock = ENV_FORK_LOCK.lock().unwrap();
     let ok = run_in_child_check(|| {
-        super::setup_child_env(42, 120);
+        super::setup_child_env(42, 120, std::path::Path::new("/bin/sh"));
         std::env::var("LINES").as_deref() == Ok("42")
             && std::env::var("COLUMNS").as_deref() == Ok("120")
     });
@@ -388,7 +388,7 @@ fn test_setup_child_env_removes_multiplexer_vars() {
     // Hold ENV_FORK_LOCK for the full critical section (set_var + fork + cleanup)
     // so no concurrent test can hold the env RwLock when fork() is called.
     let _lock = ENV_FORK_LOCK.lock().unwrap();
-    #[allow(deprecated)]
+    #[allow(deprecated, reason = "set_var deprecated but fork lock serializes access")]
     unsafe {
         std::env::set_var("TMUX", "some-socket");
         std::env::set_var("STY", "some-screen");
@@ -397,14 +397,14 @@ fn test_setup_child_env_removes_multiplexer_vars() {
     }
     let ok = run_in_child_check(|| {
         // Child inherits the vars set above; verify setup_child_env removes them.
-        super::setup_child_env(24, 80);
+        super::setup_child_env(24, 80, std::path::Path::new("/bin/sh"));
         std::env::var("TMUX").is_err()
             && std::env::var("STY").is_err()
-            && std::env::var("INSIDE_EMACS").is_err()
+            && std::env::var("INSIDE_EMACS").as_deref() == Ok("kuro,comint")
             && std::env::var("EMACS_SOCKET_NAME").is_err()
     });
     // Clean up in the parent regardless of test outcome.
-    #[allow(deprecated)]
+    #[allow(deprecated, reason = "remove_var deprecated but fork lock serializes access")]
     unsafe {
         std::env::remove_var("TMUX");
         std::env::remove_var("STY");

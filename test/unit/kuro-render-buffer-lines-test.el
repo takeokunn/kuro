@@ -70,8 +70,8 @@
       (cl-letf (((symbol-function 'kuro--apply-ffi-face-at)
                  (lambda (_s _e _fg _bg _fl _ul) (cl-incf face-calls)))
                 ((symbol-function 'kuro--clear-row-image-overlays) #'ignore))
-        ;; A single face range: start=0, end=5, fg=0, bg=0, flags=0, ul=0
-        (kuro--update-line-full 0 "hello" '((0 5 0 0 0 0)) nil))
+        ;; A single face range in stride-6 flat format: [start end fg bg flags ul]
+        (kuro--update-line-full 0 "hello" (vector 0 5 0 0 0 0) nil))
       (should (= face-calls 1)))))
 
 (ert-deftest kuro-render-buffer-update-line-full-stores-col-to-buf ()
@@ -254,13 +254,15 @@
 ;; ------------------------------------------------------------
 
 (ert-deftest kuro-render-buffer-store-col-to-buf-nil-non-integer-row-is-noop ()
-  "kuro--store-col-to-buf with nil col-to-buf and a non-integer row does not remove anything.
-The guard `(when (and (integerp row) (null col-to-buf)))' rejects non-integer rows."
+  "kuro--store-col-to-buf with nil col-to-buf and a non-integer row.
+The integerp guard was removed in Round 11 as dead code (row is always an
+integer in production since it originates from the binary FFI decoder).
+Without the guard, (gethash row ht) governs: if no entry exists, remhash
+is not called (already a no-op).  Non-integer rows only arise in unit tests."
   (kuro-render-buffer-test--with-buffer
-    (puthash 'foo [0 1] kuro--col-to-buf-map)
+    ;; No entry for 'foo: no remhash call, no error — still a no-op.
     (kuro--store-col-to-buf 'foo nil)
-    ;; Non-integer key: the remhash branch is skipped; entry stays
-    (should (equal (gethash 'foo kuro--col-to-buf-map) [0 1]))))
+    (should (null (gethash 'foo kuro--col-to-buf-map)))))
 
 (ert-deftest kuro-render-buffer-store-col-to-buf-overwrites-existing-vector ()
   "kuro--store-col-to-buf replaces an existing vector entry with a new one."

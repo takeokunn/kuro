@@ -223,7 +223,7 @@ before the new idle timer is created."
                 ((symbol-function 'cancel-timer)
                  (lambda (x) (setq cancel-called-with x)))
                 ((symbol-function 'run-with-idle-timer)
-                 (lambda (_delay _repeat _fn) 'new-fake-timer)))
+                 (lambda (_delay _repeat _fn &rest _args) 'new-fake-timer)))
         (kuro--schedule-immediate-render)
         (should (eq cancel-called-with fake-old))))))
 
@@ -233,7 +233,7 @@ before the new idle timer is created."
     (setq-local kuro--pending-render-timer nil)
     (cl-letf (((symbol-function 'timerp) (lambda (_x) nil))
               ((symbol-function 'run-with-idle-timer)
-               (lambda (_delay _repeat _fn) 'created-timer)))
+               (lambda (_delay _repeat _fn &rest _args) 'created-timer)))
       (kuro--schedule-immediate-render)
       (should (eq kuro--pending-render-timer 'created-timer)))))
 
@@ -245,7 +245,7 @@ before the new idle timer is created."
           (captured-delay nil))
       (cl-letf (((symbol-function 'timerp) (lambda (_x) nil))
                 ((symbol-function 'run-with-idle-timer)
-                 (lambda (delay _repeat _fn)
+                 (lambda (delay _repeat _fn &rest _args)
                    (setq captured-delay delay)
                    'fake)))
         (kuro--schedule-immediate-render)

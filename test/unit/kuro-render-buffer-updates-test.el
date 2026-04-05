@@ -99,8 +99,9 @@
   (kuro-render-buffer-test--with-buffer
     (insert "hello\n")
     (kuro-render-buffer-test--capture-face-calls calls
-      ;; range (0 3 1 0 0 0): start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
-      (kuro--apply-face-ranges '((0 3 1 0 0 0)) 1 6)
+      ;; Stride-6 flat vector: [start end fg bg flags ul] — range [0 3 1 0 0 0]
+      ;; start-pos = min(1+0,6) = 1, end-pos = min(1+3,6) = 4
+      (kuro--apply-face-ranges (vector 0 3 1 0 0 0) 1 6)
       (should (= (length calls) 1))
       (should (equal (car calls) '(1 4 1 0 0))))))
 
@@ -109,8 +110,8 @@
   (kuro-render-buffer-test--with-buffer
     (insert "hello\n")
     (kuro-render-buffer-test--capture-face-calls calls
-      ;; start-buf=3 end-buf=3 → start-pos=end-pos → no call
-      (kuro--apply-face-ranges '((3 3 1 0 0 0)) 1 6)
+      ;; Stride-6: start-buf=3 end-buf=3 → start-pos=end-pos → no call
+      (kuro--apply-face-ranges (vector 3 3 1 0 0 0) 1 6)
       (should (null calls)))))
 
 (ert-deftest kuro-render-buffer-apply-face-ranges-clamps-to-line-end ()
@@ -119,8 +120,8 @@
     (insert "ab\n")
     ;; line-start=1, line-end=3 ("ab" occupies positions 1-2, newline at 3)
     (kuro-render-buffer-test--capture-face-calls calls
-      ;; range (0 99 1 0 0 0): end-pos = min(1+99, 3) = 3
-      (kuro--apply-face-ranges '((0 99 1 0 0 0)) 1 3)
+      ;; Stride-6: range [0 99 1 0 0 0] — end-pos = min(1+99, 3) = 3
+      (kuro--apply-face-ranges (vector 0 99 1 0 0 0) 1 3)
       (should (= (length calls) 1))
       (should (= (nth 1 (car calls)) 3)))))
 
@@ -130,10 +131,10 @@
     (insert "hello world\n")
     ;; line-start=1, line-end=12 ("hello world" = 11 chars)
     (kuro-render-buffer-test--capture-face-calls calls
-      ;; Three non-overlapping ranges
-      (kuro--apply-face-ranges '((0 3 1 0 0 0)   ; "hel"
-                                 (4 6 2 0 0 0)   ; "o "
-                                 (7 10 3 0 0 0)) ; "wor"
+      ;; Stride-6: three ranges flat [s0 e0 fg0 bg0 f0 ul0 s1 ...]
+      (kuro--apply-face-ranges (vector 0 3 1 0 0 0   ; "hel"
+                                       4 6 2 0 0 0   ; "o "
+                                       7 10 3 0 0 0) ; "wor"
                                1 12)
       (should (= (length calls) 3))
       ;; calls pushed in reverse order; verify each call's fg-enc
@@ -299,11 +300,15 @@ so storing it would waste hash table space without any semantic benefit."
      (should (null (gethash 5 kuro--col-to-buf-map)))))
 
 (ert-deftest kuro-render-buffer-update-row-position-cache-after-line-change-updates-next-row ()
-  "Length changes update row+1 and invalidate later cached rows."
+  "Length changes update row+1 exactly and propagate delta to later rows.
+Row+1 is set to (1+ new-line-end).  Rows +2 and beyond are adjusted by
+(new-len - old-len) so they remain valid without a forward-line traversal."
   (kuro-render-buffer-test--with-buffer
     (setq kuro--row-positions [10 20 30 40 50])
+    ;; row=1, old-len=3, new-len=5 → delta=+2, new-line-end=99
     (kuro--update-row-position-cache-after-line-change 1 3 5 99)
-    (should (equal kuro--row-positions [10 20 100 nil nil]))))
+    ;; row 2 = (1+ 99) = 100; row 3 = 40+2 = 42; row 4 = 50+2 = 52.
+    (should (equal kuro--row-positions [10 20 100 42 52]))))
 
 (ert-deftest kuro-render-buffer-update-row-position-cache-after-line-change-skips-equal-length ()
   "Equal lengths leave the cached row positions untouched."

@@ -264,14 +264,18 @@
                  (lambda (row _text _faces _c2b)
                    (push row updated-rows))))
         (kuro--apply-dirty-lines
-         '((((0 . "new0") . nil) . nil)
-           (((1 . "new1") . nil) . nil)))
+         (vector (vector 0 "new0" nil nil)
+                 (vector 1 "new1" nil nil)))
         (should (= (length updated-rows) 2))
         (should (member 0 updated-rows))
         (should (member 1 updated-rows))))))
 
 (ert-deftest kuro-renderer-pipeline-apply-dirty-lines-swallows-per-row-errors ()
-  "kuro--apply-dirty-lines swallows per-row errors and continues."
+  "kuro--apply-dirty-lines catches frame-level errors without propagating.
+The condition-case is hoisted outside the loop for performance (avoids
+installing a C-level setjmp target per-iteration).  When an error occurs
+on row 0, the loop aborts and remaining rows are not attempted — this is
+acceptable because `kuro--update-line-full' never signals in production."
   (kuro-renderer-pipeline-test--with-buffer
     (insert "row0\nrow1\n")
     (let ((rows-attempted nil))
@@ -280,11 +284,13 @@
                    (push row rows-attempted)
                    (when (= row 0)
                      (error "simulated row error")))))
+        ;; Error is caught inside kuro--apply-dirty-lines; nothing propagates.
         (kuro--apply-dirty-lines
-         '((((0 . "bad") . nil) . nil)
-           (((1 . "ok") . nil) . nil)))
-        ;; Both rows should have been attempted despite error on row 0
-        (should (= (length rows-attempted) 2))))))
+         (vector (vector 0 "bad" nil nil)
+                 (vector 1 "ok" nil nil)))
+        ;; Only row 0 was attempted; frame-level abort skipped row 1.
+        (should (= (length rows-attempted) 1))
+        (should (equal rows-attempted '(0)))))))
 
 (ert-deftest kuro-renderer-pipeline-apply-dirty-lines-empty-updates-is-noop ()
   "kuro--apply-dirty-lines with an empty list is a no-op."

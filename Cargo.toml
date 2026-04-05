@@ -9,20 +9,20 @@ edition = "2021"
 authors = ["takeokunn"]
 license = "MIT"
 repository = "https://github.com/takeokunn/kuro"
+description = "Rust core for the Kuro terminal emulator Emacs module"
 rust-version = "1.84.0"
 
 [workspace.dependencies]
 vte = "0.15.0"
 emacs = "0.19.0"
 unicode-width = "0.2"
-thiserror = "2.0"
-serde = { version = "1.0", features = ["derive"] }
 proptest = "1.5"
 criterion = "0.5"
-nix = { version = "0.29", features = ["process", "term", "fs", "signal"] }
+nix = { version = "0.29", features = ["process", "term", "signal"] }
 png = "0.17"
+ahash = "0.8"
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
 strip = "symbols"

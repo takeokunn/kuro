@@ -85,6 +85,9 @@ pub(super) fn make_session() -> TerminalSession {
         palette_epoch: 0,
         was_alt_screen: false,
         encode_pool: crate::ffi::codec::EncodePool::new(),
+        dirty_scratch: Vec::new(),
+        texts_scratch: Vec::new(),
+        buf_scratch: Vec::new(),
     }
 }
 

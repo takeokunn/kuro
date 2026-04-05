@@ -13,11 +13,10 @@ crate-type = ["cdylib", "rlib"]
 vte.workspace = true
 emacs.workspace = true
 unicode-width.workspace = true
-thiserror.workspace = true
-serde.workspace = true
 nix.workspace = true
 png.workspace = true
-compact_str = { version = "0.8", features = ["serde"] }
+compact_str = "0.8"
+ahash.workspace = true
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]

@@ -3,7 +3,7 @@
 use kuro_core::TerminalCore;
 
 /// Return a standard-size test terminal used by the integration suites.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "shared helper; not every integration test binary calls it")]
 pub fn new_terminal() -> TerminalCore {
     TerminalCore::new(24, 80)
 }
@@ -13,7 +13,7 @@ pub fn new_terminal() -> TerminalCore {
 /// Accumulates across calls — each subsequent call returns all responses since
 /// the session was created (or since `TerminalCore::reset()` was last called).
 /// Use the length delta between two calls to check for new responses.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "shared helper; not every integration test binary calls it")]
 pub fn read_responses(term: &TerminalCore) -> Vec<String> {
     let responses = term.pending_responses().to_vec();
     responses

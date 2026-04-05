@@ -1,6 +1,6 @@
 ;;; kuro-faces-color.el --- Color conversion utilities for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -37,6 +37,15 @@ See `encode_color' in rust-core/src/ffi/codec.rs for the encoding contract.")
 Used to look up named-color faces in `kuro--decode-ffi-color' and
 `kuro--indexed-to-emacs'. Indices match the order of NamedColor in
 rust-core/src/types/color.rs.  Names match the keys in `kuro--named-colors'.")
+
+(defconst kuro--named-color-conses
+  (let ((v (make-vector 16 nil)))
+    (dotimes (i 16)
+      (aset v i (cons 'named (aref kuro--ansi-color-names i))))
+    v)
+  "Pre-allocated `(named . name)' cons cells for the 16 ANSI color indices.
+`kuro--decode-ffi-color' reads these directly on named-color hits, avoiding
+one cons allocation per unique named-color cache miss.")
 
 ;;; 256-color palette constants
 
@@ -128,16 +137,35 @@ COLOR can be:
     (aref kuro--grayscale-table (- idx kuro--color-gray-start)))
    (t nil)))
 
+(defvar kuro--rgb-string-cache (make-hash-table :test 'eql :size 256)
+  "Cache mapping 24-bit RGB integers to Emacs \"#rrggbb\" color strings.
+Avoids repeated `format' calls for TrueColor values that recur across
+frames (e.g. btop, neovim palette).  Keyed on the raw integer so lookups
+are O(1) with no string comparison.")
+
 (defsubst kuro--rgb-to-emacs (rgb-value)
-  "Convert 24-bit RGB-VALUE to Emacs color string."
-  (let ((r (logand (ash rgb-value -16) #xFF))
-        (g (logand (ash rgb-value -8)  #xFF))
-        (b (logand rgb-value            #xFF)))
-    (format "#%02x%02x%02x" r g b)))
+  "Convert 24-bit RGB-VALUE to Emacs color string, using a session cache."
+  (or (gethash rgb-value kuro--rgb-string-cache)
+      (let ((s (format "#%02x%02x%02x"
+                       (logand (ash rgb-value -16) #xFF)
+                       (logand (ash rgb-value -8)  #xFF)
+                       (logand rgb-value            #xFF))))
+        (puthash rgb-value s kuro--rgb-string-cache)
+        s)))
 
 ;;; FFI color decoding
 
-(defun kuro--decode-ffi-color (color-enc)
+(defconst kuro--indexed-color-conses
+  (let ((v (make-vector 256 nil)))
+    (dotimes (i 256)
+      (aset v i (cons 'indexed i)))
+    v)
+  "Pre-allocated `(indexed . idx)' cons cells for all 256 indexed color indices.
+`kuro--decode-ffi-color' reads these directly on indexed-color hits, avoiding
+one cons allocation per unique indexed-color cache miss (analogous to
+`kuro--named-color-conses' for the 16 ANSI named colors).")
+
+(defsubst kuro--decode-ffi-color (color-enc)
   "Decode FFI color encoding COLOR-ENC to Emacs color spec.
 COLOR-ENC is a u32 value:
   - kuro--ffi-color-default: default color (sentinel, distinct from true black)
@@ -148,15 +176,15 @@ COLOR-ENC is a u32 value:
    ((= color-enc kuro--ffi-color-default)
     :default)
    ((/= 0 (logand color-enc kuro--color-tag-named))
-    (let* ((idx (logand color-enc #xFF))
-           (name (when (< idx 16)
-                   (aref kuro--ansi-color-names idx))))
-      (when name
-        (cons 'named name))))
-    ((/= 0 (logand color-enc kuro--color-tag-indexed))
-     (cons 'indexed (logand color-enc #xFF)))
-    (t
-     (cons 'rgb (logand color-enc kuro--color-rgb-mask)))))
+    ;; Use pre-allocated cons cell to avoid heap allocation on every cache miss.
+    (let ((idx (logand color-enc #xFF)))
+      (when (< idx 16)
+        (aref kuro--named-color-conses idx))))
+   ((/= 0 (logand color-enc kuro--color-tag-indexed))
+    ;; Use pre-allocated cons cell to avoid heap allocation on every cache miss.
+    (aref kuro--indexed-color-conses (logand color-enc #xFF)))
+   (t
+    (cons 'rgb (logand color-enc kuro--color-rgb-mask)))))
 
 (provide 'kuro-faces-color)
 

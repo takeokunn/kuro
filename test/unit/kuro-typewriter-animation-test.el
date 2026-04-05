@@ -37,7 +37,8 @@
            kuro--typewriter-timer
            kuro--typewriter-current-row
            kuro--typewriter-current-text
-           (kuro--typewriter-written-len 0))
+           (kuro--typewriter-written-len 0)
+           (kuro--typewriter-current-text-len 0))
        ,@body)))
 
 (defmacro kuro-typewriter-test--with-timer-stub (var &rest body)
@@ -102,6 +103,7 @@ length 3; after one tick written-len goes from 0 to 1, substring = first char."
     (insert "日本語\n")
     (setq kuro--typewriter-current-row 0
           kuro--typewriter-current-text "日本語"
+          kuro--typewriter-current-text-len 3
           kuro--typewriter-written-len 0)
     (let ((last-written nil))
       (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
@@ -118,6 +120,7 @@ length 3; after one tick written-len goes from 0 to 1, substring = first char."
       (insert (concat text "\n"))
       (setq kuro--typewriter-current-row 0
             kuro--typewriter-current-text text
+            kuro--typewriter-current-text-len (length text)
             kuro--typewriter-written-len 0)
       (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
                  (lambda (_row _text) (cl-incf tick-count))))

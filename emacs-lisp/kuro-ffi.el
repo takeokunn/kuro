@@ -1,6 +1,6 @@
 ;;; kuro-ffi.el --- FFI wrapper functions for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -81,9 +81,12 @@ and `insert' for speed (no echo-area overhead)."
 (defmacro kuro--when-divisible (counter divisor &rest body)
   "Execute BODY when COUNTER is divisible by DIVISOR (counter mod divisor = 0).
 This is the fundamental cadence-gating primitive used for periodic polling and
-animation timing: BODY is a continuation invoked at exact multiples of DIVISOR."
+animation timing: BODY is a continuation invoked at exact multiples of DIVISOR.
+`%' is used instead of `mod': both are identical for non-negative COUNTER
+(frame counter is always ≥ 0), but `%' avoids the sign-normalization branch
+inside `mod'."
   (declare (indent 2))
-  `(when (zerop (mod ,counter ,divisor))
+  `(when (zerop (% ,counter ,divisor))
      ,@body))
 
 (defmacro kuro--defvar-permanent-local (name value &optional doc)

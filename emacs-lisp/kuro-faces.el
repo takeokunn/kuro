@@ -1,6 +1,6 @@
 ;;; kuro-faces.el --- Color conversion and face management for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
@@ -115,57 +115,73 @@ This function is a no-op in non-graphical (terminal) Emacs frames."
   "Create an Emacs face spec from decoded FG, BG, FLAGS, and UNDERLINE-COLOR."
   (kuro--attrs-to-face-props fg bg flags underline-color))
 
-(defun kuro--get-cached-face-raw (fg-enc bg-enc flags ul-enc)
+(defun kuro--get-cached-face-raw--miss (fg-enc bg-enc flags ul-normalized)
+  "Cold path: handle a cache miss for `kuro--get-cached-face-raw'.
+UL-NORMALIZED is already canonicalized: 0 when underline color is absent
+\(original ul-enc was nil, 0, or #xFF000000); otherwise equals ul-enc.
+Called only on cache misses — typically < 1% of calls.  Runs optional FIFO
+eviction, decodes FFI color/attribute values, builds a face plist, stores
+it under a stable key vector, and returns the face."
+  (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
+    ;; FIFO eviction: collect evict-count keys then remove them.
+    ;; `catch'/`throw' exits maphash early once enough keys are collected,
+    ;; avoiding the remaining ~75% of iterations (4096 - 1024 = 3072 entries).
+    (let ((evict-count (round (* kuro--face-cache-max-size kuro--face-cache-evict-fraction)))
+          (evict-keys nil)
+          (n 0))
+      (catch 'evict-done
+        (maphash (lambda (k _v)
+                   (push k evict-keys)
+                   (when (>= (setq n (1+ n)) evict-count)
+                     (throw 'evict-done nil)))
+                 kuro--face-cache))
+      (dolist (k evict-keys)
+        (remhash k kuro--face-cache))))
+  (let* ((fg (kuro--decode-ffi-color fg-enc))
+         (bg (kuro--decode-ffi-color bg-enc))
+         ;; ul-normalized != 0 iff original ul-enc was a real color value,
+         ;; and in that case ul-normalized == ul-enc, so logand is correct.
+         (ul-color (when (/= ul-normalized 0)
+                     (kuro--rgb-to-emacs (logand ul-normalized kuro--color-rgb-mask))))
+         (face (kuro--make-face fg bg flags ul-color))
+         ;; Store a fresh vector as the cache key so the lookup key can be
+         ;; mutated next call without corrupting the stored hash entry.
+         (key (vector fg-enc bg-enc flags ul-normalized)))
+    ;; Explicit `face' return: puthash returns the value in Emacs 27+,
+    ;; but relying on that is undocumented; be explicit.
+    (puthash key face kuro--face-cache)
+    face))
+
+(defsubst kuro--get-cached-face-raw (fg-enc bg-enc flags ul-enc)
   "Get or create a cached face using raw FFI-encoded integer values.
 Uses a vector key of raw integers, which avoids cons-cell list allocation
 on cache hits and skips color decoding entirely when cached.
 FG-ENC, BG-ENC, UL-ENC are u32 FFI color values; FLAGS is a u64 bitmask.
-On cache miss, decodes all values and delegates to `kuro--make-face'.
+On cache miss, delegates to `kuro--get-cached-face-raw--miss'.
 
 The pre-allocated `kuro--face-cache-lookup-key' vector is mutated in-place
 for the gethash call (avoiding one cons per call).  On cache miss a new
 vector is created for puthash so stored keys are stable across future calls.
 
-Cache eviction uses FIFO order (hash-table iteration order) without per-entry
-access-time tracking.  This eliminates one heap allocation and one puthash
-per cache hit — the dominant cost on the 99%+ hit-rate hot path."
+Hot/cold split: this defsubst is inlined at all call sites so the 99%+
+cache-hit path executes with no function-call dispatch overhead.  The cold
+miss path is a separate defun to keep the inlined body small."
   ;; Normalize ul-enc: both 0 and #xFF000000 mean "no underline color".
   ;; Canonicalizing to 0 prevents duplicate cache entries for the common case.
-  (let ((ul-normalized (if (or (null ul-enc)
-                               (= ul-enc 0)
-                               (= ul-enc #xFF000000))
-                           0 ul-enc)))
+  ;; ul-enc is always a fixnum from kuro--read-u32-le or the v1 padding value 0;
+  ;; the former (null ul-enc) guard is removed — it was dead weight at 28,800/sec.
+  ;; zerop bytecode (1 instruction) replaces `(= ul-enc 0)' (2 instructions);
+  ;; nested if avoids the `or' short-circuit machinery for the uncommon branch.
+  (let ((ul-normalized (if (zerop ul-enc) 0
+                         (if (= ul-enc #xFF000000) 0 ul-enc))))
     ;; Mutate the pre-allocated key vector in-place; no cons on cache hits.
     (aset kuro--face-cache-lookup-key 0 fg-enc)
     (aset kuro--face-cache-lookup-key 1 bg-enc)
     (aset kuro--face-cache-lookup-key 2 flags)
     (aset kuro--face-cache-lookup-key 3 ul-normalized)
-    (let ((hit (gethash kuro--face-cache-lookup-key kuro--face-cache)))
-      (if hit
-          hit  ; hot path: no allocation, no bookkeeping
-        (when (> (hash-table-count kuro--face-cache) kuro--face-cache-max-size)
-          ;; FIFO eviction: collect the first evict-count keys, then remove them.
-          ;; Collecting before removing avoids mutating the hash table during
-          ;; maphash iteration.  No sort needed — O(n) vs previous O(n log n).
-          (let ((evict-count (round (* kuro--face-cache-max-size kuro--face-cache-evict-fraction)))
-                (evict-keys nil)
-                (n 0))
-            (maphash (lambda (k _v)
-                       (when (< n evict-count)
-                         (push k evict-keys)
-                         (setq n (1+ n))))
-                     kuro--face-cache)
-            (dolist (k evict-keys)
-              (remhash k kuro--face-cache))))
-        (let* ((fg (kuro--decode-ffi-color fg-enc))
-               (bg (kuro--decode-ffi-color bg-enc))
-               (ul-color (when (/= ul-normalized 0)
-                           (kuro--rgb-to-emacs (logand ul-enc kuro--color-rgb-mask))))
-               (face (kuro--make-face fg bg flags ul-color))
-               (key (vector fg-enc bg-enc flags ul-normalized)))
-          ;; Store a fresh vector as the cache key so the lookup key can be
-          ;; mutated next call without corrupting the stored hash entry.
-          (puthash key face kuro--face-cache))))))
+    ;; `or' short-circuits: cold path never called on cache hit.
+    (or (gethash kuro--face-cache-lookup-key kuro--face-cache)
+        (kuro--get-cached-face-raw--miss fg-enc bg-enc flags ul-normalized))))
 
 (defsubst kuro--clear-face-cache ()
   "Clear the face cache to free memory."
@@ -215,7 +231,7 @@ Only indices 0–15 are accepted (standard ANSI palette).
 Returns non-nil if the color for IDX actually changed, nil otherwise."
   (when (< idx 16)
     (let* ((name      (aref kuro--ansi-color-names idx))
-           (new-color (format "#%02x%02x%02x" r g b))
+           (new-color (kuro--rgb-to-emacs (logior (ash r 16) (ash g 8) b)))
            (old-color (gethash name kuro--named-colors)))
       (unless (equal old-color new-color)
         (puthash name new-color kuro--named-colors)
@@ -227,10 +243,16 @@ Fetches all pending updates, applies each via `kuro--apply-palette-entry',
 then flushes the face cache if at least one entry actually changed."
   (when kuro--initialized
     (when-let ((updates (kuro--get-palette-updates)))
-      (when (cl-some (pcase-lambda (`(,idx ,r ,g ,b))
-                       (kuro--apply-palette-entry idx r g b))
-                     updates)
-        (kuro--clear-face-cache)))))
+      (let ((changed nil))
+        (dolist (entry updates)
+          (let* ((e1 (cdr entry))
+                 (e2 (cdr e1))
+                 (e3 (cdr e2)))
+            (when (kuro--apply-palette-entry
+                   (car entry) (car e1) (car e2) (car e3))
+              (setq changed t))))
+        (when changed
+          (kuro--clear-face-cache))))))
 
 (provide 'kuro-faces)
 

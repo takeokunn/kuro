@@ -1,6 +1,5 @@
 //! Color representations and conversions
 
-use serde::{Deserialize, Serialize};
 
 const SYSTEM_COLOR_MAX: u8 = 15;
 const COLOR_CUBE_BASE: u8 = 16;
@@ -15,7 +14,7 @@ const GRAYSCALE_OFFSET: u8 = 8;
 ///
 /// `#[repr(u8)]` with explicit discriminants enables zero-cost `as u8` casts
 /// for FFI color encoding, replacing a 16-arm match with a single instruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum NamedColor {
     /// Black color (index 0)
@@ -53,7 +52,7 @@ pub enum NamedColor {
 }
 
 /// Terminal color representation
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Color {
     /// Named color from standard palette
     Named(NamedColor),

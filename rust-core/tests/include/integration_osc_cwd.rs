@@ -124,6 +124,7 @@ fn osc8_hyperlink_with_id_param_stores_uri() {
 }
 
 // Open a hyperlink, write some text, then close. Cursor must remain in bounds.
+// Cells printed while the hyperlink is active must carry the URI.
 #[test]
 fn osc8_hyperlink_text_between_open_and_close() {
     let mut t = TerminalCore::new(24, 80);
@@ -136,6 +137,23 @@ fn osc8_hyperlink_text_between_open_and_close() {
     );
     assert!(t.cursor_row() < 24);
     assert!(t.cursor_col() < 80);
+
+    // Verify cells 0..10 carry the hyperlink URI
+    for col in 0..10 {
+        let cell = t.get_cell(0, col).expect("cell must exist");
+        assert_eq!(
+            cell.hyperlink_id(),
+            Some("https://example.com"),
+            "cell at col {col} must carry hyperlink URI"
+        );
+    }
+    // Cell at col 10 (after hyperlink close) must not have a hyperlink
+    let plain_cell = t.get_cell(0, 10).expect("cell must exist");
+    assert_eq!(
+        plain_cell.hyperlink_id(),
+        None,
+        "cell after hyperlink close must not carry URI"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

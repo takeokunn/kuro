@@ -1,5 +1,6 @@
 //! OSC sequence tests.
 
+use std::sync::Arc;
 use super::super::*;
 
 #[test]
@@ -141,7 +142,7 @@ fn test_osc_8_hyperlink() {
     core.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
         core.osc_data.hyperlink.uri,
-        Some("https://example.com".to_owned())
+        Some(Arc::from("https://example.com"))
     );
     // Close hyperlink
     core.advance(b"\x1b]8;;\x07");

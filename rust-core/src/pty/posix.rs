@@ -42,12 +42,12 @@ const DROP_WAITPID_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 /// async-signal-safe in general, but is safe here because no other threads
 /// exist in the child process.
 #[inline]
-fn setup_child_env(rows: u16, cols: u16) {
+fn setup_child_env(rows: u16, cols: u16, shell_path: &Path) {
     // Remove terminal-multiplexer variables so tmux/screen behave correctly inside kuro.
     std::env::remove_var("TMUX");
     std::env::remove_var("STY");
-    // Remove Emacs host-side variables so emacsclient does not talk to the parent Emacs.
-    std::env::remove_var("INSIDE_EMACS");
+    // Set INSIDE_EMACS so shell integration scripts and programs can detect kuro.
+    std::env::set_var("INSIDE_EMACS", "kuro,comint");
     std::env::remove_var("EMACS_SOCKET_NAME");
     // Advertise the kuro environment to programs that wish to detect it.
     std::env::set_var("KURO_TERMINAL", "1");
@@ -57,6 +57,135 @@ fn setup_child_env(rows: u16, cols: u16) {
     // Belt-and-suspenders: some shells read COLUMNS/LINES before calling TIOCGWINSZ.
     std::env::set_var("COLUMNS", cols.to_string());
     std::env::set_var("LINES", rows.to_string());
+    // Inject shell integration scripts when KURO_SHELL_INTEGRATION_DIR is set by Elisp.
+    setup_shell_integration(shell_path);
+}
+
+/// Set shell-specific environment variables to auto-source kuro integration scripts.
+///
+/// Reads `KURO_SHELL_INTEGRATION_DIR` (set by `kuro-lifecycle.el` before spawn) and
+/// configures the appropriate env var for the detected shell:
+///   - bash: temporary bashrc that sources `~/.bashrc` then `kuro-shell.bash`
+///   - zsh:  temporary `ZDOTDIR` that sources `~/.zshrc` then `kuro-shell.zsh`
+///   - fish: `XDG_DATA_DIRS` prepended so fish autoloads `kuro-shell.fish`
+///
+/// Does nothing when `KURO_SHELL_INTEGRATION_DIR` is unset or the shell is unknown.
+#[inline]
+fn setup_shell_integration(shell_path: &Path) {
+    let dir = match std::env::var("KURO_SHELL_INTEGRATION_DIR") {
+        Ok(d) if !d.is_empty() => d,
+        _ => return,
+    };
+    std::env::remove_var("KURO_SHELL_INTEGRATION_DIR");
+
+    let basename = shell_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    match basename {
+        "bash" => setup_bash_integration(&dir),
+        "zsh" => setup_zsh_integration(&dir),
+        "fish" => setup_fish_integration(&dir),
+        _ => {}
+    }
+}
+
+/// Create a temporary bashrc that sources `~/.bashrc` then kuro integration.
+///
+/// Uses `KURO_BASH_RCFILE` env var to pass the path to the temporary bashrc
+/// to `exec_in_child`, which adds `--rcfile <path>` to the bash invocation.
+/// This avoids overriding HOME (which breaks tilde expansion, cd, etc.).
+#[inline]
+fn setup_bash_integration(integration_dir: &str) {
+    let script = PathBuf::from(integration_dir).join("kuro-shell.bash");
+    if !script.exists() {
+        return;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    // Use pid + monotonic timestamp for unpredictable temp path.
+    let unique = format!(
+        "kuro-bash-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let tmp = std::env::temp_dir().join(unique);
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return;
+    }
+    // Restrict directory to owner-only access.
+    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o700));
+    let bashrc_content = format!(
+        "[ -f \"{home}/.bashrc\" ] && source \"{home}/.bashrc\"\n\
+         source \"{}\"\n",
+        script.display()
+    );
+    let bashrc_path = tmp.join(".bashrc");
+    if std::fs::write(&bashrc_path, &bashrc_content).is_ok() {
+        // Signal exec_in_child to pass --rcfile instead of overriding HOME.
+        std::env::set_var("KURO_BASH_RCFILE", &bashrc_path);
+    }
+}
+
+/// Create a temporary ZDOTDIR that sources `~/.zshrc` then kuro integration.
+#[inline]
+fn setup_zsh_integration(integration_dir: &str) {
+    let script = PathBuf::from(integration_dir).join("kuro-shell.zsh");
+    if !script.exists() {
+        return;
+    }
+    let original_zdotdir = std::env::var("ZDOTDIR")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+        .unwrap_or_default();
+
+    let unique = format!(
+        "kuro-zsh-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let tmp = std::env::temp_dir().join(unique);
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return;
+    }
+    // Restrict directory to owner-only access.
+    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o700));
+    let zshrc_content = format!(
+        "[ -f \"{original_zdotdir}/.zshrc\" ] && ZDOTDIR=\"{original_zdotdir}\" source \"{original_zdotdir}/.zshrc\"\n\
+         source \"{}\"\n",
+        script.display()
+    );
+    let zshrc_path = tmp.join(".zshrc");
+    if std::fs::write(&zshrc_path, zshrc_content).is_ok() {
+        std::env::set_var("ZDOTDIR", &tmp);
+        std::env::set_var("KURO_ORIGINAL_ZDOTDIR", original_zdotdir);
+    }
+}
+
+/// Prepend the integration directory to `XDG_DATA_DIRS` for fish autoloading.
+#[inline]
+fn setup_fish_integration(integration_dir: &str) {
+    let script = PathBuf::from(integration_dir).join("kuro-shell.fish");
+    if !script.exists() {
+        return;
+    }
+    let vendor_dir = PathBuf::from(integration_dir)
+        .join("fish")
+        .join("vendor_conf.d");
+    if !vendor_dir.exists() {
+        return;
+    }
+    let existing = std::env::var("XDG_DATA_DIRS").unwrap_or_default();
+    let new_val = if existing.is_empty() {
+        integration_dir.to_owned()
+    } else {
+        format!("{integration_dir}:{existing}")
+    };
+    std::env::set_var("XDG_DATA_DIRS", new_val);
 }
 
 /// Configure a forked child process: establish a PTY session, redirect I/O,
@@ -128,8 +257,8 @@ fn exec_in_child(
     }
 
     // Configure the environment: strip multiplexer vars, set TERM/COLORTERM/KURO_TERMINAL,
-    // and propagate initial PTY dimensions for shells that read COLUMNS/LINES at startup.
-    setup_child_env(rows, cols);
+    // propagate initial PTY dimensions, and inject shell integration scripts.
+    setup_child_env(rows, cols, shell_path);
 
     // Re-assert window size on fd 0 inside the child.
     // Some readline builds call TIOCGWINSZ before the parent's SIGWINCH handler fires;
@@ -161,7 +290,23 @@ fn exec_in_child(
     let shell_name_cstr = std::ffi::CString::new(shell_name)
         .map_err(|e| pty_spawn_error(command, &format!("Invalid shell name: {e}")))?;
 
-    nix::unistd::execv(&shell_full_cstr, &[shell_name_cstr.as_c_str()])
+    // For bash: use --rcfile to load the integration script without overriding HOME.
+    // KURO_BASH_RCFILE is set by setup_bash_integration and consumed here.
+    let mut argv: Vec<&std::ffi::CStr> = vec![shell_name_cstr.as_c_str()];
+    let rcfile_flag;
+    let rcfile_path_cstr;
+    if let Ok(rcfile) = std::env::var("KURO_BASH_RCFILE") {
+        std::env::remove_var("KURO_BASH_RCFILE");
+        rcfile_flag = std::ffi::CString::new("--rcfile").expect("static flag");
+        rcfile_path_cstr =
+            std::ffi::CString::new(rcfile).map_err(|e| {
+                pty_spawn_error(command, &format!("Invalid rcfile path: {e}"))
+            })?;
+        argv.push(rcfile_flag.as_c_str());
+        argv.push(rcfile_path_cstr.as_c_str());
+    }
+
+    nix::unistd::execv(&shell_full_cstr, &argv)
         .map_err(|e| pty_spawn_error(command, &format!("Failed to exec shell: {e}")))?;
 
     // execv succeeded — process image was replaced; this line is unreachable.

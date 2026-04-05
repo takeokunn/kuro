@@ -71,12 +71,15 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
                 }
                 // AfterApcEsc: '\\' completes the APC (ESC \\ = ST); else keep accumulating
                 (ApcScanState::AfterApcEsc, b'\\') => {
-                    // APC complete — dispatch if it starts with 'G' (Kitty Graphics)
-                    if core.kitty.apc_buf.first() == Some(&b'G') {
-                        let payload = core.kitty.apc_buf[1..].to_vec();
-                        dispatch_kitty_apc(core, &payload);
+                    // APC complete — dispatch if it starts with 'G' (Kitty Graphics).
+                    // Take the buffer out to avoid copying potentially-large image payloads;
+                    // core.kitty.apc_buf becomes an empty Vec (retains capacity on return).
+                    let mut buf = std::mem::take(&mut core.kitty.apc_buf);
+                    if buf.first() == Some(&b'G') {
+                        dispatch_kitty_apc(core, &buf[1..]);
                     }
-                    core.kitty.apc_buf.clear();
+                    buf.clear();
+                    core.kitty.apc_buf = buf; // return capacity to the pool
                     core.kitty.apc_state = ApcScanState::Idle;
                 }
                 (ApcScanState::AfterApcEsc, b) => {
@@ -98,8 +101,12 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // Only non-ASCII or escape-containing segments are forwarded to VTE.
     let mut pos = 0;
 
-    // ASCII fast-path: scan for printable ASCII run at start of buffer
-    if core.parser_in_ground {
+    // ASCII fast-path: scan for printable ASCII run at start of buffer.
+    // Disabled when a non-ASCII charset (e.g. DEC line drawing) is active,
+    // since those bytes need per-character translation via VTE print().
+    if core.parser_in_ground
+        && core.active_charset() == crate::types::charset::CharsetType::Ascii
+    {
         while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
             pos += 1;
         }
@@ -109,6 +116,10 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
                 core.current_attrs,
                 core.dec_modes.auto_wrap,
             );
+            // Stamp hyperlink on the cells just written (if active)
+            if core.osc_data.hyperlink.uri.is_some() {
+                core.stamp_hyperlink_on_last_n_cells(pos);
+            }
             // After printing ASCII, parser is still in Ground (we didn't touch VTE)
         }
     }

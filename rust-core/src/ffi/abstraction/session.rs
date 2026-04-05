@@ -79,6 +79,25 @@ pub struct TerminalSession {
     /// (`String` + two `Vec`s) that were previously created by `EncodePool::new()`
     /// on every call to `get_dirty_lines_binary_direct` / `get_dirty_lines_with_faces`.
     pub(super) encode_pool: crate::ffi::codec::EncodePool,
+    /// Reusable scratch vec for dirty row indices.
+    ///
+    /// `take_dirty_lines_into` fills this instead of allocating a fresh `Vec`
+    /// each frame.  Capacity grows to the terminal height on the first full-dirty
+    /// frame, then stays there — zero heap allocations per frame thereafter.
+    pub(super) dirty_scratch: Vec<usize>,
+    /// Reusable scratch vec for per-row text strings in the binary FFI path.
+    ///
+    /// `get_dirty_lines_binary_direct` clears this and then `mem::take`s it on
+    /// return.  After the take the Vec is empty but retains its allocation, so the
+    /// next frame re-uses the same backing buffer — eliminating one `Vec<String>`
+    /// heap allocation per frame (~120/sec at 120fps).
+    pub(super) texts_scratch: Vec<String>,
+    /// Reusable scratch buffer for binary frame serialisation bytes.
+    ///
+    /// Same `clear()` + `mem::take()` pattern as `texts_scratch`.  The serialised
+    /// frame is typically 2–50 KB; persisting the allocation eliminates one
+    /// `Vec<u8>` heap allocation per frame on both the live and scrollback paths.
+    pub(super) buf_scratch: Vec<u8>,
 }
 
 /// Feed `data` into the terminal parser, limited by `budget`.
@@ -197,6 +216,9 @@ impl TerminalSession {
                 palette_epoch: 0,
                 was_alt_screen: false,
                 encode_pool: crate::ffi::codec::EncodePool::new(),
+                dirty_scratch: Vec::new(),
+                texts_scratch: Vec::new(),
+                buf_scratch: Vec::new(),
             })
         }
 
@@ -209,6 +231,8 @@ impl TerminalSession {
             palette_epoch: 0,
             was_alt_screen: false,
             encode_pool: crate::ffi::codec::EncodePool::new(),
+            dirty_scratch: Vec::new(),
+            texts_scratch: Vec::new(),
         })
     }
 
@@ -598,6 +622,19 @@ impl TerminalSession {
     );
 
     take_vec_field!(
+        /// Drain and return all pending eval commands (OSC 51).
+        fn take_eval_commands from osc_data take eval_commands : String
+    );
+
+    /// Get the hostname from the last OSC 7 notification.
+    /// Returns `None` if localhost or unset.
+    #[inline]
+    #[must_use]
+    pub fn get_cwd_host(&self) -> Option<String> {
+        self.core.osc_data.cwd_host.clone()
+    }
+
+    take_vec_field!(
         /// Drain and return all pending prompt mark events (OSC 133).
         fn take_prompt_marks from osc_data take prompt_marks : crate::types::osc::PromptMarkEvent
     );
@@ -620,6 +657,27 @@ impl TerminalSession {
         fn get_focus_events -> bool = focus_events);
     dec_mode_getter!(/// Get whether synchronized output mode is active.
         fn get_synchronized_output -> bool = synchronized_output);
+
+    /// Return hyperlink ranges for all visible rows.
+    ///
+    /// Returns a flat Vec of `(row, start, end, uri)` tuples — one entry per
+    /// hyperlink range per row.  Only rows that contain at least one hyperlink
+    /// are included.  `start` and `end` are buffer character offsets (matching
+    /// the convention used by `encode_hyperlink_ranges`).
+    #[must_use]
+    pub fn get_hyperlink_ranges(&self) -> Vec<(usize, usize, usize, String)> {
+        let rows = self.core.screen.rows() as usize;
+        let mut result = Vec::new();
+        for row in 0..rows {
+            if let Some(line) = self.core.screen.get_line(row) {
+                let ranges = crate::ffi::codec::encode_hyperlink_ranges(&line.cells);
+                for (start, end, uri) in ranges {
+                    result.push((row, start, end, uri));
+                }
+            }
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -694,6 +752,9 @@ mod tests {
             palette_epoch: 0,
             was_alt_screen: false,
             encode_pool: crate::ffi::codec::EncodePool::new(),
+            dirty_scratch: Vec::new(),
+            texts_scratch: Vec::new(),
+            buf_scratch: Vec::new(),
         };
         let (fg, bg, cursor) = session.get_default_colors();
         // Before any OSC 10/11/12, all three are unset → sentinel

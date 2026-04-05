@@ -1,13 +1,17 @@
 ;;; kuro-sessions.el --- Session listing UI for Kuro  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 takeokunn
+;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
 ;; Version: 1.0.0
 
 ;;; Commentary:
 
-;; This file provides the tabulated session browser for Kuro.
+;; Tabulated session browser for the Kuro terminal emulator.
+;;
+;; Provides `kuro-list-sessions', a `tabulated-list-mode' buffer
+;; that displays all active Kuro sessions (running, detached, dead)
+;; with attach, destroy, and refresh commands.
 
 ;;; Code:
 

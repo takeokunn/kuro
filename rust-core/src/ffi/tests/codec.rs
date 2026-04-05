@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 use crate::grid::line::Line;
 use crate::types::cell::{Cell, CellWidth, SgrAttributes, SgrFlags, UnderlineStyle};
@@ -143,3 +145,4 @@ include!("codec_color.rs");
 include!("codec_attrs.rs");
 include!("codec_line.rs");
 include!("codec_binary.rs");
+include!("codec_hyperlink.rs");

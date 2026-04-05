@@ -225,10 +225,7 @@ fn test_flush_print_buf_multi_char_buffer() {
 
 /// OSC 8 hyperlink round-trip: set a URI, verify `osc_data().hyperlink.uri` is set;
 /// then close the hyperlink and verify the URI is cleared.
-///
-/// Note: The terminal core stores the active hyperlink URI in `osc_data.hyperlink`
-/// but does not stamp `hyperlink_id` onto individual grid cells at print time.
-/// Compliance is verified at the `osc_data` level.
+/// Also verifies that cells printed while a hyperlink is active carry the URI.
 #[test]
 fn test_osc8_hyperlink_round_trip() {
     let mut term = TerminalCore::new(24, 80);
@@ -243,12 +240,34 @@ fn test_osc8_hyperlink_round_trip() {
         .expect("hyperlink URI must be set after OSC 8 open");
     assert_eq!(uri, "https://example.com", "URI must match the sent value");
 
+    // Print text while hyperlink is active — cells must carry the URI
+    term.advance(b"click here");
+    for col in 0..10 {
+        let cell = term.get_cell(0, col).expect("cell must exist");
+        assert_eq!(
+            cell.hyperlink_id(),
+            Some("https://example.com"),
+            "cell at col {col} must have hyperlink URI"
+        );
+    }
+
     // Close hyperlink (empty URI)
     term.advance(b"\x1b]8;;\x07");
     assert!(
         term.osc_data().hyperlink.uri.is_none(),
         "hyperlink URI must be None after OSC 8 close"
     );
+
+    // Text printed after close must NOT have a hyperlink
+    term.advance(b"plain");
+    for col in 10..15 {
+        let cell = term.get_cell(0, col).expect("cell must exist");
+        assert_eq!(
+            cell.hyperlink_id(),
+            None,
+            "cell at col {col} must not have hyperlink after close"
+        );
+    }
 }
 
 /// `take_title` semantics: after reading title via `title()` + `title_dirty()`,

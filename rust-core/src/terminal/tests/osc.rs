@@ -1,6 +1,6 @@
 //! OSC sequence tests.
 
-use super::super::*;
+use crate::types;
 use std::sync::Arc;
 
 #[test]

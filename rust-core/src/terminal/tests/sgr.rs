@@ -1,6 +1,6 @@
 //! SGR underline/color attribute tests.
 
-use super::super::*;
+use crate::types;
 
 // === SGR underline style tests ===
 

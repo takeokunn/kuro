@@ -49,6 +49,3 @@ pub use parser::apc::ApcScanState;
 
 // Re-export TerminalCore from dedicated module
 pub use terminal::TerminalCore;
-
-#[cfg(test)]
-mod tests;

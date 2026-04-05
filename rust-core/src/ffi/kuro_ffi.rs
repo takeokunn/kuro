@@ -117,3 +117,48 @@ pub trait KuroFFI {
     /// A pointer to an Emacs boolean (t or nil)
     fn set_scrollback_max_lines(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value;
 }
+
+#[cfg(test)]
+mod tests_unit {
+    use super::*;
+    use std::mem;
+
+    // --- emacs_env and emacs_value — layout invariants ---
+    // (migrated from src/tests/unit/ffi/kuro_ffi_module.rs)
+
+    #[test]
+    fn test_emacs_env_is_zero_sized() {
+        assert_eq!(
+            mem::size_of::<emacs_env>(),
+            0,
+            "emacs_env must be zero-sized (opaque C placeholder)"
+        );
+    }
+
+    #[test]
+    fn test_emacs_value_is_zero_sized() {
+        assert_eq!(
+            mem::size_of::<emacs_value>(),
+            0,
+            "emacs_value must be zero-sized (opaque C placeholder)"
+        );
+    }
+
+    #[test]
+    fn test_emacs_env_align_is_one() {
+        assert_eq!(
+            mem::align_of::<emacs_env>(),
+            1,
+            "emacs_env must have alignment 1"
+        );
+    }
+
+    #[test]
+    fn test_emacs_value_align_is_one() {
+        assert_eq!(
+            mem::align_of::<emacs_value>(),
+            1,
+            "emacs_value must have alignment 1"
+        );
+    }
+}

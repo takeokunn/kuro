@@ -27,6 +27,7 @@
 //!   Symptom: btop showed "disk root" twice / display shifted up by 1.
 
 use crate::ffi::codec::encode_line;
+use crate::types::cell::Cell;
 
 /// Typing a single space must advance the cursor by one column.
 ///
@@ -134,11 +135,7 @@ fn test_btop_render_dump() {
         offset = end;
 
         if let Some(line) = term.screen.get_line(0) {
-            let text: String = line
-                .cells
-                .iter()
-                .map(super::super::types::cell::Cell::char)
-                .collect();
+            let text: String = line.cells.iter().map(Cell::char).collect();
             let trimmed = text.trim_end();
             let end_idx = trimmed
                 .char_indices()
@@ -153,11 +150,7 @@ fn test_btop_render_dump() {
     eprintln!("\n--- Final screen dump (40x120) ---");
     for row in 0..40usize {
         if let Some(line) = term.screen.get_line(row) {
-            let text: String = line
-                .cells
-                .iter()
-                .map(super::super::types::cell::Cell::char)
-                .collect();
+            let text: String = line.cells.iter().map(Cell::char).collect();
             eprintln!("{:02}: |{}|", row, text.trim_end());
         }
     }

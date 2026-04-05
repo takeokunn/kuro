@@ -467,3 +467,19 @@ impl TerminalCore {
         self.gl_is_g1 = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::types;
+
+    /// Create a standard 24x80 `TerminalCore` for testing.
+    fn make_term() -> super::TerminalCore {
+        super::TerminalCore::new(24, 80)
+    }
+
+    mod apc;
+    mod osc;
+    mod sgr;
+    mod regression;
+    mod terminal;
+}

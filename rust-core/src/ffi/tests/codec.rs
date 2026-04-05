@@ -604,7 +604,11 @@ fn test_pbt_encode_screen_binary_row_index_and_text_len() {
     assert_eq!(pbt_read_u32(&out, 4), 1, "num_rows must be 1");
     assert_eq!(pbt_read_u32(&out, 8), 42, "row_index must be 42");
     assert_eq!(pbt_read_u32(&out, 12), 0, "num_face_ranges must be 0");
-    assert_eq!(pbt_read_u32(&out, 16), 5, "text_byte_len must be 5 for 'Hello'");
+    assert_eq!(
+        pbt_read_u32(&out, 16),
+        5,
+        "text_byte_len must be 5 for 'Hello'"
+    );
     assert_eq!(&out[20..25], b"Hello", "text bytes must match 'Hello'");
     assert_eq!(pbt_read_u32(&out, 25), 0, "col_to_buf_len must be 0");
 }
@@ -617,12 +621,36 @@ fn test_pbt_encode_screen_binary_one_face_range() {
 
     assert_eq!(pbt_read_u32(&out, 12), 1, "num_face_ranges must be 1");
     let fr_base = 8 + 4 + 4 + 4 + 2;
-    assert_eq!(pbt_read_u32(&out, fr_base), 0, "face range start_buf must be 0");
-    assert_eq!(pbt_read_u32(&out, fr_base + 4), 2, "face range end_buf must be 2");
-    assert_eq!(pbt_read_u32(&out, fr_base + 8), 1, "face range fg must be 1");
-    assert_eq!(pbt_read_u32(&out, fr_base + 12), 2, "face range bg must be 2");
-    assert_eq!(pbt_read_u64(&out, fr_base + 16), 3, "face range flags must be 3");
-    assert_eq!(pbt_read_u32(&out, fr_base + 24), 4, "face range ul_color must be 4");
+    assert_eq!(
+        pbt_read_u32(&out, fr_base),
+        0,
+        "face range start_buf must be 0"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, fr_base + 4),
+        2,
+        "face range end_buf must be 2"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, fr_base + 8),
+        1,
+        "face range fg must be 1"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, fr_base + 12),
+        2,
+        "face range bg must be 2"
+    );
+    assert_eq!(
+        pbt_read_u64(&out, fr_base + 16),
+        3,
+        "face range flags must be 3"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, fr_base + 24),
+        4,
+        "face range ul_color must be 4"
+    );
 }
 
 #[test]
@@ -633,9 +661,21 @@ fn test_pbt_encode_screen_binary_col_to_buf_entries() {
 
     let ctb_base = 8 + 4 + 4 + 4 + 1;
     assert_eq!(pbt_read_u32(&out, ctb_base), 3, "col_to_buf_len must be 3");
-    assert_eq!(pbt_read_u32(&out, ctb_base + 4), 0, "col_to_buf[0] must be 0");
-    assert_eq!(pbt_read_u32(&out, ctb_base + 8), 0, "col_to_buf[1] must be 0");
-    assert_eq!(pbt_read_u32(&out, ctb_base + 12), 1, "col_to_buf[2] must be 1");
+    assert_eq!(
+        pbt_read_u32(&out, ctb_base + 4),
+        0,
+        "col_to_buf[0] must be 0"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, ctb_base + 8),
+        0,
+        "col_to_buf[1] must be 0"
+    );
+    assert_eq!(
+        pbt_read_u32(&out, ctb_base + 12),
+        1,
+        "col_to_buf[2] must be 1"
+    );
     assert_eq!(out.len(), ctb_base + 4 + 3 * 4, "total byte count mismatch");
 }
 
@@ -672,8 +712,16 @@ fn test_pbt_encode_screen_binary_unicode_text() {
     let lines: &[ScreenLine] = &[(0, arrow.to_string(), vec![], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(pbt_read_u32(&out, 16), 3, "text_byte_len must be 3 for arrow");
-    assert_eq!(&out[20..23], arrow.as_bytes(), "text bytes must match arrow");
+    assert_eq!(
+        pbt_read_u32(&out, 16),
+        3,
+        "text_byte_len must be 3 for arrow"
+    );
+    assert_eq!(
+        &out[20..23],
+        arrow.as_bytes(),
+        "text bytes must match arrow"
+    );
 }
 
 // -------------------------------------------------------------------------
@@ -753,8 +801,14 @@ fn test_pbt_compute_row_hash_empty_row() {
 // SENSITIVITY: Same character but different foreground color -> different hashes.
 assert_hash_differs_by_attrs!(
     test_pbt_compute_row_hash_differs_by_fg_color,
-    SgrAttributes { foreground: Color::Rgb(255, 0, 0), ..Default::default() },
-    SgrAttributes { foreground: Color::Rgb(0, 0, 255), ..Default::default() },
+    SgrAttributes {
+        foreground: Color::Rgb(255, 0, 0),
+        ..Default::default()
+    },
+    SgrAttributes {
+        foreground: Color::Rgb(0, 0, 255),
+        ..Default::default()
+    },
     "different fg color must produce different hashes"
 );
 
@@ -762,6 +816,9 @@ assert_hash_differs_by_attrs!(
 assert_hash_differs_by_attrs!(
     test_pbt_compute_row_hash_differs_by_attrs,
     SgrAttributes::default(),
-    SgrAttributes { flags: SgrFlags::BOLD, ..Default::default() },
+    SgrAttributes {
+        flags: SgrFlags::BOLD,
+        ..Default::default()
+    },
     "bold vs plain must produce different hashes"
 );

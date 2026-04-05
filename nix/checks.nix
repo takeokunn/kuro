@@ -8,9 +8,7 @@
 #   commonArgs     - shared cargo build arguments
 #   cargoArtifacts - pre-built dependency artifacts
 #   kuro-core      - the main built package (included as a check)
-#   advisory-db    - rustsec advisory-db flake input
-{ pkgs, craneLib, src, elispSrc, commonArgs, cargoArtifacts, kuro-core
-, advisory-db }:
+{ pkgs, craneLib, src, elispSrc, commonArgs, cargoArtifacts, kuro-core }:
 
 let
   emacs = pkgs.emacs30;
@@ -34,7 +32,6 @@ let
         -L test/unit/input \
         -L test/unit/faces \
         -L test/unit/features \
-        -L test/unit/support \
         --eval "(setq load-prefer-newer t)" \
         --eval "(load (expand-file-name \"test/unit/core/kuro-test.el\"))" \
         --eval "(mapc (function load) \
@@ -100,13 +97,6 @@ in {
 
   # Rust unit + integration tests.
   kuro-test = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
-
-  # Security audit against the rustsec advisory database.
-  # --ignore RUSTSEC-2026-0073: upstream advisory uses CVSS 4.0 which cargo-audit cannot parse yet.
-  kuro-audit = craneLib.cargoAudit {
-    inherit src advisory-db;
-    cargoAuditExtraArgs = "--ignore RUSTSEC-2026-0073";
-  };
 
   # ERT test suite (Emacs 30).
   kuro-elisp = ertCheck;

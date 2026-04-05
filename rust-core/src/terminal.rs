@@ -479,7 +479,7 @@ mod tests {
 
     mod apc;
     mod osc;
-    mod sgr;
     mod regression;
+    mod sgr;
     mod terminal;
 }

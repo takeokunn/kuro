@@ -606,7 +606,12 @@ mod tests {
         let plain = Line::new(cols);
         let with_default_bg = Line::new_with_bg(cols, Color::Default);
         assert_eq!(plain.cells.len(), with_default_bg.cells.len());
-        for (i, (a, b)) in plain.cells.iter().zip(with_default_bg.cells.iter()).enumerate() {
+        for (i, (a, b)) in plain
+            .cells
+            .iter()
+            .zip(with_default_bg.cells.iter())
+            .enumerate()
+        {
             assert_eq!(a, b, "cell mismatch at col {i}");
         }
     }
@@ -673,7 +678,10 @@ mod tests {
             assert_eq!(cell.grapheme.as_str(), "Z");
             cell.attrs.background = Color::Indexed(1);
         }
-        assert_eq!(line.get_cell(3).unwrap().attrs.background, Color::Indexed(1));
+        assert_eq!(
+            line.get_cell(3).unwrap().attrs.background,
+            Color::Indexed(1)
+        );
     }
 
     #[test]
@@ -700,8 +708,10 @@ mod tests {
     fn assert_all_cells_have_bg(line: &Line, expected_bg: Color, label: &str) {
         assert!(!line.cells.is_empty(), "{label}: line must be non-empty");
         for (i, cell) in line.cells.iter().enumerate() {
-            assert_eq!(cell.attrs.background, expected_bg,
-                "{label}: cell at col {i} must have background {expected_bg:?}");
+            assert_eq!(
+                cell.attrs.background, expected_bg,
+                "{label}: cell at col {i} must have background {expected_bg:?}"
+            );
         }
     }
 
@@ -717,8 +727,18 @@ mod tests {
         };
     }
 
-    assert_new_with_bg!(pbt_new_with_bg_all_cells_carry_bg, 8, Color::Indexed(42), "new_with_bg(Indexed(42))");
-    assert_new_with_bg!(pbt_new_with_bg_rgb_first_and_last, 5, Color::Rgb(10, 20, 30), "new_with_bg(Rgb(10,20,30))");
+    assert_new_with_bg!(
+        pbt_new_with_bg_all_cells_carry_bg,
+        8,
+        Color::Indexed(42),
+        "new_with_bg(Indexed(42))"
+    );
+    assert_new_with_bg!(
+        pbt_new_with_bg_rgb_first_and_last,
+        5,
+        Color::Rgb(10, 20, 30),
+        "new_with_bg(Rgb(10,20,30))"
+    );
 
     macro_rules! assert_clear_with_bg_cells {
         ($name:ident, $setup:expr, $bg:expr, $check:expr, $msg:expr) => {
@@ -738,9 +758,19 @@ mod tests {
 
     assert_clear_with_bg_cells!(
         pbt_clear_with_bg_default_equals_cell_default,
-        { let mut l = Line::new(6); l.update_cell(2, 'Q', SgrAttributes::default()); l },
+        {
+            let mut l = Line::new(6);
+            l.update_cell(2, 'Q', SgrAttributes::default());
+            l
+        },
         Color::Default,
-        |cell, i| { assert_eq!(cell, &Cell::default(), "cell at col {i} must equal Cell::default()"); },
+        |cell, i| {
+            assert_eq!(
+                cell,
+                &Cell::default(),
+                "cell at col {i} must equal Cell::default()"
+            );
+        },
         "clear_with_bg(Default)"
     );
 
@@ -748,7 +778,13 @@ mod tests {
         pbt_clear_with_bg_overwrites_existing_bg,
         Line::new_with_bg(4, Color::Indexed(1)),
         Color::Indexed(7),
-        |cell, i| { assert_eq!(cell.attrs.background, Color::Indexed(7), "cell at col {i} must have new bg"); },
+        |cell, i| {
+            assert_eq!(
+                cell.attrs.background,
+                Color::Indexed(7),
+                "cell at col {i} must have new bg"
+            );
+        },
         "clear_with_bg overwrite"
     );
 
@@ -767,10 +803,16 @@ mod tests {
         let mut line = Line::new(10);
         line.update_cell(3, 'A', SgrAttributes::default());
         line.mark_clean();
-        let new_attrs = SgrAttributes { background: Color::Indexed(5), ..Default::default() };
+        let new_attrs = SgrAttributes {
+            background: Color::Indexed(5),
+            ..Default::default()
+        };
         line.update_cell(3, 'A', new_attrs);
         assert!(line.is_dirty);
-        assert_eq!(line.get_cell(3).unwrap().attrs.background, Color::Indexed(5));
+        assert_eq!(
+            line.get_cell(3).unwrap().attrs.background,
+            Color::Indexed(5)
+        );
     }
 
     #[test]
@@ -820,13 +862,20 @@ mod tests {
     fn pbt_resize_shrink_preserves_remaining_cells() {
         let mut line = Line::new(10);
         for i in 0..10 {
-            line.update_cell(i, char::from_u32(b'A' as u32 + i as u32).unwrap(), SgrAttributes::default());
+            line.update_cell(
+                i,
+                char::from_u32(b'A' as u32 + i as u32).unwrap(),
+                SgrAttributes::default(),
+            );
         }
         line.resize(4);
         assert_eq!(line.cells.len(), 4);
         for i in 0..4 {
             let expected = char::from_u32(b'A' as u32 + i as u32).unwrap();
-            assert_eq!(line.get_cell(i).unwrap().grapheme.as_str(), expected.to_string());
+            assert_eq!(
+                line.get_cell(i).unwrap().grapheme.as_str(),
+                expected.to_string()
+            );
         }
     }
 }

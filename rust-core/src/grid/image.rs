@@ -298,7 +298,10 @@ mod tests {
     fn default_is_equivalent_to_new() {
         let by_new = GraphicsStore::new();
         let by_default = GraphicsStore::default();
-        assert_eq!(by_new.get_image_png_base64(1), by_default.get_image_png_base64(1));
+        assert_eq!(
+            by_new.get_image_png_base64(1),
+            by_default.get_image_png_base64(1)
+        );
     }
 
     // ── store_image — explicit ID ────────��──────────────────────────────────
@@ -359,7 +362,9 @@ mod tests {
         let mut store = GraphicsStore::new();
         store.store_image(Some(3), tiny_rgb(0x80));
         let result = store.get_image_png_base64(3);
-        assert!(result.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
+        assert!(result
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
     }
 
     // ── add_placement ───────────────────────────────────────────────────────
@@ -375,7 +380,11 @@ mod tests {
         let mut store = GraphicsStore::new();
         store.store_image(Some(10), tiny_rgb(0x10));
         let placement = ImagePlacement {
-            image_id: 10, row: 3, col: 7, display_cols: 12, display_rows: 4,
+            image_id: 10,
+            row: 3,
+            col: 7,
+            display_cols: 12,
+            display_rows: 4,
         };
         let notif = store.add_placement(placement).expect("must return Some");
         assert_eq!(notif.image_id, 10);
@@ -411,25 +420,44 @@ mod tests {
     // ── scroll_up ──────────────────────────────────────���────────────────────
 
     assert_image_survives!(
-        scroll_up_shifts_placement_rows_up_by_n, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 5, 0)); },
-        |s| { s.scroll_up(3); s.add_placement(min_placement(1, 2, 0)); },
+        scroll_up_shifts_placement_rows_up_by_n,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 5, 0));
+        },
+        |s| {
+            s.scroll_up(3);
+            s.add_placement(min_placement(1, 2, 0));
+        },
         "image must still be present after scroll_up"
     );
 
     assert_image_survives!(
-        scroll_up_discards_placements_that_scroll_off_the_top, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 1, 0)); },
-        |s| { s.scroll_up(2); },
+        scroll_up_discards_placements_that_scroll_off_the_top,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 1, 0));
+        },
+        |s| {
+            s.scroll_up(2);
+        },
         "image data must survive scroll_up even when its placement is discarded"
     );
 
     // ── scroll_down ─────────────────────────────────────────────────────────
 
     assert_image_survives!(
-        scroll_down_shifts_placement_rows_down_by_n, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 2, 0)); },
-        |s| { s.scroll_down(3, 24); },
+        scroll_down_shifts_placement_rows_down_by_n,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 2, 0));
+        },
+        |s| {
+            s.scroll_down(3, 24);
+        },
         "image must survive scroll_down"
     );
 
@@ -464,9 +492,19 @@ mod tests {
 
     #[test]
     fn image_data_byte_count_matches_pixel_vec_len() {
-        let rgb = ImageData { pixels: vec![1, 2, 3, 4, 5, 6], format: ImageFormat::Rgb, pixel_width: 2, pixel_height: 1 };
+        let rgb = ImageData {
+            pixels: vec![1, 2, 3, 4, 5, 6],
+            format: ImageFormat::Rgb,
+            pixel_width: 2,
+            pixel_height: 1,
+        };
         assert_eq!(rgb.byte_count(), 6);
-        let rgba = ImageData { pixels: vec![1, 2, 3, 4], format: ImageFormat::Rgba, pixel_width: 1, pixel_height: 1 };
+        let rgba = ImageData {
+            pixels: vec![1, 2, 3, 4],
+            format: ImageFormat::Rgba,
+            pixel_width: 1,
+            pixel_height: 1,
+        };
         assert_eq!(rgba.byte_count(), 4);
     }
 
@@ -474,43 +512,69 @@ mod tests {
 
     assert_to_png_base64_non_empty!(
         to_png_base64_produces_non_empty_string_for_valid_image,
-        tiny_rgb(0x80), "to_png_base64 must produce a non-empty string"
+        tiny_rgb(0x80),
+        "to_png_base64 must produce a non-empty string"
     );
 
     assert_to_png_base64_non_empty!(
         to_png_base64_rgba_produces_non_empty_string,
-        tiny_rgba(0x40), "to_png_base64 for RGBA must produce a non-empty string"
+        tiny_rgba(0x40),
+        "to_png_base64 for RGBA must produce a non-empty string"
     );
 
     // ── scroll_up edge cases ───────────��────────────────────────────────────
 
     assert_image_survives!(
-        scroll_up_zero_is_noop, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 5, 0)); },
-        |s| { s.scroll_up(0); },
+        scroll_up_zero_is_noop,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 5, 0));
+        },
+        |s| {
+            s.scroll_up(0);
+        },
         "image must survive scroll_up(0)"
     );
 
     assert_image_survives!(
-        scroll_up_keeps_placement_at_exact_boundary, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 5, 0)); },
-        |s| { s.scroll_up(5); },
+        scroll_up_keeps_placement_at_exact_boundary,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 5, 0));
+        },
+        |s| {
+            s.scroll_up(5);
+        },
         "image must survive scroll_up equal to placement row"
     );
 
     // ── scroll_down edge cases ──────────────────────────────────────────────
 
     assert_image_survives!(
-        scroll_down_with_zero_max_row_clamps_to_zero, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 0, 0)); },
-        |s| { s.scroll_down(5, 0); },
+        scroll_down_with_zero_max_row_clamps_to_zero,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 0, 0));
+        },
+        |s| {
+            s.scroll_down(5, 0);
+        },
         "image must survive scroll_down with max_row=0"
     );
 
     assert_image_survives!(
-        scroll_down_clamps_placement_to_max_row_minus_one, 1, tiny_rgb(0x01),
-        |s| { s.add_placement(min_placement(1, 20, 0)); },
-        |s| { s.scroll_down(100, 24); },
+        scroll_down_clamps_placement_to_max_row_minus_one,
+        1,
+        tiny_rgb(0x01),
+        |s| {
+            s.add_placement(min_placement(1, 20, 0));
+        },
+        |s| {
+            s.scroll_down(100, 24);
+        },
         "image must survive scroll_down with large n"
     );
 
@@ -553,7 +617,12 @@ mod tests {
 
     #[test]
     fn image_data_byte_count_empty_pixels_is_zero() {
-        let data = ImageData { pixels: vec![], format: ImageFormat::Rgb, pixel_width: 0, pixel_height: 0 };
+        let data = ImageData {
+            pixels: vec![],
+            format: ImageFormat::Rgb,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
         assert_eq!(data.byte_count(), 0);
     }
 }

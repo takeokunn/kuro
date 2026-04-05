@@ -342,7 +342,9 @@ mod tests {
         let mut screen = make_screen();
         let attrs = SgrAttributes::default();
         screen.move_cursor(23, 0);
-        for _ in 0..80 { screen.print('Z', attrs, false); }
+        for _ in 0..80 {
+            screen.print('Z', attrs, false);
+        }
         assert_eq!(screen.get_cell(23, 0).unwrap().char(), 'Z');
         screen.scroll_up(1, Color::Default);
         assert_eq!(screen.get_cell(23, 0).unwrap().char(), ' ');
@@ -400,8 +402,10 @@ mod tests {
     fn test_scroll_region_scroll_up_does_not_affect_outside_rows() {
         let mut screen = make_screen();
         let attrs = SgrAttributes::default();
-        screen.move_cursor(0, 0); screen.print('S', attrs, false);
-        screen.move_cursor(23, 0); screen.print('E', attrs, false);
+        screen.move_cursor(0, 0);
+        screen.print('S', attrs, false);
+        screen.move_cursor(23, 0);
+        screen.print('E', attrs, false);
         screen.set_scroll_region(10, 20);
         screen.scroll_up(1, Color::Default);
         assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'S');

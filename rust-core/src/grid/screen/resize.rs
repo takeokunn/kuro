@@ -104,7 +104,11 @@ mod tests {
 
     macro_rules! assert_cell_char {
         ($screen:expr, $row:expr, $col:expr, $expected:expr, $msg:expr) => {
-            assert_eq!($screen.get_cell($row, $col).unwrap().char(), $expected, $msg)
+            assert_eq!(
+                $screen.get_cell($row, $col).unwrap().char(),
+                $expected,
+                $msg
+            )
         };
     }
 
@@ -172,8 +176,10 @@ mod tests {
     fn resize_preserves_content_within_new_bounds() {
         let mut s = make_screen();
         let attrs = SgrAttributes::default();
-        s.move_cursor(0, 0); s.print('A', attrs, true);
-        s.move_cursor(1, 1); s.print('B', attrs, true);
+        s.move_cursor(0, 0);
+        s.print('A', attrs, true);
+        s.move_cursor(1, 1);
+        s.print('B', attrs, true);
         s.resize(20, 60);
         assert_cell_char!(s, 0, 0, 'A', "cell (0,0) must survive resize");
         assert_cell_char!(s, 1, 1, 'B', "cell (1,1) must survive resize");

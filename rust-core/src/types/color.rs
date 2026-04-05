@@ -354,10 +354,7 @@ mod tests {
             NamedColor::BrightCyan,
             NamedColor::BrightWhite,
         ];
-        let rgb_values: HashSet<(u8, u8, u8)> = all_named
-            .iter()
-            .map(NamedColor::to_rgb)
-            .collect();
+        let rgb_values: HashSet<(u8, u8, u8)> = all_named.iter().map(NamedColor::to_rgb).collect();
         assert_eq!(
             rgb_values.len(),
             16,

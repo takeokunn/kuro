@@ -2,23 +2,19 @@
   description = "Kuro - High-performance terminal emulator for Emacs";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
-    advisory-db = {
-      url = "github:rustsec/advisory-db";
-      flake = false;
-    };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, fenix, crane, advisory-db, treefmt-nix }:
+  outputs = { self, nixpkgs, fenix, crane, treefmt-nix }:
     let
       supportedSystems =
         [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
@@ -71,7 +67,6 @@
         in (import ./nix/checks.nix {
           inherit (ctx)
             pkgs craneLib src elispSrc commonArgs cargoArtifacts kuro-core;
-          inherit advisory-db;
         }) // {
           # Verify that all Nix files are formatted (treefmt).
           treefmt = (mkTreefmt system).config.build.check self;

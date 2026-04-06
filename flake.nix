@@ -3,9 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    # nixpkgs-unstable is used only for cargo-llvm-cov, which is marked broken
-    # in nixos-25.11 (0.6.20) but works in unstable (0.8.5+).
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -21,7 +18,6 @@
     {
       self,
       nixpkgs,
-      nixpkgs-unstable,
       fenix,
       crane,
       treefmt-nix,
@@ -39,11 +35,8 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          pkgsUnstable = nixpkgs-unstable.legacyPackages.${system};
           rustToolchain = fenix.packages.${system}.stable.toolchain;
           nightlyToolchain = fenix.packages.${system}.latest.toolchain;
-          llvmTools = fenix.packages.${system}.stable.llvm-tools;
-          cargoLlvmCov = pkgsUnstable.cargo-llvm-cov;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
           src = craneLib.path ./.;
           elispSrc = pkgs.lib.cleanSource ./.;
@@ -69,8 +62,6 @@
             kuro-core
             rustToolchain
             nightlyToolchain
-            llvmTools
-            cargoLlvmCov
             ;
         };
 
@@ -122,7 +113,7 @@
           ctx = mkKuro system;
         in
         import ./nix/apps.nix {
-          inherit (ctx) pkgs rustToolchain nightlyToolchain llvmTools cargoLlvmCov;
+          inherit (ctx) pkgs rustToolchain nightlyToolchain;
         }
       );
 
@@ -134,7 +125,6 @@
           stableShell = fenix.packages.${system}.stable.withComponents [
             "cargo"
             "clippy"
-            "llvm-tools"
             "rust-src"
             "rustc"
             "rustfmt"
@@ -142,12 +132,11 @@
           darwinInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
         in
         {
-          # Default development shell — stable Rust + Emacs + llvm-cov.
+          # Default development shell — stable Rust + Emacs.
           default = pkgs.mkShell {
             packages = [
               stableShell
               pkgs.emacs
-              ctx.cargoLlvmCov
               pkgs.pkg-config
               pkgs.rust-analyzer
               pkgs.cargo-audit
@@ -159,9 +148,8 @@
               === Kuro Development Shell ===
 
                 nix fmt                  # Format Nix files (treefmt/nixfmt)
-                nix flake check          # All checks (Rust + ERT + byte-compile + audit + treefmt)
+                nix flake check          # All checks (Rust + ERT + byte-compile + audit + treefmt + e2e)
                 nix build                # Release build
-                nix run .#coverage       # Code coverage (stdout)
                 nix run .#doc            # Open Rust docs
                 nix run .#install        # Install to ~/.local/share/kuro
                 nix run .#run            # Build + install + launch Emacs

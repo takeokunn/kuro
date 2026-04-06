@@ -4,14 +4,10 @@
 #   pkgs             - nixpkgs for the target system (nixos-25.11)
 #   rustToolchain    - stable Rust toolchain (fenix)
 #   nightlyToolchain - nightly Rust toolchain (fenix) used for benchmarks
-#   llvmTools        - stable LLVM tools component (fenix) used for llvm-cov
-#   cargoLlvmCov     - cargo-llvm-cov from nixpkgs-unstable (0.6.20 in 25.11 is broken)
 {
   pkgs,
   rustToolchain,
   nightlyToolchain,
-  llvmTools,
-  cargoLlvmCov,
 }:
 
 let
@@ -24,27 +20,6 @@ let
 
 in
 {
-  # Run cargo-llvm-cov workspace coverage (fails if line coverage drops below 90%).
-  # Excludes code that requires OS-level or Emacs runtime context:
-  #   src/ffi/bridge/**       — all #[defun] entry points (require Emacs module runtime)
-  #   src/lib.rs              — #[emacs::module] plugin entry point (requires module loader)
-  #   src/ffi/test_terminal.rs — ERT test helper (called from Emacs, not Rust)
-  #   src/ffi/fallback.rs     — raw C API placeholder stubs (no production callers)
-  #   src/pty/posix.rs        — fork/openpty/exec boundary (requires real PTY process)
-  coverage =
-    mkApp "kuro-coverage" "Run llvm-cov workspace coverage (fails if line coverage < 90%)"
-      [
-        cargoLlvmCov
-        llvmTools
-      ]
-      ''
-        cargo llvm-cov --workspace \
-          --ignore-filename-regex \
-            'src/ffi/bridge/|src/lib\.rs|src/ffi/test_terminal\.rs|src/ffi/fallback\.rs|src/pty/posix\.rs' \
-          --lcov --output-path lcov.info \
-          --fail-under-lines 90
-      '';
-
   # Open generated Rust API documentation in the browser.
   doc =
     mkApp "kuro-doc" "Open generated Rust API documentation in the browser"

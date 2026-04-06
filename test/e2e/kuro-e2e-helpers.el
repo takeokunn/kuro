@@ -162,12 +162,19 @@ output that arrived since the previous call.  See `kuro-e2e--wait-for-output'."
 (defun kuro-e2e--wait-for-output (session-id pattern &optional timeout)
   "Poll SESSION-ID via direct FFI until PATTERN matches or TIMEOUT seconds.
 
-Uses a two-poll-per-iteration strategy to handle the 1-frame latency:
+Uses a two-poll-per-iteration strategy to handle the 1-frame latency.
+Each iteration checks BOTH poll-a and poll-b results:
+
   Iteration N:
-    poll-a (discard): poll_output reads new PTY bytes → marks dirty rows
-    sleep POLL-INTERVAL: gives PTY reader thread time to deliver data
+    poll-a (check):   poll_output reads new PTY bytes → marks dirty rows;
+                      also returns rows dirty BEFORE this call — check both.
+    sleep POLL-INTERVAL: gives PTY reader thread time to deliver data.
     poll-b (check):   poll_output reads any new data → returns dirty rows
-                      from poll-a's poll_output → search for PATTERN
+                      from poll-a's poll_output → check for PATTERN.
+
+Checking poll-a avoids a timing hole: when output arrives between poll-a
+and poll-b, it is returned by the NEXT iteration's poll-a.  If poll-a
+were discarded that row would be lost until the iteration after next.
 
 Also checks the scrollback buffer as a fallback each iteration.
 
@@ -176,15 +183,21 @@ Returns t if found, nil on timeout."
   (let ((deadline (+ (float-time) (or timeout kuro-e2e--timeout)))
         (found nil))
     (while (and (not found) (< (float-time) deadline))
-      ;; Poll-a: reads new PTY bytes, returns previous dirty rows (discarded).
-      (kuro-e2e--ffi-poll-texts session-id)
-      ;; Give the PTY reader thread time to deliver the shell's response.
-      (sleep-for kuro-e2e--poll-interval)
-      ;; Poll-b: returns dirty rows from poll-a's poll_output.
+      ;; Poll-a: reads new PTY bytes; returns rows dirty from before this
+      ;; call.  Check them — they may already contain PATTERN.
       (let ((texts (kuro-e2e--ffi-poll-texts session-id)))
         (dolist (text texts)
           (when (string-match-p pattern text)
             (setq found t))))
+      ;; Give the PTY reader thread time to deliver the shell's response.
+      (unless found
+        (sleep-for kuro-e2e--poll-interval))
+      ;; Poll-b: returns dirty rows from poll-a's poll_output.
+      (unless found
+        (let ((texts (kuro-e2e--ffi-poll-texts session-id)))
+          (dolist (text texts)
+            (when (string-match-p pattern text)
+              (setq found t)))))
       ;; Scrollback fallback: catches output that scrolled off the visible area.
       (unless found
         (when (kuro-e2e--ffi-scrollback-contains-p session-id pattern)

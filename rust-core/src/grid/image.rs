@@ -362,11 +362,9 @@ mod tests {
         let mut store = GraphicsStore::new();
         store.store_image(Some(3), tiny_rgb(0x80));
         let result = store.get_image_png_base64(3);
-        assert!(
-            result
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '=')
-        );
+        assert!(result
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
     }
 
     // ── add_placement ───────────────────────────────────────────────────────

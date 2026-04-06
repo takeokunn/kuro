@@ -7,8 +7,8 @@
 //! All exported functions follow the `kuro-core-test-*` naming convention
 //! and are only intended for use in ERT test suites.
 
-use crate::TerminalCore;
 use crate::error::KuroError;
+use crate::TerminalCore;
 use emacs::defun;
 use emacs::{Env, IntoLisp, Result as EmacsResult, Value};
 use std::panic::catch_unwind;

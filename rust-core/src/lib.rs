@@ -47,7 +47,7 @@ pub use types::{cell::Cell, cell::UnderlineStyle, color::Color, cursor::CursorSh
 // Re-export FFI abstraction layer (EmacsModuleFFI only outside fuzzing)
 #[cfg(not(fuzzing))]
 pub use ffi::EmacsModuleFFI;
-pub use ffi::{KuroFFI, RawFFI, SessionState, TERMINAL_SESSIONS, TerminalSession};
+pub use ffi::{KuroFFI, RawFFI, SessionState, TerminalSession, TERMINAL_SESSIONS};
 
 /// Result type for Kuro operations
 pub type Result<T> = std::result::Result<T, KuroError>;

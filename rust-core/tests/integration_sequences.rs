@@ -1,6 +1,6 @@
 //! Integration tests for complex escape sequence interactions.
 
-use kuro_core::{TerminalCore, types::cell::SgrFlags};
+use kuro_core::{types::cell::SgrFlags, TerminalCore};
 
 #[test]
 fn test_decsc_decrc_saves_and_restores_cursor_position() {
@@ -49,7 +49,7 @@ fn test_ris_full_reset_clears_screen() {
 fn test_sgr_true_color_foreground_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[38;2;255;128;0m"); // truecolor orange foreground
-    // Must not panic, and cursor remains in bounds
+                                           // Must not panic, and cursor remains in bounds
     assert!(term.cursor_row() < 24);
 }
 
@@ -66,7 +66,7 @@ fn test_insert_and_delete_chars_no_panic() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;3H"); // move to row 1, col 3 (1-indexed → row 0, col 2)
     term.advance(b"\x1b[1P"); // DCH: delete 1 char
-    // Must not panic
+                              // Must not panic
     assert!(term.cursor_col() < 80);
 }
 
@@ -76,7 +76,7 @@ fn test_scroll_up_with_region_no_panic() {
     term.advance(b"\x1b[3;7r"); // scroll region rows 3-7
     term.advance(b"\x1b[3;1H"); // move to top of region (1-indexed → row 2, col 0)
     term.advance(b"\x1b[S"); // SU: scroll up
-    // Must not panic, cursor in bounds
+                             // Must not panic, cursor in bounds
     assert!(term.cursor_row() < 10);
 }
 
@@ -95,7 +95,7 @@ fn test_complex_sequence_does_not_panic() {
 fn test_osc_title_set() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b]2;hello title\x07"); // OSC 2: set window title
-    // Must not panic, cursor in bounds
+                                             // Must not panic, cursor in bounds
     assert!(term.cursor_row() < 24);
 }
 
@@ -134,7 +134,7 @@ fn test_deckpam_deckpnm_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b="); // DECKPAM: application keypad
     term.advance(b"\x1b>"); // DECKPNM: normal keypad
-    // Must not panic
+                            // Must not panic
     assert!(term.cursor_row() < 24);
 }
 
@@ -171,7 +171,7 @@ fn test_get_cell_returns_printed_char() {
 fn test_decaln_esc_hash_8_does_not_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b#8"); // DECALN: DEC Screen Alignment Test
-    // Must not panic and cursor must remain in bounds
+                             // Must not panic and cursor must remain in bounds
     assert!(
         term.cursor_row() < 24,
         "Row must stay within 24 after DECALN"
@@ -301,7 +301,7 @@ fn test_sgr_split_across_two_advance_calls_is_equivalent() {
 fn test_decawm_off_suppresses_wrap() {
     let mut term = TerminalCore::new(10, 10);
     term.advance(b"\x1b[?7l"); // DECAWM off
-    // Print 15 characters; without wrap the cursor should stay on row 0
+                               // Print 15 characters; without wrap the cursor should stay on row 0
     term.advance(b"AAAAABBBBBCCCCC");
     assert_eq!(
         term.cursor_row(),
@@ -316,7 +316,7 @@ fn test_decawm_on_restores_wrap() {
     let mut term = TerminalCore::new(5, 5);
     term.advance(b"\x1b[?7l"); // DECAWM off
     term.advance(b"\x1b[?7h"); // DECAWM on
-    // 6 chars on a 5-col terminal: the 6th must wrap to row 1
+                               // 6 chars on a 5-col terminal: the 6th must wrap to row 1
     term.advance(b"XXXXXY");
     assert_eq!(term.cursor_row(), 1, "DECAWM on: cursor must wrap to row 1");
     let cell = term
@@ -376,7 +376,7 @@ fn test_el0_erases_to_end_of_line() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;3H"); // move to row 0, col 2 (1-indexed)
     term.advance(b"\x1b[0K"); // EL 0: erase from cursor to EOL
-    // Cells 0 and 1 must still hold 'A' and 'B'; cells from col 2 onward must be erased
+                              // Cells 0 and 1 must still hold 'A' and 'B'; cells from col 2 onward must be erased
     let a = term.get_cell(0, 0).expect("cell (0,0) must exist");
     let b = term.get_cell(0, 1).expect("cell (0,1) must exist");
     assert_eq!(a.char(), 'A', "cell (0,0) must be 'A' — not erased by EL 0");
@@ -392,7 +392,7 @@ fn test_el1_erases_to_start_of_line() {
     term.advance(b"ABCDE");
     term.advance(b"\x1b[1;4H"); // move to row 0, col 3 (1-indexed)
     term.advance(b"\x1b[1K"); // EL 1: erase from BOL to cursor
-    // Cols 0–3 must be spaces; col 4 must still hold 'E'
+                              // Cols 0–3 must be spaces; col 4 must still hold 'E'
     for col in 0..=3 {
         let cell = term.get_cell(0, col).expect("cell must exist");
         assert_eq!(

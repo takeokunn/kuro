@@ -12,8 +12,8 @@ use std::result::Result;
 
 use crate::error::KuroError;
 use crate::ffi::abstraction::{
-    KuroFFI, emacs_env, emacs_value, init_session, shutdown_session, with_session,
-    with_session_readonly,
+    emacs_env, emacs_value, init_session, shutdown_session, with_session, with_session_readonly,
+    KuroFFI,
 };
 
 /// Legacy session ID used by the `KuroFFI` trait implementation.

@@ -1,19 +1,19 @@
 //! POSIX PTY implementation using nix crate for safe fork/pty operations
 
 use crate::{
-    Result,
     ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn_error},
     pty::reader::PtyReader,
+    Result,
 };
-use nix::pty::{OpenptyResult, Winsize, openpty};
-use nix::sys::wait::{WaitPidFlag, waitpid};
-use nix::unistd::{ForkResult, Pid, fork};
+use nix::pty::{openpty, OpenptyResult, Winsize};
+use nix::sys::wait::{waitpid, WaitPidFlag};
+use nix::unistd::{fork, ForkResult, Pid};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 /// Allowed shells whitelist for security

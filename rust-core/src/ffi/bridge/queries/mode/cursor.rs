@@ -1,6 +1,6 @@
 //! Cursor-related query functions: position, visibility, shape (DECSCUSR).
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};

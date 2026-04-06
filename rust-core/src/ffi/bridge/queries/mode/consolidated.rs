@@ -3,7 +3,7 @@
 //! Each function collects multiple terminal state values in a single lock
 //! acquisition, returning a flat Lisp list for the Elisp layer to destructure.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};

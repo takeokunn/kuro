@@ -7,7 +7,7 @@
     reason = "bench color/index casts: values computed modulo 256/26 always fit in the target type"
 )]
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::ffi::codec::encode_line;
 use kuro_core::grid::screen::Screen;
 use kuro_core::types::cell::{Cell, SgrAttributes};

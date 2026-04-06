@@ -185,11 +185,19 @@
                 pkgs.pkg-config
               ]
               ++ darwinInputs
-              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ darwinFuzzLinker ];
-              env = pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-                CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
-                CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
-              };
+              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ darwinFuzzLinker ]
+              # libFuzzer fuzz targets link against libstdc++ at runtime on Linux.
+              # Without this, fuzz binaries exit with "cannot open shared object file:
+              # libstdc++.so.6".  On macOS the C++ runtime is part of the system SDK.
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
+              env =
+                pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+                  CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
+                  CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER = "${darwinFuzzLinker}/bin/fuzz-linker";
+                }
+                // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+                  LD_LIBRARY_PATH = "${pkgs.stdenv.cc.cc.lib}/lib";
+                };
               shellHook = ''
                 echo "Kuro fuzz shell (nightly Rust + cargo-fuzz)"
                 echo "  cd rust-core/fuzz && cargo fuzz run advance -- -max_total_time=30 -runs=1000"

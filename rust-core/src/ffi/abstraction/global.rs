@@ -6,7 +6,7 @@
 //! each is keyed by a unique `u64` ID returned from `init_session`.
 
 use super::session::TerminalSession;
-use crate::{Result, error::KuroError};
+use crate::{error::KuroError, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};

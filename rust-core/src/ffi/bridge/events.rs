@@ -1,6 +1,6 @@
 //! OSC event polling: CWD, clipboard, prompt marks
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};

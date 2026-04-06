@@ -46,8 +46,13 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
         let g = u16::from_str_radix(parts[1], 16).ok()?;
         let b = u16::from_str_radix(parts[2], 16).ok()?;
         // Normalize to 8-bit (take upper 8 bits if 4-digit, else direct if 2-digit)
-        let normalize =
-            |v: u16, digits: usize| -> u8 { if digits > 2 { (v >> 8) as u8 } else { v as u8 } };
+        let normalize = |v: u16, digits: usize| -> u8 {
+            if digits > 2 {
+                (v >> 8) as u8
+            } else {
+                v as u8
+            }
+        };
         Some([
             normalize(r, parts[0].len()),
             normalize(g, parts[1].len()),

@@ -110,10 +110,10 @@ fn test_decstbm_inverted_margins_ignored() {
     let mut term = crate::TerminalCore::new(10, 80);
     // First set a valid scroll region to verify it doesn't change
     term.advance(b"\x1b[2;8r"); // valid: 1-indexed top=2, bottom=8 → 0-indexed top=1, bottom=8
-    // Now try invalid: top > bottom
+                                // Now try invalid: top > bottom
     term.advance(b"\x1b[8;3r"); // invalid: should be ignored
-    // The valid region from before should still be active
-    // (cursor will be at home after DECSTBM per spec)
+                                // The valid region from before should still be active
+                                // (cursor will be at home after DECSTBM per spec)
     assert!(term.screen.cursor.row < 10);
     assert!(term.screen.cursor.col < 80);
     // The previously-set valid region must be preserved

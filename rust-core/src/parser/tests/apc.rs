@@ -196,7 +196,7 @@ fn test_false_esc_at_capacity_is_dropped() {
     // so both ESC and 'X' are silently dropped.
     seq.push(0x1B); // false ESC
     seq.push(b'X'); // non-'\\' — back to InApc without pushing
-    // Terminate the APC with a real ESC \\ so the state machine returns to Idle.
+                    // Terminate the APC with a real ESC \\ so the state machine returns to Idle.
     seq.push(0x1B);
     seq.push(b'\\');
 

@@ -4,8 +4,8 @@
 //! specification: erased cells receive the current SGR background color, not
 //! the default background.
 
-use crate::types::Cell;
 use crate::types::cell::CellWidth;
+use crate::types::Cell;
 
 /// Handle erase sequences
 ///

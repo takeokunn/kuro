@@ -18,7 +18,13 @@ pub enum PromptMark {
 }
 
 /// Pending prompt mark with position
-#[cfg_attr(fuzzing, expect(dead_code, reason = "fields read only by ffi::bridge which is excluded in fuzz builds"))]
+#[cfg_attr(
+    fuzzing,
+    expect(
+        dead_code,
+        reason = "fields read only by ffi::bridge which is excluded in fuzz builds"
+    )
+)]
 #[derive(Debug, Clone)]
 pub struct PromptMarkEvent {
     /// The mark type

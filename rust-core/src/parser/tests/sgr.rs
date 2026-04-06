@@ -333,7 +333,7 @@ fn test_sgr_unknown_code_no_panic() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[999m"); // Unknown code
     term.advance(b"\x1b[38;9m"); // Invalid extended color mode
-    // Should complete without panic
+                                 // Should complete without panic
 }
 
 // ── Additional SGR coverage ───────────────────────────────────────────────────
@@ -518,7 +518,7 @@ fn test_sgr_compound_reset_in_sequence() {
     // SGR 0 mid-sequence resets everything accumulated before it.
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;3;0;31m"); // bold, italic, RESET, then red fg
-    // After reset, only red fg should remain.
+                                     // After reset, only red fg should remain.
     assert!(
         !term.current_attrs.flags.contains(SgrFlags::BOLD),
         "bold must be cleared by mid-sequence SGR 0"

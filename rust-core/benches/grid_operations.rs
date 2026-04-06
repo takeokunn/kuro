@@ -8,7 +8,7 @@
     reason = "bench dimension casts: rows/cols are small constants (≤ 400); usize→u16 is always safe here"
 )]
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::{grid::screen::Screen, types::cell::SgrAttributes};
 
 /// Benchmark grid cell updates with varying dimensions

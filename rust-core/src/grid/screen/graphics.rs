@@ -268,11 +268,10 @@ mod tests {
             5,
             "image must not be retrievable after delete"
         );
-        assert!(
-            s.active_graphics_mut()
-                .add_placement(make_placement!(5, row = 1, col = 1, cols = 2, rows = 1))
-                .is_none()
-        );
+        assert!(s
+            .active_graphics_mut()
+            .add_placement(make_placement!(5, row = 1, col = 1, cols = 2, rows = 1))
+            .is_none());
     }
 
     #[test]
@@ -299,11 +298,10 @@ mod tests {
         s.active_graphics_mut().clear_all_placements();
         assert_image_present!(s.active_graphics(), 1, "image 1 must survive");
         assert_image_present!(s.active_graphics(), 2, "image 2 must survive");
-        assert!(
-            s.active_graphics_mut()
-                .add_placement(make_placement!(1, row = 5, col = 5, cols = 1, rows = 1))
-                .is_some()
-        );
+        assert!(s
+            .active_graphics_mut()
+            .add_placement(make_placement!(1, row = 5, col = 5, cols = 1, rows = 1))
+            .is_some());
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Measures the time to parse large VTE sequences.
 //! Target: >100MB/s throughput.
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use kuro_core::TerminalCore;
 
 /// Generate simulated PTY output with various escape sequences

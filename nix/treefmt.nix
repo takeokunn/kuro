@@ -13,6 +13,8 @@
   # Nix — nixfmt RFC-166 style (modern opinionated formatter)
   programs.nixfmt.enable = true;
 
-  # Rust — rustfmt with project's edition (Cargo.toml drives edition)
-  programs.rustfmt.enable = true;
+  # Rust formatting is handled exclusively by `checks.kuro-fmt` (crane/cargoFmt
+  # with the fenix stable toolchain).  Enabling rustfmt here would use the
+  # nixpkgs rustfmt, which may differ from the fenix version and cause
+  # treefmt-check and kuro-fmt to produce conflicting outputs.
 }

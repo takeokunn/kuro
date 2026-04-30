@@ -165,7 +165,7 @@ Used by `kuro--validate-config' and any code needing to enumerate all colors.")
 (defcustom kuro-module-binary-path nil
   "Path to the kuro native module binary (libkuro_core.so / libkuro_core.dylib).
 When nil, kuro will auto-detect the binary from standard locations:
-1. ~/.local/share/kuro/ (installed via `make install')
+1. ~/.local/share/kuro/ (installed via \\[kuro-module-download])
 2. The directory adjacent to this file's location (development checkout)
 
 Set this if the binary is installed in a non-standard location."
@@ -389,8 +389,10 @@ Displays results in the echo area."
                  (mapconcat #'identity errors "\n"))
       (message "Kuro: all configuration settings are valid."))))
 
-;; Initialize the color table from current defcustom values at load time.
-(kuro--rebuild-named-colors)
+;; The color table is initialized lazily from `kuro-mode' (see kuro.el)
+;; rather than at load time, so that requiring kuro-config does not
+;; trigger global side effects.  The defcustom :set handler also
+;; rebuilds it whenever a color is customised.
 
 (provide 'kuro-config)
 

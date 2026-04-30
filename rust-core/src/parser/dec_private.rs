@@ -56,6 +56,11 @@ pub struct DecModes {
     /// Synchronized output (?2026) - When set, screen updates are batched
     pub synchronized_output: bool,
 
+    /// DEC mode 2031: color scheme change notifications (Contour/Ghostty).
+    /// When enabled, terminal proactively emits CSI ? 997 ; Ps n on theme change.
+    /// See: <https://contour-terminal.org/vt-extensions/color-palette-update-notifications/>
+    pub color_scheme_notifications: bool,
+
     /// Cursor shape (DECSCUSR)
     pub cursor_shape: CursorShape,
 
@@ -91,6 +96,7 @@ impl DecModes {
             origin_mode: false,
             focus_events: false,
             synchronized_output: false,
+            color_scheme_notifications: false,
             cursor_shape: CursorShape::BlinkingBlock,
             keyboard_flags: 0,
             keyboard_flags_stack: Vec::new(),
@@ -115,6 +121,7 @@ impl DecModes {
             1049 => self.alternate_screen = value,
             2004 => self.bracketed_paste = value,
             2026 => self.synchronized_output = value,
+            2031 => self.color_scheme_notifications = value,
             // Mouse tracking: set stores the mode number; reset clears to 0.
             1000 | 1002 | 1003 => self.mouse_mode = if value { mode } else { 0 },
             _ => {}
@@ -150,6 +157,7 @@ impl DecModes {
             1006 => Some(self.mouse_sgr),
             1016 => Some(self.mouse_pixel),
             2026 => Some(self.synchronized_output),
+            2031 => Some(self.color_scheme_notifications),
             _ => None,
         }
     }
@@ -300,6 +308,56 @@ pub fn handle_kitty_kb_pop(term: &mut crate::TerminalCore) {
 pub fn handle_kitty_kb_query(term: &mut crate::TerminalCore) {
     let response = format!("\x1b[?{}u", term.dec_modes.keyboard_flags);
     term.meta.pending_responses.push(response.into_bytes());
+}
+
+/// Handle DSR 996 — color scheme query (Contour/Ghostty mode 2031 companion).
+///
+/// Sequence: CSI ? 996 n
+/// Response: CSI ? 997 ; 1 n (dark) or CSI ? 997 ; 2 n (light), determined by
+/// the current `meta.color_scheme_dark` state — set from Elisp via
+/// `kuro_core_set_color_scheme` so Emacs can advertise its actual theme.
+///
+/// `color_scheme_dark` lives on `TerminalMeta` (Emacs-owned host state), NOT
+/// on `DecModes` (PTY-settable state).
+///
+/// See: <https://contour-terminal.org/vt-extensions/color-palette-update-notifications/>
+#[inline]
+pub fn handle_dsr_color_scheme(term: &mut crate::TerminalCore) {
+    let bytes: &[u8] = if term.meta.color_scheme_dark {
+        b"\x1b[?997;1n"
+    } else {
+        b"\x1b[?997;2n"
+    };
+    term.meta.pending_responses.push(bytes.to_vec());
+}
+
+/// Pure-fn body of `kuro_core_set_color_scheme` defun — extracted so unit
+/// tests in this file can exercise the state-update + notification logic
+/// without going through the FFI layer.
+///
+/// Updates `core.meta.color_scheme_dark` to `is_dark`. When the value
+/// actually changes AND mode 2031 (`color_scheme_notifications`) is enabled,
+/// pushes the corresponding `CSI ? 997 ; Ps n` unsolicited notification to
+/// `meta.pending_responses` (Ps=1 dark, Ps=2 light).
+///
+/// Returns `true` if the stored state changed, `false` if it was already at
+/// the requested value (idempotent — repeat calls with the same value are a
+/// no-op and push zero bytes).
+#[inline]
+pub(crate) fn apply_color_scheme(core: &mut crate::TerminalCore, is_dark: bool) -> bool {
+    let changed = core.meta.color_scheme_dark != is_dark;
+    if changed {
+        core.meta.color_scheme_dark = is_dark;
+        if core.dec_modes.color_scheme_notifications {
+            let bytes: &[u8] = if is_dark {
+                b"\x1b[?997;1n"
+            } else {
+                b"\x1b[?997;2n"
+            };
+            core.meta.pending_responses.push(bytes.to_vec());
+        }
+    }
+    changed
 }
 
 #[cfg(test)]

@@ -78,13 +78,23 @@ fn kuro_core_poll_clipboard_actions(env: &Env, session_id: u64) -> EmacsResult<V
 /// Poll for pending prompt mark events from OSC 133 and clear them.
 ///
 /// Returns a list of prompt mark descriptors, each of the form:
-///   (MARK-TYPE ROW COL EXIT-CODE)
-/// where MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end"
-/// and EXIT-CODE is an integer for command-end marks or nil for others.
+///   (MARK-TYPE ROW COL EXIT-CODE AID DURATION-MS ERR-PATH)
+/// where:
+///   - MARK-TYPE is one of: "prompt-start", "prompt-end", "command-start", "command-end".
+///   - EXIT-CODE is an integer for command-end marks or nil for others.
+///   - AID is the application id string (OSC 133 `aid=` kv, Ghostty 1.3+) or nil.
+///     An explicit empty `aid=""` is preserved as the empty string and is NOT
+///     converted to nil.
+///   - DURATION-MS is the command duration in milliseconds (OSC 133 D `duration=`
+///     kv, Ghostty 1.3+) as an integer, or nil when absent.
+///   - ERR-PATH is the stderr log path (OSC 133 D `err=` kv, FinalTerm/Ghostty)
+///     as a string, or nil when absent.
+///
+/// See: <https://gitlab.freedesktop.org/Per_Bothner/specifications/-/blob/master/proposals/semantic-prompts.md>
 #[defun]
 #[expect(
     clippy::cast_possible_wrap,
-    reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
+    reason = "row/col are terminal dimensions (≤ 65535) and duration_ms is shell-supplied (≤ u64::MAX); usize/u64→i64 may wrap on adversarial input but is acceptable for a display-side hint"
 )]
 fn kuro_core_poll_prompt_marks(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     let marks = drain_session_vec(
@@ -93,6 +103,10 @@ fn kuro_core_poll_prompt_marks(env: &Env, session_id: u64) -> EmacsResult<Value<
         "poll_prompt_marks",
         super::super::abstraction::session::TerminalSession::take_prompt_marks,
     );
+
+    if marks.is_empty() {
+        return false.into_lisp(env);
+    }
 
     let nil = false.into_lisp(env)?;
     let mut list = nil;
@@ -110,9 +124,26 @@ fn kuro_core_poll_prompt_marks(env: &Env, session_id: u64) -> EmacsResult<Value<
             Some(code) => i64::from(code).into_lisp(env)?,
             None => nil,
         };
+        // Note: aid="" is preserved as the empty string (not converted to nil)
+        // so consumers can distinguish "absent" from "explicitly empty".
+        let aid_val = match event.aid {
+            Some(s) => s.into_lisp(env)?,
+            None => nil,
+        };
+        let duration_val = match event.duration_ms {
+            Some(ms) => (ms as i64).into_lisp(env)?,
+            None => nil,
+        };
+        let err_val = match event.err_path {
+            Some(s) => s.into_lisp(env)?,
+            None => nil,
+        };
 
-        // Build proper list: (mark-type row col exit-code)
-        let item = env.cons(exit_val, nil)?;
+        // Build proper list: (mark-type row col exit-code aid duration-ms err-path)
+        let item = env.cons(err_val, nil)?;
+        let item = env.cons(duration_val, item)?;
+        let item = env.cons(aid_val, item)?;
+        let item = env.cons(exit_val, item)?;
         let item = env.cons(col_val, item)?;
         let item = env.cons(row_val, item)?;
         let item = env.cons(mark_val, item)?;

@@ -46,6 +46,28 @@ pub const OSC51_MAX_EVAL_BYTES: usize = 4096;
 /// RFC 2616's 2 KiB recommendation.
 pub const OSC8_MAX_URI_BYTES: usize = 8192;
 
+/// Maximum `aid=` length for OSC 133 (shell job / action ID).
+///
+/// 256 is generous vs typical values (≤32); oversized values are silently
+/// dropped to prevent a shell under attacker control from inflating
+/// `PromptMarkEvent::aid` storage one mark at a time.
+pub const OSC133_MAX_AID_BYTES: usize = 256;
+
+/// Maximum `err=` path length for OSC 133 (error-report path).
+///
+/// Mirrors Linux `PATH_MAX` (4096). OSC 133 `err=` commonly carries a
+/// PATH-like string; anything larger is silently rejected to preserve
+/// heap safety against adversarial prompt marks.
+pub const OSC133_MAX_ERR_PATH_BYTES: usize = 4096;
+
+/// Maximum number of pending entries in [`crate::types::osc::OscData::prompt_marks`].
+///
+/// **`DoS` prevention:** a runaway or adversarial shell could emit prompt marks
+/// faster than Elisp drains them. Without this cap, the `prompt_marks` Vec would
+/// grow unboundedly and eventually OOM the host Emacs. Once the cap is reached,
+/// additional marks are silently dropped.
+pub const MAX_PENDING_PROMPT_MARKS: usize = 256;
+
 #[cfg(test)]
 mod tests {
     //! Tests for parser/limits.rs — boundary constants

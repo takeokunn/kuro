@@ -127,13 +127,13 @@
   (kuro-poll-test--with-buffer
     (let ((update-called-with nil))
       (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 5 0))))
+                 (lambda () '(("prompt-start" 5 0 nil nil nil nil))))
                 ((symbol-function 'kuro--update-prompt-positions)
                  (lambda (marks positions max)
                    (setq update-called-with (list marks positions max))
                    positions)))
         (kuro--poll-prompt-mark-updates)
-        (should (equal (car update-called-with) '(("prompt-start" 5 0))))))))
+        (should (equal (car update-called-with) '(("prompt-start" 5 0 nil nil nil nil))))))))
 
 (ert-deftest kuro-poll-modes-prompt-mark-updates-noop-on-nil ()
   "kuro--poll-prompt-mark-updates does nothing when FFI returns nil."
@@ -408,7 +408,7 @@
   "kuro--poll-prompt-mark-updates stores the return value from kuro--update-prompt-positions."
   (kuro-poll-test--with-buffer
     (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-               (lambda () '(("prompt-start" 1 0))))
+               (lambda () '(("prompt-start" 1 0 nil nil nil nil))))
               ((symbol-function 'kuro--update-prompt-positions)
                (lambda (_marks _positions _max) '(42 . stored))))
       (kuro--poll-prompt-mark-updates)
@@ -419,7 +419,7 @@
   (kuro-poll-test--with-buffer
     (let ((received-max nil))
       (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 1 0))))
+                 (lambda () '(("prompt-start" 1 0 nil nil nil nil))))
                 ((symbol-function 'kuro--update-prompt-positions)
                  (lambda (_marks _positions max)
                    (setq received-max max)
@@ -670,7 +670,7 @@
     (setq kuro--prompt-positions '(10 20 30))
     (let ((received-positions nil))
       (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 5 0))))
+                 (lambda () '(("prompt-start" 5 0 nil nil nil nil))))
                 ((symbol-function 'kuro--update-prompt-positions)
                  (lambda (_marks positions _max)
                    (setq received-positions positions)
@@ -683,7 +683,7 @@
   (kuro-poll-test--with-buffer
     (setq kuro--prompt-positions '(1 2 3))
     (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-               (lambda () '(("prompt-start" 99 0))))
+               (lambda () '(("prompt-start" 99 0 nil nil nil nil))))
               ((symbol-function 'kuro--update-prompt-positions)
                (lambda (_marks _positions _max) '(99))))
       (kuro--poll-prompt-mark-updates)
@@ -738,6 +738,30 @@
       (kuro--gated-poll 30  (lambda () (setq tier2-called t)))
       (should tier1-called)
       (should-not tier2-called))))
+
+;; ------------------------------------------------------------
+;; Group U — kuro--poll-prompt-mark-updates 7-tuple forwarding
+;; ------------------------------------------------------------
+
+(ert-deftest kuro-poll-modes-prompt-mark-updates-forwards-7tuple-unchanged ()
+  "T2g: a 7-tuple emitted by FFI passes through unchanged into the update fn
+and the resulting positions are stored in `kuro--prompt-positions'."
+  (kuro-poll-test--with-buffer
+    (let* ((mark      '("command-end" 8 0 0 "aid42" 1234 nil))
+           (input     (list mark))
+           (forwarded nil))
+      (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
+                 (lambda () input))
+                ((symbol-function 'kuro--update-prompt-status) #'ignore)
+                ((symbol-function 'kuro--update-prompt-positions)
+                 (lambda (marks _positions _max)
+                   (setq forwarded marks)
+                   marks)))
+        (kuro--poll-prompt-mark-updates)
+        ;; Same shape, same length, same fields — no truncation.
+        (should (equal forwarded input))
+        (should (= (length (car forwarded)) 7))
+        (should (equal kuro--prompt-positions input))))))
 
 (provide 'kuro-poll-modes-test)
 

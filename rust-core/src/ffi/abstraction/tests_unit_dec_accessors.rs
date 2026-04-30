@@ -119,6 +119,265 @@ fn test_take_prompt_marks_drains_after_osc133() {
 }
 
 // ---------------------------------------------------------------------------
+// FR-124: 7-tuple FFI shape — field-level coverage of the contract that
+// `kuro_core_poll_prompt_marks` (rust-core/src/ffi/bridge/events.rs) consumes.
+//
+// The FFI bridge requires Emacs `Env` and cannot be unit-tested in this crate
+// without a real Emacs runtime, so these tests pin the producer-side invariants
+// that the bridge depends on:
+//   - aid="" round-trips as Some("") (empty string, NOT None)
+//   - all-None extras stay None (rendered as 3 tail nils)
+//   - all-Some extras stay Some (rendered as 3 non-nil tail values)
+//   - duration_ms accepts the full u64 range; the bridge tolerates u64→i64
+//     via the cast_possible_wrap expect attribute on the defun
+//   - Pre-FR-124 callers reading only mark/row/col/exit-code see no breakage
+//     because the new fields land strictly in the cons-cell tail.
+// ---------------------------------------------------------------------------
+
+/// T1a — explicit `aid=""` round-trips as `Some(String::new())`, NOT None.
+/// FFI bridge encodes this as the empty Emacs string (not nil) so the consumer
+/// can distinguish "absent" from "explicitly empty".
+#[test]
+fn test_take_prompt_marks_aid_empty_string_preserved() {
+    let mut session = make_session();
+    session.core.advance(b"\x1b]133;D;0;aid=\x1b\\");
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1, "expected exactly one drained mark");
+    assert_eq!(
+        marks[0].aid.as_deref(),
+        Some(""),
+        "aid=\"\" must survive as Some(empty), never collapse to None"
+    );
+}
+
+/// T1b — all extras absent: aid/duration_ms/err_path are all None so the
+/// bridge tail of `(... aid duration-ms err-path)` is `(nil nil nil)`.
+#[test]
+fn test_take_prompt_marks_no_extras_all_none() {
+    let mut session = make_session();
+    session.core.advance(b"\x1b]133;D;0\x1b\\");
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+    let ev = &marks[0];
+    assert!(ev.aid.is_none(), "aid must be None when no aid= kv is sent");
+    assert!(
+        ev.duration_ms.is_none(),
+        "duration_ms must be None when no duration= kv is sent"
+    );
+    assert!(
+        ev.err_path.is_none(),
+        "err_path must be None when no err= kv is sent"
+    );
+}
+
+/// T1c — all extras present: aid/duration_ms/err_path are all Some so the
+/// bridge tail emits three non-nil Lisp values.
+#[test]
+fn test_take_prompt_marks_all_extras_some() {
+    let mut session = make_session();
+    session.core.advance(
+        b"\x1b]133;D;0;aid=app1;duration=1234;err=/var/log/x.log\x1b\\",
+    );
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+    let ev = &marks[0];
+    assert_eq!(ev.aid.as_deref(), Some("app1"));
+    assert_eq!(ev.duration_ms, Some(1234));
+    assert_eq!(ev.err_path.as_deref(), Some("/var/log/x.log"));
+    assert_eq!(ev.exit_code, Some(0));
+}
+
+/// T1d — `duration_ms = u64::MAX` is REJECTED by the parser (Security W3).
+/// The cap is `MAX_PROMPT_DURATION_MS = 365 * 24 * 3600 * 1000` (one year in ms);
+/// any value above is dropped to `None` rather than passed through. This protects
+/// the FFI bridge consumer from misleadingly huge durations supplied by an
+/// adversarial or buggy shell.
+#[test]
+fn test_take_prompt_marks_duration_u64_max_rejected() {
+    let mut session = make_session();
+    let payload = b"\x1b]133;D;0;duration=18446744073709551615\x1b\\";
+    session.core.advance(payload);
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(
+        marks[0].duration_ms, None,
+        "u64::MAX exceeds MAX_PROMPT_DURATION_MS (1 year); parser must drop to None"
+    );
+}
+
+/// T1d-cap — `duration_ms` exactly at `MAX_PROMPT_DURATION_MS` is accepted
+/// (boundary).
+#[test]
+fn test_take_prompt_marks_duration_at_cap_accepted() {
+    let mut session = make_session();
+    const MAX_MS: u64 = 365 * 24 * 3600 * 1000;
+    let payload = format!("\x1b]133;D;0;duration={MAX_MS}\x1b\\");
+    session.core.advance(payload.as_bytes());
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(
+        marks[0].duration_ms,
+        Some(MAX_MS),
+        "duration_ms exactly at cap must round-trip"
+    );
+}
+
+/// T1d-over — `duration_ms` one above the cap is rejected (boundary).
+#[test]
+fn test_take_prompt_marks_duration_above_cap_rejected() {
+    let mut session = make_session();
+    const OVER_CAP: u64 = 365 * 24 * 3600 * 1000 + 1;
+    let payload = format!("\x1b]133;D;0;duration={OVER_CAP}\x1b\\");
+    session.core.advance(payload.as_bytes());
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(
+        marks[0].duration_ms, None,
+        "duration_ms one above MAX_PROMPT_DURATION_MS must drop to None"
+    );
+}
+
+/// T1e — legacy consumers that only read the first 4 fields (mark, row, col,
+/// exit-code) keep working when the FFI tail grows by 3 fields.
+///
+/// This test simulates such a consumer entirely on the Rust side: it reads the
+/// 4 "classic" fields off `PromptMarkEvent` and must not need to touch the new
+/// fields, proving the extension is strictly additive.
+#[test]
+fn test_take_prompt_marks_legacy_4field_consumer_unaffected() {
+    let mut session = make_session();
+    session.core.advance(
+        b"\x1b]133;D;42;aid=app1;duration=999;err=/tmp/e\x1b\\",
+    );
+    let marks = session.take_prompt_marks();
+    assert_eq!(marks.len(), 1);
+
+    // A "legacy" consumer destructures only the first 4 logical fields.
+    // It must succeed without referencing aid/duration_ms/err_path.
+    let ev = &marks[0];
+    let legacy_view: (
+        crate::types::osc::PromptMark,
+        usize,
+        usize,
+        Option<i32>,
+    ) = (ev.mark.clone(), ev.row, ev.col, ev.exit_code);
+
+    assert!(matches!(legacy_view.0, crate::types::osc::PromptMark::CommandEnd));
+    assert_eq!(legacy_view.1, 0, "row must reflect cursor at OSC 133 D time");
+    assert_eq!(legacy_view.2, 0, "col must reflect cursor at OSC 133 D time");
+    assert_eq!(legacy_view.3, Some(42), "exit-code positional param survives");
+}
+
+// ---------------------------------------------------------------------------
+// FR-124 PBT: random aid/duration/err_path triples round-trip through the
+// parser into the drained Vec exactly. Mirrors the property that the FFI
+// bridge's per-field encoding preserves field identity.
+// ---------------------------------------------------------------------------
+
+mod fr_124_pbt {
+    use super::make_session;
+    use proptest::prelude::*;
+
+    /// Format an OSC 133 D escape sequence with the given optional extras.
+    /// All extras use ST (`ESC \`) terminator.
+    fn build_osc133_d(
+        exit_code: i32,
+        aid: Option<&str>,
+        duration: Option<u64>,
+        err: Option<&str>,
+    ) -> Vec<u8> {
+        let mut out = Vec::with_capacity(64);
+        out.extend_from_slice(b"\x1b]133;D;");
+        out.extend_from_slice(exit_code.to_string().as_bytes());
+        if let Some(a) = aid {
+            out.extend_from_slice(b";aid=");
+            out.extend_from_slice(a.as_bytes());
+        }
+        if let Some(d) = duration {
+            out.extend_from_slice(b";duration=");
+            out.extend_from_slice(d.to_string().as_bytes());
+        }
+        if let Some(e) = err {
+            out.extend_from_slice(b";err=");
+            out.extend_from_slice(e.as_bytes());
+        }
+        out.extend_from_slice(b"\x1b\\");
+        out
+    }
+
+    // Restrict err_path to printable ASCII without OSC delimiters (`;`, `\x1b`,
+    // controls). The parser drops values containing C0/DEL bytes (see
+    // `parser/osc_protocol.rs::has_control_bytes`); the property here
+    // asserts round-trip on inputs the parser is contractually required
+    // to preserve.
+    fn safe_err_str(max_len: usize) -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                32u8..=58u8,    // ' ' .. ':'  (excludes ';' = 0x3B)
+                60u8..=126u8,   // '<' .. '~'  (excludes DEL)
+            ],
+            0..=max_len,
+        )
+        .prop_map(|v| String::from_utf8(v).expect("ASCII subset is always valid UTF-8"))
+    }
+
+    /// Strict printable-ASCII generator for `aid=` values (`[!-~]+`, no `;` or `=`).
+    /// Mirrors the `is_printable_aid` parser-side predicate (Security W1):
+    /// `aid=` rejects space, C0/DEL, and OSC delimiter bytes. Empty strings are
+    /// produced separately (the parser preserves empty `aid=` as `Some("")`).
+    fn safe_aid_str(max_len: usize) -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                33u8..=58u8,    // '!' .. ':'  (excludes ';' = 0x3B and ' ' = 0x20)
+                60u8..=60u8,    // '<'         (excludes '=' = 0x3D)
+                62u8..=126u8,   // '>' .. '~'  (excludes DEL)
+            ],
+            0..=max_len,
+        )
+        .prop_map(|v| String::from_utf8(v).expect("ASCII subset is always valid UTF-8"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        // INVARIANT: parser→take_prompt_marks preserves every extra field
+        // identically. This is the producer-side half of the FFI roundtrip
+        // (`kuro_core_poll_prompt_marks` then maps each Some/None directly to
+        // a Lisp string-or-nil / int-or-nil with no further mutation).
+        //
+        // `aid` uses the strict printable-ASCII generator (`is_printable_aid`).
+        // `duration` is capped at `MAX_PROMPT_DURATION_MS` (1 year in ms,
+        // Security W3); larger values are dropped to None by the parser.
+        fn prop_osc133_d_extras_roundtrip_through_parser(
+            exit_code in -128i32..=127i32,
+            aid_opt in proptest::option::of(safe_aid_str(64)),
+            duration_opt in proptest::option::of(0u64..=(365_u64 * 24 * 3600 * 1000)),
+            err_opt in proptest::option::of(safe_err_str(64)),
+        ) {
+            let payload = build_osc133_d(
+                exit_code,
+                aid_opt.as_deref(),
+                duration_opt,
+                err_opt.as_deref(),
+            );
+
+            let mut session = make_session();
+            session.core.advance(&payload);
+            let marks = session.take_prompt_marks();
+            prop_assert_eq!(marks.len(), 1);
+
+            let ev = &marks[0];
+            prop_assert!(matches!(ev.mark, crate::types::osc::PromptMark::CommandEnd));
+            prop_assert_eq!(ev.exit_code, Some(exit_code));
+            prop_assert_eq!(ev.aid.clone(), aid_opt);
+            prop_assert_eq!(ev.duration_ms, duration_opt);
+            prop_assert_eq!(ev.err_path.clone(), err_opt);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // get_image_png_base64 / take_pending_image_notifications
 // ---------------------------------------------------------------------------
 

@@ -21,13 +21,17 @@
 ;;; Code:
 
 ;; Add subdirectories to load-path so that (require 'kuro-xxx) works
-;; regardless of which subdirectory the file lives in.
+;; regardless of which subdirectory the file lives in.  This is only
+;; needed in the source tree layout; MELPA installs all .el files flat
+;; into a single directory, in which case the subdirs do not exist and
+;; the dolist body is skipped entirely.
 (let ((base (file-name-directory
              (directory-file-name
               (file-name-directory (or load-file-name buffer-file-name
                                       (locate-library "kuro")))))))
   (dolist (subdir '("core" "rendering" "input" "ffi" "faces" "features"))
-    (add-to-list 'load-path (expand-file-name subdir base) t)))
+    (when (file-directory-p (expand-file-name subdir base))
+      (add-to-list 'load-path (expand-file-name subdir base) t))))
 
 (require 'kuro-module)
 (require 'kuro-config)
@@ -50,6 +54,10 @@
 (declare-function kuro--setup-char-width-table "kuro-char-width" ())
 (declare-function kuro--assign-mono-fonts "kuro-char-width" ())
 (declare-function kuro--refine-glyph-widths "kuro-char-width" ())
+(declare-function kuro-char-width-setup "kuro-char-width" ())
+
+;; Color palette table is rebuilt lazily on first kuro-mode entry; defined in kuro-colors.el.
+(declare-function kuro--rebuild-named-colors "kuro-colors" ())
 
 (defvar kuro-mode-map
   (let ((map (make-sparse-keymap)))
@@ -169,8 +177,14 @@ When PREV is a function it is called at the end; nil is ignored."
       (kuro--handle-focus-out))
     (when (functionp prev) (funcall prev))))
 
+;;;###autoload
 (define-derived-mode kuro-mode fundamental-mode "Kuro"
   "Major mode for Kuro terminal buffers."
+  ;; Install global hooks/state lazily — keeps load-time side-effect-free
+  ;; for users who require kuro from init.el but defer launching a
+  ;; terminal until later.  Both helpers are idempotent.
+  (kuro-char-width-setup)
+  (kuro--rebuild-named-colors)
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
   (setq-local bidi-paragraph-direction 'left-to-right)

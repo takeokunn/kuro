@@ -35,6 +35,12 @@ pub struct PromptMarkEvent {
     pub(crate) col: usize,
     /// Exit code from OSC 133;D (None for A/B/C marks)
     pub(crate) exit_code: Option<i32>,
+    /// Application id (OSC 133 aid= param, Ghostty 1.3+).
+    pub(crate) aid: Option<String>,
+    /// Command duration in milliseconds (OSC 133 D duration= param, Ghostty 1.3+).
+    pub(crate) duration_ms: Option<u64>,
+    /// Stderr log path (OSC 133 D err= param, FinalTerm/Ghostty).
+    pub(crate) err_path: Option<String>,
 }
 
 /// Active hyperlink state for OSC 8
@@ -201,6 +207,9 @@ mod tests {
             row: 10,
             col: 3,
             exit_code: None,
+            aid: None,
+            duration_ms: None,
+            err_path: None,
         };
         assert!(matches!(ev.mark, PromptMark::CommandEnd));
         assert_eq!(ev.row, 10);
@@ -351,6 +360,9 @@ mod tests {
             row: 5,
             col: 10,
             exit_code: None,
+            aid: None,
+            duration_ms: None,
+            err_path: None,
         };
         assert!(matches!(event.mark, PromptMark::PromptStart));
         assert_eq!(event.row, 5);
@@ -366,6 +378,9 @@ mod tests {
             row: 3,
             col: 0,
             exit_code: Some(1),
+            aid: None,
+            duration_ms: None,
+            err_path: None,
         });
         assert_eq!(d.prompt_marks.len(), 1);
         assert!(matches!(d.prompt_marks[0].mark, PromptMark::CommandEnd));

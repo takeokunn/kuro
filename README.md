@@ -13,7 +13,9 @@ A high-performance terminal emulator for Emacs, powered by a Rust dynamic module
 - **VTE Compliance**: VT100/VT220 compatible with cursor movement, erase, scroll regions, insert/delete, tab stops
 - **SGR Attributes**: Bold, italic, underline, blink, reverse, strikethrough, conceal, dim; 256-color and TrueColor
 - **Kitty Protocols**: Kitty Graphics Protocol (APC), Kitty Keyboard Protocol
-- **OSC Support**: OSC 7 (CWD), OSC 8 (hyperlinks), OSC 52 (clipboard), OSC 133 (shell integration)
+- **OSC Support**: OSC 7 (CWD), OSC 8 (hyperlinks), OSC 52 (clipboard), OSC 133 shell integration with FinalTerm/Ghostty extras (`aid=`, `duration=`, `err=`, exit code on D-mark), with extras (aid, duration, err) rendered as left-margin status indicators and end-of-line annotations
+- **Device Attributes**: DA1, DA2, DA3 (`CSI = c` → `DCS ! | 00000000 ST`)
+- **Color Scheme Notifications**: DEC private mode 2031 + DSR 996 (Contour/Ghostty extension), automatically synchronized to Emacs's current theme via `enable-theme-functions`
 - **Sixel Graphics**: Inline image display via Sixel protocol
 - **Unicode**: Full CJK support, grapheme clusters, emoji (unicode-width)
 - **Multi-session**: Multiple terminal sessions with independent state, auto-reaping of dead sessions
@@ -45,19 +47,41 @@ cachix use takeokunn-kuro
 
 ### From Source (without Nix)
 
+Build the Rust dynamic module with cargo and place it where Emacs can load it:
+
 ```bash
 git clone https://github.com/takeokunn/kuro.git
 cd kuro
-make install        # cargo build --release + copy to ~/.local/share/kuro
+cargo build --release --manifest-path rust-core/Cargo.toml
+mkdir -p ~/.local/share/kuro
+
+# Linux:
+cp rust-core/target/release/libkuro_core.so ~/.local/share/kuro/
+
+# macOS:
+cp rust-core/target/release/libkuro_core.dylib ~/.local/share/kuro/
 ```
+
+After installing the Emacs package via `package.el` (see MELPA section below), you can also run `M-x kuro-module-build` to compile the native module from source via cargo, or `M-x kuro-module-download` to fetch a prebuilt binary.
 
 ### MELPA
 
-MELPA packaging is prepared (recipe, `.elpaignore`, package-lint CI). Submission pending.
+MELPA packaging is prepared (recipe, `.elpaignore`, package-lint CI). Submission is pending the rollout of the GitHub Releases prebuilt-binary infrastructure, which ships native modules for the four supported platforms:
+
+- `linux-x86_64`
+- `linux-aarch64`
+- `darwin-x86_64`
+- `darwin-aarch64`
 
 ```elisp
 ;; Once published:
 M-x package-install RET kuro RET
+
+;; Then fetch the prebuilt native module for your platform:
+M-x kuro-module-download
+
+;; Or compile from source via cargo (requires a Rust toolchain):
+M-x kuro-module-build
 ```
 
 ## Quick Start
@@ -107,7 +131,7 @@ graph LR
 
 ### Emacs Lisp (`emacs-lisp/`)
 
-28 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-renderer-pipeline`, `kuro-binary-decoder`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation), `kuro-poll-modes`, `kuro-typewriter`, `kuro-tui-mode`.
+28 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-renderer-pipeline`, `kuro-binary-decoder`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation), `kuro-poll-modes`, `kuro-typewriter`, `kuro-tui-mode`, `kuro-color-scheme` (Emacs theme bridge to DEC 2031 / DSR 996), `kuro-prompt-status` (OSC 133 exit-status indicators and prompt extras annotations).
 
 ## Development
 

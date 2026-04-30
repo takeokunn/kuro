@@ -308,3 +308,4 @@ fn test_get_default_colors_after_osc10() {
 }
 
 include!("tests_unit_dec_accessors.rs");
+include!("tests_unit_color_scheme.rs");

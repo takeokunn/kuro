@@ -274,6 +274,38 @@ fn vt_da2_response() {
     );
 }
 
+#[test]
+fn da3_tertiary_device_attributes_responds_with_unit_id() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[=c");
+    assert!(
+        !t.pending_responses().is_empty(),
+        "DA3 must generate response"
+    );
+    let resp = t.pending_responses().last().expect("response present");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1bP!|00000000\x1b\\",
+        "DA3 response must be DCS ! | 00000000 ST"
+    );
+}
+
+#[test]
+fn da3_with_zero_param() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[=0c");
+    assert!(
+        !t.pending_responses().is_empty(),
+        "DA3 with zero param must generate response"
+    );
+    let resp = t.pending_responses().last().expect("response present");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1bP!|00000000\x1b\\",
+        "DA3 zero-param response must be DCS ! | 00000000 ST"
+    );
+}
+
 // === DECSC/DECRC ===
 
 #[test]
@@ -381,6 +413,69 @@ fn vt_osc133_prompt_marks() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]133;A\x07");
     assert_eq!(t.osc_data().prompt_marks.len(), 1);
+}
+
+// === DEC mode 2031 — Color Scheme Notifications (Contour/Ghostty) ===
+
+#[test]
+fn dec_mode_2031_set_stores_state() {
+    let mut t = TerminalCore::new(24, 80);
+    assert!(
+        !t.dec_modes().color_scheme_notifications,
+        "color_scheme_notifications must default to false"
+    );
+    t.advance(b"\x1b[?2031h");
+    assert!(
+        t.dec_modes().color_scheme_notifications,
+        "?2031h must set color_scheme_notifications = true"
+    );
+    t.advance(b"\x1b[?2031l");
+    assert!(
+        !t.dec_modes().color_scheme_notifications,
+        "?2031l must clear color_scheme_notifications"
+    );
+}
+
+#[test]
+fn dec_mode_2031_decrqm_reports_status() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?2031h");
+    t.advance(b"\x1b[?2031$p");
+    let resp = t
+        .pending_responses()
+        .last()
+        .expect("DECRQM must emit a response for mode 2031");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1b[?2031;1$y",
+        "?2031 enabled must report status=1"
+    );
+    t.advance(b"\x1b[?2031l");
+    t.advance(b"\x1b[?2031$p");
+    let resp = t
+        .pending_responses()
+        .last()
+        .expect("DECRQM must emit a response after reset");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1b[?2031;2$y",
+        "?2031 disabled must report status=2"
+    );
+}
+
+#[test]
+fn dsr_996_color_scheme_query_responds_dark() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[?996n");
+    let resp = t
+        .pending_responses()
+        .last()
+        .expect("DSR 996 must emit a response");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1b[?997;1n",
+        "DSR 996 must report dark (Ps=1) until theme detection is wired"
+    );
 }
 
 include!("include/vt_compliance_device_attrs.rs");

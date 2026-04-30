@@ -359,6 +359,166 @@ include!("dec_private_kitty_keyboard.rs");
 
 include!("dec_private_edge.rs");
 
+// ── color_scheme_dark + apply_color_scheme + DSR 996 (FR-125) ────────────────
+//
+// `color_scheme_dark` lives on `TerminalMeta` (Emacs-owned host state), NOT
+// on `DecModes` (PTY-settable state). See `types/meta.rs`.
+
+/// T3a: `TerminalMeta::default()` defaults `color_scheme_dark` to `true`
+/// (conservative default — most shell apps assume bright-on-dark).
+#[test]
+fn test_terminal_meta_default_color_scheme_dark_is_true() {
+    let term = crate::TerminalCore::new(24, 80);
+    assert!(term.meta.color_scheme_dark);
+}
+
+/// T3b: `handle_dsr_color_scheme` with `color_scheme_dark = true` pushes
+/// `CSI ? 997 ; 1 n` (Ps=1 = dark).
+#[test]
+fn test_handle_dsr_color_scheme_dark_pushes_ps1() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.meta.color_scheme_dark = true;
+    handle_dsr_color_scheme(&mut term);
+    assert_eq!(term.meta.pending_responses.len(), 1);
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;1n");
+}
+
+/// T3c: `handle_dsr_color_scheme` with `color_scheme_dark = false` pushes
+/// `CSI ? 997 ; 2 n` (Ps=2 = light).
+#[test]
+fn test_handle_dsr_color_scheme_light_pushes_ps2() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.meta.color_scheme_dark = false;
+    handle_dsr_color_scheme(&mut term);
+    assert_eq!(term.meta.pending_responses.len(), 1);
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
+}
+
+/// T3d: `apply_color_scheme(false)` with notifications enabled and previous
+/// state dark — returns `true`, pushes exactly one `CSI ? 997 ; 2 n` byte
+/// string (light unsolicited notification).
+#[test]
+fn test_apply_color_scheme_change_with_notifications_pushes_response() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.color_scheme_notifications = true;
+    // Default is dark; switch to light.
+    let changed = apply_color_scheme(&mut term, false);
+    assert!(changed, "switching dark → light must report changed = true");
+    assert!(!term.meta.color_scheme_dark);
+    assert_eq!(term.meta.pending_responses.len(), 1);
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
+}
+
+/// T3e: `apply_color_scheme(true)` while already dark with notifications on —
+/// idempotent, returns `false`, pushes zero bytes.
+#[test]
+fn test_apply_color_scheme_idempotent_no_change_no_response() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.color_scheme_notifications = true;
+    // Default already dark — calling with the same value must be a no-op.
+    let changed = apply_color_scheme(&mut term, true);
+    assert!(!changed, "no-op call must report changed = false");
+    assert!(term.meta.color_scheme_dark);
+    assert!(
+        term.meta.pending_responses.is_empty(),
+        "idempotent call must not push any response bytes"
+    );
+}
+
+/// T3f: `apply_color_scheme(false)` with notifications **disabled** — state
+/// updates and `true` is returned, but no notification is pushed (mode 2031
+/// gates the proactive emit).
+#[test]
+fn test_apply_color_scheme_change_without_notifications_pushes_nothing() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    assert!(!term.dec_modes.color_scheme_notifications); // default off
+    let changed = apply_color_scheme(&mut term, false);
+    assert!(changed);
+    assert!(!term.meta.color_scheme_dark);
+    assert!(
+        term.meta.pending_responses.is_empty(),
+        "notifications disabled must suppress CSI ? 997 ; Ps n push"
+    );
+}
+
+/// T3g (isolation): OSC 11 — set default background color — must NOT modify
+/// `color_scheme_dark`. The two pieces of color state are independent: OSC
+/// 10/11/12 control palette colors; mode 2031 + DSR 996 advertise the *theme*.
+#[test]
+fn test_osc_11_does_not_modify_color_scheme_dark() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    let initial = term.meta.color_scheme_dark;
+    // OSC 11 ; rgb:ffff/ffff/ffff — set bg to white. This is a palette change,
+    // not a theme change; color_scheme_dark must stay untouched.
+    let params: &[&[u8]] = &[b"11", b"rgb:ffff/ffff/ffff"];
+    crate::parser::osc_protocol::handle_osc_default_colors(&mut term, params);
+    assert_eq!(
+        term.meta.color_scheme_dark, initial,
+        "OSC 11 must not modify color_scheme_dark — palette ≠ theme"
+    );
+}
+
+// ── Dual-fire ordering tests (V#5, V#8) ──────────────────────────────────────
+
+/// V#5: `apply_color_scheme(false)` followed by DSR 996 emits two identical
+/// `CSI ? 997 ; 2 n` byte strings — both reflect the new (light) state.
+///
+/// Notifications mode 2031 is enabled so that the change emits a proactive
+/// notification; the subsequent DSR 996 query then re-reads the same state.
+#[test]
+fn test_apply_color_scheme_then_dsr_996_emits_two_identical_responses() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?2031h"); // enable color scheme notifications
+    let _ = apply_color_scheme(&mut term, false);
+    term.advance(b"\x1b[?996n"); // DSR 996 query
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        2,
+        "expected one notification + one DSR response = 2 entries"
+    );
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
+    assert_eq!(term.meta.pending_responses[1], b"\x1b[?997;2n");
+}
+
+/// V#5 (reverse): DSR 996 first, then `apply_color_scheme(false)` —
+/// the prior `?997;1n` response must remain untouched while the new
+/// `?997;2n` notification is appended.
+#[test]
+fn test_dsr_996_then_apply_color_scheme_preserves_prior_response() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Default dark + enable notifications
+    term.advance(b"\x1b[?2031h");
+    term.advance(b"\x1b[?996n"); // DSR 996 → pushes "?997;1n"
+    let _ = apply_color_scheme(&mut term, false); // change → pushes "?997;2n"
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        2,
+        "expected query response + change notification = 2 entries"
+    );
+    assert_eq!(
+        term.meta.pending_responses[0], b"\x1b[?997;1n",
+        "prior DSR 996 response must remain ?997;1n; state change must not mutate \
+         already-pushed bytes"
+    );
+    assert_eq!(term.meta.pending_responses[1], b"\x1b[?997;2n");
+}
+
+/// V#8: Two consecutive DSR 996 queries push two distinct response entries.
+///
+/// Each DSR 996 must produce its own pending_responses entry — the parser
+/// must not deduplicate or coalesce them (Emacs may have drained between
+/// queries).
+#[test]
+fn test_two_consecutive_dsr_996_pushes_two_responses() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?996n\x1b[?996n");
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        2,
+        "two DSR 996 queries must produce two distinct pending response entries"
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 

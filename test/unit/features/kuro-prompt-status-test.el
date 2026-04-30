@@ -150,6 +150,117 @@
        '(("command-end" 2 0 0)))
       (should (null kuro--prompt-status-overlays)))))
 
+;;; Group 4b: kuro--update-prompt-status — 7-tuple destructure & extras
+
+(ert-deftest kuro-prompt-status--update-7tuple-renders-indicator-only ()
+  "T2a: 7-tuple with all-nil extras still renders the exit-code indicator."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 4 0 0 nil nil nil)))
+    ;; Only the indicator overlay; no extras overlay since all extras nil.
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (let ((ov (car kuro--prompt-status-overlays)))
+      (should (overlay-get ov 'kuro-prompt-status))
+      (should-not (overlay-get ov 'kuro-prompt-extras)))))
+
+(ert-deftest kuro-prompt-status--update-renders-extras-when-aid-set ()
+  "T2b: extras overlay is created when aid is non-nil."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 2 0 0 "job1" nil nil)))
+    ;; Indicator + extras = 2 overlays.
+    (should (= (length kuro--prompt-status-overlays) 2))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "aid=job1" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-formats-duration-1500-as-1.5s ()
+  "T2c: duration-ms 1500 renders as \"1.5s\"."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 1 0 0 nil 1500 nil)))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "1\\.5s" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-formats-duration-75000-as-1m15s ()
+  "T2d: duration-ms 75000 renders as \"1m15s\"."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 1 0 0 nil 75000 nil)))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "1m15s" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-skips-extras-when-toggle-off ()
+  "T2e: extras overlay is suppressed when kuro-prompt-status-show-extras is nil."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (let ((kuro-prompt-status-show-extras nil))
+      (kuro--update-prompt-status
+       '(("command-end" 3 0 0 "job1" 1500 "/tmp/log"))))
+    ;; Only the indicator overlay; extras suppressed.
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (should-not (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                          kuro--prompt-status-overlays))))
+
+(ert-deftest kuro-prompt-status--format-extras-all-nil-returns-nil ()
+  "T2f: kuro--format-prompt-extras with all nil fields returns nil."
+  (should (null (kuro--format-prompt-extras nil nil nil))))
+
+(ert-deftest kuro-prompt-status--update-accepts-legacy-4-tuple ()
+  "Backward-compat: the dotted-rest pcase pattern still matches a 4-tuple."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    ;; Old-shape 4-tuple — extras are absent (nil), indicator still rendered.
+    (kuro--update-prompt-status '(("command-end" 2 0 1)))
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (should-not (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                          kuro--prompt-status-overlays))))
+
+(ert-deftest kuro-prompt-status--format-extras-includes-err-path ()
+  "Extras include err= prefix when err-path is provided."
+  (let ((s (kuro--format-prompt-extras nil nil "/tmp/build.log")))
+    (should (stringp s))
+    (should (string-match-p "err=/tmp/build\\.log" s))))
+
+(ert-deftest kuro-prompt-status--format-duration-sub-second ()
+  "Duration <1000ms renders as \"Nms\"."
+  (should (equal (kuro--format-prompt-duration 250) "250ms")))
+
+;;; Group 4c: kuro--format-prompt-duration — band boundary values
+
+(ert-deftest kuro-prompt-status--format-duration-0ms ()
+  "Lower edge of <1000 ms band: 0 renders as \"0ms\"."
+  (should (equal (kuro--format-prompt-duration 0) "0ms")))
+
+(ert-deftest kuro-prompt-status--format-duration-999ms ()
+  "Upper edge of <1000 ms band: 999 renders as \"999ms\"."
+  (should (equal (kuro--format-prompt-duration 999) "999ms")))
+
+(ert-deftest kuro-prompt-status--format-duration-1000ms ()
+  "Lower edge of <60000 ms band: 1000 renders as \"1.0s\"."
+  (should (equal (kuro--format-prompt-duration 1000) "1.0s")))
+
+(ert-deftest kuro-prompt-status--format-duration-59999ms ()
+  "Upper edge of <60000 ms band: 59999 rounds via %.1f to \"60.0s\"."
+  (should (equal (kuro--format-prompt-duration 59999) "60.0s")))
+
+(ert-deftest kuro-prompt-status--format-duration-60000ms ()
+  "Lower edge of MmSSs band: 60000 renders as \"1m00s\"."
+  (should (equal (kuro--format-prompt-duration 60000) "1m00s")))
+
+(ert-deftest kuro-prompt-status--format-duration-3600000ms ()
+  "Hour mark in MmSSs band: 3,600,000 renders as \"60m00s\" (no hour rollover)."
+  (should (equal (kuro--format-prompt-duration 3600000) "60m00s")))
+
 ;;; Group 5: kuro--ensure-left-margin — margin setup
 
 (ert-deftest kuro-prompt-status--ensure-left-margin-sets-width ()

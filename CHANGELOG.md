@@ -9,9 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OSC 133 extras: `aid=`, `duration=`, `err=` kv pairs and positional exit code on D-mark for richer shell-integration job tracking (FR-115).
+- DA3 (Tertiary Device Attributes) response: reply to `CSI = c` with `DCS ! | 00000000 ST`, completing the DA1/DA2/DA3 triad (FR-117).
+- DEC private mode 2031 (`color_scheme_notifications`) and DSR 996: terminal answers `CSI ? 996 n` with `CSI ? 997 ; 1 n` and proactively emits color-scheme change notifications when mode 2031 is set (FR-119).
+- OSC 133 prompt extras (aid, duration, err path) are now surfaced to Emacs via the extended 7-tuple returned by `kuro-core-poll-prompt-marks` and rendered as end-of-line annotations by the `kuro-prompt-status` feature. Gated by `kuro-prompt-status-show-extras` (default t). New face `kuro-prompt-extras` (FR-124).
+- Automatic dark/light theme bridge: Emacs's `enable-theme-functions` is debounced and forwarded to `kuro-core-set-color-scheme`, so DSR 996 queries and DEC private mode 2031 notifications reflect the real Emacs theme. New defcustom `kuro-color-scheme-debounce-seconds`, autoload `M-x kuro-color-scheme-refresh` (FR-125).
 - `.elpaignore` for clean package distribution (excludes Rust, tests, docs from package)
 - `package-lint` CI step for MELPA compliance validation
 - Module availability detection in E2E tests (`kuro-test--module-loaded`)
+
+### Changed
+
+- **Breaking for downstream hooks**: `kuro-core-poll-prompt-marks` now returns 7-tuples `(MARK-TYPE ROW COL EXIT-CODE AID DURATION-MS ERR-PATH)` instead of 4-tuples. Consumers that read positions 0–3 via `nth` or `pcase` rest patterns are unaffected. Consumers using closed-arity `pcase` patterns (e.g. `` `(,t ,r ,c ,e) mark ``) must migrate to the rest pattern `` `(,t ,r ,c ,e . ,_) mark ``.
 
 ### Fixed
 

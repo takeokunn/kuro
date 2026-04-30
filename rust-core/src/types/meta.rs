@@ -3,7 +3,6 @@
 use crate::parser::dcs::DcsState;
 
 /// Grouped terminal metadata and pending-response state.
-#[derive(Default)]
 pub(crate) struct TerminalMeta {
     /// Window title set via OSC 0 or OSC 2
     pub(crate) title: String,
@@ -15,6 +14,27 @@ pub(crate) struct TerminalMeta {
     pub(crate) pending_responses: Vec<Vec<u8>>,
     /// DCS (Device Control String) sequence state
     pub(crate) dcs_state: DcsState,
+    /// Current Emacs color scheme, pushed in from Elisp side via
+    /// `kuro_core_set_color_scheme`. `true` = dark (default), `false` = light.
+    ///
+    /// This is Emacs-owned host state — it is NOT a PTY-settable DEC mode, so it
+    /// lives on `TerminalMeta` rather than `DecModes`. Used by DSR 996 response
+    /// and mode 2031 proactive notifications.
+    /// See: <https://contour-terminal.org/vt-extensions/color-palette-update-notifications/>
+    pub(crate) color_scheme_dark: bool,
+}
+
+impl Default for TerminalMeta {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            title_dirty: false,
+            bell_pending: false,
+            pending_responses: Vec::new(),
+            dcs_state: DcsState::default(),
+            color_scheme_dark: true,
+        }
+    }
 }
 
 #[cfg(test)]

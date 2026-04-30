@@ -27,6 +27,7 @@
 (require 'kuro-dnd)
 (require 'kuro-compilation)
 (require 'kuro-bookmark)
+(require 'kuro-color-scheme)
 
 ;; Forward-declare functions defined in kuro.el to avoid circular require
 (declare-function kuro-mode "kuro" ())
@@ -36,14 +37,23 @@
 (declare-function kuro--start-render-loop "kuro-renderer" ())
 (declare-function kuro--stop-render-loop  "kuro-renderer" ())
 
-;; kuro--ensure-module-loaded is defined in kuro-module.el
+;; kuro--ensure-module-loaded, kuro-module-load, kuro-module-download, and
+;; kuro-module-build are defined in kuro-module.el; kuro-module-installation-method
+;; is defined as a defcustom there.
 (declare-function kuro--ensure-module-loaded "kuro-module" ())
+(declare-function kuro-module-load           "kuro-module" ())
+(declare-function kuro-module-download       "kuro-module" (&optional version))
+(declare-function kuro-module-build          "kuro-module" ())
+(defvar kuro-module-installation-method)
 
 ;; face-remap-remove-relative is provided by the C core (face-remap.el)
 (declare-function face-remap-remove-relative "face-remap" (cookie))
 
 (defconst kuro--startup-render-delay 0.05
   "Delay in seconds before the first render after terminal startup.")
+
+;; kuro-config.el
+(defvar kuro-shell-integration)
 
 (defun kuro--shell-integration-dir ()
   "Return the directory containing kuro shell integration scripts, or nil.
@@ -209,7 +219,12 @@ always computes fresh cursor position from Rust."
     (kuro--ensure-left-margin)
     (kuro--setup-dnd)
     (kuro--setup-compilation)
-    (kuro--setup-bookmark)))
+    (kuro--setup-bookmark)
+    ;; Install the global theme-change hook (idempotent via add-hook) and
+    ;; sync the current Emacs theme to this session immediately so DSR 996
+    ;; is truthful before any future theme switch.
+    (kuro--color-scheme-install-hook)
+    (ignore-errors (kuro-color-scheme-refresh))))
 
 ;; kuro--set-scrollback-max-lines is defined in kuro-ffi-osc.el (loaded via kuro-renderer)
 (declare-function kuro--set-scrollback-max-lines "kuro-ffi-osc" (max-lines))
@@ -247,6 +262,14 @@ always computes fresh cursor position from Rust."
 
 ;; kuro-bookmark.el
 (declare-function kuro--setup-bookmark "kuro-bookmark" ())
+
+;; kuro-color-scheme.el
+(declare-function kuro--color-scheme-install-hook   "kuro-color-scheme" ())
+(declare-function kuro--color-scheme-uninstall-hook "kuro-color-scheme" ())
+(declare-function kuro-color-scheme-refresh         "kuro-color-scheme" ())
+
+;; kuro-config.el
+(declare-function kuro--kuro-buffers "kuro-config" ())
 
 ;; kuro-prompt-status.el
 (declare-function kuro--ensure-left-margin           "kuro-prompt-status" ())
@@ -301,17 +324,70 @@ always computes fresh cursor position from Rust."
 (defvar kuro--font-remap-cookie nil
   "Forward reference; defvar-local in kuro-faces.el.")
 
+(defun kuro--module-loadable-p ()
+  "Return non-nil when the Rust dynamic module is loaded into Emacs.
+Detects this by probing for `kuro-core-init', the canonical FFI entry
+point provided by the native module."
+  (fboundp 'kuro-core-init))
+
+(defun kuro--try-load-module ()
+  "Attempt to load the Rust native module, swallowing any errors.
+Returns non-nil iff the module is loaded after the attempt."
+  (ignore-errors (kuro-module-load))
+  (kuro--module-loadable-p))
+
+(defun kuro--prompt-and-install-module ()
+  "Prompt the user to install the native module, then load it.
+Offers three choices via `read-char-choice':
+  d — download a prebuilt binary via `kuro-module-download'.
+  b — build from source via `kuro-module-build'.
+  q — abort with `user-error'.
+Signals a `user-error' on quit; otherwise returns non-nil after a
+successful install and load."
+  (pcase (read-char-choice
+          (concat "Kuro native module not found. "
+                  "Install: [d]ownload prebuilt, [b]uild from source, [q]uit? ")
+          '(?d ?b ?q))
+    (?d (kuro-module-download) (kuro-module-load)
+        (or (kuro--module-loadable-p)
+            (error "Kuro: download succeeded but native init is not bound")))
+    (?b (kuro-module-build)    (kuro-module-load)
+        (or (kuro--module-loadable-p)
+            (error "Kuro: cargo build succeeded but native init is not bound")))
+    (?q (user-error "Aborted: kuro native module is required"))))
+
+(defun kuro--ensure-module-installed ()
+  "Ensure the native module is installed, prompting the user if not.
+Honours `kuro-module-installation-method' to skip the interactive
+prompt: the symbols `prebuilt', `cargo', and `manual' map to download,
+build, and abort-with-error respectively; nil falls through to the
+interactive prompt.  Returns non-nil on success; signals an error
+otherwise."
+  (or (kuro--try-load-module)
+      (pcase kuro-module-installation-method
+        ('prebuilt (kuro-module-download) (kuro-module-load)
+                   (or (kuro--module-loadable-p)
+                       (error "Kuro: download succeeded but native init is not bound")))
+        ('cargo    (kuro-module-build)    (kuro-module-load)
+                   (or (kuro--module-loadable-p)
+                       (error "Kuro: cargo build succeeded but native init is not bound")))
+        ('manual   (user-error "Native module missing; install manually then retry"))
+        (_         (kuro--prompt-and-install-module)))))
+
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)
   "Create a new Kuro terminal instance running COMMAND.
 If COMMAND is nil, use `kuro-shell'.
 BUFFER-NAME is the name for the new buffer.
-Switches to the terminal buffer after creation."
+Switches to the terminal buffer after creation.
+On first run, when the Rust native module is missing, the user is
+prompted to download a prebuilt binary or build it from source; the
+prompt is skipped when `kuro-module-installation-method' is set."
   (interactive
    (list
     (read-string "Shell command: " kuro-shell)
     (generate-new-buffer-name kuro--buffer-name-default)))
-  (kuro--ensure-module-loaded)
+  (kuro--ensure-module-installed)
   (kuro--start-session-in-buffer
    (kuro--create-session-buffer buffer-name)
    (or command kuro-shell)))
@@ -330,18 +406,21 @@ Switches to the terminal buffer after creation."
   "Define an interactive command NAME that sends SEQUENCE to the terminal."
   `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
 
-;;;###autoload
 (kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
-;;;###autoload
+;;;###autoload (autoload 'kuro-send-interrupt "kuro-lifecycle" nil t)
 (kuro--def-control-key kuro-send-sigstop  [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
-;;;###autoload
+;;;###autoload (autoload 'kuro-send-sigstop "kuro-lifecycle" nil t)
 (kuro--def-control-key kuro-send-sigquit  [?\C-\\] "Send quit signal (C-\\) to the terminal process.")
+;;;###autoload (autoload 'kuro-send-sigquit "kuro-lifecycle" nil t)
 
 (defun kuro--cleanup-render-state ()
   "Reset all render-related buffer state for teardown.
 Called by `kuro-kill' immediately after stopping the render loop.
 Resets TUI mode counters, overlay lists, mouse state, scroll offset,
-and font remap cookie.  Idempotent: safe to call more than once."
+and font remap cookie.  Idempotent: safe to call more than once.
+When the buffer being killed is the LAST live Kuro buffer, also
+uninstalls the global `enable-theme-functions' hook so it does not
+iterate over zero buffers on every future theme switch."
   (setq kuro--tui-mode-active     nil
         kuro--tui-mode-frame-count 0
         kuro--last-dirty-count    0)
@@ -358,7 +437,14 @@ and font remap cookie.  Idempotent: safe to call more than once."
         kuro--scroll-offset    0)
   (kuro--with-face-remap kuro--font-remap-cookie)
   (kuro--teardown-compilation)
-  (kuro--teardown-dnd))
+  (kuro--teardown-dnd)
+  ;; Uninstall the global theme-change hook when this is the last live
+  ;; Kuro buffer.  The current buffer still appears in `kuro--kuro-buffers'
+  ;; (kill-buffer runs after this), so the "last buffer" condition is
+  ;; "remaining Kuro buffers excluding self is empty".
+  (let ((others (remq (current-buffer) (kuro--kuro-buffers))))
+    (unless others
+      (kuro--color-scheme-uninstall-hook))))
 
 ;;;###autoload
 (defun kuro-kill ()
@@ -419,7 +505,7 @@ Creates a new buffer in `kuro-mode', associates it with the existing
 PTY session, and starts the render loop.  The session must be in the
 detached state (see `kuro-list-sessions' and `kuro-kill')."
   (interactive (list (kuro--read-attach-session-id)))
-  (kuro--ensure-module-loaded)
+  (kuro--ensure-module-installed)
   (let ((buffer (kuro--attach-buffer session-id)))
     (with-current-buffer buffer
       (kuro-mode)

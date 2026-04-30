@@ -148,6 +148,17 @@ impl vte::Perform for TerminalCore {
                         // DECRQM — DEC private mode query
                         parser::dec_private::handle_decrqm(self, params);
                     }
+                    'n' => {
+                        // CSI ? Ps n — DEC DSR queries
+                        // See: https://contour-terminal.org/vt-extensions/color-palette-update-notifications/
+                        for param_group in params {
+                            for &ps in param_group {
+                                if ps == 996 {
+                                    parser::dec_private::handle_dsr_color_scheme(self);
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 return;
@@ -176,6 +187,17 @@ impl vte::Perform for TerminalCore {
                 if c == 'u' {
                     // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
                     parser::dec_private::handle_kitty_kb_pop(self);
+                }
+                return;
+            }
+            Some(b'=') => {
+                if c == 'c' {
+                    // DA3 (Tertiary Device Attributes): ESC[=c or ESC[=0c
+                    // Response: DCS ! | <unit-id-hex> ST. Kuro unit id = "00000000".
+                    // See: https://vt100.net/docs/vt510-rm/DA3.html
+                    self.meta
+                        .pending_responses
+                        .push(b"\x1bP!|00000000\x1b\\".to_vec());
                 }
                 return;
             }

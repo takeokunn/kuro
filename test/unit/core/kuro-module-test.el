@@ -544,6 +544,116 @@ kuro-core-init is naturally unbound in the test environment, so no fboundp stub 
       (should (= call-count 0)))))
 
 
+;;; Group 17: kuro-module--platform-string Rust-triple mapping
+
+(ert-deftest kuro-module-test--platform-string-darwin-aarch64 ()
+  "`kuro-module--platform-string' returns aarch64-apple-darwin on darwin/arm64."
+  (should (equal (kuro-module--platform-string 'darwin "aarch64-apple-darwin23.0")
+                 "aarch64-apple-darwin")))
+
+(ert-deftest kuro-module-test--platform-string-darwin-arm64-prefix ()
+  "`kuro-module--platform-string' also accepts arm64 as the aarch64 prefix on darwin."
+  (should (equal (kuro-module--platform-string 'darwin "arm64-apple-darwin23.0")
+                 "aarch64-apple-darwin")))
+
+(ert-deftest kuro-module-test--platform-string-darwin-x86_64 ()
+  "`kuro-module--platform-string' returns x86_64-apple-darwin on darwin/x86_64."
+  (should (equal (kuro-module--platform-string 'darwin "x86_64-apple-darwin23.0")
+                 "x86_64-apple-darwin")))
+
+(ert-deftest kuro-module-test--platform-string-linux-x86_64 ()
+  "`kuro-module--platform-string' returns x86_64-unknown-linux-gnu on Linux/x86_64."
+  (should (equal (kuro-module--platform-string 'gnu/linux "x86_64-pc-linux-gnu")
+                 "x86_64-unknown-linux-gnu")))
+
+(ert-deftest kuro-module-test--platform-string-linux-aarch64 ()
+  "`kuro-module--platform-string' returns aarch64-unknown-linux-gnu on Linux/arm64."
+  (should (equal (kuro-module--platform-string 'gnu/linux "aarch64-unknown-linux-gnu")
+                 "aarch64-unknown-linux-gnu")))
+
+(ert-deftest kuro-module-test--platform-string-unknown-errors ()
+  "`kuro-module--platform-string' signals an error for unsupported platforms."
+  (should-error (kuro-module--platform-string 'windows-nt "x86_64-pc-windows-msvc")
+                :type 'error))
+
+;;; Group 18: kuro-module--verify-sha256
+
+(ert-deftest kuro-module-test--verify-sha256-match-passes ()
+  "`kuro-module--verify-sha256' returns t when the file digest matches."
+  (let ((tmpfile (make-temp-file "kuro-hash-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile (insert "hello kuro"))
+          (let ((expected (with-temp-buffer
+                            (set-buffer-multibyte nil)
+                            (insert-file-contents-literally tmpfile)
+                            (secure-hash 'sha256 (current-buffer)))))
+            (should (kuro-module--verify-sha256 tmpfile expected))))
+      (delete-file tmpfile))))
+
+(ert-deftest kuro-module-test--verify-sha256-mismatch-rejects ()
+  "`kuro-module--verify-sha256' returns nil when the digest does not match."
+  (let ((tmpfile (make-temp-file "kuro-hash-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile (insert "hello kuro"))
+          (should-not
+           (kuro-module--verify-sha256
+            tmpfile
+            "0000000000000000000000000000000000000000000000000000000000000000")))
+      (delete-file tmpfile))))
+
+(ert-deftest kuro-module-test--verify-sha256-nil-hash-warns-and-passes ()
+  "`kuro-module--verify-sha256' returns t when EXPECTED-HASH is nil and emits a warning."
+  (let ((tmpfile (make-temp-file "kuro-hash-"))
+        (warned nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _args) (setq warned t))))
+          (with-temp-file tmpfile (insert "hello kuro"))
+          (should (kuro-module--verify-sha256 tmpfile nil))
+          (should warned))
+      (delete-file tmpfile))))
+
+;;; Group 19: kuro-module--shared-extension
+
+(ert-deftest kuro-module-test--shared-extension-darwin ()
+  "`kuro-module--shared-extension' returns \".dylib\" on darwin."
+  (let ((system-type 'darwin))
+    (should (equal (kuro-module--shared-extension) ".dylib"))))
+
+(ert-deftest kuro-module-test--shared-extension-linux ()
+  "`kuro-module--shared-extension' returns \".so\" on GNU/Linux."
+  (let ((system-type 'gnu/linux))
+    (should (equal (kuro-module--shared-extension) ".so"))))
+
+;;; Group 20: kuro-module--target-path
+
+(ert-deftest kuro-module-test--target-path-honours-xdg ()
+  "`kuro-module--target-path' uses XDG_DATA_HOME when set."
+  (let* ((tmpdir (make-temp-file "kuro-xdg-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'getenv)
+                   (lambda (var)
+                     (if (equal var "XDG_DATA_HOME") tmpdir (getenv var)))))
+          (let ((dir (kuro-module--target-path)))
+            (should (equal dir (expand-file-name "kuro" tmpdir)))
+            (should (file-directory-p dir))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-test--target-path-creates-directory ()
+  "`kuro-module--target-path' creates the install directory if it is missing."
+  (let* ((tmpdir (make-temp-file "kuro-xdg-" t))
+         (target (expand-file-name "kuro" tmpdir)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'getenv)
+                   (lambda (var)
+                     (if (equal var "XDG_DATA_HOME") tmpdir (getenv var)))))
+          (should-not (file-directory-p target))
+          (kuro-module--target-path)
+          (should (file-directory-p target)))
+      (delete-directory tmpdir t))))
+
 (provide 'kuro-module-test)
 
 ;;; kuro-module-test.el ends here

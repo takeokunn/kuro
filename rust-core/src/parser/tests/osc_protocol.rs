@@ -310,141 +310,7 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     assert!(core.osc_data().palette_dirty);
 }
 
-// ── handle_osc_133 ────────────────────────────────────────────────────────────
-
-test_osc_133_mark!(test_handle_osc_133_prompt_start, b"A", PromptStart);
-test_osc_133_mark!(test_handle_osc_133_prompt_end, b"B", PromptEnd);
-test_osc_133_mark!(test_handle_osc_133_command_start, b"C", CommandStart);
-test_osc_133_mark!(test_handle_osc_133_command_end, b"D", CommandEnd);
-
-#[test]
-fn test_handle_osc_133_unknown_mark_is_noop() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"Z"];
-    super::handle_osc_133(&mut core, params);
-    assert!(core.osc_data().prompt_marks.is_empty());
-}
-
-#[test]
-fn test_handle_osc_133_missing_param_is_noop() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133"];
-    super::handle_osc_133(&mut core, params);
-    assert!(core.osc_data().prompt_marks.is_empty());
-}
-
-#[test]
-fn test_handle_osc_133_mark_records_cursor_position() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    // Move cursor to a known position before emitting the mark
-    core.advance(b"\x1b[5;10H"); // row 5, col 10 (1-based → 4, 9 zero-based)
-    let params: &[&[u8]] = &[b"133", b"A"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::PromptStart);
-    // cursor row/col must be captured at call time
-    assert_eq!(ev.row, 4);
-    assert_eq!(ev.col, 9);
-}
-
-// ── handle_osc_133 exit_code ─────────────────────────────────────────────────
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_zero() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"0"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(0));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_one() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_127() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"127"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(127));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_negative() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"-1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(-1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"abc"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, None);
-}
-
-#[test]
-fn test_handle_osc_133_command_end_no_exit_code_param() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, None);
-}
-
-#[test]
-fn test_handle_osc_133_prompt_start_exit_code_always_none() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    // Even if a third param is provided, non-D marks should have exit_code: None
-    let params: &[&[u8]] = &[b"133", b"A", b"0"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::PromptStart);
-    assert_eq!(ev.exit_code, None);
-}
+// ── handle_osc_133 (moved to osc_protocol_osc133.rs) ─────────────────────────
 
 // ── handle_osc_default_colors ─────────────────────────────────────────────────
 
@@ -585,5 +451,46 @@ fn osc7_host_cleared_on_localhost() {
     assert_eq!(core.osc_data().cwd.as_deref(), Some("/home"));
 }
 
+// ── DA3 ordering / Mode 2031 default state (FR-115 / FR-117) ─────────────────
+
+/// DA3 (`CSI = c`) issued after DA1 (`CSI c`) queues responses in submission
+/// order — DA1 response first, DA3 response second.
+#[test]
+fn da1_then_da3_responses_in_submission_order() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b[c\x1b[=c");
+    let responses = core.pending_responses();
+    assert_eq!(
+        responses.len(),
+        2,
+        "both DA1 and DA3 must enqueue a response"
+    );
+    // DA1 response: CSI ? 1 ; 2 c
+    assert_eq!(
+        responses[0].as_slice(),
+        b"\x1b[?1;2c",
+        "first response must be DA1 (submitted first)"
+    );
+    // DA3 response: DCS ! | 00000000 ST
+    assert_eq!(
+        responses[1].as_slice(),
+        b"\x1bP!|00000000\x1b\\",
+        "second response must be DA3 (submitted after DA1)"
+    );
+}
+
+/// `DecModes::new()` defaults `color_scheme_notifications` (mode 2031) to false.
+#[test]
+fn dec_modes_new_mode_2031_default_false() {
+    use crate::parser::dec_private::DecModes;
+    let modes = DecModes::new();
+    assert!(
+        !modes.color_scheme_notifications,
+        "mode 2031 (color scheme notifications) must default to false"
+    );
+}
+
 include!("osc_protocol_colors.rs");
 include!("osc_protocol_coverage.rs");
+include!("osc_protocol_osc133.rs");

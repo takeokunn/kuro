@@ -155,7 +155,14 @@ Called from `set-language-environment-hook' because
           (setq char-width-table (copy-sequence char-width-table))
           (kuro--apply-char-width-overrides))))))
 
-(add-hook 'set-language-environment-hook #'kuro--reapply-char-width-in-all-buffers)
+;;;###autoload
+(defun kuro-char-width-setup ()
+  "Install the global `set-language-environment-hook' for kuro buffers.
+Idempotent: `add-hook' with a function symbol is a no-op when the entry
+is already present.  Called from `kuro-mode' so requiring this file
+from a user's init.el does not pollute global state."
+  (add-hook 'set-language-environment-hook
+            #'kuro--reapply-char-width-in-all-buffers))
 
 (defun kuro--assign-mono-fonts ()
   "Assign the frame's ASCII (monospace) font to EA-Ambiguous Unicode ranges.

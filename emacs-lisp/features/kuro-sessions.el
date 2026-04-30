@@ -93,6 +93,7 @@
     map)
   "Keymap for `kuro-sessions-mode'.")
 
+;;;###autoload
 (define-derived-mode kuro-sessions-mode tabulated-list-mode "Kuro Sessions"
   "Major mode for listing Kuro terminal sessions."
   (setq tabulated-list-format kuro-sessions--columns

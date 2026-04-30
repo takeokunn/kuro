@@ -137,6 +137,8 @@ pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
 }
 
 /// Handle OSC 133 — Shell integration prompt marks.
+///
+/// See: <https://gitlab.freedesktop.org/Per_Bothner/specifications/-/blob/master/proposals/semantic-prompts.md>
 pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(mark_raw) = params.get(1) {
         let mark = match mark_raw.first() {
@@ -147,11 +149,12 @@ pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
             _ => None,
         };
         if let Some(m) = mark {
-            let exit_code = if m == crate::types::osc::PromptMark::CommandEnd {
-                parse_osc133_exit_code(params)
-            } else {
-                None
-            };
+            // Cap pending prompt_marks to prevent a runaway shell from
+            // OOM-ing the host Emacs. Excess marks are silently dropped.
+            if core.osc_data.prompt_marks.len() >= crate::parser::limits::MAX_PENDING_PROMPT_MARKS {
+                return;
+            }
+            let extras = parse_osc133_extras(params, &m);
             let cursor = *core.screen.cursor();
             core.osc_data
                 .prompt_marks
@@ -159,16 +162,100 @@ pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
                     mark: m,
                     row: cursor.row,
                     col: cursor.col,
-                    exit_code,
+                    exit_code: extras.exit_code,
+                    aid: extras.aid,
+                    duration_ms: extras.duration_ms,
+                    err_path: extras.err_path,
                 });
         }
     }
 }
 
+/// Result of parsing OSC 133 extras (params beyond the mark letter).
+#[derive(Default)]
+struct Osc133Extras {
+    exit_code: Option<i32>,
+    aid: Option<String>,
+    duration_ms: Option<u64>,
+    err_path: Option<String>,
+}
+
+/// Reject strings containing C0 controls (0x00..=0x1F) or DEL (0x7F).
+///
+/// Shell-supplied values must never smuggle ESC/NUL/DEL into Elisp-visible
+/// fields. Oversized or control-bearing values are silently dropped.
 #[inline]
-fn parse_osc133_exit_code(params: &[&[u8]]) -> Option<i32> {
-    let code_raw = params.get(2)?;
-    std::str::from_utf8(code_raw).ok()?.parse().ok()
+fn has_control_bytes(s: &str) -> bool {
+    s.bytes().any(|b| b < 0x20 || b == 0x7F)
+}
+
+/// Strict printable-ASCII predicate for `aid=` values.
+///
+/// `aid=` is a job/action identifier — by convention it must be a printable
+/// ASCII token in the visible-glyph range `[!-~]` (0x21..=0x7E). This rejects
+/// embedded spaces (which OSC parameter splitting would already mangle on `;`)
+/// as well as any C0/DEL or non-ASCII byte. Stricter than `has_control_bytes`
+/// which allows space (0x20) and high-bit / UTF-8 bytes.
+#[inline]
+fn is_printable_aid(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| (0x21..=0x7E).contains(&b))
+}
+
+/// Hard cap on `duration=` value (one year in ms). Rejects ridiculous values
+/// from a shell supplying an attacker-controlled or buggy duration. Clamps
+/// to `None` rather than saturating so the consumer sees "not provided"
+/// rather than a misleading huge integer.
+const MAX_PROMPT_DURATION_MS: u64 = 365 * 24 * 3600 * 1000;
+
+/// Extras (`aid=`, `duration=`, `err=`) extension spec:
+/// <https://iterm2.com/documentation-shell-integration.html> and
+/// <https://ghostty.org/docs/vt/osc/osc-133>.
+#[inline]
+fn parse_osc133_extras(params: &[&[u8]], mark: &crate::types::osc::PromptMark) -> Osc133Extras {
+    use super::limits::{OSC133_MAX_AID_BYTES, OSC133_MAX_ERR_PATH_BYTES};
+
+    let mut extras = Osc133Extras::default();
+    // params[0] = "133", params[1] = mark letter; params[2..] are extras.
+    for (i, raw) in params.iter().enumerate().skip(2) {
+        let s = match std::str::from_utf8(raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        // First extra on D (CommandEnd) mark is the exit code (positional, no '=').
+        if matches!(mark, crate::types::osc::PromptMark::CommandEnd) && i == 2 && !s.contains('=') {
+            extras.exit_code = s.parse().ok();
+            continue;
+        }
+        // kv pair.
+        if let Some((k, v)) = s.split_once('=') {
+            match k {
+                "aid" => {
+                    // Silent drop on oversize OR non-printable-ASCII (`[!-~]+`).
+                    // Empty `aid=` round-trips as Some("") so consumers can
+                    // distinguish "absent" from "explicitly empty"; only
+                    // non-empty values must satisfy the printable predicate.
+                    if v.len() <= OSC133_MAX_AID_BYTES && (v.is_empty() || is_printable_aid(v)) {
+                        extras.aid = Some(v.to_string());
+                    }
+                }
+                "duration" => {
+                    extras.duration_ms = v
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|ms| *ms <= MAX_PROMPT_DURATION_MS);
+                }
+                "err" => {
+                    // Silent drop on oversize or control-char injection.
+                    // `err_path` is UTF-8-tolerant (paths may contain non-ASCII).
+                    if v.len() <= OSC133_MAX_ERR_PATH_BYTES && !has_control_bytes(v) {
+                        extras.err_path = Some(v.to_string());
+                    }
+                }
+                _ => {} // unknown, ignore
+            }
+        }
+    }
+    extras
 }
 
 /// Handle OSC 10/11/12 — Set/query default fg/bg/cursor color.

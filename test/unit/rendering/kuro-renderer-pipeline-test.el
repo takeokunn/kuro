@@ -155,13 +155,13 @@
     (setq kuro--prompt-positions nil)
     (let ((update-called-with nil))
       (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 5 0))))
+                 (lambda () '(("prompt-start" 5 0 nil nil nil nil))))
                 ((symbol-function 'kuro--update-prompt-positions)
                  (lambda (marks positions max)
                    (setq update-called-with (list marks positions max))
                    positions)))
         (kuro--poll-prompt-mark-updates)
-        (should (equal (car update-called-with) '(("prompt-start" 5 0))))))))
+        (should (equal (car update-called-with) '(("prompt-start" 5 0 nil nil nil nil))))))))
 
 (ert-deftest kuro-renderer-pipeline-poll-prompt-mark-updates-noop-on-nil ()
   "kuro--poll-prompt-mark-updates does nothing when FFI returns nil."

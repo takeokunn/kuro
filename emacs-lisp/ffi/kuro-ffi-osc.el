@@ -62,12 +62,12 @@ Returns nil if no actions are pending.")
 
  (kuro--poll-prompt-marks
   kuro-core-poll-prompt-marks nil
-  "Poll for pending OSC 133 shell prompt mark notifications.
-Returns a list of (MARK-TYPE ROW COL EXIT-CODE) proper lists where
-MARK-TYPE is a string such as \"prompt-start\", \"prompt-end\",
-\"command-start\", or \"command-end\".  EXIT-CODE is an integer for
-command-end marks (from OSC 133;D;N), or nil.
-Returns nil if no marks are pending.")
+  "Drain OSC 133 prompt marks from the Rust backend.
+Returns a list of proper lists of the form
+\(MARK-TYPE ROW COL EXIT-CODE AID DURATION-MS ERR-PATH).
+MARK-TYPE is one of \"prompt-start\", \"command-start\", \"command-end\".
+AID, DURATION-MS, and ERR-PATH are nil when the shell did not provide
+OSC 133 extras (semantic prompt extensions).")
 
  (kuro--poll-image-notifications
   kuro-core-poll-image-notifications nil

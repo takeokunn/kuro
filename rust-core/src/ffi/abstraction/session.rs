@@ -429,6 +429,16 @@ impl TerminalSession {
         self.core.screen.set_scrollback_max_lines(max_lines);
     }
 
+    /// Update the stored Emacs color scheme (`true` = dark, `false` = light).
+    ///
+    /// Returns `true` if the value actually changed, `false` if it was already
+    /// at the requested value (idempotent). When the value changes AND DEC mode
+    /// 2031 is enabled, pushes a `CSI ? 997 ; Ps n` notification onto
+    /// `pending_responses`. See `apply_color_scheme` in `parser::dec_private`.
+    pub fn set_color_scheme(&mut self, is_dark: bool) -> bool {
+        crate::parser::dec_private::apply_color_scheme(&mut self.core, is_dark)
+    }
+
     /// Return a base64-encoded PNG string for the given image ID.
     /// Returns an empty string if the image is not found (orphan reference).
     #[must_use]

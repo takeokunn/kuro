@@ -71,7 +71,17 @@ let
     installPhase = "touch $out";
   };
 
-  # Run package-lint on the main entry point.
+  # Run package-lint on user-facing entry points.
+  #
+  # kuro.el is the main package file. The two secondary files contain
+  # autoloaded user-facing commands (`kuro-start`, `kuro-sessions`) and benefit
+  # from package-lint coverage. Pure helpers (faces, renderer pipeline, …) are
+  # excluded — they are internal implementation, not entry points.
+  #
+  # Secondary files lack their own `Package-Requires:` headers (intentional —
+  # the dependency set lives in kuro.el). The wrapper sets
+  # `package-lint-main-file` so package-lint treats kuro.el as authoritative
+  # and does not re-flag the missing headers in the secondary files.
   packageLintCheck =
     let
       emacsWithLint = (pkgs.emacsPackagesFor emacs).withPackages (epkgs: [ epkgs.package-lint ]);
@@ -83,11 +93,54 @@ let
       buildPhase = ''
         emacs -Q --batch \
           --eval "(require 'package-lint)" \
+          --eval "(setq package-lint-main-file \"emacs-lisp/core/kuro.el\")" \
           -f package-lint-batch-and-exit \
-          emacs-lisp/core/kuro.el
+          emacs-lisp/core/kuro.el \
+          emacs-lisp/core/kuro-lifecycle.el \
+          emacs-lisp/features/kuro-sessions.el
       '';
       installPhase = "touch $out";
     };
+
+  # Run checkdoc on every Emacs Lisp file under emacs-lisp/.
+  #
+  # Failure mode: checkdoc-current-buffer collects diagnostics in a buffer
+  # whose name we control. After processing each file we read the buffer
+  # contents; if non-empty, we print them and increment an error counter.
+  # Derivation exits non-zero iff any file produced a diagnostic.
+  #
+  # `kuro-pkg.el` is excluded defensively (auto-generated style file, may
+  # reappear). Test files under test/ are not checked.
+  checkdocCheck = pkgs.stdenv.mkDerivation {
+    name = "kuro-checkdoc";
+    src = elispSrc;
+    nativeBuildInputs = [ emacs ];
+    buildPhase = ''
+      emacs -Q --batch \
+        -L emacs-lisp/core \
+        --eval "(require 'checkdoc)" \
+        --eval "(let ((errors 0) \
+                      (diag-buffer \"*kuro-checkdoc-diag*\")) \
+                  (dolist (file (directory-files-recursively \"emacs-lisp\" \"\\.el\$\")) \
+                    (unless (string-match-p \"-pkg\\.el\$\" file) \
+                      (when (get-buffer diag-buffer) \
+                        (let ((kill-buffer-query-functions nil)) \
+                          (kill-buffer diag-buffer))) \
+                      (with-temp-buffer \
+                        (insert-file-contents file) \
+                        (setq buffer-file-name file) \
+                        (emacs-lisp-mode) \
+                        (let ((checkdoc-diagnostic-buffer diag-buffer)) \
+                          (ignore-errors (checkdoc-current-buffer t)))) \
+                      (when (get-buffer diag-buffer) \
+                        (let ((output (with-current-buffer diag-buffer (buffer-string)))) \
+                          (when (and output (not (string-empty-p (string-trim output)))) \
+                            (princ (format \"==> %s\n%s\n\" file output)) \
+                            (setq errors (1+ errors))))))) \
+                  (kill-emacs (if (zerop errors) 0 1)))"
+    '';
+    installPhase = "touch $out";
+  };
 
 in
 {
@@ -119,6 +172,9 @@ in
   # Byte-compile check (Emacs 30).
   kuro-byte-compile = byteCompileCheck;
 
-  # Package-lint on the main kuro.el entry point (Emacs 30).
+  # Package-lint on user-facing entry points (Emacs 30).
   kuro-package-lint = packageLintCheck;
+
+  # Checkdoc across all Emacs Lisp source files (Emacs 30).
+  kuro-checkdoc = checkdocCheck;
 }

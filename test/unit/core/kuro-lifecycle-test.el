@@ -200,13 +200,86 @@ Stubs kuro-core-send-key so the kuro--call guard is exercised."
   (should (commandp 'kuro-create)))
 
 (ert-deftest kuro-lifecycle--create-aborts-without-module ()
-  "kuro-create calls kuro--ensure-module-loaded as its first action.
+  "kuro-create calls kuro--ensure-module-installed as its first action.
 When the module is unavailable, that call may signal an error.
 We verify kuro-create does not succeed silently when the stub errors."
-  (cl-letf (((symbol-function 'kuro--ensure-module-loaded)
+  (cl-letf (((symbol-function 'kuro--ensure-module-installed)
              (lambda () (error "module not available"))))
     (should-error (kuro-create "echo hello" "*kuro-test*")
                   :type 'error)))
+
+;;; ── Group 4b: kuro--ensure-module-installed (install-prompt orchestration) ──
+;;
+;; kuro--ensure-module-installed wraps kuro-module-load with an installation
+;; prompt for first-time users.  It honours kuro-module-installation-method
+;; (`prebuilt' / `cargo' / `manual' / nil) to bypass or steer the prompt.
+;; The interactive read-char-choice path is intentionally NOT exercised here —
+;; stubbing it portably across Emacs versions is brittle and the dispatch
+;; logic is already covered by the symbolic-method branches.
+
+(ert-deftest kuro-lifecycle-test--ensure-module-installed-success-when-loaded ()
+  "When the module loads on the first try, no install command runs."
+  (let ((download-calls 0)
+        (build-calls 0))
+    (cl-letf (((symbol-function 'kuro-module-load)   (lambda () t))
+              ((symbol-function 'kuro--module-loadable-p) (lambda () t))
+              ((symbol-function 'kuro-module-download)
+               (lambda (&optional _v) (cl-incf download-calls)))
+              ((symbol-function 'kuro-module-build)
+               (lambda () (cl-incf build-calls))))
+      (let ((kuro-module-installation-method nil))
+        (should (kuro--ensure-module-installed))
+        (should (= download-calls 0))
+        (should (= build-calls 0))))))
+
+(ert-deftest kuro-lifecycle-test--ensure-module-installed-prebuilt-method ()
+  "With `prebuilt' method, kuro-module-download is invoked when load fails first."
+  (let ((download-calls 0)
+        (load-calls 0)
+        (loaded nil))
+    (cl-letf (((symbol-function 'kuro-module-load)
+               (lambda ()
+                 (cl-incf load-calls)
+                 (when (>= load-calls 2) (setq loaded t))))
+              ((symbol-function 'kuro--module-loadable-p)
+               (lambda () loaded))
+              ((symbol-function 'kuro-module-download)
+               (lambda (&optional _v) (cl-incf download-calls)))
+              ((symbol-function 'kuro-module-build)
+               (lambda () (error "should not build"))))
+      (let ((kuro-module-installation-method 'prebuilt))
+        (should (kuro--ensure-module-installed))
+        (should (= download-calls 1))))))
+
+(ert-deftest kuro-lifecycle-test--ensure-module-installed-cargo-method ()
+  "With `cargo' method, kuro-module-build is invoked when load fails first."
+  (let ((build-calls 0)
+        (load-calls 0)
+        (loaded nil))
+    (cl-letf (((symbol-function 'kuro-module-load)
+               (lambda ()
+                 (cl-incf load-calls)
+                 (when (>= load-calls 2) (setq loaded t))))
+              ((symbol-function 'kuro--module-loadable-p)
+               (lambda () loaded))
+              ((symbol-function 'kuro-module-build)
+               (lambda () (cl-incf build-calls)))
+              ((symbol-function 'kuro-module-download)
+               (lambda (&optional _v) (error "should not download"))))
+      (let ((kuro-module-installation-method 'cargo))
+        (should (kuro--ensure-module-installed))
+        (should (= build-calls 1))))))
+
+(ert-deftest kuro-lifecycle-test--ensure-module-installed-manual-method-errors ()
+  "With `manual' method, a user-error is signalled when the module is missing."
+  (cl-letf (((symbol-function 'kuro-module-load) (lambda () nil))
+            ((symbol-function 'kuro--module-loadable-p) (lambda () nil))
+            ((symbol-function 'kuro-module-download)
+             (lambda (&optional _v) (error "should not download")))
+            ((symbol-function 'kuro-module-build)
+             (lambda () (error "should not build"))))
+    (let ((kuro-module-installation-method 'manual))
+      (should-error (kuro--ensure-module-installed) :type 'user-error))))
 
 ;;; ── Group 5: kuro-list-sessions (tabulated-list-mode) ──────────────────────
 ;;

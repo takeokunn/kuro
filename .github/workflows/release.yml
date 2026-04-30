@@ -1,0 +1,146 @@
+# Release native module
+#
+# Trigger:
+#   - Tag push matching `v*` (e.g. `v1.0.0`)
+#   - Manual `workflow_dispatch` with explicit `tag` input (for re-running a
+#     previously-pushed tag without retagging).
+#
+# What it produces:
+#   For each of 4 target triples, builds the `kuro-core` cdylib in release
+#   mode and uploads two artifacts to the GitHub Release for the tag:
+#     - libkuro_core-<VERSION>-<TARGET>.tar.gz          (contains libkuro_core.{so,dylib})
+#     - libkuro_core-<VERSION>-<TARGET>.tar.gz.sha256   (sha256 of the tarball)
+#
+#   Targets:
+#     - x86_64-unknown-linux-gnu   (ubuntu-latest, native)
+#     - aarch64-unknown-linux-gnu  (ubuntu-22.04-arm, native aarch64 runner)
+#     - x86_64-apple-darwin        (macos-13, last Intel default macOS image)
+#     - aarch64-apple-darwin       (macos-latest, Apple Silicon default since late 2024)
+#
+# How Elisp consumes it:
+#   The companion Elisp loader fetches
+#     https://github.com/takeokunn/kuro/releases/download/v<VERSION>/libkuro_core-<VERSION>-<TARGET>.tar.gz
+#   plus the matching `.sha256`, verifies the hash, untars, and dlopens
+#   `libkuro_core.{so,dylib}` from the resulting directory.
+#
+# Design notes:
+#   - Raw cargo (no Nix) for portability and speed. Nix-on-macOS-aarch64 in
+#     GitHub-hosted runners is ~10x slower than raw cargo + sccache.
+#   - MSRV pinned to 1.84.0 (matches Cargo.toml workspace.package.rust-version).
+#   - Release profile (lto=fat, codegen-units=1, strip=symbols) already set in
+#     workspace Cargo.toml — no extra flags needed.
+#   - Action versions pinned to major (@v4, @v2) per repo convention.
+
+name: Release native module
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re-)release, e.g. v1.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write  # required for creating releases and uploading assets
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu  }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-13,         target: x86_64-apple-darwin       }
+          - { os: macos-latest,     target: aarch64-apple-darwin      }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain (1.84.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.84.0
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build cdylib (release)
+        run: |
+          cargo build --release \
+            --target ${{ matrix.target }} \
+            --manifest-path rust-core/Cargo.toml
+
+      - name: Determine version + library filename
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF_NAME="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          case "${{ matrix.os }}" in
+            macos-*) echo "lib=libkuro_core.dylib" >> "$GITHUB_OUTPUT" ;;
+            *)       echo "lib=libkuro_core.so"    >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Package tarball + sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          LIB="${{ steps.meta.outputs.lib }}"
+          OUT="libkuro_core-${VERSION}-${TARGET}.tar.gz"
+
+          tar -C "rust-core/target/${TARGET}/release" -czf "${OUT}" "${LIB}"
+          shasum -a 256 "${OUT}" | awk '{print $1}' > "${OUT}.sha256"
+          ls -la "${OUT}" "${OUT}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kuro-${{ matrix.target }}
+          path: |
+            libkuro_core-*.tar.gz
+            libkuro_core-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kuro-*
+          path: dist
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: ls -la dist/
+
+      - name: Resolve tag for release
+        id: tag
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: |
+            dist/libkuro_core-*.tar.gz
+            dist/libkuro_core-*.tar.gz.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: false

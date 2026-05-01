@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -26,13 +25,13 @@
 (declare-function kuro--clear-row-image-overlays "kuro-overlays" (row))
 (declare-function kuro--call-with-normalized-ffi-face-range "kuro-overlays" (range line-start line-end continuation))
 (defvar kuro--has-images nil
-  "Forward reference; defvar-local in kuro-overlays.el.")
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--blink-overlays-by-row nil
-  "Forward reference; defvar-local in kuro-overlays.el.")
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--scroll-offset 0
-  "Forward reference; defvar-local in kuro-input.el.")
+  "Forward reference; `defvar-local' in kuro-input.el.")
 (defvar kuro--cursor-marker nil
-  "Forward reference; defvar-local in kuro-renderer.el.")
+  "Forward reference; `defvar-local' in kuro-renderer.el.")
 (declare-function kuro--apply-ffi-face-at "kuro-overlays" (start-pos end-pos fg-enc bg-enc flags ul-color-enc))
 (declare-function kuro--get-cursor         "kuro-ffi"       ())
 (declare-function kuro--get-cursor-visible "kuro-ffi-modes" ())
@@ -83,7 +82,7 @@ For \\='up: delete the first N lines and insert N blank lines at bottom.
 For \\='down: delete the last N lines and insert N blank lines at top.
 Must be called with `inhibit-read-only' and `inhibit-modification-hooks'
 already bound non-nil by the caller.  The outer `kuro--with-buffer-edit' already
-provides `save-excursion', so no inner save-excursion is needed here."
+provides `save-excursion', so no inner `save-excursion' is needed here."
   (if (eq direction 'up)
       ;; Scroll-up: delete first N lines then append N blank lines.
       (progn
@@ -101,15 +100,15 @@ provides `save-excursion', so no inner save-excursion is needed here."
 
 (defun kuro--apply-buffer-scroll (up down)
   "Apply pending full-screen scroll events to the Emacs buffer.
-UP and DOWN are the number of full-screen scroll-up and scroll-down steps
+UP and DOWN are the number of full-screen `scroll-up' and `scroll-down' steps
 accumulated in the Rust core since the last call.
 
 NOTE: Currently `pending_scroll_up'/`pending_scroll_down' in Rust are never
 incremented — full-screen scrolls use `full_dirty = true' instead.  This
 function exists for a potential future two-path scroll design.
 
-For each scroll-up step: delete the first buffer line and append a blank.
-For each scroll-down step: delete the last buffer line and prepend a blank.
+For each upward-scroll step: delete the first buffer line and append a blank.
+For each downward-scroll step: delete the last buffer line and prepend a blank.
 Also clears `kuro--col-to-buf-map' since row-indexed mappings are stale."
   (when (> (+ up down) 0)
     (kuro--with-buffer-edit
@@ -258,7 +257,7 @@ already bound non-nil by the caller."
 
 (defconst kuro--decscusr-cursor-types
   [box box box (hbar . 2) (hbar . 2) (bar . 2) (bar . 2)]
-  "Vector mapping DECSCUSR shape integers (0–6) to Emacs cursor-type values.
+  "Vector mapping DECSCUSR shape integers (0–6) to Emacs `cursor-type' values.
 Indices per CSI Ps SP q spec: 0/1=blinking-block, 2=steady-block,
 3=blinking-underline, 4=steady-underline, 5=blinking-bar, 6=steady-bar.")
 
@@ -360,7 +359,7 @@ col_to_buf[col] gives the buffer char offset for cursor column COL on ROW.
 For pure ASCII lines, col == buf-offset; for CJK lines, col > buf-offset
 because wide placeholder cells are skipped in the buffer.
 Falls back to COL when the mapping is absent or shorter than COL
-(e.g. cursor past last content — trailing spaces are pure ASCII).
+\(e.g. cursor past last content — trailing spaces are pure ASCII).
 Uses `kuro--row-positions' cache for O(1) row navigation when available;
 falls back to O(row) `forward-line' only when the cache misses."
   (let* ((row-map    (gethash row kuro--col-to-buf-map))

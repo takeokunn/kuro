@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -25,15 +24,16 @@
 ;;; Customization
 
 (defcustom kuro-eval-command-whitelist
-  '("cd" "setenv" "kuro-")
+  '("cd" "setenv")
   "List of command prefixes allowed for OSC 51 eval.
 Each entry is a string prefix.  An incoming eval command is executed
 only if it starts with one of these prefixes (after whitespace trimming).
-The default allows directory changes, environment variable updates,
-and kuro-specific commands.
+The default allows directory changes and environment variable updates.
 
 Security note: this whitelist prevents arbitrary code execution from
-malicious terminal output.  Do not add broad prefixes like \"(\"."
+malicious terminal output.  Do not add broad prefixes like \"(\" or
+function-namespace prefixes like \"kuro-\" that would permit unintended
+functions to be invoked via terminal output."
   :type '(repeat string)
   :group 'kuro)
 

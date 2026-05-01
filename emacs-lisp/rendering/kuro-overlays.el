@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -31,12 +30,12 @@
 (declare-function kuro--get-image "kuro-ffi-osc" (image-id))
 
 (defvar kuro--current-render-row -1
-  "Forward reference; defvar-local in kuro-render-buffer.el.
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.
 Holds the 0-based row index being rendered by `kuro--update-line-full'.
 Read by `kuro--apply-blink-overlay' to avoid O(position) `line-number-at-pos'.")
 
 (defvar kuro--row-positions nil
-  "Forward reference; defvar-local in kuro-render-buffer.el.
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.
 Vector mapping row index to buffer position for O(1) row navigation.
 Read by `kuro--clear-row-image-overlays' to skip O(row) `forward-line'.")
 
@@ -331,8 +330,8 @@ Applies the face, blink overlays (SGR 5/6), and invisible property (SGR 8).
   "Normalize FFI face RANGE and call CONTINUATION with the computed arguments.
 RANGE is a 6-element vector [START-BUF END-BUF FG-ENC BG-ENC FLAGS
 UL-COLOR-ENC].
-LINE-START and LINE-END bound the inserted line. CONTINUATION runs only for
-non-empty ranges after clamping. Returns non-nil when CONTINUATION ran."
+LINE-START and LINE-END bound the inserted line.  CONTINUATION runs only for
+non-empty ranges after clamping.  Returns non-nil when CONTINUATION ran."
   (let* ((start-pos (min (+ line-start (aref range 0)) line-end))
          (end-pos   (min (+ line-start (aref range 1)) line-end)))
     (when (> end-pos start-pos)

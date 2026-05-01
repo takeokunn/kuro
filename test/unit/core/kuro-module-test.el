@@ -206,11 +206,7 @@
             ((symbol-function 'kuro-module--tier-dev)   (lambda () "/dev/libkuro_core.so")))
     (should (equal (kuro-module--find-library) "/dev/libkuro_core.so"))))
 
-;;; Group 6: kuro--module-loaded state variable
-
-(ert-deftest kuro-module-test--module-loaded-var-is-defined ()
-  "`kuro--module-loaded' is defined as a variable."
-  (should (boundp 'kuro--module-loaded)))
+;;; Group 6: kuro--ensure-module-loaded interface
 
 (ert-deftest kuro-module-test--ensure-module-loaded-is-callable ()
   "`kuro--ensure-module-loaded' is a function that can be called."
@@ -280,18 +276,27 @@
 ;;; Group 9: kuro-module--tier-dev
 
 (ert-deftest kuro-module-tier-dev-returns-string ()
-  "`kuro-module--tier-dev' always returns a string (never nil)."
-  (should (stringp (kuro-module--tier-dev))))
+  "`kuro-module--tier-dev' returns a string when a dev binary path is accessible."
+  (cl-letf (((symbol-function 'locate-library)
+             (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
+            ((symbol-function 'file-exists-p) (lambda (_) t)))
+    (should (stringp (kuro-module--tier-dev)))))
 
 (ert-deftest kuro-module-tier-dev-path-contains-target-release ()
   "`kuro-module--tier-dev' path contains \"target/release\"."
-  (should (string-match-p "target/release" (kuro-module--tier-dev))))
+  (cl-letf (((symbol-function 'locate-library)
+             (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
+            ((symbol-function 'file-exists-p) (lambda (_) t)))
+    (should (string-match-p "target/release" (kuro-module--tier-dev)))))
 
 (ert-deftest kuro-module-tier-dev-path-contains-lib-name ()
   "`kuro-module--tier-dev' path contains the platform library filename."
   (let* ((ext (kuro-module--platform-extension))
          (lib-name (format "libkuro_core.%s" ext)))
-    (should (string-match-p (regexp-quote lib-name) (kuro-module--tier-dev)))))
+    (cl-letf (((symbol-function 'locate-library)
+               (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
+              ((symbol-function 'file-exists-p) (lambda (_) t)))
+      (should (string-match-p (regexp-quote lib-name) (kuro-module--tier-dev))))))
 
 ;;; Group 10: kuro-module--search-tiers defconst
 
@@ -358,19 +363,28 @@
 
 (ert-deftest kuro-module-test--ensure-module-loaded-calls-load-when-not-loaded ()
   "`kuro--ensure-module-loaded' calls `kuro-module-load' exactly once when unloaded."
-  (let ((kuro--module-loaded nil)
-        (load-call-count 0))
-    (cl-letf (((symbol-function 'kuro-module-load)
-               (lambda () (setq load-call-count (1+ load-call-count)))))
-      (kuro--ensure-module-loaded)
-      (should (= load-call-count 1)))))
+  (let ((load-call-count 0))
+    (fmakunbound 'kuro-core-init)
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-module-load)
+                   (lambda ()
+                     (setq load-call-count (1+ load-call-count))
+                     (fset 'kuro-core-init (lambda (&rest _) t)))))
+          (kuro--ensure-module-loaded))
+      (unless (fboundp 'kuro-core-init)
+        (fset 'kuro-core-init (lambda (&rest _) t))))
+    (should (= load-call-count 1))))
 
 (ert-deftest kuro-module-test--ensure-module-loaded-sets-flag-after-load ()
-  "`kuro--ensure-module-loaded' sets `kuro--module-loaded' to non-nil after loading."
-  (let ((kuro--module-loaded nil))
-    (cl-letf (((symbol-function 'kuro-module-load) (lambda () nil)))
-      (kuro--ensure-module-loaded)
-      (should kuro--module-loaded))))
+  "`kuro--ensure-module-loaded' results in `kuro-core-init' being fbound after loading."
+  (fmakunbound 'kuro-core-init)
+  (unwind-protect
+      (cl-letf (((symbol-function 'kuro-module-load)
+                 (lambda () (fset 'kuro-core-init (lambda (&rest _) t)))))
+        (kuro--ensure-module-loaded)
+        (should (fboundp 'kuro-core-init)))
+    (unless (fboundp 'kuro-core-init)
+      (fset 'kuro-core-init (lambda (&rest _) t)))))
 
 ;;; Group 13: kuro-module-load — already-fbound guard
 
@@ -414,10 +428,13 @@
 
 (ert-deftest kuro-module-lib-name-matches-tier-functions ()
   "`kuro-module--lib-name' is consistent with what tier functions use."
-  ;; tier-dev uses kuro-module--lib-name internally; its result must contain the lib name.
-  (let ((lib-name (kuro-module--lib-name))
-        (dev-path  (kuro-module--tier-dev)))
-    (should (string-match-p (regexp-quote lib-name) dev-path))))
+  (cl-letf (((symbol-function 'locate-library)
+             (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
+            ((symbol-function 'file-exists-p) (lambda (_) t)))
+    (let ((lib-name (kuro-module--lib-name))
+          (dev-path  (kuro-module--tier-dev)))
+      (should (stringp dev-path))
+      (should (string-match-p (regexp-quote lib-name) dev-path)))))
 
 (ert-deftest kuro-module-lib-name-no-dot-in-stem ()
   "`kuro-module--lib-name' stem (before the extension dot) contains no dots."
@@ -512,21 +529,30 @@ kuro-core-init is naturally unbound in the test environment, so no fboundp stub 
 
 (ert-deftest kuro-module-test--ensure-module-loaded-idempotent ()
   "`kuro--ensure-module-loaded' is idempotent: second call is a no-op."
-  (let ((kuro--module-loaded nil)
-        (load-call-count 0))
-    (cl-letf (((symbol-function 'kuro-module-load)
-               (lambda () (setq load-call-count (1+ load-call-count)))))
-      (kuro--ensure-module-loaded)
-      (kuro--ensure-module-loaded)
-      (should (= load-call-count 1)))))
+  (let ((load-call-count 0))
+    (fmakunbound 'kuro-core-init)
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-module-load)
+                   (lambda ()
+                     (setq load-call-count (1+ load-call-count))
+                     (fset 'kuro-core-init (lambda (&rest _) t)))))
+          (kuro--ensure-module-loaded)
+          (kuro--ensure-module-loaded))
+      (unless (fboundp 'kuro-core-init)
+        (fset 'kuro-core-init (lambda (&rest _) t))))
+    (should (= load-call-count 1))))
 
 (ert-deftest kuro-module-test--ensure-module-loaded-flag-stays-non-nil ()
-  "`kuro--module-loaded' remains non-nil after two calls to `kuro--ensure-module-loaded'."
-  (let ((kuro--module-loaded nil))
-    (cl-letf (((symbol-function 'kuro-module-load) (lambda () nil)))
-      (kuro--ensure-module-loaded)
-      (kuro--ensure-module-loaded)
-      (should kuro--module-loaded))))
+  "`kuro-core-init' remains fbound after two calls to `kuro--ensure-module-loaded'."
+  (fmakunbound 'kuro-core-init)
+  (unwind-protect
+      (cl-letf (((symbol-function 'kuro-module-load)
+                 (lambda () (fset 'kuro-core-init (lambda (&rest _) t)))))
+        (kuro--ensure-module-loaded)
+        (kuro--ensure-module-loaded)
+        (should (fboundp 'kuro-core-init)))
+    (unless (fboundp 'kuro-core-init)
+      (fset 'kuro-core-init (lambda (&rest _) t)))))
 
 (ert-deftest kuro-module-test--module-try-empty-string-file-exists-stubbed-nil ()
   "`kuro--module-try' returns nil for empty string when file-exists-p is stubbed nil."
@@ -653,6 +679,282 @@ kuro-core-init is naturally unbound in the test environment, so no fboundp stub 
           (kuro-module--target-path)
           (should (file-directory-p target)))
       (delete-directory tmpdir t))))
+
+;;; Group 21: kuro-module-download error paths
+
+(ert-deftest kuro-module-test--download-tar-not-found ()
+  "`kuro-module-download' errors when `tar' is not found in PATH."
+  (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) nil)))
+    (should (string-match-p "executable not found"
+                            (cadr (should-error (kuro-module-download "0.0.0")
+                                                :type 'error))))))
+
+(ert-deftest kuro-module-test--download-sha256-fetch-fails ()
+  "`kuro-module-download' errors when the .sha256 URL fetch returns nil."
+  (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) "/usr/bin/tar"))
+            ((symbol-function 'kuro-module--platform-string)
+             (lambda (&rest _) "x86_64-unknown-linux-gnu"))
+            ((symbol-function 'kuro-module--target-path)
+             (lambda () (make-temp-file "kuro-dl-test-" t)))
+            ((symbol-function 'url-retrieve-synchronously) (lambda (&rest _) nil))
+            ((symbol-function 'message) #'ignore))
+    (should (string-match-p "failed to fetch SHA256"
+                            (cadr (should-error (kuro-module-download "0.0.0")
+                                                :type 'error))))))
+
+(ert-deftest kuro-module-test--download-sha256-mismatch ()
+  "`kuro-module-download' errors when SHA256 computed from file differs from expected."
+  (let* ((tmpdir (make-temp-file "kuro-dl-mismatch-" t))
+         (tmp-tar (expand-file-name "kuro-test.tar.gz" tmpdir))
+         (sha-buf (generate-new-buffer " *kuro-sha-test*")))
+    (unwind-protect
+        (progn
+          ;; Create a fake sha buffer with header + a known hash
+          (with-current-buffer sha-buf
+            (insert "HTTP/1.1 200 OK\r\n\r\n")
+            (insert "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+          ;; Create a real temp tar file to write into
+          (with-temp-file tmp-tar (insert "fake tarball content"))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (_cmd) "/usr/bin/tar"))
+                    ((symbol-function 'kuro-module--platform-string)
+                     (lambda (&rest _) "x86_64-unknown-linux-gnu"))
+                    ((symbol-function 'kuro-module--target-path)
+                     (lambda () tmpdir))
+                    ((symbol-function 'make-temp-file)
+                     (lambda (&rest _) tmp-tar))
+                    ((symbol-function 'url-retrieve-synchronously)
+                     (lambda (url &rest _)
+                       (if (string-suffix-p ".sha256" url)
+                           sha-buf
+                         ;; return a minimal HTTP buffer for the tarball
+                         (let ((buf (generate-new-buffer " *kuro-dl-test*")))
+                           (with-current-buffer buf
+                             (insert "HTTP/1.1 200 OK\r\n\r\nfake"))
+                           buf))))
+                    ((symbol-function 'write-region) #'ignore)
+                    ((symbol-function 'kuro-module--verify-sha256)
+                     (lambda (_file _hash) nil))
+                    ((symbol-function 'message) #'ignore))
+            (should (string-match-p "SHA256 mismatch"
+                                    (cadr (should-error (kuro-module-download "0.0.0")
+                                                        :type 'error))))))
+      (ignore-errors (kill-buffer sha-buf))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-test--download-tar-extraction-fails ()
+  "`kuro-module-download' errors when tar exits with a nonzero code."
+  (let* ((tmpdir (make-temp-file "kuro-dl-tarfail-" t))
+         (tmp-tar (expand-file-name "kuro-test.tar.gz" tmpdir))
+         (sha-buf (generate-new-buffer " *kuro-sha-tarfail*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer sha-buf
+            (insert "HTTP/1.1 200 OK\r\n\r\nabc123"))
+          (with-temp-file tmp-tar (insert "fake"))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (_cmd) "/usr/bin/tar"))
+                    ((symbol-function 'kuro-module--platform-string)
+                     (lambda (&rest _) "x86_64-unknown-linux-gnu"))
+                    ((symbol-function 'kuro-module--target-path)
+                     (lambda () tmpdir))
+                    ((symbol-function 'make-temp-file)
+                     (lambda (&rest _) tmp-tar))
+                    ((symbol-function 'url-retrieve-synchronously)
+                     (lambda (url &rest _)
+                       (if (string-suffix-p ".sha256" url)
+                           sha-buf
+                         (let ((buf (generate-new-buffer " *kuro-dl-tarfail-body*")))
+                           (with-current-buffer buf
+                             (insert "HTTP/1.1 200 OK\r\n\r\nfake"))
+                           buf))))
+                    ((symbol-function 'write-region) #'ignore)
+                    ((symbol-function 'kuro-module--verify-sha256)
+                     (lambda (_file _hash) t))
+                    ((symbol-function 'call-process)
+                     (lambda (&rest _) 1))
+                    ((symbol-function 'delete-file) #'ignore)
+                    ((symbol-function 'message) #'ignore))
+            (should (string-match-p "tar extraction failed"
+                                    (cadr (should-error (kuro-module-download "0.0.0")
+                                                        :type 'error))))))
+      (ignore-errors (kill-buffer sha-buf))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-test--download-extracted-binary-missing ()
+  "`kuro-module-download' errors when tar succeeds but the extracted file is absent.
+Uses a real tmpdir that contains no libkuro_core binary, so file-exists-p
+naturally returns nil for the installed-binary check without global stubbing."
+  (let* ((tmpdir (make-temp-file "kuro-dl-binmiss-" t))
+         (tmp-tar (expand-file-name "kuro-test.tar.gz" tmpdir))
+         (sha-buf (generate-new-buffer " *kuro-sha-binmiss*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer sha-buf
+            (insert "HTTP/1.1 200 OK\r\n\r\nabc123"))
+          (with-temp-file tmp-tar (insert "fake tarball"))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (_cmd) "/usr/bin/tar"))
+                    ((symbol-function 'kuro-module--platform-string)
+                     (lambda (&rest _) "x86_64-unknown-linux-gnu"))
+                    ((symbol-function 'kuro-module--target-path)
+                     (lambda () tmpdir))
+                    ((symbol-function 'make-temp-file)
+                     (lambda (&rest _) tmp-tar))
+                    ((symbol-function 'url-retrieve-synchronously)
+                     (lambda (url &rest _)
+                       (if (string-suffix-p ".sha256" url)
+                           sha-buf
+                         (let ((buf (generate-new-buffer " *kuro-dl-binmiss-body*")))
+                           (with-current-buffer buf
+                             (insert "HTTP/1.1 200 OK\r\n\r\nfake"))
+                           buf))))
+                    ;; Verify passes, tar returns 0 — but no binary is extracted
+                    ((symbol-function 'kuro-module--verify-sha256)
+                     (lambda (_file _hash) t))
+                    ((symbol-function 'call-process)
+                     (lambda (&rest _) 0))
+                    ((symbol-function 'message) #'ignore))
+            ;; tmpdir has no libkuro_core.so/.dylib → file-exists-p naturally nil
+            (should (string-match-p "extracted archive does not contain"
+                                    (cadr (should-error (kuro-module-download "0.0.0")
+                                                        :type 'error))))))
+      (ignore-errors (kill-buffer sha-buf))
+      (delete-directory tmpdir t))))
+
+(ert-deftest kuro-module-test--download-sha256-malformed-response ()
+  "`kuro-module-download' errors when SHA256 HTTP response has no blank-line separator."
+  (let* ((tmpdir (make-temp-file "kuro-dl-malformed-" t))
+         (tmp-tar (expand-file-name "kuro-test.tar.gz" tmpdir))
+         ;; A buffer with no blank line between headers and body
+         (sha-buf (generate-new-buffer " *kuro-sha-malformed*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer sha-buf
+            (insert "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nabc123"))
+          (with-temp-file tmp-tar (insert "fake"))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (_cmd) "/usr/bin/tar"))
+                    ((symbol-function 'kuro-module--platform-string)
+                     (lambda (&rest _) "x86_64-unknown-linux-gnu"))
+                    ((symbol-function 'kuro-module--target-path)
+                     (lambda () tmpdir))
+                    ((symbol-function 'make-temp-file)
+                     (lambda (&rest _) tmp-tar))
+                    ((symbol-function 'url-retrieve-synchronously)
+                     (lambda (url &rest _)
+                       (when (string-suffix-p ".sha256" url) sha-buf)))
+                    ((symbol-function 'message) #'ignore))
+            (should (string-match-p "malformed SHA256 response"
+                                    (cadr (should-error (kuro-module-download "0.0.0")
+                                                        :type 'error))))))
+      (ignore-errors (kill-buffer sha-buf))
+      (delete-directory tmpdir t))))
+
+;;; Group 22: kuro-module-build error paths
+
+(ert-deftest kuro-module-test--build-cargo-toml-not-found ()
+  "`kuro-module-build' errors when `kuro-module--locate-cargo-toml' returns nil."
+  (cl-letf (((symbol-function 'kuro-module--locate-cargo-toml) (lambda () nil)))
+    (should (string-match-p "rust-core not found alongside"
+                            (cadr (should-error (kuro-module-build) :type 'error))))))
+
+(ert-deftest kuro-module-test--build-cargo-not-found ()
+  "`kuro-module-build' errors when `cargo' is not found in PATH."
+  (cl-letf (((symbol-function 'kuro-module--locate-cargo-toml)
+             (lambda () "/fake/rust-core/Cargo.toml"))
+            ((symbol-function 'file-exists-p)
+             (lambda (p) (equal p "/fake/rust-core/Cargo.toml")))
+            ((symbol-function 'executable-find) (lambda (_cmd) nil)))
+    (should (string-match-p "executable not found"
+                            (cadr (should-error (kuro-module-build) :type 'error))))))
+
+(ert-deftest kuro-module-test--build-cargo-build-fails ()
+  "`kuro-module-build' errors and pops to buffer when cargo exits with nonzero."
+  (let ((pop-called nil))
+    (cl-letf (((symbol-function 'kuro-module--locate-cargo-toml)
+               (lambda () "/fake/rust-core/Cargo.toml"))
+              ((symbol-function 'executable-find)
+               (lambda (_cmd) "/usr/bin/cargo"))
+              ((symbol-function 'call-process)
+               (lambda (&rest _) 1))
+              ((symbol-function 'pop-to-buffer)
+               (lambda (_buf) (setq pop-called t)))
+              ((symbol-function 'message) #'ignore))
+      (should (string-match-p "cargo build failed"
+                              (cadr (should-error (kuro-module-build) :type 'error))))
+      (should pop-called))))
+
+(ert-deftest kuro-module-test--build-lib-missing-after-build ()
+  "`kuro-module-build' errors when cargo exits 0 but the built lib path is absent."
+  (cl-letf (((symbol-function 'kuro-module--locate-cargo-toml)
+             (lambda () "/fake/rust-core/Cargo.toml"))
+            ((symbol-function 'executable-find)
+             (lambda (_cmd) "/usr/bin/cargo"))
+            ((symbol-function 'call-process)
+             (lambda (&rest _) 0))
+            ;; file-exists-p: always returns nil so built lib appears missing
+            ((symbol-function 'file-exists-p)
+             (lambda (_p) nil))
+            ((symbol-function 'kuro-module--target-path)
+             (lambda () "/fake/target-dir"))
+            ((symbol-function 'message) #'ignore))
+    (should (string-match-p "cargo reported success but"
+                            (cadr (should-error (kuro-module-build) :type 'error))))))
+
+;;; Group 23: kuro-module--verify-sha256 — dedicated coverage
+
+(ert-deftest kuro-module-test--verify-sha256-nil-hash-warns-and-returns-t ()
+  "`kuro-module--verify-sha256' returns t and calls `display-warning' when hash is nil."
+  (let ((warned nil)
+        (tmpfile (make-temp-file "kuro-verify-nil-")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (setq warned t))))
+          (with-temp-file tmpfile (insert "content"))
+          (should (kuro-module--verify-sha256 tmpfile nil))
+          (should warned))
+      (delete-file tmpfile))))
+
+(ert-deftest kuro-module-test--verify-sha256-matching-hash-returns-t ()
+  "`kuro-module--verify-sha256' returns t when the file hash matches exactly."
+  (let ((tmpfile (make-temp-file "kuro-verify-match-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile (insert "kuro test content"))
+          (let ((hash (with-temp-buffer
+                        (set-buffer-multibyte nil)
+                        (insert-file-contents-literally tmpfile)
+                        (secure-hash 'sha256 (current-buffer)))))
+            (should (kuro-module--verify-sha256 tmpfile hash))))
+      (delete-file tmpfile))))
+
+(ert-deftest kuro-module-test--verify-sha256-mismatched-hash-returns-nil ()
+  "`kuro-module--verify-sha256' returns nil when the expected hash does not match."
+  (let ((tmpfile (make-temp-file "kuro-verify-mismatch-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile (insert "kuro test content"))
+          (should-not
+           (kuro-module--verify-sha256
+            tmpfile
+            "0000000000000000000000000000000000000000000000000000000000000000")))
+      (delete-file tmpfile))))
+
+;;; Group 24: kuro--ensure-module-loaded error path
+
+(ert-deftest kuro-module-test--ensure-module-loaded-errors-when-load-fails ()
+  "`kuro--ensure-module-loaded' signals error containing \"native module could not be loaded\"
+when `kuro-module-load' runs but `kuro-core-init' remains unbound."
+  (let ((was-bound (fboundp 'kuro-core-init)))
+    (when was-bound (fmakunbound 'kuro-core-init))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-module-load) #'ignore))
+          (should (string-match-p "native module could not be loaded"
+                                  (cadr (should-error (kuro--ensure-module-loaded)
+                                                      :type 'error)))))
+      (when was-bound
+        (fset 'kuro-core-init (lambda () nil))))))
 
 (provide 'kuro-module-test)
 

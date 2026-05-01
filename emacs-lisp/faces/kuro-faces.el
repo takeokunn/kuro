@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -117,6 +116,7 @@ This function is a no-op in non-graphical (terminal) Emacs frames."
 
 (defun kuro--get-cached-face-raw--miss (fg-enc bg-enc flags ul-normalized)
   "Cold path: handle a cache miss for `kuro--get-cached-face-raw'.
+FG-ENC and BG-ENC are raw FFI u32 color values; FLAGS is the SGR bitmask.
 UL-NORMALIZED is already canonicalized: 0 when underline color is absent
 \(original ul-enc was nil, 0, or #xFF000000); otherwise equals ul-enc.
 Called only on cache misses — typically < 1% of calls.  Runs optional FIFO

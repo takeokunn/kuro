@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -138,9 +137,9 @@ ATTR-FLAGS is the SGR bitmask integer.  UNDERLINE-COLOR is an Emacs
 color string or nil.
 
 Only non-default attributes are included in the returned plist.  Omitting
-:weight \='normal and :slant \='normal lets text inherit those properties from the
-buffer's default face, which is both more correct and faster to render —
-Emacs does not need to recompute font metrics for every cell.
+:weight \='normal and :slant \='normal lets text inherit those properties
+from the buffer's default face, which is both more correct and faster to
+render — Emacs does not need to recompute font metrics for every cell.
 
 Bit-flag tests are inlined to avoid the intermediate 20-element plist
 that `kuro--decode-attrs' would allocate on every call."

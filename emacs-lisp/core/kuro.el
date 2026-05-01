@@ -6,12 +6,12 @@
 ;; URL: https://github.com/takeokunn/kuro
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.1"))
-;; Keywords: terminal, tools
+;; Keywords: terminals, tools
 
 ;;; Commentary:
 
 ;; Kuro is a modern terminal emulator for Emacs using a Rust core and
-;; Emacs Lisp UI. It implements the Remote Display Model where all
+;; Emacs Lisp UI.  It implements the Remote Display Model where all
 ;; terminal state is managed in Rust and Emacs is purely a display layer.
 
 ;; Usage:
@@ -77,7 +77,7 @@
   "Keymap for Kuro major mode.")
 
 (defun kuro--window-size-change (frame)
-  "Handle window size changes for kuro buffers in FRAME.
+  "Handle window size change for kuro buffers in FRAME.
 Called from `window-size-change-functions'.  For every kuro buffer
 whose window dimensions changed, records the new size in
 `kuro--resize-pending' so the render cycle can process it
@@ -103,9 +103,9 @@ In copy mode the PTY keymap parent is detached so standard Emacs
 navigation and text-selection commands work in the terminal buffer.")
 
 (defcustom kuro-copy-mode-auto-exit t
-  "When non-nil, exit copy mode automatically after M-w (`kill-ring-save').
-This streamlines the copy workflow: enter copy mode with C-c C-t,
-select a region, press M-w to copy and return to terminal mode."
+  "When non-nil, exit copy mode automatically after \\[kill-ring-save].
+This streamlines the copy workflow: enter copy mode, select a region,
+call `kill-ring-save' to copy and return to terminal mode."
   :type 'boolean
   :group 'kuro)
 
@@ -150,12 +150,13 @@ buffers keep their normal terminal keymaps."
 (defun kuro-copy-mode ()
   "Toggle Kuro copy mode.
 In copy mode the PTY keymap is suspended and standard Emacs cursor
-movement, region selection, and copy commands (M-w, C-w, C-s…) become
-available.  The buffer remains read-only; only navigation and selection
-are enabled.  Press C-c C-t or C-c C-SPC again to return to terminal mode."
+movement, region selection, and copy commands (\\[kill-ring-save],
+\\[kill-region], \\[isearch-forward]…) become available.
+The buffer remains read-only; only navigation and selection
+are enabled.  Call \\[kuro-copy-mode] again to return to terminal mode."
   (interactive)
   (unless (derived-mode-p 'kuro-mode)
-    (user-error "kuro-copy-mode: not in a Kuro terminal buffer"))
+    (user-error "Kuro-copy-mode: not in a Kuro terminal buffer"))
   (if kuro--copy-mode
       (kuro--exit-copy-mode)
     (kuro--enter-copy-mode)))

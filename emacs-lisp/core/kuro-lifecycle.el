@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -28,6 +27,7 @@
 (require 'kuro-compilation)
 (require 'kuro-bookmark)
 (require 'kuro-color-scheme)
+(require 'kuro-sessions)
 
 ;; Forward-declare functions defined in kuro.el to avoid circular require
 (declare-function kuro-mode "kuro" ())
@@ -136,8 +136,8 @@ Sets `kuro--initialized' to nil and `kuro--session-id' to 0."
          kuro--session-id  0))
 
 (defun kuro--do-attach (session-id rows cols)
-  "Perform the core attach steps for SESSION-ID at terminal size ROWS x COLS.
-Assumes the calling buffer is already in `kuro-mode'.
+  "Perform the core attach step for SESSION-ID at terminal size ROWS x COLS.
+Assume the calling buffer is already in `kuro-mode'.
 Signals on any failure; the caller is responsible for rollback."
   (let ((inhibit-read-only t))
     (kuro-core-attach session-id)
@@ -165,7 +165,7 @@ Detached sessions remain reattachable via `kuro-attach'.
 Assumes `kuro--stop-render-loop' and `kuro--cleanup-render-state' already ran."
   (if (and kuro--initialized
            (kuro--is-process-alive)
-           (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it) ")))
+           (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it)? ")))
       ;; Detach: PTY keeps running; another buffer can attach later.
       (condition-case nil
           (progn
@@ -202,7 +202,7 @@ The timer is a one-shot: it fires once and is not rescheduled."
 (defun kuro--init-session-buffer (buffer rows cols)
   "Initialize BUFFER as a kuro session display with dimensions ROWS×COLS.
 Called from both `kuro-create' (new session) and `kuro-attach' (re-attach).
-Sets up scrollback, font remapping, char-width table, fontset, default
+Sets up scrollback, font remapping, `char-width' table, fontset, default
 colors, and resets all cursor cache state so the first render frame
 always computes fresh cursor position from Rust."
   (with-current-buffer buffer
@@ -275,30 +275,30 @@ always computes fresh cursor position from Rust."
 (declare-function kuro--ensure-left-margin           "kuro-prompt-status" ())
 (declare-function kuro--clear-prompt-status-overlays "kuro-prompt-status" ())
 
-;; Forward reference: defvar-local in kuro-input-mouse.el
+;; Forward reference: `defvar-local' in kuro-input-mouse.el
 (defvar kuro--mouse-pixel-mode nil
-  "Forward reference; defvar-local in kuro-input-mouse.el.")
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
 
-;; Forward declarations for defvar-local symbols written or tested in
+;; Forward declarations for `defvar-local' symbols written or tested in
 ;; kuro-kill / kuro-create but defined in other modules.
 ;; kuro-renderer.el
 (defvar kuro--cursor-marker nil
-  "Forward reference; defvar-local in kuro-renderer.el.")
+  "Forward reference; `defvar-local' in kuro-renderer.el.")
 ;; kuro.el
 (defvar kuro--last-rows 0
-  "Forward reference; defvar-local in kuro.el.")
+  "Forward reference; `defvar-local' in kuro.el.")
 (defvar kuro--last-cols 0
-  "Forward reference; defvar-local in kuro.el.")
+  "Forward reference; `defvar-local' in kuro.el.")
 ;; kuro-input.el
 (defvar kuro--scroll-offset 0
-  "Forward reference; defvar-local in kuro-input.el.")
+  "Forward reference; `defvar-local' in kuro-input.el.")
 ;; kuro-overlays.el
 (defvar kuro--blink-overlays nil
-  "Forward reference; defvar-local in kuro-overlays.el.")
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--blink-overlays-slow nil
-  "Forward reference; defvar-local in kuro-overlays.el.")
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--blink-overlays-fast nil
-  "Forward reference; defvar-local in kuro-overlays.el.")
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
 ;; kuro-tui-mode.el (TUI mode state)
 (defvar kuro--tui-mode-active nil
   "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
@@ -308,21 +308,21 @@ always computes fresh cursor position from Rust."
   "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
 ;; kuro-render-buffer.el
 (defvar kuro--last-cursor-row nil
-  "Forward reference; defvar-local in kuro-render-buffer.el.")
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
 (defvar kuro--last-cursor-col nil
-  "Forward reference; defvar-local in kuro-render-buffer.el.")
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
 (defvar kuro--last-cursor-visible nil
-  "Forward reference; defvar-local in kuro-render-buffer.el.")
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
 (defvar kuro--last-cursor-shape nil
-  "Forward reference; defvar-local in kuro-render-buffer.el.")
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
 ;; kuro-input-mouse.el
 (defvar kuro--mouse-mode 0
-  "Forward reference; defvar-local in kuro-input-mouse.el.")
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
 (defvar kuro--mouse-sgr nil
-  "Forward reference; defvar-local in kuro-input-mouse.el.")
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
 ;; kuro-faces.el
 (defvar kuro--font-remap-cookie nil
-  "Forward reference; defvar-local in kuro-faces.el.")
+  "Forward reference; `defvar-local' in kuro-faces.el.")
 
 (defun kuro--module-loadable-p ()
   "Return non-nil when the Rust dynamic module is loaded into Emacs.
@@ -403,7 +403,8 @@ prompt is skipped when `kuro-module-installation-method' is set."
   (kuro--send-key string))
 
 (defmacro kuro--def-control-key (name sequence doc)
-  "Define an interactive command NAME that sends SEQUENCE to the terminal."
+  "Define an interactive command NAME that sends SEQUENCE to the terminal.
+DOC is the docstring for the generated command."
   `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
 
 (kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
@@ -472,7 +473,7 @@ Each entry is expected to be (ID COMMAND DETACHED-P ALIVE-P)."
   (seq-filter (lambda (entry) (nth 2 entry)) sessions))
 
 (defun kuro--session-candidates (sessions)
-  "Convert detached session SESSIONS into completing-read candidates."
+  "Convert detached session SESSIONS into `completing-read' candidates."
   (mapcar (lambda (entry)
             (pcase-let ((`(,id ,cmd ,_detached-p ,_alive-p) entry))
               (cons (format "Session %d: %s" id cmd) id)))
@@ -517,8 +518,6 @@ detached state (see `kuro-list-sessions' and `kuro-kill')."
           (error
            (kuro--rollback-attach session-id buffer err)))))
     buffer))
-
-(require 'kuro-sessions)
 
 (provide 'kuro-lifecycle)
 

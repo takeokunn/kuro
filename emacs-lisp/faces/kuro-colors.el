@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -84,7 +83,7 @@ during `defcustom' initialization before all 16 colors are defined)."
   "Set SYMBOL to VALUE, rebuild color table, and clear face cache."
   (unless (and (stringp value)
                (string-match-p kuro--hex-color-regexp value))
-    (user-error "kuro: color must be a 6-digit hex string like #rrggbb, got: %s" value))
+    (user-error "Kuro: color must be a 6-digit hex string like #rrggbb, got: %s" value))
   (set-default symbol value)
   (kuro--rebuild-named-colors)
   (when (fboundp 'kuro--clear-face-cache)

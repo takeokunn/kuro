@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -37,8 +36,8 @@
   :group 'kuro)
 
 (defcustom kuro-prompt-status-show-extras t
-  "When non-nil, render aid/duration/error-path metadata at the end of
-prompt rows that have command-end marks carrying any of those fields.
+  "When non-nil, render aid/duration/error-path metadata after prompt rows.
+Applies to rows that have command-end marks carrying any of those fields.
 
 The data is sourced from OSC 133 \"D\" parameters emitted by shells that
 support extended prompt marking (semantic prompt extensions).  When the
@@ -60,8 +59,8 @@ shell does not provide the metadata, no extras overlay is created."
 
 (defface kuro-prompt-extras
   '((t :inherit shadow :slant italic))
-  "Face for the OSC 133 D-mark extras annotation appended to the prompt
-line (aid, duration, error path).
+  "Face for the OSC 133 D-mark extras annotation appended to the prompt line.
+Fields include aid, duration, and error path.
 Controlled by `kuro-prompt-status-show-extras'.  Inherits from `shadow'
 for subtle styling; rendered via an overlay `after-string'."
   :group 'kuro)
@@ -134,6 +133,7 @@ Returns nil if all three fields are nil/empty."
 
 (defun kuro--apply-prompt-extras-overlay (row aid duration-ms err-path)
   "Place an end-of-line extras annotation overlay for ROW.
+AID, DURATION-MS, and ERR-PATH are forwarded to `kuro--format-prompt-extras'.
 The overlay carries `kuro-prompt-status' so it is removed by
 `kuro--clear-prompt-status-overlays'."
   (when-let ((label (kuro--format-prompt-extras aid duration-ms err-path)))
@@ -148,7 +148,7 @@ The overlay carries `kuro-prompt-status' so it is removed by
           (push ov kuro--prompt-status-overlays))))))
 
 (defun kuro--update-prompt-status (marks)
-  "Update prompt status annotations from MARKS.
+  "Update prompt status annotations for the current terminal buffer.
 MARKS is a list of (MARK-TYPE ROW COL EXIT-CODE AID DURATION-MS ERR-PATH)
 as returned by `kuro--poll-prompt-marks'.  AID, DURATION-MS, and ERR-PATH
 are nil when not provided by the shell.  Only processes \"command-end\"

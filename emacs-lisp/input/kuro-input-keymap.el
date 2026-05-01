@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -103,8 +102,8 @@
     ("C-\\" . 28) ("C-]"  . 29) ("C-_"  . 31))
   "Mapping of Emacs Ctrl+key strings to their ASCII control-byte values.
 Each entry is (KBD-STRING . CTRL-BYTE).  The ctrl byte for a letter is
-\\(logand char 31\\): C-a=1, C-b=2, ..., C-z=26.
-C-c is intentionally absent — it is the kuro-mode-map prefix key.")
+\\(logand char 31\\): values range from 1 (Control-A) to 26 (Control-Z).
+The kuro-mode prefix key is intentionally absent from this map.")
 
 (defun kuro--keymap-setup-ctrl (map)
   "Add Ctrl+letter bindings to MAP, forwarding each to the PTY as control byte.
@@ -121,7 +120,7 @@ Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
 
 (defun kuro--send-meta-backspace ()
   "Send ESC+DEL (Meta-Backspace) to the PTY.
-This is the standard control sequence for backward-kill-word in readline/bash."
+This is the standard control sequence for `backward-kill-word' in readline/bash."
   (interactive)
   (kuro--send-key (string ?\e ?\x7f))
   (kuro--schedule-immediate-render))
@@ -136,18 +135,19 @@ M-DEL and M-<backspace> are handled separately
 \(they call `kuro--send-meta-backspace').")
 
 (defun kuro--keymap-setup-meta (map)
-  "Add Meta/Alt bindings M-a through M-z and related keys to MAP.
+  "Add Meta/Alt bindings for all letters and related keys to MAP.
 
 In readline, Alt+key is sent as ESC then the key character.  These are
-the bash readline Alt bindings most frequently used:
-  M-b  — move word left          M-f  — move word right
-  M-d  — delete word forward     M-DEL — delete word backward
-  M-.  — insert last argument    M-r  — revert-line
-  M-u  — uppercase word          M-l  — lowercase word
-  M-c  — capitalize word         M-t  — transpose words
-  M-y  — yank-pop                M-<  — beginning of history
-  M->  — end of history          M-?  — possible completions
-  M-/  — complete filename
+the bash readline Alt bindings most frequently used (each is forwarded as
+ESC + the corresponding character byte to the PTY):
+  Meta-b  — move word left          Meta-f  — move word right
+  Meta-d  — delete word forward     Meta-DEL — delete word backward
+  Meta-.  — insert last argument    Meta-r  — revert-line
+  Meta-u  — uppercase word          Meta-l  — lowercase word
+  Meta-c  — capitalize word         Meta-t  — transpose words
+  Meta-y  — `yank-pop'              Meta-<  — beginning of history
+  Meta->  — end of history          Meta-?  — possible completions
+  Meta-/  — complete filename
 
 The loop runs FIRST so that explicit overrides below take precedence.
 Use (kbd (format \"M-%c\" char)) — this produces the correct event descriptor
@@ -184,13 +184,13 @@ and would be silently ignored in GUI frames."
 
 (defconst kuro--xterm-modifier-codes
   '((S . 2) (M . 3) (C . 5))
-  "xterm CSI modifier parameter codes used in \\e[1;Nm sequences.
+  "Xterm CSI modifier parameter codes used in \\e[1;Nm sequences.
 Shift=2, Alt/Meta=3, Ctrl=5.  Note: code 4 (Shift+Alt) is absent here
 because Emacs does not generate a distinct [S-M-up] event.")
 
 (defconst kuro--xterm-arrow-codes
   '((up . ?A) (down . ?B) (right . ?C) (left . ?D))
-  "xterm CSI final-byte characters for arrow directions in \\e[1;Nm sequences.
+  "Xterm CSI final-byte characters for arrow directions in \\e[1;Nm sequences.
 The letters A/B/C/D are the original VT100 cursor movement codes
 \(CUU/CUD/CUF/CUB).  Used with `kuro--xterm-modifier-codes' to build the 12
 modifier+arrow sequences like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
@@ -258,7 +258,7 @@ Applied by `kuro--keymap-setup-mouse'.")
 
 (defun kuro--keymap-setup-yank (map)
   "Add yank remapping and keymap-exception removal to MAP.
-Remaps `yank' (C-y), `yank-pop' (M-y), and `clipboard-yank' (Cmd+V on macOS)
+Remaps `yank', `yank-pop', and `clipboard-yank' (Cmd+V on macOS)
 all to `kuro--yank' / `kuro--yank-pop' so paste always goes through the PTY
 with optional bracketed-paste wrapping."
   (define-key map [remap yank]          #'kuro--yank)

@@ -1,8 +1,8 @@
 ;;; kuro-bookmark.el --- Bookmark support for Kuro terminal buffers  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
+
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 ;; Integrates Kuro with Emacs' bookmark system.

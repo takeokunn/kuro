@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -101,7 +100,7 @@ redundant integer comparison per dirty row.
   v2-p nil:     24 bytes — start-buf(u32) end-buf(u32) fg(u32)
     bg(u32) flags(u64)
 Returns FACE-RANGES-FLAT-VECTOR directly: nil when NUM-FACE-RANGES is 0
-(callers may guard on null), or a FLAT vector of (* 6 NUM-FACE-RANGES)
+\(callers may guard on null), or a FLAT vector of (* 6 NUM-FACE-RANGES)
 integers otherwise.  Sets `kuro--decode-pos' to the byte offset
 immediately after the decoded section — eliminates the (RESULT .
 NEW-POS) cons at ~3,600/sec.
@@ -203,11 +202,11 @@ native string paths to share one implementation.
 Validates the frame header (format version 1 or 2), then iterates over rows,
 decoding face ranges and col-to-buf entries via the section decoders.
 Each result element has the structure expected by `kuro--apply-dirty-lines':
-  (((row . text) . face-list) . col-to-buf-vector)"
+  (((row . text) . face-ranges) . col-to-buf-vector)"
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
                 (= format-version kuro--binary-format-version-v2))
-      (error "kuro: unsupported binary format version %d" format-version))
+      (error "Kuro: unsupported binary format version %d" format-version))
     (let* ((num-rows (kuro--read-u32-le vec 4))
            (pos 8)
            ;; Pre-compute once per frame: eliminates one >= integer comparison
@@ -260,8 +259,8 @@ See `encode_screen_binary' in rust-core/src/ffi/codec.rs for the wire format."
 ;;; Optimised decoder using native Emacs strings from Rust
 
 (defun kuro--decode-binary-updates-with-strings (text-strings vec)
-  "Decode binary VEC using pre-supplied native TEXT-STRINGS, without
-funcall overhead.
+  "Decode binary VEC using pre-supplied native TEXT-STRINGS.
+Without funcall overhead:
 TEXT-STRINGS is a vector of strings (one per dirty row) from
 `kuro-core-poll-updates-binary-with-strings'.  VEC carries only
 face/col-to-buf data; `text_byte_len' is always 0 in this path.
@@ -273,7 +272,7 @@ At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
                 (= format-version kuro--binary-format-version-v2))
-      (error "kuro: unsupported binary format version %d" format-version))
+      (error "Kuro: unsupported binary format version %d" format-version))
     (let* ((num-rows         (kuro--read-u32-le vec 4))
            (pos              8)
            (face-ranges-v2-p (>= format-version 2))

@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -35,7 +34,7 @@ See `encode_color' in rust-core/src/ffi/codec.rs for the encoding contract.")
    "bright-blue" "bright-magenta" "bright-cyan" "bright-white"]
   "Standard ANSI terminal color names for indices 0-15.
 Used to look up named-color faces in `kuro--decode-ffi-color' and
-`kuro--indexed-to-emacs'. Indices match the order of NamedColor in
+`kuro--indexed-to-emacs'.  Indices match the order of NamedColor in
 rust-core/src/types/color.rs.  Names match the keys in `kuro--named-colors'.")
 
 (defconst kuro--named-color-conses

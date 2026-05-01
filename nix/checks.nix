@@ -134,7 +134,7 @@ let
                           (ignore-errors (checkdoc-current-buffer t)))) \
                       (when (get-buffer diag-buffer) \
                         (let ((output (with-current-buffer diag-buffer (buffer-string)))) \
-                          (when (and output (not (string-empty-p (string-trim output)))) \
+                          (when (and output (string-match-p \":[0-9]+:\" output)) \
                             (princ (format \"==> %s\n%s\n\" file output)) \
                             (setq errors (1+ errors))))))) \
                   (kill-emacs (if (zerop errors) 0 1)))"

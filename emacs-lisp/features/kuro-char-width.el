@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -33,11 +32,11 @@
 ;; Forward declarations for variables used by kuro--refine-glyph-widths
 ;; to detect line-height changes after font rescaling.
 (defvar kuro--initialized nil
-  "Forward reference; defvar-local in kuro-ffi.el.")
+  "Forward reference; `defvar-local' in kuro-ffi.el.")
 (defvar kuro--last-rows 0
-  "Forward reference; defvar-local in kuro.el.")
+  "Forward reference; `defvar-local' in kuro.el.")
 (defvar kuro--last-cols 0
-  "Forward reference; defvar-local in kuro.el.")
+  "Forward reference; `defvar-local' in kuro.el.")
 (defvar kuro--resize-pending nil
   "Forward reference; defvar-permanent-local in kuro-ffi.el.")
 
@@ -172,7 +171,7 @@ widths from the very first frame.  If deferred to an idle timer, the timer
 may never fire while btop floods the PTY with output.
 
 Modifies BOTH the selected frame's fontset (nil) and the default fontset (t).
-Using only `t' was the original bug: `t' modifies the template for future
+Using only t was the original bug: t modifies the template for future
 frames, but existing frames already have their own fontset copy made at
 frame creation time.
 

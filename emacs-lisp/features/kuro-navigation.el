@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -25,7 +24,7 @@
 (declare-function kuro--send-key "kuro-ffi" (data))
 
 (defvar kuro--initialized nil
-  "Forward reference; defvar-local in kuro-ffi.el.")
+  "Forward reference; `defvar-local' in kuro-ffi.el.")
 
 ;;; Buffer-local state
 
@@ -37,7 +36,7 @@ EXIT-CODE is an integer for command-end marks (from OSC 133;D;N), or nil.
 Updated each render cycle by polling `kuro--poll-prompt-marks'.")
 
 (defun kuro--update-prompt-positions (marks positions max-count)
-  "Merge OSC 133 MARKS into POSITIONS and return the updated list.
+  "Merge OSC 133 prompt mark data into POSITIONS and return the updated list.
 MARKS is a list of (MARK-TYPE ROW COL EXIT-CODE) proper lists as returned
 by `kuro--poll-prompt-marks'.  POSITIONS is the current accumulated list
 of prompt positions (buffer-local `kuro--prompt-positions').
@@ -116,7 +115,8 @@ to the exact buffer position corresponding to grid row ROW."
      ,@body))
 
 (defmacro kuro--def-focus-handler (name sequence doc)
-  "Define a focus event handler NAME that sends SEQUENCE."
+  "Define a focus event handler NAME that sends SEQUENCE.
+DOC is the docstring for the generated handler function."
   `(defun ,name ()
      ,doc
      (kuro--with-focus-guard

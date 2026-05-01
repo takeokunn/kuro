@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -57,7 +56,7 @@ Cell mode: `posn-col-row' coordinates incremented to 1-based."
 
 (defun kuro--encode-mouse (event button press)
   "Encode mouse EVENT with BUTTON index as a PTY byte string.
-BUTTON is 0=left, 1=middle, 2=right, 64=scroll-up, 65=scroll-down.
+BUTTON is 0=left, 1=middle, 2=right, 64=wheel-up, 65=wheel-down.
 PRESS is non-nil for button press, nil for button release.
 Returns the encoded string, or nil if mouse mode is off or position overflows."
   (when (> kuro--mouse-mode 0)
@@ -71,7 +70,7 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
             (format "\e[M%c%c%c" btn-byte (+ col1 32) (+ row1 32))))))))
 
 (defun kuro--encode-mouse-sgr (event button press)
-  "Encode mouse EVENT in SGR format (used when kuro--mouse-sgr is set)."
+  "Encode mouse EVENT with BUTTON index in SGR format; PRESS is non-nil for press."
   (pcase-let* ((`(,col1 . ,row1) (kuro--mouse-coords event)))
     (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))))
 
@@ -96,7 +95,8 @@ Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
   "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to PTY.
 BTN-FORM is evaluated at call time: a literal integer for scroll commands, or a
 pcase expression over `event-basic-type' for button commands.
-PRESS is t for press events, nil for release."
+PRESS is t for press events, nil for release.
+DOC is the docstring for the generated command."
   `(defun ,name ()
      ,doc
      (interactive)
@@ -154,7 +154,7 @@ call.  The generated function is guarded by `kuro--initialized', calls
   (max 0 (or (kuro--get-scroll-offset) (+ kuro--scroll-offset kuro--mouse-scroll-lines))))
 
 (defun kuro--mouse-scroll-up ()
-  "Handle scroll-up (wheel up) mouse event.
+  "Handle wheel-up mouse scroll event.
 When mouse tracking is active, forward to PTY as button 64.
 Otherwise, scroll the terminal scrollback up by `kuro--mouse-scroll-lines'."
   (interactive)
@@ -169,7 +169,7 @@ Otherwise, scroll the terminal scrollback up by `kuro--mouse-scroll-lines'."
   (max 0 (or (kuro--get-scroll-offset) (- kuro--scroll-offset kuro--mouse-scroll-lines))))
 
 (defun kuro--mouse-scroll-down ()
-  "Handle scroll-down (wheel down) mouse event.
+  "Handle wheel-down mouse scroll event.
 When mouse tracking is active, forward to PTY as button 65.
 Otherwise, scroll the terminal scrollback down by `kuro--mouse-scroll-lines'."
   (interactive)

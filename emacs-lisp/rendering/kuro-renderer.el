@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -187,10 +186,10 @@ Stage 1 -- Resize (unconditional): synchronizes PTY dimensions before
   any display work, even when the frame is coalesced.
 
 Stage 2 -- Coalesced render (gated by `kuro--with-frame-coalescing'):
-  2a. Bell: ring if pending.
-  2b. Dirty updates: rewrite changed rows and advance cursor.
-  2c. Mode poll: DECCKM, mouse, CWD, clipboard (budget-gated).
-  2d. Blink: tick overlay animations.
+  2a.  Bell: ring if pending.
+  2b.  Dirty updates: rewrite changed rows and advance cursor.
+  2c.  Mode poll: DECCKM, mouse, CWD, clipboard (budget-gated).
+  2d.  Blink: tick overlay animations.
 
 Stage 3 -- TUI detection (unconditional): must run on every timer
   invocation so `kuro--tui-mode-frame-count' accumulates correctly

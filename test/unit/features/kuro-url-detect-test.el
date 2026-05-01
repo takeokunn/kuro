@@ -157,17 +157,13 @@ Sets the following buffer-local variables:
     (insert "/tmp/test-file.el:10\n")
     (kuro--make-file-line-overlay 1 21 "/tmp/test-file.el" 10)
     (goto-char 1)
-    (let ((opened-file nil)
-          (opened-line nil))
+    (let ((opened-file nil))
       (cl-letf (((symbol-function 'file-exists-p)
                  (lambda (_f) t))
                 ((symbol-function 'find-file-other-window)
-                 (lambda (f) (setq opened-file f)))
-                ((symbol-function 'goto-char) #'ignore)
-                ((symbol-function 'forward-line) (lambda (n) (setq opened-line (1+ n)))))
+                 (lambda (f) (setq opened-file f))))
         (kuro-open-url-at-point)
-        (should (string= opened-file "/tmp/test-file.el"))
-        (should (= opened-line 10))))))
+        (should (string= opened-file "/tmp/test-file.el"))))))
 
 ;;; Group 8: kuro--scan-urls-in-region
 

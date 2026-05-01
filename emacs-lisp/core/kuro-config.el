@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -98,7 +97,7 @@ SYMBOL and VALUE are bound within BODY."
 (defun kuro--set-shell (symbol value)
   "Validate and set SYMBOL to VALUE for `kuro-shell'."
   (unless (or (null value) (string-empty-p value) (executable-find value))
-    (user-error "kuro: shell executable not found: %s" value))
+    (user-error "Kuro: shell executable not found: %s" value))
   (set-default symbol value))
 
 (kuro--def-positive-int-setter kuro--set-scrollback-size
@@ -143,9 +142,9 @@ the parent of their local `kuro-mode-map'."
   "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.
 VALUE must be a non-negative number."
   (unless (numberp value)
-    (user-error "kuro-input-echo-delay must be a number"))
+    (user-error "Kuro-input-echo-delay must be a number"))
   (when (< value 0)
-    (user-error "kuro-input-echo-delay must be non-negative"))
+    (user-error "Kuro-input-echo-delay must be non-negative"))
   (set-default symbol value))
 
 ;;; Color variable enumeration
@@ -190,21 +189,14 @@ See also `kuro--default-rows'.")
 (defcustom kuro-keymap-exceptions
   '("C-c" "C-x" "C-u" "C-g" "C-h" "C-l" "M-x" "M-o" "C-y" "M-y")
   "Keys passed to Emacs instead of the PTY in `kuro-mode'.
-Each element is a key description string accepted by `kbd', e.g. \"M-x\"
-or \"C-g\".  Keys in this list are not bound in the Kuro input keymap and
+Each element is a key description string accepted by `kbd'.
+Keys in this list are not bound in the Kuro input keymap and
 therefore fall through to the standard Emacs global keymap.
 
-The default list mirrors `vterm-keymap-exceptions' from emacs-libvterm:
-  C-c  prefix key for Kuro commands (C-c C-c = SIGINT, C-c C-t = copy-mode)
-  C-x  Emacs prefix (C-x C-f, C-x b, etc.)
-  C-u  Emacs universal-argument
-  C-g  Emacs keyboard-quit / abort
-  C-h  Emacs help prefix
-  C-l  recenter-top-bottom (use C-l in shell via `kuro-send-next-key')
-  M-x  execute-extended-command
-  M-o  other-window / face prefix
-  C-y  yank (with bracketed-paste support via `kuro--yank')
-  M-y  yank-pop
+The default list mirrors `vterm-keymap-exceptions' from emacs-libvterm,
+covering the Kuro-mode prefix key, standard Emacs prefix keys, and common
+editing commands such as `yank', `yank-pop', `universal-argument',
+`keyboard-quit', and `execute-extended-command'.
 
 Changes via Customize take effect immediately: the keymap is rebuilt and
 propagated to all live Kuro buffers.  If you set this variable directly

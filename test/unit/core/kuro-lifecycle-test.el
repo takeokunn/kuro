@@ -1790,6 +1790,137 @@ calls switch-to-buffer with the newly created buffer."
       (when (buffer-live-p result)
         (kill-buffer result)))))
 
+;;; ── Group 27: kuro--module-loadable-p ───────────────────────────────────────
+
+(ert-deftest kuro-lifecycle--module-loadable-p-returns-t-when-find-library-succeeds ()
+  "`kuro--module-loadable-p' returns t when `kuro-core-init' is fbound."
+  (cl-letf (((symbol-function 'kuro-core-init) (lambda () nil)))
+    (should (kuro--module-loadable-p))))
+
+(ert-deftest kuro-lifecycle--module-loadable-p-returns-nil-when-no-library ()
+  "`kuro--module-loadable-p' returns nil when `kuro-core-init' is not fbound."
+  (let ((was-bound (fboundp 'kuro-core-init)))
+    (when was-bound (fmakunbound 'kuro-core-init))
+    (unwind-protect
+        (should-not (kuro--module-loadable-p))
+      (when was-bound
+        (fset 'kuro-core-init (lambda () nil))))))
+
+;;; ── Group 28: kuro--try-load-module ─────────────────────────────────────────
+
+(ert-deftest kuro-lifecycle--try-load-module-returns-t-on-success ()
+  "`kuro--try-load-module' returns t when `kuro-module-load' binds `kuro-core-init'."
+  (let ((was-bound (fboundp 'kuro-core-init)))
+    (when was-bound (fmakunbound 'kuro-core-init))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-module-load)
+                   (lambda () (fset 'kuro-core-init #'ignore))))
+          (should (kuro--try-load-module)))
+      ;; Restore: if it was not bound originally, unbind again
+      (unless was-bound
+        (ignore-errors (fmakunbound 'kuro-core-init))))))
+
+(ert-deftest kuro-lifecycle--try-load-module-swallows-error-returns-nil ()
+  "`kuro--try-load-module' returns nil without propagating errors from `kuro-module-load'."
+  (let ((was-bound (fboundp 'kuro-core-init)))
+    (when was-bound (fmakunbound 'kuro-core-init))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-module-load)
+                   (lambda () (error "simulated load failure"))))
+          (should-not (kuro--try-load-module)))
+      (when was-bound
+        (fset 'kuro-core-init (lambda () nil))))))
+
+;;; ── Group 29: kuro--prompt-and-install-module ────────────────────────────────
+
+(ert-deftest kuro-lifecycle--prompt-and-install-module-prebuilt-path ()
+  "Answer 'd' → calls `kuro-module-download' then `kuro-module-load'."
+  (let ((download-called nil)
+        (load-called nil))
+    (cl-letf (((symbol-function 'read-char-choice) (lambda (&rest _) ?d))
+              ((symbol-function 'kuro-module-download)
+               (lambda (&optional _v) (setq download-called t)))
+              ((symbol-function 'kuro-module-load)
+               (lambda () (setq load-called t) (fset 'kuro-core-init #'ignore)))
+              ((symbol-function 'kuro--module-loadable-p) (lambda () t)))
+      (let ((was-bound (fboundp 'kuro-core-init)))
+        (when was-bound (fmakunbound 'kuro-core-init))
+        (unwind-protect
+            (progn
+              (kuro--prompt-and-install-module)
+              (should download-called)
+              (should load-called))
+          (unless was-bound
+            (ignore-errors (fmakunbound 'kuro-core-init))))))))
+
+(ert-deftest kuro-lifecycle--prompt-and-install-module-cargo-path ()
+  "Answer 'b' → calls `kuro-module-build' then `kuro-module-load'."
+  (let ((build-called nil)
+        (load-called nil))
+    (cl-letf (((symbol-function 'read-char-choice) (lambda (&rest _) ?b))
+              ((symbol-function 'kuro-module-build)
+               (lambda () (setq build-called t)))
+              ((symbol-function 'kuro-module-load)
+               (lambda () (setq load-called t) (fset 'kuro-core-init #'ignore)))
+              ((symbol-function 'kuro--module-loadable-p) (lambda () t)))
+      (let ((was-bound (fboundp 'kuro-core-init)))
+        (when was-bound (fmakunbound 'kuro-core-init))
+        (unwind-protect
+            (progn
+              (kuro--prompt-and-install-module)
+              (should build-called)
+              (should load-called))
+          (unless was-bound
+            (ignore-errors (fmakunbound 'kuro-core-init))))))))
+
+(ert-deftest kuro-lifecycle--prompt-and-install-module-quit-path ()
+  "Answer 'q' → signals `user-error'."
+  (cl-letf (((symbol-function 'read-char-choice) (lambda (&rest _) ?q)))
+    (should-error (kuro--prompt-and-install-module) :type 'user-error)))
+
+;;; ── Group 30: kuro-create — buffer lifecycle ─────────────────────────────────
+
+(ert-deftest kuro-lifecycle--create-returns-new-buffer ()
+  "`kuro-create' returns a live buffer when all helpers are stubbed as no-ops."
+  (let (result)
+    (cl-letf (((symbol-function 'kuro--ensure-module-installed) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--prefill-buffer)          #'ignore)
+              ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
+              ((symbol-function 'kuro--init)
+               (lambda (_cmd _args _rows _cols) t))
+              ((symbol-function 'kuro--init-session-buffer)     #'ignore)
+              ((symbol-function 'kuro--start-render-loop)       #'ignore)
+              ((symbol-function 'kuro--schedule-initial-render) #'ignore)
+              ((symbol-function 'message)                       #'ignore))
+      (setq result (kuro-create "echo" "*kuro-create-buf-test*")))
+    (unwind-protect
+        (should (buffer-live-p result))
+      (when (buffer-live-p result)
+        (kill-buffer result)))))
+
+(ert-deftest kuro-lifecycle--create-buffer-has-kuro-mode ()
+  "`kuro-create' returns a buffer with `major-mode' set to `kuro-mode'."
+  (let (result)
+    (cl-letf (((symbol-function 'kuro--ensure-module-installed) #'ignore)
+              ((symbol-function 'kuro-mode)
+               (lambda () (setq major-mode 'kuro-mode)))
+              ((symbol-function 'kuro--prefill-buffer)          #'ignore)
+              ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
+              ((symbol-function 'kuro--init)
+               (lambda (_cmd _args _rows _cols) t))
+              ((symbol-function 'kuro--init-session-buffer)     #'ignore)
+              ((symbol-function 'kuro--start-render-loop)       #'ignore)
+              ((symbol-function 'kuro--schedule-initial-render) #'ignore)
+              ((symbol-function 'message)                       #'ignore))
+      (setq result (kuro-create "echo" "*kuro-create-mode-test*")))
+    (unwind-protect
+        (with-current-buffer result
+          (should (eq major-mode 'kuro-mode)))
+      (when (buffer-live-p result)
+        (kill-buffer result)))))
+
 (provide 'kuro-lifecycle-test)
 
 ;;; kuro-lifecycle-test.el ends here

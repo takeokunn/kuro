@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -31,7 +30,7 @@
 ;;; Printable Characters
 
 (defsubst kuro--send-char (char)
-  "Send printable character as UTF-8 to PTY."
+  "Send printable CHAR as UTF-8 to PTY."
   (kuro--send-key (string char)))
 
 (kuro--defvar-permanent-local kuro--pending-render-timer nil
@@ -65,9 +64,9 @@ into a single render call."
          #'kuro--do-pending-render (current-buffer))))
 
 (defun kuro--self-insert ()
-  "Send the typed character to the PTY (used via remap of self-insert-command).
-If last-command-event is a control character (< 32 or = 127), send it as a
-control byte directly.  This handles the case where remap catches C-x style
+  "Send the typed character to the PTY (used via remap of `self-insert-command').
+If `last-command-event' is a control character (< 32 or = 127), send it as a
+control byte directly.  This handles the case where remap catches control-style
 events that were not caught by the explicit Ctrl+letter bindings."
   (interactive)
   (let ((char last-command-event))
@@ -84,7 +83,7 @@ events that were not caught by the explicit Ctrl+letter bindings."
 ;;; Special Keys
 
 (defun kuro--send-special (byte)
-  "Send special key as single byte sequence to PTY; schedule immediate render."
+  "Send special key as single BYTE sequence to PTY; schedule immediate render."
   (kuro--send-key (string byte))
   (kuro--schedule-immediate-render))
 
@@ -134,9 +133,9 @@ Always schedules an immediate render so cursor movement feels instant."
   "Sentinel value for `kuro-scroll-to-bottom': scrolls past any real content.")
 
 (defun kuro--scroll-aware-ctrl-v ()
-  "Send C-v to PTY when at live view; scroll down when in scrollback.
+  "Send the Control-V byte to PTY when at live view; scroll down in scrollback.
 When `kuro--scroll-offset' > 0 the user is browsing scrollback history,
-so C-v acts like `kuro-scroll-down' (toward live output) matching the
+so this acts like `kuro-scroll-down' (toward live output) matching the
 standard Emacs `scroll-up-command' semantics.  At live view (offset 0),
 the raw control byte 22 is sent to the PTY."
   (interactive)
@@ -145,8 +144,8 @@ the raw control byte 22 is sent to the PTY."
     (kuro--send-ctrl 22)))
 
 (defun kuro--scroll-aware-meta-v ()
-  "Send M-v to PTY when at live view; scroll up when in scrollback.
-When `kuro--scroll-offset' > 0, M-v acts like `kuro-scroll-up' (toward
+  "Send Meta-v to PTY when at live view; scroll up when in scrollback.
+When `kuro--scroll-offset' > 0, this acts like `kuro-scroll-up' (toward
 history) matching the standard Emacs `scroll-down-command' semantics.
 At live view (offset 0), ESC + v is sent to the PTY."
   (interactive)
@@ -178,7 +177,7 @@ At live view (offset 0), ESC + v is sent to the PTY."
 
 
 (defun kuro--ctrl-alt-modified (char _modifier)
-  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  Ignores _MODIFIER."
+  "Send Ctrl+Alt+CHAR as ESC prefix followed by Ctrl-CHAR.  Ignore _MODIFIER."
   (interactive "nChar: \nModifier: ")
   (kuro--send-key (concat (string ?\e) (string (logand char 31))))
   (kuro--schedule-immediate-render))
@@ -258,10 +257,10 @@ Priority order:
 ;;;###autoload
 (defun kuro-send-next-key ()
   "Read the next key event and send it directly to the PTY.
-This bypasses `kuro-keymap-exceptions', allowing exception keys such as
-C-g, M-x, or C-l to reach terminal applications when needed.
+This bypasses `kuro-keymap-exceptions', allowing exception keys to reach
+terminal applications when needed.
 
-Bound to C-c C-q in `kuro-mode-map'."
+Bound to \\[kuro-send-next-key] in `kuro-mode-map'."
   (interactive)
   (message "Send key to PTY: ")
   (let* ((event (read-event))

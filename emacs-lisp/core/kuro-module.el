@@ -3,12 +3,11 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
 ;; This file provides the module definitions and FFI wrappers for the Kuro
-;; terminal emulator. It loads the Rust dynamic module and provides the
+;; terminal emulator.  It loads the Rust dynamic module and provides the
 ;; necessary Lisp functions for interacting with it.
 
 ;;; Code:
@@ -99,7 +98,7 @@ Must use the https:// scheme; http:// values are rejected at set time."
   :type 'string
   :set (lambda (sym val)
          (unless (string-prefix-p "https://" val)
-           (user-error "kuro-module-release-base-url must use https://, got: %s" val))
+           (user-error "Kuro-module-release-base-url must use https://, got: %s" val))
          (set-default sym val)))
 
 (defun kuro-module--target-path ()
@@ -127,7 +126,12 @@ deleted and an error is signalled.  On success, the tarball is extracted
 under `kuro-module--target-path' using the system `tar' executable.
 Requires `tar' in PATH.  Emacs is unresponsive during the download."
   (interactive)
+  (unless (string-prefix-p "https://" kuro-module-release-base-url)
+    (error "Kuro: kuro-module-release-base-url must use https://, got: %s"
+           kuro-module-release-base-url))
   (let* ((ver (or version kuro-module--version))
+         (_ (unless (string-match-p "\\`[0-9]+\\.[0-9]+\\.[0-9]+\\'" ver)
+              (error "Kuro: invalid version string: %S" ver)))
          (platform (kuro-module--platform-string))
          (ext (kuro-module--shared-extension))
          (tarball (format "libkuro_core-%s-%s.tar.gz" ver platform))
@@ -151,7 +155,10 @@ Requires `tar' in PATH.  Emacs is unresponsive during the download."
                             (goto-char (point-min))
                             (unless (re-search-forward "\r?\n\r?\n" nil t)
                               (error "Kuro: malformed SHA256 response from %s" sha-url))
-                            (string-trim (buffer-substring (point) (point-max))))
+                            (let ((hash (string-trim (buffer-substring (point) (point-max)))))
+                              (unless (string-match-p "\\`[0-9a-f]\\{64\\}\\'" hash)
+                                (error "Kuro: invalid SHA256 in sidecar response: %S" hash))
+                              hash))
                         (kill-buffer sha-buf)))))
               (message "Kuro: downloading %s" url)
               (let ((buffer (url-retrieve-synchronously url t t 300)))
@@ -259,9 +266,11 @@ For example: \"libkuro_core.dylib\" on macOS, \"libkuro_core.so\" on Linux."
   (kuro--module-try (expand-file-name (kuro-module--lib-name) "~/.local/share/kuro/")))
 
 (defun kuro-module--tier-dev ()
-  "Tier 4: development build output (target/release/ relative to this file).
-load-file-name is only set during the initial `load' call; after that
-we fall back to locate-library so that batch-mode tests also work."
+  "Tier 4: development build output in target/release/ relative to repo root.
+`load-file-name' is only set during the initial `load' call; after that
+we fall back to `locate-library' so that batch-mode tests also work.
+kuro-module.el lives two directories below the repo root (emacs-lisp/core/),
+so the path prefix is ../../target/release/."
   (let* ((lib-name (kuro-module--lib-name))
          (this-file (or load-file-name
                         (locate-library "kuro-module")
@@ -269,7 +278,7 @@ we fall back to locate-library so that batch-mode tests also work."
     (when this-file
       (kuro--module-try
        (expand-file-name
-        (format "../target/release/%s" lib-name)
+        (format "../../target/release/%s" lib-name)
         (file-name-directory this-file))))))
 
 (defconst kuro-module--search-tiers

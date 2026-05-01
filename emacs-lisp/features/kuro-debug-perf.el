@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -49,7 +48,7 @@ logging itself does not perturb the measurement."
 FFI-MS: Rust poll-updates-with-faces wall time.
 APPLY-MS: kuro--apply-dirty-lines wall time.
 CURSOR-MS: kuro--update-cursor wall time.
-TOTAL-MS: entire inhibit-redisplay block wall time.
+TOTAL-MS: entire `inhibit-redisplay' block wall time.
 DIRTY: number of dirty rows sent by Rust.
 FACE-COUNT: total face-range tuples across all dirty rows."
   (with-current-buffer (get-buffer-create "*kuro-perf*")
@@ -61,17 +60,18 @@ FACE-COUNT: total face-range tuples across all dirty rows."
 ;;; Diagnostic command
 
 ;; Forward declarations for buffer-local variables used by the diagnostic.
-(defvar kuro--initialized nil)
-(defvar kuro--session-id 0)
-(defvar kuro--last-rows 0)
-(defvar kuro--last-cols 0)
-(defvar kuro--resize-pending nil)
-(defvar kuro--scroll-offset 0)
-(defvar kuro--tui-mode-active nil)
-(defvar kuro--last-cursor-row nil)
-(defvar kuro--last-cursor-col nil)
-(defvar kuro--col-to-buf-map nil)
+(defvar kuro--initialized)
+(defvar kuro--session-id)
+(defvar kuro--last-rows)
+(defvar kuro--last-cols)
+(defvar kuro--resize-pending)
+(defvar kuro--scroll-offset)
+(defvar kuro--tui-mode-active)
+(defvar kuro--last-cursor-row)
+(defvar kuro--last-cursor-col)
+(defvar kuro--col-to-buf-map)
 
+;;;###autoload
 (defun kuro-debug-state ()
   "Display terminal state diagnostics for the current kuro buffer.
 Useful for diagnosing TUI rendering issues.  Reports buffer line
@@ -108,6 +108,7 @@ count, PTY dimensions, window geometry, scroll state, and cursor."
                (frame-char-width) (frame-char-height))))
     (message "%s" msg)))
 
+;;;###autoload
 (defun kuro-debug-line-widths ()
   "Report per-row display width vs expected terminal columns.
 Identifies rows where the Emacs `string-width' of the line text

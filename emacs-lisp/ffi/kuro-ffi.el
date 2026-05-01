@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -51,7 +50,7 @@ When exceeded, the oldest half of the buffer is truncated.")
 
 (defsubst kuro--log (err)
   "Write a timestamped error entry for ERR to the `*kuro-log*' buffer.
-ERR is a condition-case error value (a list whose car is the error symbol).
+ERR is a `condition-case' error value (a list whose car is the error symbol).
 Only called when `kuro-log-errors' is non-nil.  Uses `with-current-buffer'
 and `insert' for speed (no echo-area overhead)."
   (let ((buf (get-buffer-create kuro--log-buffer-name)))
@@ -83,7 +82,7 @@ and `insert' for speed (no echo-area overhead)."
 This is the fundamental cadence-gating primitive used for periodic polling and
 animation timing: BODY is a continuation invoked at exact multiples of DIVISOR.
 `%' is used instead of `mod': both are identical for non-negative COUNTER
-(frame counter is always ≥ 0), but `%' avoids the sign-normalization branch
+\(frame counter is always ≥ 0), but `%' avoids the sign-normalization branch
 inside `mod'."
   (declare (indent 2))
   `(when (zerop (% ,counter ,divisor))
@@ -142,8 +141,9 @@ DOC is the docstring for the generated function."
   `(defun ,name () ,doc (kuro--call ,default (,core-fn kuro--session-id))))
 
 (defmacro kuro--def-ffi-unary (name core-fn default arg doc)
-  "Define a one-argument FFI wrapper wrapping CORE-FN with fallback DEFAULT.
-ARG is the parameter name symbol (used in the docstring)."
+  "Define NAME as a one-argument FFI wrapper with fallback DEFAULT.
+CORE-FN is the underlying Rust function called with session-id and ARG.
+DOC is the docstring for the generated function."
   `(defun ,name (,arg) ,doc (kuro--call ,default (,core-fn kuro--session-id ,arg))))
 
 (defmacro kuro--define-ffi-getters (&rest entries)
@@ -197,7 +197,7 @@ Usage:
 (defun kuro--init (command &optional shell-args rows cols)
   "Initialize Kuro with COMMAND (e.g., \"bash\").
 SHELL-ARGS is an optional list of string arguments passed to the shell
-(e.g., \\='(\"--norc\" \"--noprofile\")); nil means no extra arguments.
+\(e.g., \\='(\"--norc\" \"--noprofile\")); nil means no extra arguments.
 ROWS and COLS specify the initial terminal dimensions.  When omitted,
 `kuro--default-rows' and `kuro--default-cols' are used.  Callers should always
 pass the actual window dimensions so full-screen programs start with the correct

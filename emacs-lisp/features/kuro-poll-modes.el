@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -53,9 +52,9 @@
 ;; Forward references: these defvar-locals live in their respective modules.
 ;; kuro-input.el
 (defvar kuro--application-cursor-keys-mode nil
-  "Forward reference; defvar-local in kuro-input.el.")
+  "Forward reference; `defvar-local' in kuro-input.el.")
 (defvar kuro--app-keypad-mode nil
-  "Forward reference; defvar-local in kuro-input.el.")
+  "Forward reference; `defvar-local' in kuro-input.el.")
 (defvar kuro--mouse-mode)
 (defvar kuro--mouse-sgr)
 (defvar kuro--mouse-pixel-mode)
@@ -63,7 +62,7 @@
 (defvar kuro--keyboard-flags)
 ;; kuro-navigation.el
 (defvar kuro--prompt-positions nil
-  "Forward reference; defvar-local in kuro-navigation.el.")
+  "Forward reference; `defvar-local' in kuro-navigation.el.")
 
 ;;; Cadence constants
 
@@ -101,7 +100,7 @@ See `kuro--mode-poll-cadence' and `kuro--osc-rare-poll-cadence'.")
   "Poll rare OSC events: color palette (OSC 4), default colors (OSC 10/11/12).
 Called every `kuro--osc-rare-poll-cadence' frames.  At 30 fps this fires
 approximately once per second.  Changes occur at user-action timescale
-(theme switch, startup), so a ~1 second lag is invisible."
+\(theme switch, startup), so a ~1 second lag is invisible."
   (kuro--apply-palette-updates)
   (kuro--apply-default-colors))
 
@@ -129,7 +128,7 @@ Uses Tramp path construction when a remote hostname is detected."
   (kuro--apply-cwd-with-tramp))
 
 (defun kuro--poll-prompt-mark-updates ()
-  "Merge pending OSC 133 prompt marks into `kuro--prompt-positions'."
+  "Merge pending OSC 133 prompt mark into `kuro--prompt-positions'."
   (when-let ((marks (kuro--poll-prompt-marks)))
     (kuro--update-prompt-status marks)
     (setq kuro--prompt-positions
@@ -147,7 +146,7 @@ Uses Tramp path construction when a remote hostname is detected."
     (kuro-kill)))
 
 (defsubst kuro--send-osc52-clipboard-response ()
-  "Send OSC 52 clipboard response with the current kill-ring head to the PTY."
+  "Send OSC 52 clipboard response with the current `kill-ring' head to the PTY."
   (let ((text (condition-case nil (current-kill 0 t) (error ""))))
     (kuro--send-key
      (format "\e]52;c;%s\a"
@@ -158,9 +157,9 @@ Uses Tramp path construction when a remote hostname is detected."
 Drains the action queue returned by `kuro--poll-clipboard-actions' and
 dispatches each entry:
   `write' -- place terminal-supplied text on the kill ring (optional prompt).
-  `query' — respond with the current kill-ring head (with optional prompt).
+  `query' — respond with the current `kill-ring' head (with optional prompt).
 
-On `query': sends an OSC 52 response with the current kill-ring head
+On `query': sends an OSC 52 response with the current `kill-ring' head
   back to the PTY via `kuro--send-key' (active-terminal output).
 Returns nil."
   (let ((actions (kuro--poll-clipboard-actions)))
@@ -170,10 +169,10 @@ Returns nil."
          (pcase kuro-clipboard-policy
            ((or 'write-only 'allow)
             (kill-new (cdr action))
-            (message "kuro: clipboard updated from terminal"))
+            (message "Kuro: clipboard updated from terminal"))
            ('prompt
             (when (yes-or-no-p
-                   (format "kuro: terminal wants to set clipboard (%d chars). Allow? "
+                   (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
                            (length (cdr action))))
               (kill-new (cdr action))))))
         ('query
@@ -181,7 +180,7 @@ Returns nil."
            ('allow
             (kuro--send-osc52-clipboard-response))
            ('prompt
-            (when (yes-or-no-p "kuro: terminal wants to read clipboard. Allow? ")
+            (when (yes-or-no-p "Kuro: terminal wants to read clipboard.  Allow? ")
               (kuro--send-osc52-clipboard-response)))))))))
 
 (defconst kuro--tier1-poll-fns
@@ -198,10 +197,10 @@ Add new shell-interaction-timescale polls here; no changes to dispatch loop.")
 ;;; Tier-1 consolidated dispatcher
 
 (defun kuro--poll-tier1-modes ()
-  "Poll tier-1 terminal state: modes, CWD, clipboard, prompts, images, exit.
+  "Poll tier-1 terminal state: modes, CWD, clipboard, prompt, images, exit.
 A single consolidated FFI call (`kuro--get-terminal-modes', PERF-005)
 replaces 7 individual Mutex acquisitions.  All other tier-1 items
-(CWD, clipboard, prompt marks, image notifications, process exit) are
+\(CWD, clipboard, prompt marks, image notifications, process exit) are
 at shell-interaction timescale so 167 ms lag is imperceptible."
   (when-let ((modes (kuro--get-terminal-modes)))
     (kuro--apply-terminal-modes modes))

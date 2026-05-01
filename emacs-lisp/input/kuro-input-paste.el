@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -66,7 +65,8 @@ In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
     (kuro--send-key text)))
 
 (defun kuro--yank (&optional arg)
-  "Yank from kill ring, wrapping with bracketed paste sequences when active."
+  "Yank from kill ring, wrapping with bracketed paste sequences when active.
+Optional ARG selects which kill ring entry to use."
   (interactive "P")
   (let* ((n (if (numberp arg) (1- arg) 0))
          (text (current-kill n)))
@@ -74,7 +74,8 @@ In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
   (kuro--schedule-immediate-render))
 
 (defun kuro--yank-pop (&optional arg)
-  "Cycle kill ring and yank; wraps with bracketed paste sequences when active.
+  "Cycle kill ring and yank ARG entries forward.
+Wraps with bracketed paste when active.
 Like `yank-pop': signals an error if the previous command was not a yank."
   (interactive "p")
   (unless (memq last-command '(yank kuro--yank kuro--yank-pop))

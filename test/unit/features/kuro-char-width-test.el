@@ -113,13 +113,14 @@ kuro--char-width-1-ranges (EA-Ambiguous); the width-1 pass must win."
   (let ((orig-env current-language-environment))
     (unwind-protect
         (with-temp-buffer
-          ;; Simulate kuro-mode setup
+          ;; Simulate kuro-mode setup: buffer-local table + global hook
           (setq major-mode 'kuro-mode)
           (kuro--setup-char-width-table)
+          (kuro-char-width-setup)
           (should (= 1 (char-width #x25A0)))
-          ;; Now set-language-environment "Japanese" — this destroys the table
+          ;; set-language-environment replaces char-width-table globally;
+          ;; the hook must re-apply overrides in all kuro-mode buffers.
           (set-language-environment "Japanese")
-          ;; The hook should have re-applied overrides
           (should (= 1 (char-width #x25A0)))
           (should (= 1 (char-width #x2502)))
           (should (= 1 (char-width #x2500))))

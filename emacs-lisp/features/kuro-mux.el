@@ -477,6 +477,7 @@ Analogous to tmux's resize-pane command."
 
 (require 'kuro-mux-layout)
 (require 'kuro-mux-ext)
+(require 'kuro-mux-ext2)
 
 (provide 'kuro-mux)
 ;;; kuro-mux.el ends here

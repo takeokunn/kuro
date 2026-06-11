@@ -178,6 +178,19 @@ macro_rules! take_vec_field {
     };
 }
 
+/// Generate a `const fn` that reads a `bool` flag from a nested owner, clears it, and returns
+/// the old value.  Equivalent to a non-atomic `fetch_and_clear` on a plain `bool` field.
+macro_rules! take_bool_field {
+    ($(#[$doc:meta])* fn $name:ident from $owner:ident . $field:ident) => {
+        $(#[$doc])*
+        pub const fn $name(&mut self) -> bool {
+            let v = self.core.$owner.$field;
+            self.core.$owner.$field = false;
+            v
+        }
+    };
+}
+
 // TerminalSession Facade
 // -----------------------
 // Current public method count: 38.
@@ -594,27 +607,23 @@ impl TerminalSession {
         )
     }
 
-    /// Check and unconditionally clear the default-colors-dirty flag.
-    ///
-    /// Returns `true` if the flag was set (i.e., the default colors changed since
-    /// the last call), then resets the flag to `false` regardless of its value.
-    /// Subsequent calls return `false` until the flag is set again by the parser.
-    pub const fn take_default_colors_dirty(&mut self) -> bool {
-        let dirty = self.core.osc_data.default_colors_dirty;
-        self.core.osc_data.default_colors_dirty = false;
-        dirty
-    }
+    take_bool_field!(
+        /// Check and unconditionally clear the default-colors-dirty flag.
+        ///
+        /// Returns `true` if the flag was set (i.e., the default colors changed since
+        /// the last call), then resets the flag to `false` regardless of its value.
+        /// Subsequent calls return `false` until the flag is set again by the parser.
+        fn take_default_colors_dirty from osc_data.default_colors_dirty
+    );
 
-    /// Check and clear the pending bell flag.
-    ///
-    /// Returns `true` if a BEL character has been received since the last call,
-    /// then unconditionally resets the flag to `false`.
-    /// Subsequent calls return `false` until another BEL is received.
-    pub const fn take_bell_pending(&mut self) -> bool {
-        let was_pending = self.core.meta.bell_pending;
-        self.core.meta.bell_pending = false;
-        was_pending
-    }
+    take_bool_field!(
+        /// Check and clear the pending bell flag.
+        ///
+        /// Returns `true` if a BEL character has been received since the last call,
+        /// then unconditionally resets the flag to `false`.
+        /// Subsequent calls return `false` until another BEL is received.
+        fn take_bell_pending from meta.bell_pending
+    );
 
     take_some_if_dirty!(
         /// Return the window title if it has been updated since the last call, clearing the dirty flag.

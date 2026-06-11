@@ -306,11 +306,11 @@ send does not leave stale visual state."
                  (> (length kuro--line-history) kuro-line-history-max-length))
         (setq kuro--line-history
               (seq-take kuro--line-history kuro-line-history-max-length))))
-    (setq kuro--line-buffer "")
-    (setq kuro--line-point 0)
-    (setq kuro--line-history-idx -1)
-    (setq kuro--line-history-stash "")
-    (setq kuro--line-undo-stack nil)
+    (setq kuro--line-buffer      ""
+          kuro--line-point       0
+          kuro--line-history-idx -1
+          kuro--line-history-stash ""
+          kuro--line-undo-stack  nil)
     (kuro--line-clear-overlay)
     (kuro--send-key (concat text "\r"))
     (kuro--schedule-immediate-render)))
@@ -318,9 +318,7 @@ send does not leave stale visual state."
 (defun kuro--line-abort ()
   "Cancel line-mode input without sending anything to the PTY."
   (interactive)
-  (setq kuro--line-buffer "")
-  (setq kuro--line-point 0)
-  (setq kuro--line-undo-stack nil)
+  (setq kuro--line-buffer "" kuro--line-point 0 kuro--line-undo-stack nil)
   (kuro--line-clear-overlay)
   (message "kuro: line input cancelled"))
 
@@ -388,8 +386,8 @@ buffer; no match messages the user."
       (message "kuro: no history completions for %S" prefix))
      ((= (length candidates) 1)
       (kuro--line-undo-push)
-      (setq kuro--line-buffer (car candidates))
-      (setq kuro--line-point (length kuro--line-buffer))
+      (setq kuro--line-buffer (car candidates)
+            kuro--line-point  (length (car candidates)))
       (kuro--line-mode-update-display))
      (t
       (with-output-to-temp-buffer "*Completions*"
@@ -451,8 +449,8 @@ changing the line buffer."
                                     nil nil kuro--line-buffer)))
         (unless (string= match "")
           (kuro--line-undo-push)
-          (setq kuro--line-buffer match)
-          (setq kuro--line-point (length match))
+          (setq kuro--line-buffer match
+                kuro--line-point  (length match))
           (kuro--line-mode-update-display)))
     (quit nil)))
 
@@ -469,9 +467,8 @@ backward through `kuro--line-history' (index 0 = most recent)."
   (interactive)
   (when kuro--line-history
     (if (= kuro--line-history-idx -1)
-        (progn
-          (setq kuro--line-history-stash kuro--line-buffer)
-          (setq kuro--line-history-idx 0))
+        (setq kuro--line-history-stash kuro--line-buffer
+              kuro--line-history-idx   0)
       (setq kuro--line-history-idx
             (min (1+ kuro--line-history-idx)
                  (1- (length kuro--line-history)))))

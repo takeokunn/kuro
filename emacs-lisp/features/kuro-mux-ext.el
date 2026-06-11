@@ -44,9 +44,6 @@
 (defvar kuro-mux-tab-bar-mode)
 (defvar kuro-mux-monitor-activity-debounce)
 (defvar kuro-mux-mode-line-segment)
-(defvar kuro-mux--sessions)
-(defvar kuro-mux--zoom-config)
-(defvar kuro-mux--last-session)
 (defvar kuro-mux--name)
 (defvar kuro-mux--command)
 (defvar kuro-mux--directory)
@@ -434,85 +431,49 @@ or missing :command) are silently dropped."
                 (and (listp spec) (plist-member spec :command)))
               raw))
 
-
 ;;;; Prefix keymap (tmux-style)
+
+(defconst kuro-mux--prefix-bindings
+  '(("n"     . kuro-mux-next)                  ("p"     . kuro-mux-prev)
+    ("s"     . kuro-mux-switch-by-name)         ("L"     . kuro-mux-last)
+    ("o"     . kuro-mux-other-window)           ("C-o"   . kuro-mux-rotate-panes)
+    ("M-o"   . kuro-mux-rotate-panes-backward)  ("f"     . kuro-mux-find-window)
+    ("%"     . kuro-mux-split-right)            ("\""    . kuro-mux-split-below)
+    ("c"     . kuro-mux-create)                 (","     . kuro-mux-rename)
+    ("$"     . kuro-mux-rename)                 ("d"     . kuro-mux-detach)
+    ("z"     . kuro-mux-zoom)                   ("&"     . kuro-mux-kill)
+    ("S"     . kuro-mux-save-layout)            ("R"     . kuro-mux-restore-layout)
+    ("SPC"   . kuro-mux-next-layout)            ("M-SPC" . kuro-mux-select-layout)
+    ("M-{"   . kuro-mux-previous-layout)        ("M-}"   . kuro-mux-next-layout)
+    ("{"     . kuro-mux-swap-pane-backward)     ("}"     . kuro-mux-swap-pane-forward)
+    ("!"     . kuro-mux-break-pane)             ("@"     . kuro-mux-join-pane)
+    ("["     . kuro-copy-mode)                  ("/"     . kuro-search-forward)
+    ("t"     . kuro-mux-clock)                  ("x"     . kuro-mux-send-to-session)
+    ("B"     . kuro-mux-broadcast-toggle)       ("P"     . kuro-mux-pipe-pane)
+    ("m"     . kuro-mux-monitor-activity-toggle) ("M"    . kuro-mux-monitor-silence)
+    ("w"     . kuro-list-sessions)              ("?"     . kuro-mux-help))
+  "Simple key→command binding table for `kuro-mux-prefix-map'.")
+
+(defconst kuro-mux--prefix-resize-bindings
+  '(("<up>" up 2) ("<down>" down 2) ("<left>" left 5) ("<right>" right 5))
+  "Arrow resize entries (key direction delta) for `kuro-mux-prefix-map'.")
 
 (defvar kuro-mux-prefix-map
   (let ((map (make-sparse-keymap)))
-    ;; Session navigation
-    (define-key map (kbd "n") #'kuro-mux-next)
-    (define-key map (kbd "p") #'kuro-mux-prev)
-    (define-key map (kbd "s") #'kuro-mux-switch-by-name)
-    ;; Other visible kuro pane (tmux: prefix + o)
-    (define-key map (kbd "o") #'kuro-mux-other-window)
-    ;; Rotate buffers through pane positions (tmux: C-o forward, M-o backward)
-    (define-key map (kbd "C-o") #'kuro-mux-rotate-panes)
-    (define-key map (kbd "M-o") #'kuro-mux-rotate-panes-backward)
-    ;; Last (most recently focused) session (tmux: prefix + L)
-    (define-key map (kbd "L") #'kuro-mux-last)
-    ;; Find session by buffer name (jump to visible window or switch)
-    (define-key map (kbd "f") #'kuro-mux-find-window)
-    ;; Session selection by index (tmux: prefix + 1-9)
+    (dolist (b kuro-mux--prefix-bindings)
+      (define-key map (kbd (car b)) (cdr b)))
     (dotimes (i 9)
       (let ((n (1+ i)))
         (define-key map (kbd (number-to-string n))
           (lambda () (interactive) (kuro-mux-select-by-index n)))))
-    ;; Pane resize via arrow keys (tmux: prefix + arrow; 2 rows / 5 cols per press)
-    (define-key map (kbd "<up>")    (lambda () (interactive) (kuro-mux-resize-pane 'up    2)))
-    (define-key map (kbd "<down>")  (lambda () (interactive) (kuro-mux-resize-pane 'down  2)))
-    (define-key map (kbd "<left>")  (lambda () (interactive) (kuro-mux-resize-pane 'left  5)))
-    (define-key map (kbd "<right>") (lambda () (interactive) (kuro-mux-resize-pane 'right 5)))
-    ;; Pane splitting — mnemonic matches tmux: % vertical, \" horizontal
-    (define-key map (kbd "%") #'kuro-mux-split-right)
-    (define-key map (kbd "\"") #'kuro-mux-split-below)
-    ;; Session management
-    (define-key map (kbd "c") #'kuro-mux-create)
-    (define-key map (kbd ",") #'kuro-mux-rename)
-    (define-key map (kbd "$") #'kuro-mux-rename)
-    ;; Layout persistence
-    (define-key map (kbd "S") #'kuro-mux-save-layout)
-    (define-key map (kbd "R") #'kuro-mux-restore-layout)
-    ;; Help
-    (define-key map (kbd "?") #'kuro-mux-help)
-    ;; Window management — detach, zoom, kill (tmux: d/z/&)
-    (define-key map (kbd "d") #'kuro-mux-detach)
-    (define-key map (kbd "z") #'kuro-mux-zoom)
-    (define-key map (kbd "&") #'kuro-mux-kill)
-    ;; Copy/browse and search
-    (define-key map (kbd "[") #'kuro-copy-mode)
-    (define-key map (kbd "/") #'kuro-search-forward)
-    ;; Clock display (tmux: t)
-    (define-key map (kbd "t") #'kuro-mux-clock)
-    ;; Send-keys: send text to a named session (tmux: send-keys)
-    (define-key map (kbd "x") #'kuro-mux-send-to-session)
-    ;; Broadcast mode: synchronize input to all sessions (tmux: :setw synchronize-panes)
-    (define-key map (kbd "B") #'kuro-mux-broadcast-toggle)
-    ;; Swap pane: move current buffer to adjacent window (tmux: prefix + { / })
-    (define-key map (kbd "{") #'kuro-mux-swap-pane-backward)
-    (define-key map (kbd "}") #'kuro-mux-swap-pane-forward)
-    ;; Break / join pane (tmux: ! / @)
-    (define-key map (kbd "!") #'kuro-mux-break-pane)
-    (define-key map (kbd "@") #'kuro-mux-join-pane)
-    ;; Session monitoring (tmux: :monitor-activity / :monitor-silence)
-    (define-key map (kbd "m") #'kuro-mux-monitor-activity-toggle)
-    (define-key map (kbd "M") #'kuro-mux-monitor-silence)
-    ;; Choose-window: show tabulated session list (tmux: prefix + w)
-    (define-key map (kbd "w") #'kuro-list-sessions)
-    ;; Layouts: Space cycles to the next preset (tmux parity); M-Space opens
-    ;; the explicit completing-read picker.  M-{ / M-} step prev / next too.
-    (define-key map (kbd "SPC")   #'kuro-mux-next-layout)
-    (define-key map (kbd "M-SPC") #'kuro-mux-select-layout)
-    (define-key map (kbd "M-{")   #'kuro-mux-previous-layout)
-    (define-key map (kbd "M-}")   #'kuro-mux-next-layout)
-    ;; Pipe-pane: toggle output capture to file (tmux: pipe-pane)
-    (define-key map (kbd "P") #'kuro-mux-pipe-pane)
+    (dolist (b kuro-mux--prefix-resize-bindings)
+      (let ((key (car b)) (dir (cadr b)) (delta (caddr b)))
+        (define-key map (kbd key)
+          (lambda () (interactive) (kuro-mux-resize-pane dir delta)))))
     map)
   "Prefix keymap for kuro-mux multiplexer commands.
 Bound under `kuro-mux-prefix-key' by `kuro-mux-install-keys'.
-Modeled on the tmux prefix-key workflow: navigate with n/p, split
-with %/\\\", create with c, rename with `,', window management with
-d (detach) / z (zoom) / & (kill), persist with S/R, enter
-copy/browse mode with [, search with /, break/join pane with !/\\@.")
+See `kuro-mux--prefix-bindings' for the full command table.")
 
 (defcustom kuro-mux-prefix-key "C-c m"
   "Key sequence (a `kbd' string) under which `kuro-mux-prefix-map' is bound.

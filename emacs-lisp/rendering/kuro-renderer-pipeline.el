@@ -351,11 +351,11 @@ Return the update list.  Appends one timing line to *kuro-perf* per
 Called after every render pipeline invocation regardless of debug mode.
 When UPDATE-LIST is nil, eviction is skipped: no new dirty rows implies no
 new CJK entries, so `hash-table-count' is not worth calling."
-  (if update-list
-      (progn
-        (kuro--evict-stale-col-to-buf-entries update-list)
-        (setq kuro--last-dirty-count (length update-list)))
-    (setq kuro--last-dirty-count 0)))
+  (setq kuro--last-dirty-count
+        (if update-list
+            (progn (kuro--evict-stale-col-to-buf-entries update-list)
+                   (length update-list))
+          0)))
 
 ;;; Adaptive frame budget
 
@@ -404,11 +404,11 @@ previous `dotimes'-10 scan (21 ops/frame) with 3 float ops/frame."
     (let ((avg (/ kuro--frame-duration-ring-sum 10.0)))
       (cond
        ((> avg kuro--budget-threshold-high)
-        (setq kuro--frame-budget-ratio (max 0.5 (- kuro--frame-budget-ratio 0.05)))
-        (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))
+        (setq kuro--frame-budget-ratio      (max 0.5 (- kuro--frame-budget-ratio 0.05))
+              kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))
        ((< avg kuro--budget-threshold-low)
-        (setq kuro--frame-budget-ratio (min 0.8 (+ kuro--frame-budget-ratio 0.02)))
-        (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))))))
+        (setq kuro--frame-budget-ratio      (min 0.8 (+ kuro--frame-budget-ratio 0.02))
+              kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))))))
 
 ;;; Pipeline entry point
 

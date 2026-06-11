@@ -400,86 +400,49 @@ Inherits from `kuro--keymap' (semi-char) but overrides self-insert, RET,
 DEL/backspace, C-k, and C-g to operate on the local line buffer instead
 of forwarding to the PTY.")
 
+(defconst kuro--line-mode-bindings
+  '(;; commit / abort / newline
+    ("C-m"     . kuro--line-commit)         ("C-j"     . kuro--line-commit)
+    ("C-o"     . kuro--line-newline)        ("C-g"     . kuro--line-abort)
+    ;; delete
+    ("DEL"     . kuro--line-delete)         ("C-h"     . kuro--line-delete)
+    ("C-k"     . kuro--line-kill-line)      ("C-d"     . kuro--line-delete-char)
+    ("C-u"     . kuro--line-kill-to-bol)    ("C-w"     . kuro--line-unix-word-rubout)
+    ;; movement
+    ("C-a"     . kuro--line-beginning-of-line) ("C-e"  . kuro--line-end-of-line)
+    ("C-f"     . kuro--line-forward-char)   ("C-b"     . kuro--line-backward-char)
+    ("M-f"     . kuro--line-forward-word)   ("M-b"     . kuro--line-backward-word)
+    ;; word operations
+    ("M-d"     . kuro--line-kill-word)      ("M-DEL"   . kuro--line-backward-kill-word)
+    ("M-u"     . kuro--line-upcase-word)    ("M-l"     . kuro--line-downcase-word)
+    ("M-c"     . kuro--line-capitalize-word) ("M-t"    . kuro--line-transpose-words)
+    ;; misc editing
+    ("C-t"     . kuro--line-transpose-chars) ("C-q"   . kuro--line-quoted-insert)
+    ("C-/"     . kuro--line-undo)           ("C-_"     . kuro--line-undo)
+    ("C-y"     . kuro--line-yank)           ("M-y"     . kuro--line-yank-pop)
+    ("M-."     . kuro--line-yank-last-arg)  ("M-_"     . kuro--line-yank-last-arg)
+    ;; history navigation
+    ("M-p"     . kuro--line-history-prev)   ("M-n"     . kuro--line-history-next)
+    ("C-p"     . kuro--line-history-prev)   ("C-n"     . kuro--line-history-next)
+    ("M-<"     . kuro--line-goto-history-oldest) ("M->" . kuro--line-goto-history-newest)
+    ;; completion / search / abbrev
+    ("TAB"     . kuro--line-complete)       ("M-/"     . kuro--line-complete-history)
+    ("C-r"     . kuro--line-history-search) ("C-c C-r" . kuro-line-minibuffer-send)
+    ("M-SPC"   . kuro--line-expand-abbrev)  ("C-x C-e" . kuro--line-edit-in-buffer))
+  "Key→command binding table for `kuro--line-mode-keymap'.
+Vector-keyed special bindings ([remap self-insert-command], [return],
+[backspace]) are installed directly in `kuro--build-line-mode-keymap'.")
+
 (defun kuro--build-line-mode-keymap ()
-  "Build `kuro--line-mode-keymap' from the current `kuro--keymap'.
+  "Build `kuro--line-mode-keymap' from `kuro--keymap'.
 Must be called after `kuro--build-keymap' so the parent is up to date."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map kuro--keymap)
-    ;; Printable characters accumulate locally
     (define-key map [remap self-insert-command] #'kuro--line-self-insert)
-    ;; RET commits the line
     (define-key map [return]    #'kuro--line-commit)
-    (define-key map (kbd "C-m") #'kuro--line-commit)
-    ;; C-j (LFD) commits too — readline accept-line parity
-    (define-key map (kbd "C-j") #'kuro--line-commit)
-    ;; C-o inserts a literal newline without sending (multi-line composition)
-    (define-key map (kbd "C-o") #'kuro--line-newline)
-    ;; Backspace removes last char from accumulator
     (define-key map [backspace] #'kuro--line-delete)
-    (define-key map (kbd "DEL") #'kuro--line-delete)
-    (define-key map (kbd "C-h") #'kuro--line-delete)
-    ;; C-k clears the accumulator
-    (define-key map (kbd "C-k") #'kuro--line-kill-line)
-    ;; C-g cancels without sending
-    (define-key map (kbd "C-g") #'kuro--line-abort)
-    ;; C-c C-r: read via minibuffer (supports IME/DDSKK/mozc, command history)
-    (define-key map (kbd "C-c C-r") #'kuro-line-minibuffer-send)
-    ;; M-p/M-n: navigate overlay-path history (older/newer)
-    (define-key map (kbd "M-p") #'kuro--line-history-prev)
-    (define-key map (kbd "M-n") #'kuro--line-history-next)
-    ;; TAB: complete current input (history multi-match or custom completion fn)
-    (define-key map (kbd "TAB") #'kuro--line-complete)
-    ;; M-/: complete line buffer from history (fish-style single-best match)
-    (define-key map (kbd "M-/") #'kuro--line-complete-history)
-    ;; C-r: interactive history search via completing-read
-    (define-key map (kbd "C-r") #'kuro--line-history-search)
-    ;; C-a/C-e: BOL/EOL movement
-    (define-key map (kbd "C-a") #'kuro--line-beginning-of-line)
-    (define-key map (kbd "C-e") #'kuro--line-end-of-line)
-    ;; C-f/C-b: character movement
-    (define-key map (kbd "C-f") #'kuro--line-forward-char)
-    (define-key map (kbd "C-b") #'kuro--line-backward-char)
-    ;; M-f/M-b: word movement
-    (define-key map (kbd "M-f") #'kuro--line-forward-word)
-    (define-key map (kbd "M-b") #'kuro--line-backward-word)
-    ;; M-d/M-DEL: word kill forward/backward
-    (define-key map (kbd "M-d")   #'kuro--line-kill-word)
-    (define-key map (kbd "M-DEL") #'kuro--line-backward-kill-word)
-    ;; C-d: delete forward char
-    (define-key map (kbd "C-d") #'kuro--line-delete-char)
-    ;; C-u: kill to BOL
-    (define-key map (kbd "C-u") #'kuro--line-kill-to-bol)
-    ;; C-t: transpose chars
-    (define-key map (kbd "C-t") #'kuro--line-transpose-chars)
-    ;; C-q: quoted-insert — read next key literally (embed TAB/ESC/CR)
-    (define-key map (kbd "C-q") #'kuro--line-quoted-insert)
-    ;; C-y/M-y: yank from kill-ring / rotate yank
-    (define-key map (kbd "C-y") #'kuro--line-yank)
-    (define-key map (kbd "M-y") #'kuro--line-yank-pop)
-    ;; C-/ C-_: undo
-    (define-key map (kbd "C-/") #'kuro--line-undo)
-    (define-key map (kbd "C-_") #'kuro--line-undo)
-    ;; C-w: unix-word-rubout (bash-style: kills to nearest whitespace)
-    (define-key map (kbd "C-w") #'kuro--line-unix-word-rubout)
-    ;; M-u/M-l/M-c: upcase/downcase/capitalize word
-    (define-key map (kbd "M-u") #'kuro--line-upcase-word)
-    (define-key map (kbd "M-l") #'kuro--line-downcase-word)
-    (define-key map (kbd "M-c") #'kuro--line-capitalize-word)
-    ;; M-t: transpose words
-    (define-key map (kbd "M-t") #'kuro--line-transpose-words)
-    ;; C-p/C-n: history aliases (same as M-p/M-n; common readline muscle memory)
-    (define-key map (kbd "C-p") #'kuro--line-history-prev)
-    (define-key map (kbd "C-n") #'kuro--line-history-next)
-    ;; M-</M->: jump to oldest/newest history entry (readline boundary navigation)
-    (define-key map (kbd "M-<") #'kuro--line-goto-history-oldest)
-    (define-key map (kbd "M->") #'kuro--line-goto-history-newest)
-    ;; M-SPC: expand abbreviation before point (kuro-line-abbrev-alist)
-    (define-key map (kbd "M-SPC") #'kuro--line-expand-abbrev)
-    ;; M-./M-_: yank last argument of previous history entry (readline yank-last-arg)
-    (define-key map (kbd "M-.") #'kuro--line-yank-last-arg)
-    (define-key map (kbd "M-_") #'kuro--line-yank-last-arg)
-    ;; C-x C-e: edit line buffer in a full Emacs text buffer (readline edit-and-execute)
-    (define-key map (kbd "C-x C-e") #'kuro--line-edit-in-buffer)
+    (dolist (b kuro--line-mode-bindings)
+      (define-key map (kbd (car b)) (cdr b)))
     (setq kuro--line-mode-keymap map)
     map))
 

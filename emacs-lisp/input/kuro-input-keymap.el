@@ -242,6 +242,22 @@ of the xterm CSI 1;Nm form.  Mirrors `kuro--xterm-arrow-codes' key order.")
 Covers arrow keys, home/end/page/insert/delete, and scrollback viewport.
 Applied by `kuro--keymap-setup-navigation'.")
 
+(defun kuro--send-shifted-tab ()
+  "Send Shift+Tab to the PTY: KKP CSI 9;2u or legacy ESC [ Z."
+  (interactive)
+  (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+      (kuro--send-key "\e[9;2u")
+    (kuro--send-key "\e[Z"))
+  (kuro--schedule-immediate-render))
+
+(defun kuro--send-shifted-return ()
+  "Send Shift+Return to the PTY: KKP CSI 13;2u or legacy CR."
+  (interactive)
+  (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+      (kuro--send-key "\e[13;2u")
+    (kuro--send-key "\r"))
+  (kuro--schedule-immediate-render))
+
 (defun kuro--keymap-setup-navigation (map)
   "Add arrow, home, end, page, function key and modifier+arrow bindings to MAP."
   ;; Static navigation keys: arrows, home/end/page/insert/delete, scrollback
@@ -255,14 +271,14 @@ Applied by `kuro--keymap-setup-navigation'.")
   ;; Modifier + arrow keys: xterm CSI 1;Nm sequences (or KKP with flag 0x08)
   (dolist (mod kuro--xterm-modifier-codes)
     (dolist (arrow kuro--xterm-arrow-codes)
-      (let* ((dir    (car arrow))
-             (mod-sym (car mod))
+      (let* ((dir      (car arrow))
+             (mod-sym  (car mod))
              (xterm-mod (cdr mod))
-             (event  (intern (format "%s-%s" mod-sym dir)))
+             (event    (intern (format "%s-%s" mod-sym dir)))
              (xterm-seq (format "\e[1;%d%c" xterm-mod (cdr arrow)))
              ;; KKP wire modifier: shift=1→2, alt=2→3, ctrl=4→5
-             (kkp-mod   (1+ xterm-mod))
-             (kkp-cp    (cdr (assq dir kuro--kkp-arrow-codepoints))))
+             (kkp-mod  (1+ xterm-mod))
+             (kkp-cp   (cdr (assq dir kuro--kkp-arrow-codepoints))))
         (define-key map (vector event)
           (lambda () (interactive)
             (if (and kkp-cp (kuro--kkp-flag-p kuro--kkp-all-escape))
@@ -270,27 +286,11 @@ Applied by `kuro--keymap-setup-navigation'.")
               (kuro--send-key xterm-seq))
             (kuro--schedule-immediate-render))))))
 
-  ;; Shift+Tab (backtab): legacy = ESC [ Z; KKP = CSI 9;2u
-  (define-key map [backtab]
-    (lambda () (interactive)
-      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-          (kuro--send-key "\e[9;2u")
-        (kuro--send-key "\e[Z"))
-      (kuro--schedule-immediate-render)))
-  (define-key map [S-tab]
-    (lambda () (interactive)
-      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-          (kuro--send-key "\e[9;2u")
-        (kuro--send-key "\e[Z"))
-      (kuro--schedule-immediate-render)))
-
-  ;; Shift+Return: legacy = CR (same as Return); KKP = CSI 13;2u
-  (define-key map [S-return]
-    (lambda () (interactive)
-      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-          (kuro--send-key "\e[13;2u")
-        (kuro--send-key "\r"))
-      (kuro--schedule-immediate-render))))
+  ;; Shift+Tab: [backtab] (X11) and [S-tab] (some terminals) are the same event.
+  (define-key map [backtab] #'kuro--send-shifted-tab)
+  (define-key map [S-tab]   #'kuro--send-shifted-tab)
+  ;; Shift+Return: legacy = CR; KKP = CSI 13;2u
+  (define-key map [S-return] #'kuro--send-shifted-return))
 
 (defconst kuro--mouse-bindings
   '(([down-mouse-1] . kuro--mouse-press)
@@ -309,14 +309,22 @@ Applied by `kuro--keymap-setup-mouse'.")
   (pcase-dolist (`(,key . ,cmd) kuro--mouse-bindings)
     (define-key map key cmd)))
 
+(defconst kuro--yank-bindings
+  '((yank          . kuro--yank)
+    (yank-pop      . kuro--yank-pop)
+    (clipboard-yank . kuro--yank))
+  "Alist of (EMACS-CMD . KURO-CMD) remap entries for paste interception.
+Each entry remaps an Emacs yank command to its kuro equivalent so all paste
+paths go through the PTY with optional bracketed-paste wrapping.
+Applied by `kuro--keymap-setup-yank'.")
+
 (defun kuro--keymap-setup-yank (map)
-  "Add yank remapping to MAP.
+  "Add yank remapping to MAP using `kuro--yank-bindings'.
 Remaps `yank', `yank-pop', and `clipboard-yank' (Cmd+V on macOS)
 all to `kuro--yank' / `kuro--yank-pop' so paste always goes through the PTY
 with optional bracketed-paste wrapping."
-  (define-key map [remap yank]          #'kuro--yank)
-  (define-key map [remap yank-pop]      #'kuro--yank-pop)
-  (define-key map [remap clipboard-yank] #'kuro--yank))
+  (dolist (b kuro--yank-bindings)
+    (define-key map (vector 'remap (car b)) (cdr b))))
 
 (defun kuro--keymap-apply-exceptions (map)
   "Remove exception keys from MAP per `kuro-keymap-exceptions'.

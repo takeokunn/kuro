@@ -486,5 +486,38 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
   (should (assq 'left  kuro--kkp-arrow-codepoints))
   (should (assq 'right kuro--kkp-arrow-codepoints)))
 
+;;; Group 18: kuro--yank-bindings table + named shift helpers
+
+(ert-deftest kuro-input-keymap--g18-yank-bindings-non-empty ()
+  "`kuro--yank-bindings' must have at least 3 entries."
+  (should (>= (length kuro--yank-bindings) 3)))
+
+(ert-deftest kuro-input-keymap--g18-yank-bindings-all-commands-bound ()
+  "Every target command in `kuro--yank-bindings' must be a bound function symbol."
+  (dolist (b kuro--yank-bindings)
+    (should (fboundp (cdr b)))))
+
+(ert-deftest kuro-input-keymap--g18-yank-bindings-installs-all ()
+  "`kuro--keymap-setup-yank' installs every remap from `kuro--yank-bindings'."
+  (let ((map (make-sparse-keymap)))
+    (kuro--keymap-setup-yank map)
+    (dolist (b kuro--yank-bindings)
+      (should (eq (lookup-key map (vector 'remap (car b)))
+                  (cdr b))))))
+
+(ert-deftest kuro-input-keymap--g18-backtab-and-stab-share-same-command ()
+  "[backtab] and [S-tab] must both map to `kuro--send-shifted-tab'."
+  (let ((map (kuro--build-keymap)))
+    (should (eq (lookup-key map [backtab]) #'kuro--send-shifted-tab))
+    (should (eq (lookup-key map [S-tab])   #'kuro--send-shifted-tab))))
+
+(ert-deftest kuro-input-keymap--g18-send-shifted-tab-is-interactive ()
+  "`kuro--send-shifted-tab' must be an interactive command."
+  (should (commandp #'kuro--send-shifted-tab)))
+
+(ert-deftest kuro-input-keymap--g18-send-shifted-return-is-interactive ()
+  "`kuro--send-shifted-return' must be an interactive command."
+  (should (commandp #'kuro--send-shifted-return)))
+
 (provide 'kuro-input-keymap-test-2)
 ;;; kuro-input-keymap-test-2.el ends here

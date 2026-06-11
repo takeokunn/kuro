@@ -384,6 +384,27 @@
        (should (= (length kuro--line-history) 201))))))
 
 
+;;; Group 16 — kuro--line-mode-bindings table invariants
+
+(ert-deftest kuro-input-mode-test-line-mode-bindings-all-symbols-bound ()
+  "Every command in `kuro--line-mode-bindings' must be a bound function symbol."
+  (dolist (b kuro--line-mode-bindings)
+    (should (fboundp (cdr b)))))
+
+(ert-deftest kuro-input-mode-test-line-mode-bindings-non-empty ()
+  "`kuro--line-mode-bindings' must have at least 30 entries."
+  (should (>= (length kuro--line-mode-bindings) 30)))
+
+(ert-deftest kuro-input-mode-test-line-mode-bindings-installs-all ()
+  "`kuro--build-line-mode-keymap' installs every entry from `kuro--line-mode-bindings'."
+  (kuro-input-mode-test--with-buffer
+   (kuro--build-keymap)
+   (kuro--build-line-mode-keymap)
+   (dolist (b kuro--line-mode-bindings)
+     (should (eq (lookup-key kuro--line-mode-keymap (kbd (car b)))
+                 (cdr b))))))
+
+
 (provide 'kuro-input-mode-test-2)
 
 ;;; kuro-input-mode-test-2.el ends here

@@ -373,5 +373,29 @@ kuro--shutdown must NOT be called."
           (should shutdown-called)
           (should-not detach-called))))))
 
+;;; ── Group 4c: kuro--install-and-load-module ─────────────────────────────────
+
+(ert-deftest kuro-lifecycle--install-and-load-calls-install-fn ()
+  "`kuro--install-and-load-module' calls INSTALL-FN exactly once."
+  (let ((called 0))
+    (cl-letf (((symbol-function 'kuro-module-load)    #'ignore)
+              ((symbol-function 'kuro--module-loadable-p) (lambda () t)))
+      (kuro--install-and-load-module (lambda () (setq called (1+ called))) "test")
+      (should (= called 1)))))
+
+(ert-deftest kuro-lifecycle--install-and-load-returns-t-when-loadable ()
+  "`kuro--install-and-load-module' returns t when `kuro--module-loadable-p' is t."
+  (cl-letf (((symbol-function 'kuro-module-load)      #'ignore)
+            ((symbol-function 'kuro--module-loadable-p) (lambda () t)))
+    (should (kuro--install-and-load-module #'ignore "test"))))
+
+(ert-deftest kuro-lifecycle--install-and-load-errors-when-not-loadable ()
+  "`kuro--install-and-load-module' signals an error when module cannot be loaded."
+  (cl-letf (((symbol-function 'kuro-module-load)      #'ignore)
+            ((symbol-function 'kuro--module-loadable-p) (lambda () nil)))
+    (should-error
+     (kuro--install-and-load-module #'ignore "bad-install")
+     :type 'error)))
+
 (provide 'kuro-lifecycle-test)
 ;;; kuro-lifecycle-test.el ends here

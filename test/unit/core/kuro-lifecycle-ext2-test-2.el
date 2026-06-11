@@ -507,6 +507,37 @@ calls switch-to-buffer with the newly created buffer."
     (should (integerp (cdr dims)))))
 
 
+;;; ── Group 33: kuro--shell-integration-dir / kuro--setup-shell-integration-env / kuro--most-recent-buffer ──
+
+(ert-deftest kuro-lifecycle--shell-integration-dir-nil-when-disabled ()
+  "`kuro--shell-integration-dir' returns nil when `kuro-shell-integration' is nil."
+  (let ((kuro-shell-integration nil))
+    (should (null (kuro--shell-integration-dir)))))
+
+(ert-deftest kuro-lifecycle--setup-shell-integration-env-unsets-when-dir-nil ()
+  "`kuro--setup-shell-integration-env' clears the env var when dir is nil."
+  (let ((kuro-shell-integration nil)
+        (captured :not-set))
+    (cl-letf (((symbol-function 'setenv)
+               (lambda (_var val) (setq captured val))))
+      (kuro--setup-shell-integration-env)
+      (should (null captured)))))
+
+(ert-deftest kuro-lifecycle--most-recent-buffer-nil-when-no-kuro-buffers ()
+  "`kuro--most-recent-buffer' returns nil when no buffer is in kuro-mode."
+  (cl-letf (((symbol-function 'buffer-list) (lambda () nil)))
+    (should (null (kuro--most-recent-buffer)))))
+
+(ert-deftest kuro-lifecycle--attach-buffer-returns-buffer-with-correct-name ()
+  "`kuro--attach-buffer' creates a buffer named via `kuro--session-buffer-name'."
+  (cl-letf (((symbol-function 'kuro--show-buffer-if-interactive)
+             (lambda (buf) buf)))
+    (let ((buf (kuro--attach-buffer 7)))
+      (unwind-protect
+          (should (string-match-p "kuro<7>" (buffer-name buf)))
+        (kill-buffer buf)))))
+
+
 (provide 'kuro-lifecycle-ext2-test-2)
 
 ;;; kuro-lifecycle-ext2-test-2.el ends here

@@ -274,6 +274,46 @@
        (kuro--line-load-history-entry 0)
        (should called)))))
 
+;;; Group 40 — kuro--line-last-word + kuro--line-undo-push
+
+(ert-deftest kuro-input-mode-test-line-last-word-simple ()
+  "`kuro--line-last-word' returns the last whitespace-delimited token."
+  (should (equal (kuro--line-last-word "git commit") "commit")))
+
+(ert-deftest kuro-input-mode-test-line-last-word-trailing-space ()
+  "`kuro--line-last-word' strips trailing whitespace before splitting."
+  (should (equal (kuro--line-last-word "git commit ") "commit")))
+
+(ert-deftest kuro-input-mode-test-line-last-word-single-token ()
+  "`kuro--line-last-word' returns the only token when there is one."
+  (should (equal (kuro--line-last-word "ls") "ls")))
+
+(ert-deftest kuro-input-mode-test-line-last-word-nil-input ()
+  "`kuro--line-last-word' returns nil for nil input."
+  (should-not (kuro--line-last-word nil)))
+
+(ert-deftest kuro-input-mode-test-line-last-word-only-spaces ()
+  "`kuro--line-last-word' returns nil when the string contains only spaces."
+  (should-not (kuro--line-last-word "   ")))
+
+(ert-deftest kuro-input-mode-test-line-undo-push-grows-stack ()
+  "`kuro--line-undo-push' pushes current (buffer . point) onto the undo stack."
+  (kuro-input-mode-test--with-buffer
+    (setq kuro--line-buffer "hello" kuro--line-point 3 kuro--line-undo-stack nil)
+    (kuro--line-undo-push)
+    (should (= (length kuro--line-undo-stack) 1))
+    (should (equal (car kuro--line-undo-stack) '("hello" . 3)))))
+
+(ert-deftest kuro-input-mode-test-line-undo-push-caps-at-max-depth ()
+  "`kuro--line-undo-push' trims the stack to `kuro--line-undo-max-depth'."
+  (kuro-input-mode-test--with-buffer
+    (let ((kuro--line-undo-max-depth 2))
+      (setq kuro--line-undo-stack nil)
+      (setq kuro--line-buffer "a" kuro--line-point 1) (kuro--line-undo-push)
+      (setq kuro--line-buffer "b" kuro--line-point 1) (kuro--line-undo-push)
+      (setq kuro--line-buffer "c" kuro--line-point 1) (kuro--line-undo-push)
+      (should (= (length kuro--line-undo-stack) 2)))))
+
 (provide 'kuro-input-mode-edit-test-2)
 
 ;;; kuro-input-mode-edit-test-2.el ends here

@@ -484,6 +484,39 @@ for named face registration: bold, italic, dim, and strikethrough must not alias
     (should (eq removed 'old))
     (should (null cookie))))
 
+;;; Group 20: kuro--get-cached-face-raw--miss — cache insertion and FIFO eviction
+
+(ert-deftest kuro-faces-test--cache-miss-stores-face ()
+  "`kuro--get-cached-face-raw--miss' stores the new face in `kuro--face-cache'."
+  (let ((kuro--face-cache (make-hash-table :test 'equal)))
+    (kuro--get-cached-face-raw--miss kuro--ffi-color-default kuro--ffi-color-default 0 0)
+    (should (= (hash-table-count kuro--face-cache) 1))))
+
+(ert-deftest kuro-faces-test--cache-miss-returns-face-plist ()
+  "`kuro--get-cached-face-raw--miss' returns a non-nil face value."
+  (let ((kuro--face-cache (make-hash-table :test 'equal)))
+    (let ((face (kuro--get-cached-face-raw--miss
+                 kuro--ffi-color-default kuro--ffi-color-default 0 0)))
+      (should face))))
+
+(ert-deftest kuro-faces-test--cache-miss-lookup-key-vector-correct ()
+  "`kuro--get-cached-face-raw--miss' stores under a key vector matching the inputs."
+  (let ((kuro--face-cache (make-hash-table :test 'equal)))
+    (kuro--get-cached-face-raw--miss #x00FF0000 #x000000FF #x01 0)
+    (should (gethash (vector #x00FF0000 #x000000FF #x01 0) kuro--face-cache))))
+
+(ert-deftest kuro-faces-test--cache-miss-evicts-when-over-limit ()
+  "`kuro--get-cached-face-raw--miss' evicts entries when cache exceeds max size."
+  (let* ((kuro--face-cache (make-hash-table :test 'equal))
+         (kuro--face-cache-max-size 4)
+         (kuro--face-cache-evict-fraction 0.5))
+    ;; Fill cache just past the limit
+    (dotimes (i 5)
+      (puthash (vector i 0 0 0) t kuro--face-cache))
+    (kuro--get-cached-face-raw--miss kuro--ffi-color-default kuro--ffi-color-default 0 0)
+    ;; After eviction, cache should be smaller than 5 + 1 = 6
+    (should (< (hash-table-count kuro--face-cache) 6))))
+
 (provide 'kuro-faces-test-2)
 
 ;;; kuro-faces-test-2.el ends here

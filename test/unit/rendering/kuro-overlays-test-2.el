@@ -379,6 +379,58 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
       (should (null kuro--image-overlays))
       (should-not kuro--has-images))))
 
+;;; Group 19: kuro--ffi-face-default-p — pure predicate coverage
+
+(ert-deftest kuro-overlays-ffi-face-default-p-all-defaults ()
+  "`kuro--ffi-face-default-p' returns t when all args are the \"default\" sentinel."
+  (should (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 0 0)))
+
+(ert-deftest kuro-overlays-ffi-face-default-p-non-default-fg ()
+  "`kuro--ffi-face-default-p' returns nil when fg differs from the sentinel."
+  (should-not (kuro--ffi-face-default-p #x00FF0000 kuro--ffi-color-default 0 0)))
+
+(ert-deftest kuro-overlays-ffi-face-default-p-non-default-bg ()
+  "`kuro--ffi-face-default-p' returns nil when bg differs from the sentinel."
+  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default #x000000FF 0 0)))
+
+(ert-deftest kuro-overlays-ffi-face-default-p-non-zero-flags ()
+  "`kuro--ffi-face-default-p' returns nil when flags is non-zero (logior short-circuit)."
+  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 1 0)))
+
+(ert-deftest kuro-overlays-ffi-face-default-p-non-zero-ul-color ()
+  "`kuro--ffi-face-default-p' returns nil when ul-color-enc is non-zero."
+  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 0 #x00FF0000)))
+
+(ert-deftest kuro-overlays-ffi-face-default-p-flags-and-ul-both-nonzero ()
+  "`kuro--ffi-face-default-p' returns nil when both flags and ul-color-enc are non-zero."
+  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 3 5)))
+
+;;; Group 20: kuro--ffi-face-has-visual-effects-p — blink/hidden flags
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-zero-flags ()
+  "`kuro--ffi-face-has-visual-effects-p' returns nil for flags = 0."
+  (should-not (kuro--ffi-face-has-visual-effects-p 0)))
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-blink-slow ()
+  "`kuro--ffi-face-has-visual-effects-p' detects slow-blink flag."
+  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-blink-slow)))
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-blink-fast ()
+  "`kuro--ffi-face-has-visual-effects-p' detects fast-blink flag."
+  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-blink-fast)))
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-hidden ()
+  "`kuro--ffi-face-has-visual-effects-p' detects hidden (invisible) flag."
+  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-hidden)))
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-bold-only-is-false ()
+  "`kuro--ffi-face-has-visual-effects-p' returns nil for bold-only (no blink/hidden)."
+  (should-not (kuro--ffi-face-has-visual-effects-p #x01)))
+
+(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-combined ()
+  "`kuro--ffi-face-has-visual-effects-p' detects blink when combined with other flags."
+  (should (kuro--ffi-face-has-visual-effects-p (logior #x01 kuro--sgr-flag-blink-slow))))
+
 (provide 'kuro-overlays-test-2)
 
 ;;; kuro-overlays-test-2.el ends here

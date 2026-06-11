@@ -48,38 +48,33 @@
 (defun kuro--line-kill-word ()
   "Kill from `kuro--line-point' to the end of the next word (M-d)."
   (interactive)
-  (let* ((s   kuro--line-buffer)
-         (p   kuro--line-point)
-         (end (kuro--line-skip-word-fwd s (kuro--line-skip-non-word-fwd s p))))
+  (let* ((p   kuro--line-point)
+         (end (kuro--line-skip-word-fwd kuro--line-buffer
+                 (kuro--line-skip-non-word-fwd kuro--line-buffer p))))
     (kuro--with-line-edit-undo
-     (setq kuro--line-buffer (concat (substring s 0 p) (substring s end))))))
+     (kuro--line-splice p end "" p))))
 
 (defun kuro--line-backward-kill-word ()
   "Kill from the start of the previous word to `kuro--line-point' (M-DEL)."
   (interactive)
-  (let* ((s     kuro--line-buffer)
-         (p     kuro--line-point)
-         (start (kuro--line-skip-word-bwd s (kuro--line-skip-non-word-bwd s p))))
+  (let* ((p     kuro--line-point)
+         (start (kuro--line-skip-word-bwd kuro--line-buffer
+                   (kuro--line-skip-non-word-bwd kuro--line-buffer p))))
     (kuro--with-line-edit-undo
-     (setq kuro--line-buffer (concat (substring s 0 start) (substring s p)))
-     (setq kuro--line-point start))))
+     (kuro--line-splice start p "" start))))
 
 (defun kuro--line-delete-char ()
   "Delete the character at `kuro--line-point' (C-d, forward delete)."
   (interactive)
-  (let* ((s kuro--line-buffer)
-         (p kuro--line-point))
-    (when (< p (length s))
-      (kuro--line-undo-push)
-      (setq kuro--line-buffer (concat (substring s 0 p) (substring s (1+ p))))
-      (kuro--line-mode-update-display))))
+  (when (< kuro--line-point (length kuro--line-buffer))
+    (kuro--with-line-edit-undo
+     (kuro--line-splice kuro--line-point (1+ kuro--line-point) "" kuro--line-point))))
 
 (defun kuro--line-kill-to-bol ()
   "Kill from the beginning of the line to `kuro--line-point' (C-u)."
   (interactive)
   (kuro--with-line-edit-undo
-   (setq kuro--line-buffer (substring kuro--line-buffer kuro--line-point)
-         kuro--line-point  0)))
+   (kuro--line-splice 0 kuro--line-point "" 0)))
 
 (defun kuro--line-transpose-chars ()
   "Transpose the character before point with the one at point (C-t).
@@ -91,16 +86,10 @@ At end of line, transposes the two characters before point."
                 (max 0 (1- kuro--line-point))
               kuro--line-point)))
     (when (>= p 1)
-      (kuro--line-undo-push)
-      (let ((ch-before (aref s (1- p)))
-            (ch-at     (aref s p)))
-        (setq kuro--line-buffer
-              (concat (substring s 0 (1- p))
-                      (string ch-at)
-                      (string ch-before)
-                      (substring s (1+ p))))
-        (setq kuro--line-point (min (1+ p) len))
-        (kuro--line-mode-update-display)))))
+      (kuro--with-line-edit-undo
+       (kuro--line-splice (1- p) (1+ p)
+                          (string (aref s p) (aref s (1- p)))
+                          (min (1+ p) len))))))
 
 (defun kuro--line-yank ()
   "Yank the most recent kill into the line buffer at `kuro--line-point' (C-y).
@@ -108,16 +97,11 @@ Sets `kuro--line-yank-length' so `kuro--line-yank-pop' can replace the region."
   (interactive)
   (if (null kill-ring)
       (message "kuro: kill ring is empty")
-    (kuro--line-undo-push)
     (let* ((text (current-kill 0))
-           (p kuro--line-point))
-      (setq kuro--line-buffer
-            (concat (substring kuro--line-buffer 0 p)
-                    text
-                    (substring kuro--line-buffer p)))
-      (setq kuro--line-yank-length (length text))
-      (setq kuro--line-point (+ p (length text)))
-      (kuro--line-mode-update-display))))
+           (p    kuro--line-point))
+      (kuro--with-line-edit-undo
+       (kuro--line-splice p p text (+ p (length text)))
+       (setq kuro--line-yank-length (length text))))))
 
 (defun kuro--line-yank-pop ()
   "Rotate the kill ring and replace the last yank in the line buffer (M-y).
@@ -127,18 +111,13 @@ neither."
   (interactive)
   (unless (memq last-command '(kuro--line-yank kuro--line-yank-pop))
     (user-error "kuro: yank-pop requires a previous yank"))
-  (kuro--line-undo-push)
   (let* ((prev-len kuro--line-yank-length)
-         (p kuro--line-point)
-         (start (- p prev-len))
-         (text (current-kill 1 t)))
-    (setq kuro--line-buffer
-          (concat (substring kuro--line-buffer 0 start)
-                  text
-                  (substring kuro--line-buffer p)))
-    (setq kuro--line-yank-length (length text))
-    (setq kuro--line-point (+ start (length text)))
-    (kuro--line-mode-update-display)))
+         (p        kuro--line-point)
+         (start    (- p prev-len))
+         (text     (current-kill 1 t)))
+    (kuro--with-line-edit-undo
+     (kuro--line-splice start p text (+ start (length text)))
+     (setq kuro--line-yank-length (length text)))))
 
 (defsubst kuro--line-last-word (s)
   "Return the last whitespace-delimited token in S, or nil if S has none.
@@ -174,19 +153,13 @@ State is reset whenever any other command runs."
         (kuro--line-undo-push)
         ;; Remove previously inserted arg when cycling
         (when (> kuro--line-yank-last-arg-len 0)
-          (let ((start (- kuro--line-point kuro--line-yank-last-arg-len)))
-            (setq kuro--line-buffer
-                  (concat (substring kuro--line-buffer 0 start)
-                          (substring kuro--line-buffer kuro--line-point)))
-            (setq kuro--line-point start)))
-        ;; Insert new last-arg at point
-        (setq kuro--line-buffer
-              (concat (substring kuro--line-buffer 0 kuro--line-point)
-                      word
-                      (substring kuro--line-buffer kuro--line-point)))
-        (setq kuro--line-point (+ kuro--line-point (length word)))
-        (setq kuro--line-yank-last-arg-len (length word))
-        (kuro--line-mode-update-display)))))
+          (let ((prev-start (- kuro--line-point kuro--line-yank-last-arg-len)))
+            (kuro--line-splice prev-start kuro--line-point "" prev-start)))
+        ;; Insert new last-arg at point (display CPS tail)
+        (kuro--with-line-edit
+         (kuro--line-splice kuro--line-point kuro--line-point word
+                            (+ kuro--line-point (length word)))
+         (setq kuro--line-yank-last-arg-len (length word)))))))
 
 (defun kuro--line-unix-word-rubout ()
   "Kill from `kuro--line-point' backward to the nearest whitespace (C-w).
@@ -202,8 +175,7 @@ with `kuro--line-backward-kill-word' (M-DEL) which stops at any non-word char."
     (while (and (> start 0) (not (memq (aref s (1- start)) '(?\s ?\t))))
       (setq start (1- start)))
     (kuro--with-line-edit-undo
-     (setq kuro--line-buffer (concat (substring s 0 start) (substring s p))
-           kuro--line-point  start))))
+     (kuro--line-splice start p "" start))))
 
 
 ;;;; Line mode: word-case transforms
@@ -221,11 +193,7 @@ it receives bindings for S (the line buffer), START, and END."
             (s      kuro--line-buffer))
        (when (> end start)
          (kuro--with-line-edit-undo
-          (setq kuro--line-buffer
-                (concat (substring s 0 start)
-                        ,@transform-body
-                        (substring s end)))
-          (setq kuro--line-point end))))))
+          (kuro--line-splice start end (concat ,@transform-body) end))))))
 
 (kuro--def-line-word-case kuro--line-upcase-word
   "Upcase the word from `kuro--line-point' forward (M-u)."
@@ -255,12 +223,9 @@ Point advances to the end of the second word after transposition."
             (w1      (substring s w1-start w1-end))
             (w2      (substring s w2-start w2-end)))
         (kuro--with-line-edit-undo
-         (setq kuro--line-buffer
-               (concat (substring s 0 w1-start)
-                       w2 between w1
-                       (substring s w2-end)))
-         (setq kuro--line-point
-               (+ w1-start (length w2) (length between) (length w1))))))))
+         (kuro--line-splice w1-start w2-end
+                            (concat w2 between w1)
+                            (+ w1-start (length w2) (length between) (length w1))))))))
 
 
 ;;;; Line mode: minibuffer send
@@ -386,9 +351,7 @@ Kuro buffer is no longer live."
     (kill-buffer (current-buffer))
     (when (buffer-live-p source)
       (with-current-buffer source
-        (setq kuro--line-buffer (or original ""))
-        (setq kuro--line-point (length kuro--line-buffer))
-        (kuro--line-mode-update-display)))
+        (kuro--line-set-buffer (or original ""))))
     (message "kuro: line-edit discarded")))
 
 

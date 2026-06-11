@@ -60,6 +60,15 @@ pub enum ClipboardAction {
     Query,
 }
 
+/// Desktop notification request from OSC 9 (iTerm2) or OSC 777 (`notify`).
+#[derive(Debug, Clone)]
+pub struct Notification {
+    /// Optional title — OSC 777 supplies one; the iTerm2 OSC 9 form does not.
+    pub title: Option<String>,
+    /// Notification body text.
+    pub body: String,
+}
+
 /// OSC data storage
 #[derive(Debug)]
 pub struct OscData {
@@ -71,6 +80,8 @@ pub struct OscData {
     pub hyperlink: HyperlinkState,
     /// Pending clipboard actions from OSC 52
     pub(crate) clipboard_actions: Vec<ClipboardAction>,
+    /// Pending desktop notifications from OSC 9 (iTerm2) / OSC 777
+    pub(crate) notifications: Vec<Notification>,
     /// Pending prompt mark events from OSC 133
     pub prompt_marks: Vec<PromptMarkEvent>,
     /// Whether the color palette needs to be reset (OSC 104)
@@ -89,6 +100,12 @@ pub struct OscData {
     pub(crate) eval_commands: Vec<String>,
     /// Hostname from OSC 7 (None = localhost)
     pub(crate) cwd_host: Option<String>,
+    /// Window pointer cursor shape from OSC 22 (e.g. "default", "pointer", "text").
+    /// None = no override set; Some(name) = application-requested cursor name.
+    pub(crate) pointer_shape: Option<String>,
+    /// Save/restore stack for the 256-color palette (XTPUSHCOLORS / XTPOPCOLORS).
+    /// CSI # P pushes; CSI # Q pops and restores palette_dirty; capped at 10.
+    pub(crate) palette_stack: Vec<Vec<Option<[u8; 3]>>>,
 }
 
 impl Default for OscData {
@@ -98,6 +115,7 @@ impl Default for OscData {
             cwd_dirty: false,
             hyperlink: HyperlinkState::default(),
             clipboard_actions: Vec::new(),
+            notifications: Vec::new(),
             prompt_marks: Vec::new(),
             palette_dirty: false,
             default_fg: None,
@@ -107,6 +125,8 @@ impl Default for OscData {
             default_colors_dirty: false,
             eval_commands: Vec::new(),
             cwd_host: None,
+            pointer_shape: None,
+            palette_stack: Vec::new(),
         }
     }
 }

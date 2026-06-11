@@ -109,6 +109,28 @@ impl Screen {
         }
     }
 
+    /// Mark the current cursor row as soft-wrapped.
+    /// Called when DECAWM causes overflow: the line's content continues on the next row.
+    #[inline]
+    fn mark_cursor_line_wrapped(&mut self) {
+        let row = self.cursor.row;
+        if let Some(line) = self.lines.get_mut(row) {
+            line.wrapped = true;
+        }
+    }
+
+    /// Clamp `cursor.col` to the last column and set `pending_wrap` if DECAWM is active.
+    /// Called after placing a cell that may have pushed the cursor to or past the right margin.
+    #[inline]
+    fn clamp_cursor_col_with_pending_wrap(&mut self, auto_wrap: bool) {
+        if self.cursor.col >= self.cols as usize {
+            self.cursor.col = (self.cols as usize).saturating_sub(1);
+            if auto_wrap {
+                self.cursor.pending_wrap = true;
+            }
+        }
+    }
+
     /// Line feed (LF): advances cursor down one row, scrolling up if at the bottom of the scroll region.
     /// Clears pending wrap.  Dispatches to the active screen.
     #[inline]
@@ -129,6 +151,24 @@ impl Screen {
     /// - Any explicit cursor movement clears `pending_wrap` without wrapping.
     #[inline]
     pub fn print(&mut self, c: char, attrs: SgrAttributes, auto_wrap: bool) {
+        // Write CELL at (ROW, COL) on SCREEN, mark dirty, add Wide placeholder if needed.
+        // `macro_rules!` captures `screen` by identifier so type inference works
+        // across both primary and alternate screen paths.
+        macro_rules! place_cell {
+            ($screen:ident, $row:expr, $col:expr, $cell:expr, $width:expr) => {
+                if let Some(line) = $screen.lines.get_mut($row) {
+                    line.update_cell_with($col, $cell);
+                    $screen.dirty_set.insert($row);
+                    if $width > 1 && $col + 1 < $screen.cols as usize {
+                        line.update_cell_with(
+                            $col + 1,
+                            Cell { width: CellWidth::Wide, ..Cell::default() },
+                        );
+                    }
+                }
+            };
+        }
+
         // Compute is_primary BEFORE dispatching so that scroll_up_impl
         // (called from line_feed_impl) sees the correct value even when
         // operating on the alternate screen.
@@ -141,6 +181,7 @@ impl Screen {
         if screen.cursor.pending_wrap {
             screen.cursor.pending_wrap = false;
             if auto_wrap {
+                screen.mark_cursor_line_wrapped();
                 screen.cursor.col = 0;
                 screen.line_feed_impl(attrs.background, is_primary);
             }
@@ -149,85 +190,31 @@ impl Screen {
         let row = screen.cursor.row;
         let col = screen.cursor.col;
 
-        // Determine character width using Unicode width
-        // ASCII fast-path: single comparison avoids the full Unicode lookup
+        // Determine character width — ASCII fast-path avoids the Unicode lookup.
         let width = if c.is_ascii() {
             1
         } else {
             UnicodeWidthChar::width(c).unwrap_or(1)
         };
-        let cell_width = if width > 1 {
-            CellWidth::Full
-        } else {
-            CellWidth::Half
-        };
+        let cell_width = if width > 1 { CellWidth::Full } else { CellWidth::Half };
 
-        // Check if character fits on current line
         if col + width <= screen.cols as usize {
-            // Create and update the main cell
-            let cell = Cell::with_char_and_width(c, attrs, cell_width);
-
-            if let Some(line) = screen.lines.get_mut(row) {
-                line.update_cell_with(col, cell);
-                screen.dirty_set.insert(row);
-
-                // Add placeholder cell for wide characters
-                if width > 1 && col + 1 < screen.cols as usize {
-                    let placeholder = Cell {
-                        width: CellWidth::Wide,
-                        ..Cell::default()
-                    };
-                    line.update_cell_with(col + 1, placeholder);
-                }
-            }
-
-            // Advance cursor by character width
+            // Character fits on the current line.
+            place_cell!(screen, row, col, Cell::with_char_and_width(c, attrs, cell_width), width);
             screen.cursor.col += width;
-
-            // If cursor reached beyond the last column, set pending wrap
-            if screen.cursor.col >= screen.cols as usize {
-                // Clamp to last column; set pending wrap flag only if auto-wrap is on
-                screen.cursor.col = (screen.cols as usize).saturating_sub(1);
-                if auto_wrap {
-                    screen.cursor.pending_wrap = true;
-                }
-            }
+            screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
         } else {
-            // Character doesn't fit (wide char at last column) — wrap to next line
+            // Character doesn't fit (wide char at last column) — wrap to next line.
             if auto_wrap {
+                screen.mark_cursor_line_wrapped();
                 screen.cursor.col = 0;
                 screen.line_feed_impl(attrs.background, is_primary);
             }
-
-            // Print on next line if it fits
             if width <= screen.cols as usize {
                 let new_row = screen.cursor.row;
-                let cell = Cell::with_char_and_width(c, attrs, cell_width);
-
-                if let Some(line) = screen.lines.get_mut(new_row) {
-                    line.update_cell_with(0, cell);
-                    screen.dirty_set.insert(new_row);
-
-                    // Add placeholder cell for wide characters
-                    if width > 1 && 1 < screen.cols as usize {
-                        let placeholder = Cell {
-                            width: CellWidth::Wide,
-                            ..Cell::default()
-                        };
-                        line.update_cell_with(1, placeholder);
-                    }
-                }
-
+                place_cell!(screen, new_row, 0, Cell::with_char_and_width(c, attrs, cell_width), width);
                 screen.cursor.col = width;
-
-                // If the wide char exactly fills the line, set pending wrap
-                if screen.cursor.col >= screen.cols as usize {
-                    // Clamp to last column; set pending wrap flag only if auto-wrap is on
-                    screen.cursor.col = (screen.cols as usize).saturating_sub(1);
-                    if auto_wrap {
-                        screen.cursor.pending_wrap = true;
-                    }
-                }
+                screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
             }
         }
     }
@@ -269,6 +256,7 @@ impl Screen {
             if screen.cursor.pending_wrap {
                 screen.cursor.pending_wrap = false;
                 if auto_wrap {
+                    screen.mark_cursor_line_wrapped();
                     screen.cursor.col = 0;
                     screen.line_feed_impl(attrs.background, is_primary);
                     // Row changed by line_feed — allow dirty-mark on the new row.
@@ -310,8 +298,7 @@ impl Screen {
                         // All subsequent cells on the same row are captured by the
                         // next re-encode; dirty_set.insert is idempotent but not free.
                         if row != last_marked_dirty_row {
-                            line.is_dirty = true;
-                            line.version = line.version.wrapping_add(1);
+                            line.mark_dirty_and_bump();
                             screen.dirty_set.insert(row);
                             last_marked_dirty_row = row;
                         }
@@ -322,12 +309,7 @@ impl Screen {
                 screen.cursor.col += 1;
 
                 // Check for pending wrap at end of line
-                if screen.cursor.col >= cols {
-                    screen.cursor.col = cols.saturating_sub(1);
-                    if auto_wrap {
-                        screen.cursor.pending_wrap = true;
-                    }
-                }
+                screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
             }
         }
     }
@@ -352,6 +334,68 @@ mod tests {
         let mut screen = Screen::new(24, 80);
         screen.move_cursor(5, 10);
         assert_cursor!(screen, row 5, col 10);
+    }
+
+    // ── soft-wrap tracking (Line::wrapped) ────────────────────────────────────
+
+    #[test]
+    fn auto_wrap_marks_line_soft_wrapped() {
+        let mut screen = Screen::new(3, 5); // 3 rows, 5 cols
+        // The 6th char overflows the 5-col row 0 → DECAWM auto-wrap.
+        for ch in "abcdef".chars() {
+            screen.print(ch, SgrAttributes::default(), true);
+        }
+        assert!(screen.lines[0].wrapped, "row 0 overflowed → soft-wrapped");
+        assert!(
+            !screen.lines[1].wrapped,
+            "row 1 holds the continuation, not itself wrapped"
+        );
+    }
+
+    #[test]
+    fn print_ascii_run_auto_wrap_marks_line_soft_wrapped() {
+        let mut screen = Screen::new(3, 5);
+        screen.print_ascii_run(b"abcdef", SgrAttributes::default(), true);
+        assert!(
+            screen.lines[0].wrapped,
+            "the ASCII fast path must also record soft-wrap"
+        );
+        assert!(!screen.lines[1].wrapped);
+    }
+
+    #[test]
+    fn explicit_line_feed_is_a_hard_break_not_soft_wrap() {
+        let mut screen = Screen::new(3, 5);
+        // Fill row 0 exactly (sets pending_wrap but does not wrap yet).
+        for ch in "abcde".chars() {
+            screen.print(ch, SgrAttributes::default(), true);
+        }
+        screen.line_feed(Color::Default); // explicit LF = hard break
+        assert!(
+            !screen.lines[0].wrapped,
+            "an explicit line feed must not mark the line soft-wrapped"
+        );
+    }
+
+    #[test]
+    fn no_decawm_does_not_mark_soft_wrap() {
+        let mut screen = Screen::new(3, 5);
+        for ch in "abcdef".chars() {
+            screen.print(ch, SgrAttributes::default(), false); // auto_wrap off
+        }
+        assert!(
+            !screen.lines[0].wrapped,
+            "without DECAWM the cursor clamps; no soft-wrap"
+        );
+    }
+
+    #[test]
+    fn clear_line_resets_wrapped_flag() {
+        let mut screen = Screen::new(3, 5);
+        screen.print_ascii_run(b"abcdef", SgrAttributes::default(), true);
+        assert!(screen.lines[0].wrapped);
+        screen.lines[0].clear();
+        assert!(!screen.lines[0].wrapped, "clear() resets the wrap flag");
     }
 
     #[test]
@@ -523,482 +567,6 @@ mod tests {
         );
     }
 
-    // ── PBT tests (merged from tests/unit/grid/screen/cursor.rs) ────────
+    include!("cursor_pbt.rs");
 
-    use proptest::prelude::*;
-
-    fn make_screen() -> Screen {
-        Screen::new(24, 80)
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(500))]
-
-        #[test]
-        fn prop_move_cursor_clamps_row(row in 0usize..200usize, col in 0usize..80usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(row, col);
-            prop_assert!(screen.cursor().row < screen.rows() as usize);
-        }
-
-        #[test]
-        fn prop_move_cursor_clamps_col(row in 0usize..24usize, col in 0usize..200usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(row, col);
-            prop_assert!(screen.cursor().col < screen.cols() as usize);
-        }
-
-        #[test]
-        fn prop_move_cursor_clears_pending_wrap(row in 0usize..200usize, col in 0usize..200usize) {
-            let mut screen = make_screen();
-            screen.cursor.pending_wrap = true;
-            screen.move_cursor(row, col);
-            prop_assert!(!screen.cursor().pending_wrap);
-        }
-
-        #[test]
-        fn prop_move_cursor_by_no_panic(row_offset in i32::MIN..=i32::MAX, col_offset in i32::MIN..=i32::MAX) {
-            let mut screen = make_screen();
-            screen.move_cursor_by(row_offset, col_offset);
-            prop_assert!(screen.cursor().row < screen.rows() as usize);
-            prop_assert!(screen.cursor().col < screen.cols() as usize);
-        }
-
-        #[test]
-        fn prop_move_cursor_by_clears_pending_wrap(
-            row_offset in -50i32..50i32,
-            col_offset in -50i32..50i32,
-        ) {
-            let mut screen = make_screen();
-            screen.cursor.pending_wrap = true;
-            screen.move_cursor_by(row_offset, col_offset);
-            prop_assert!(!screen.cursor().pending_wrap);
-        }
-
-        #[test]
-        fn prop_carriage_return_col_zero(start_col in 0usize..80usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(0, start_col);
-            screen.carriage_return();
-            prop_assert_eq!(screen.cursor().col, 0);
-        }
-
-        #[test]
-        fn prop_backspace_saturating(start_col in 0usize..80usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(0, start_col);
-            for _ in 0..100 { screen.backspace(); }
-            prop_assert_eq!(screen.cursor().col, 0);
-        }
-
-        #[test]
-        fn prop_tab_advances_to_stop(start_col in 0usize..79usize) {
-            let mut screen = make_screen();
-            let cols = screen.cols() as usize;
-            screen.move_cursor(0, start_col);
-            screen.tab();
-            let new_col = screen.cursor().col;
-            let expected = ((start_col / 8) + 1) * 8;
-            let expected_clamped = expected.min(cols - 1);
-            prop_assert_eq!(new_col, expected_clamped);
-        }
-
-        #[test]
-        fn prop_backspace_clears_pending_wrap(start_col in 0usize..80usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(0, start_col);
-            screen.cursor.pending_wrap = true;
-            screen.backspace();
-            prop_assert!(!screen.cursor().pending_wrap);
-        }
-
-        #[test]
-        fn prop_carriage_return_clears_pending_wrap(start_col in 0usize..80usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(0, start_col);
-            screen.cursor.pending_wrap = true;
-            screen.carriage_return();
-            prop_assert!(!screen.cursor().pending_wrap);
-        }
-
-        #[test]
-        fn prop_tab_clears_pending_wrap(start_col in 0usize..79usize) {
-            let mut screen = make_screen();
-            screen.move_cursor(0, start_col);
-            screen.cursor.pending_wrap = true;
-            screen.tab();
-            prop_assert!(!screen.cursor().pending_wrap);
-        }
-
-        #[test]
-        fn prop_move_cursor_exact_clamped_value(row in 0usize..200usize, col in 0usize..200usize) {
-            let mut screen = make_screen();
-            let rows = screen.rows() as usize;
-            let cols = screen.cols() as usize;
-            screen.move_cursor(row, col);
-            prop_assert_eq!(screen.cursor().row, row.min(rows - 1));
-            prop_assert_eq!(screen.cursor().col, col.min(cols - 1));
-        }
-    }
-
-    #[test]
-    fn pbt_line_feed_advances_row() {
-        let mut screen = make_screen();
-        assert_eq!(screen.cursor().row, 0);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 1);
-        assert_eq!(screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_line_feed_clears_pending_wrap() {
-        let mut screen = make_screen();
-        screen.move_cursor(5, 10);
-        screen.cursor.pending_wrap = true;
-        screen.line_feed(Color::Default);
-        assert!(!screen.cursor().pending_wrap);
-    }
-
-    #[test]
-    fn pbt_line_feed_at_bottom_scrolls() {
-        let mut screen = make_screen();
-        screen.move_cursor(23, 0);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 23);
-    }
-
-    #[test]
-    fn pbt_move_cursor_clamps_to_last_row() {
-        let mut screen = make_screen();
-        screen.move_cursor(9999, 0);
-        assert_eq!(screen.cursor().row, 23);
-    }
-
-    #[test]
-    fn pbt_move_cursor_clamps_to_last_col() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 9999);
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    #[test]
-    fn pbt_backspace_from_zero_stays_zero() {
-        let mut screen = make_screen();
-        screen.backspace();
-        assert_eq!(screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_backspace_decrements_col() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 10);
-        screen.backspace();
-        assert_eq!(screen.cursor().col, 9);
-    }
-
-    #[test]
-    fn pbt_tab_from_col_zero() {
-        let mut screen = make_screen();
-        screen.tab();
-        assert_eq!(screen.cursor().col, 8);
-    }
-
-    #[test]
-    fn pbt_tab_from_col_7() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 7);
-        screen.tab();
-        assert_eq!(screen.cursor().col, 8);
-    }
-
-    #[test]
-    fn pbt_tab_from_col_8() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 8);
-        screen.tab();
-        assert_eq!(screen.cursor().col, 16);
-    }
-
-    #[test]
-    fn pbt_tab_at_last_tab_stop_clamps() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 79);
-        screen.tab();
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    #[test]
-    fn pbt_move_cursor_by_positive_offsets() {
-        let mut screen = make_screen();
-        screen.move_cursor(5, 10);
-        screen.move_cursor_by(3, 5);
-        assert_eq!(screen.cursor().row, 8);
-        assert_eq!(screen.cursor().col, 15);
-    }
-
-    #[test]
-    fn pbt_move_cursor_by_negative_clamps_at_zero() {
-        let mut screen = make_screen();
-        screen.move_cursor(2, 5);
-        screen.move_cursor_by(-1000, -1000);
-        assert_eq!(screen.cursor().row, 0);
-        assert_eq!(screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_move_cursor_by_large_positive_clamps_at_max() {
-        let mut screen = make_screen();
-        screen.move_cursor_by(10000, 10000);
-        assert_eq!(screen.cursor().row, 23);
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    // ── print_ascii_run tests ───────────────────────────────────────────
-
-    #[test]
-    fn pbt_print_ascii_run_writes_bytes_at_cursor() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 0);
-        screen.print_ascii_run(b"ABC", SgrAttributes::default(), true);
-        assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'A');
-        assert_eq!(screen.get_cell(0, 1).unwrap().char(), 'B');
-        assert_eq!(screen.get_cell(0, 2).unwrap().char(), 'C');
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_advances_cursor() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 0);
-        screen.print_ascii_run(b"HELLO", SgrAttributes::default(), true);
-        assert_eq!(screen.cursor().col, 5);
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_empty_slice_is_noop() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 10);
-        screen.print_ascii_run(b"", SgrAttributes::default(), true);
-        assert_eq!(screen.cursor().col, 10);
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_wraps_at_right_margin_with_auto_wrap() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 78);
-        screen.print_ascii_run(b"XYZ", SgrAttributes::default(), true);
-        assert_eq!(screen.get_cell(0, 78).unwrap().char(), 'X');
-        assert_eq!(screen.get_cell(0, 79).unwrap().char(), 'Y');
-        assert_eq!(screen.get_cell(1, 0).unwrap().char(), 'Z');
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_no_wrap_without_auto_wrap() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 78);
-        screen.print_ascii_run(b"XYZ", SgrAttributes::default(), false);
-        assert_eq!(screen.get_cell(0, 78).unwrap().char(), 'X');
-        assert_eq!(screen.get_cell(0, 79).unwrap().char(), 'Z');
-        assert_eq!(screen.get_cell(1, 0).unwrap().char(), ' ');
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_marks_row_dirty() {
-        let mut screen = make_screen();
-        let _ = screen.take_dirty_lines();
-        screen.move_cursor(3, 0);
-        screen.print_ascii_run(b"hello", SgrAttributes::default(), true);
-        let dirty = screen.take_dirty_lines();
-        assert!(dirty.contains(&3));
-    }
-
-    #[test]
-    fn pbt_print_ascii_run_preserves_cell_count_at_line_boundary() {
-        let mut screen = Screen::new(4, 10);
-        screen.move_cursor(0, 0);
-        screen.print_ascii_run(b"1234567890", SgrAttributes::default(), true);
-        assert_eq!(screen.get_line(0).unwrap().cells.len(), 10);
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(128))]
-
-        #[test]
-        fn prop_print_ascii_run_no_panic(
-            len in 0usize..200usize,
-            start_col in 0usize..80usize,
-            auto_wrap in proptest::bool::ANY,
-        ) {
-            let mut screen = Screen::new(24, 80);
-            let bytes: Vec<u8> = (0..len).map(|i| b'A' + (i % 26) as u8).collect();
-            screen.move_cursor(0, start_col);
-            screen.print_ascii_run(&bytes, SgrAttributes::default(), auto_wrap);
-            prop_assert!(screen.cursor().row < 24);
-            prop_assert!(screen.cursor().col < 80);
-            prop_assert_eq!(screen.get_line(0).unwrap().cells.len(), 80);
-        }
-    }
-
-    // ── print() tests ───────────────────────────────────────────────────
-
-    #[test]
-    fn pbt_print_ascii_char_writes_cell() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 0);
-        screen.print('A', SgrAttributes::default(), true);
-        assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'A');
-        assert_eq!(screen.cursor().col, 1);
-    }
-
-    #[test]
-    fn pbt_print_sets_pending_wrap_at_last_column() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 79);
-        screen.print('X', SgrAttributes::default(), true);
-        assert!(screen.cursor().pending_wrap);
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    #[test]
-    fn pbt_print_no_pending_wrap_without_auto_wrap() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 79);
-        screen.print('X', SgrAttributes::default(), false);
-        assert!(!screen.cursor().pending_wrap);
-    }
-
-    #[test]
-    fn pbt_print_deferred_wrap_fires_on_next_print() {
-        let mut screen = make_screen();
-        let attrs = SgrAttributes::default();
-        screen.move_cursor(0, 79);
-        screen.print('A', attrs, true);
-        assert!(screen.cursor().pending_wrap);
-        screen.print('B', attrs, true);
-        assert_eq!(screen.cursor().row, 1);
-        assert_eq!(screen.cursor().col, 1);
-        assert_eq!(screen.get_cell(1, 0).unwrap().char(), 'B');
-    }
-
-    #[test]
-    fn pbt_print_marks_row_dirty() {
-        let mut screen = make_screen();
-        let _ = screen.take_dirty_lines();
-        screen.move_cursor(5, 0);
-        screen.print('Z', SgrAttributes::default(), true);
-        let dirty = screen.take_dirty_lines();
-        assert!(dirty.contains(&5));
-    }
-
-    #[test]
-    fn pbt_print_wide_char_places_placeholder() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 0);
-        screen.print('\u{4E2D}', SgrAttributes::default(), true);
-        assert_eq!(screen.get_cell(0, 0).unwrap().char(), '\u{4E2D}');
-        assert_eq!(screen.cursor().col, 2);
-    }
-
-    #[test]
-    fn pbt_print_wide_char_at_last_col_wraps() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 79);
-        screen.print('\u{5B57}', SgrAttributes::default(), true);
-        assert_eq!(screen.get_cell(1, 0).unwrap().char(), '\u{5B57}');
-    }
-
-    #[test]
-    fn pbt_cursor_ref_on_primary_screen() {
-        let screen = make_screen();
-        assert_eq!(screen.cursor().row, 0);
-        assert_eq!(screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_cursor_ref_on_alternate_screen() {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(b"\x1b[5;10H");
-        term.advance(b"\x1b[?1049h");
-        assert_eq!(term.screen.cursor().row, 0);
-        assert_eq!(term.screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_cursor_mut_on_primary_modifies_primary() {
-        let mut screen = make_screen();
-        screen.cursor_mut().row = 7;
-        screen.cursor_mut().col = 12;
-        assert_eq!(screen.cursor().row, 7);
-        assert_eq!(screen.cursor().col, 12);
-    }
-
-    #[test]
-    fn pbt_line_feed_outside_scroll_region_moves_down() {
-        let mut screen = make_screen();
-        screen.set_scroll_region(5, 10);
-        screen.move_cursor(2, 0);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 3);
-    }
-
-    #[test]
-    fn pbt_line_feed_below_scroll_region_does_not_scroll() {
-        let mut screen = make_screen();
-        screen.set_scroll_region(0, 10);
-        screen.move_cursor(15, 0);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 16);
-    }
-
-    #[test]
-    fn pbt_line_feed_at_screen_bottom_clamps() {
-        let mut screen = make_screen();
-        screen.move_cursor(23, 0);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 23);
-    }
-
-    #[test]
-    fn pbt_move_cursor_rel_positive_overflow_clamps() {
-        let mut screen = make_screen();
-        screen.move_cursor(20, 70);
-        screen.move_cursor_by(100, 100);
-        assert_eq!(screen.cursor().row, 23);
-        assert_eq!(screen.cursor().col, 79);
-    }
-
-    #[test]
-    fn pbt_move_cursor_rel_negative_overflow_clamps_at_origin() {
-        let mut screen = make_screen();
-        screen.move_cursor(3, 5);
-        screen.move_cursor_by(-100, -100);
-        assert_eq!(screen.cursor().row, 0);
-        assert_eq!(screen.cursor().col, 0);
-    }
-
-    #[test]
-    fn pbt_tab_from_col_exactly_at_tab_stop_jumps_to_next_stop() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 16);
-        screen.tab();
-        assert_eq!(screen.cursor().col, 24);
-    }
-
-    #[test]
-    fn pbt_line_feed_col_preserved_after_advance() {
-        let mut screen = make_screen();
-        screen.move_cursor(0, 40);
-        screen.line_feed(Color::Default);
-        assert_eq!(screen.cursor().row, 1);
-        assert_eq!(screen.cursor().col, 40);
-    }
-
-    #[test]
-    fn pbt_carriage_return_row_unchanged() {
-        let mut screen = make_screen();
-        screen.move_cursor(7, 50);
-        screen.carriage_return();
-        assert_eq!(screen.cursor().row, 7);
-        assert_eq!(screen.cursor().col, 0);
-    }
 }

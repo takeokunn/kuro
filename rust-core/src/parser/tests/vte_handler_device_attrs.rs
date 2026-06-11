@@ -20,6 +20,23 @@ fn test_csi_da1_queues_response() {
     assert_response_starts!(term, b"\x1b[?");
 }
 
+/// DA1 must advertise Sixel graphics (attribute 4) so capable apps emit Sixel.
+#[test]
+fn test_csi_da1_advertises_sixel() {
+    let term = term_with!(b"\x1b[c");
+    assert_eq!(
+        term.meta.pending_responses[0], b"\x1b[?1;2;4c",
+        "DA1 must include attribute 4 (Sixel) in its capability list"
+    );
+}
+
+/// DA1 with an explicit 0 parameter (CSI 0 c) must reply identically to CSI c.
+#[test]
+fn test_csi_da1_zero_param_same_as_bare() {
+    let term = term_with!(b"\x1b[0c");
+    assert_eq!(term.meta.pending_responses[0], b"\x1b[?1;2;4c");
+}
+
 /// DA2 (CSI > c) must queue a secondary device attribute response.
 #[test]
 fn test_csi_da2_queues_response() {
@@ -109,14 +126,26 @@ fn test_csi_dsr_queues_cursor_position() {
     );
 }
 
-/// DSR with a parameter other than 6 must be silently ignored.
+/// DSR with a parameter other than 5 / 6 must be silently ignored.
 #[test]
 fn test_csi_dsr_unknown_param_no_response() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[5n"); // param 5 — not a recognised DSR code
+    term.advance(b"\x1b[99n"); // param 99 — not a recognised DSR code
     assert!(
         term.meta.pending_responses.is_empty(),
         "DSR with unknown param must not queue a response"
+    );
+}
+
+/// DSR 5 (operating status) must reply ESC[0n ("terminal OK").
+#[test]
+fn test_csi_dsr_operating_status_ok() {
+    let mut term = TerminalCore::new(24, 80);
+    term.advance(b"\x1b[5n");
+    assert_eq!(
+        term.meta.pending_responses,
+        vec![b"\x1b[0n".to_vec()],
+        "DSR 5 must reply ESC[0n"
     );
 }
 

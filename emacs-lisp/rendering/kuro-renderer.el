@@ -97,6 +97,17 @@ Pre-computed to avoid a float multiply per rendered frame in
 
 ;;; Render loop lifecycle
 
+(defmacro kuro--recompute-budget-vars (rate)
+  "Set all five frame-budget cached variables from RATE fps.
+Used identically by `kuro--start-render-loop' and `kuro--switch-render-timer'
+to keep thresholds in sync whenever the active timer period changes."
+  `(progn
+     (setq kuro--frame-budget-seconds    (/ 1.0 ,rate))
+     (setq kuro--half-frame-interval     (/ 0.5 ,rate))
+     (setq kuro--budget-threshold-high   (* 0.9 kuro--frame-budget-seconds))
+     (setq kuro--budget-threshold-low    (* 0.5 kuro--frame-budget-seconds))
+     (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))))
+
 (defun kuro--install-render-timer (rate)
   "Cancel any existing render timer and install a new one firing at RATE fps.
 Captures the current buffer so the lambda stays bound to the right buffer
@@ -116,15 +127,9 @@ after any `with-current-buffer' context switches."
   "Start the render loop targeting the current buffer.
 Also starts the low-latency streaming idle timer when
 `kuro-streaming-latency-mode' is non-nil."
-  ;; Recompute cached blink intervals in case kuro-frame-rate changed.
   (kuro--recompute-blink-frame-intervals)
-  (setq kuro--half-frame-interval    (/ 0.5 kuro-frame-rate))
-  (setq kuro--frame-budget-seconds   (/ 1.0 kuro-frame-rate))
-  (setq kuro--budget-threshold-high  (* 0.9 kuro--frame-budget-seconds))
-  (setq kuro--budget-threshold-low   (* 0.5 kuro--frame-budget-seconds))
-  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
+  (kuro--recompute-budget-vars kuro-frame-rate)
   (kuro--install-render-timer kuro-frame-rate)
-  ;; Start the zero-delay idle timer for streaming latency reduction
   (kuro--start-stream-idle-timer))
 
 (defun kuro--stop-render-loop ()
@@ -160,11 +165,7 @@ observes the dirty count from the most recently rendered frame."
 (defun kuro--switch-render-timer (new-rate)
   "Cancel the current render timer and recreate it at NEW-RATE fps."
   (kuro--install-render-timer new-rate)
-  (setq kuro--half-frame-interval  (/ 0.5 new-rate))
-  (setq kuro--frame-budget-seconds (/ 1.0 new-rate))
-  (setq kuro--budget-threshold-high   (* 0.9 kuro--frame-budget-seconds))
-  (setq kuro--budget-threshold-low    (* 0.5 kuro--frame-budget-seconds))
-  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
+  (kuro--recompute-budget-vars new-rate)
   (kuro--recompute-blink-frame-intervals))
 
 (defun kuro--ring-pending-bell ()

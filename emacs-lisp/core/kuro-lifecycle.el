@@ -13,8 +13,8 @@
 ;; - Terminal creation: `kuro-create'
 ;; - Terminal teardown: `kuro-kill' (destroy or detach)
 ;; - Session re-attachment: `kuro-attach'
-;; - Interactive send commands: `kuro-send-string', `kuro-send-interrupt',
-;;   `kuro-send-sigstop', `kuro-send-sigquit'
+;; - Interactive send commands: `kuro-send-string', `kuro-send-region',
+;;   `kuro-send-interrupt', `kuro-send-sigstop', `kuro-send-sigquit'
 
 ;;; Code:
 
@@ -49,11 +49,118 @@
 ;; face-remap-remove-relative is provided by the C core (face-remap.el)
 (declare-function face-remap-remove-relative "face-remap" (cookie))
 
-(defconst kuro--startup-render-delay 0.05
-  "Delay in seconds before the first render after terminal startup.")
+;; kuro-bookmark.el
+(declare-function kuro--setup-bookmark "kuro-bookmark" ())
+
+;; kuro-char-width.el
+(declare-function kuro--setup-char-width-table "kuro-char-width" ())
+(declare-function kuro--setup-fontset          "kuro-char-width" ())
+
+;; kuro-color-scheme.el
+(declare-function kuro--color-scheme-install-hook   "kuro-color-scheme" ())
+(declare-function kuro--color-scheme-uninstall-hook "kuro-color-scheme" ())
+(declare-function kuro-color-scheme-refresh         "kuro-color-scheme" ())
+
+;; kuro-compilation.el
+(declare-function kuro--setup-compilation    "kuro-compilation" ())
+(declare-function kuro--teardown-compilation "kuro-compilation" ())
 
 ;; kuro-config.el
+(declare-function kuro--kuro-buffers "kuro-config" ())
+
+;; kuro-dnd.el
+(declare-function kuro--setup-dnd    "kuro-dnd" ())
+(declare-function kuro--teardown-dnd "kuro-dnd" ())
+
+;; kuro-input-paste.el — used by kuro-send-region
+(declare-function kuro--send-paste-or-raw        "kuro-input-paste" (text))
+(declare-function kuro--schedule-immediate-render "kuro-input"       ())
+
+;; kuro-faces.el
+(declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
+(declare-function kuro--remap-default-face   "kuro-faces" (fg-str bg-str))
+
+;; kuro-ffi.el
+(declare-function kuro--resize "kuro-ffi" (rows cols))
+
+;; kuro-ffi-osc.el
+(declare-function kuro--set-scrollback-max-lines "kuro-ffi-osc" (max-lines))
+
+;; kuro-hyperlinks.el
+(declare-function kuro--clear-hyperlink-overlays "kuro-hyperlinks" ())
+
+;; kuro-overlays.el
+(declare-function kuro--clear-all-image-overlays "kuro-overlays" ())
+
+;; kuro-prompt-status.el
+(declare-function kuro--ensure-left-margin           "kuro-prompt-status" ())
+(declare-function kuro--clear-prompt-status-overlays "kuro-prompt-status" ())
+
+;; kuro-core Rust FFI functions (loaded at runtime by the dynamic module)
+(declare-function kuro-core-detach        "ext:kuro-core" (session-id))
+(declare-function kuro-core-attach        "ext:kuro-core" (session-id))
+(declare-function kuro-core-list-sessions "ext:kuro-core" ())
+
+;;; Forward defvar references — defvar-local symbols used here but defined elsewhere
+
+;; kuro-config.el
+(defvar kuro-module-installation-method)
 (defvar kuro-shell-integration)
+
+;; kuro-faces.el
+(defvar kuro--font-remap-cookie nil
+  "Forward reference; `defvar-local' in kuro-faces.el.")
+
+;; kuro-input.el
+(defvar kuro--scroll-offset 0
+  "Forward reference; `defvar-local' in kuro-input.el.")
+
+;; kuro-input-mouse.el
+(defvar kuro--mouse-pixel-mode nil
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
+(defvar kuro--mouse-mode 0
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
+(defvar kuro--mouse-sgr nil
+  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
+
+;; kuro-overlays.el
+(defvar kuro--blink-overlays nil
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
+(defvar kuro--blink-overlays-slow nil
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
+(defvar kuro--blink-overlays-fast nil
+  "Forward reference; `defvar-local' in kuro-overlays.el.")
+
+;; kuro-render-buffer.el
+(defvar kuro--last-cursor-row nil
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-col nil
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-visible nil
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
+(defvar kuro--last-cursor-shape nil
+  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
+
+;; kuro-renderer.el
+(defvar kuro--cursor-marker nil
+  "Forward reference; `defvar-local' in kuro-renderer.el.")
+
+;; kuro-tui-mode.el
+(defvar kuro--tui-mode-active nil
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
+(defvar kuro--tui-mode-frame-count 0
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
+(defvar kuro--last-dirty-count 0
+  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
+
+;; kuro.el
+(defvar kuro--last-rows 0
+  "Forward reference; `defvar-local' in kuro.el.")
+(defvar kuro--last-cols 0
+  "Forward reference; `defvar-local' in kuro.el.")
+
+(defconst kuro--startup-render-delay 0.05
+  "Delay in seconds before the first render after terminal startup.")
 
 (defun kuro--shell-integration-dir ()
   "Return the directory containing kuro shell integration scripts, or nil.
@@ -199,12 +306,20 @@ The timer is a one-shot: it fires once and is not rescheduled."
                              (kuro--render-cycle))))
                        buf))
 
+(defconst kuro--session-setup-fns
+  '(kuro--setup-char-width-table
+    kuro--setup-fontset
+    kuro--ensure-left-margin
+    kuro--setup-dnd
+    kuro--setup-compilation
+    kuro--setup-bookmark
+    kuro--color-scheme-install-hook)
+  "Zero-argument setup functions called in each new session buffer.
+Run by `kuro--init-session-buffer' after the arg-based initializations.
+Does not include `kuro--reset-cursor-cache' because it is a macro.")
+
 (defun kuro--init-session-buffer (buffer rows cols)
-  "Initialize BUFFER as a kuro session display with dimensions ROWS×COLS.
-Called from both `kuro-create' (new session) and `kuro-attach' (re-attach).
-Sets up scrollback, font remapping, `char-width' table, fontset, default
-colors, and resets all cursor cache state so the first render frame
-always computes fresh cursor position from Rust."
+  "Initialize BUFFER as a kuro session display with dimensions ROWS×COLS."
   (with-current-buffer buffer
     (setq kuro--cursor-marker (point-marker)
           kuro--last-rows     rows
@@ -212,117 +327,10 @@ always computes fresh cursor position from Rust."
           kuro--scroll-offset 0)
     (kuro--set-scrollback-max-lines kuro-scrollback-size)
     (kuro--apply-font-to-buffer buffer)
-    (kuro--setup-char-width-table)
-    (kuro--setup-fontset)
     (kuro--remap-default-face kuro-color-white kuro-color-black)
     (kuro--reset-cursor-cache)
-    (kuro--ensure-left-margin)
-    (kuro--setup-dnd)
-    (kuro--setup-compilation)
-    (kuro--setup-bookmark)
-    ;; Install the global theme-change hook (idempotent via add-hook) and
-    ;; sync the current Emacs theme to this session immediately so DSR 996
-    ;; is truthful before any future theme switch.
-    (kuro--color-scheme-install-hook)
+    (mapc #'funcall kuro--session-setup-fns)
     (ignore-errors (kuro-color-scheme-refresh))))
-
-;; kuro--set-scrollback-max-lines is defined in kuro-ffi-osc.el (loaded via kuro-renderer)
-(declare-function kuro--set-scrollback-max-lines "kuro-ffi-osc" (max-lines))
-
-;; Multi-session FFI functions provided by the Rust dynamic module at runtime.
-(declare-function kuro-core-detach        "ext:kuro-core" (session-id))
-(declare-function kuro-core-attach        "ext:kuro-core" (session-id))
-(declare-function kuro-core-list-sessions "ext:kuro-core" ())
-
-;; kuro--resize is defined in kuro-ffi.el (required above); declared here for
-;; byte-compiler visibility when kuro-attach calls it before the first render.
-(declare-function kuro--resize "kuro-ffi" (rows cols))
-
-;; kuro--apply-font-to-buffer and kuro--remap-default-face are defined in kuro-faces.el
-(declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
-(declare-function kuro--remap-default-face   "kuro-faces" (fg-str bg-str))
-
-;; kuro--setup-char-width-table and kuro--setup-fontset are defined in kuro-char-width.el
-(declare-function kuro--setup-char-width-table "kuro-char-width" ())
-(declare-function kuro--setup-fontset "kuro-char-width" ())
-
-;; kuro--clear-all-image-overlays is defined in kuro-overlays.el
-(declare-function kuro--clear-all-image-overlays "kuro-overlays" ())
-
-;; kuro--clear-hyperlink-overlays is defined in kuro-hyperlinks.el
-(declare-function kuro--clear-hyperlink-overlays "kuro-hyperlinks" ())
-
-;; kuro-dnd.el
-(declare-function kuro--setup-dnd    "kuro-dnd" ())
-(declare-function kuro--teardown-dnd "kuro-dnd" ())
-
-;; kuro-compilation.el
-(declare-function kuro--setup-compilation    "kuro-compilation" ())
-(declare-function kuro--teardown-compilation "kuro-compilation" ())
-
-;; kuro-bookmark.el
-(declare-function kuro--setup-bookmark "kuro-bookmark" ())
-
-;; kuro-color-scheme.el
-(declare-function kuro--color-scheme-install-hook   "kuro-color-scheme" ())
-(declare-function kuro--color-scheme-uninstall-hook "kuro-color-scheme" ())
-(declare-function kuro-color-scheme-refresh         "kuro-color-scheme" ())
-
-;; kuro-config.el
-(declare-function kuro--kuro-buffers "kuro-config" ())
-
-;; kuro-prompt-status.el
-(declare-function kuro--ensure-left-margin           "kuro-prompt-status" ())
-(declare-function kuro--clear-prompt-status-overlays "kuro-prompt-status" ())
-
-;; Forward reference: `defvar-local' in kuro-input-mouse.el
-(defvar kuro--mouse-pixel-mode nil
-  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
-
-;; Forward declarations for `defvar-local' symbols written or tested in
-;; kuro-kill / kuro-create but defined in other modules.
-;; kuro-renderer.el
-(defvar kuro--cursor-marker nil
-  "Forward reference; `defvar-local' in kuro-renderer.el.")
-;; kuro.el
-(defvar kuro--last-rows 0
-  "Forward reference; `defvar-local' in kuro.el.")
-(defvar kuro--last-cols 0
-  "Forward reference; `defvar-local' in kuro.el.")
-;; kuro-input.el
-(defvar kuro--scroll-offset 0
-  "Forward reference; `defvar-local' in kuro-input.el.")
-;; kuro-overlays.el
-(defvar kuro--blink-overlays nil
-  "Forward reference; `defvar-local' in kuro-overlays.el.")
-(defvar kuro--blink-overlays-slow nil
-  "Forward reference; `defvar-local' in kuro-overlays.el.")
-(defvar kuro--blink-overlays-fast nil
-  "Forward reference; `defvar-local' in kuro-overlays.el.")
-;; kuro-tui-mode.el (TUI mode state)
-(defvar kuro--tui-mode-active nil
-  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
-(defvar kuro--tui-mode-frame-count 0
-  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
-(defvar kuro--last-dirty-count 0
-  "Forward reference; defvar-permanent-local in kuro-tui-mode.el.")
-;; kuro-render-buffer.el
-(defvar kuro--last-cursor-row nil
-  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
-(defvar kuro--last-cursor-col nil
-  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
-(defvar kuro--last-cursor-visible nil
-  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
-(defvar kuro--last-cursor-shape nil
-  "Forward reference; `defvar-local' in kuro-render-buffer.el.")
-;; kuro-input-mouse.el
-(defvar kuro--mouse-mode 0
-  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
-(defvar kuro--mouse-sgr nil
-  "Forward reference; `defvar-local' in kuro-input-mouse.el.")
-;; kuro-faces.el
-(defvar kuro--font-remap-cookie nil
-  "Forward reference; `defvar-local' in kuro-faces.el.")
 
 (defun kuro--module-loadable-p ()
   "Return non-nil when the Rust dynamic module is loaded into Emacs.
@@ -336,6 +344,15 @@ Returns non-nil iff the module is loaded after the attempt."
   (ignore-errors (kuro-module-load))
   (kuro--module-loadable-p))
 
+(defun kuro--install-and-load-module (install-fn install-name)
+  "Run INSTALL-FN, load the module, and verify it's callable.
+INSTALL-NAME is a display string used in the error message on failure.
+Signals an error when the module is not loadable after installation."
+  (funcall install-fn)
+  (kuro-module-load)
+  (or (kuro--module-loadable-p)
+      (error "Kuro: %s succeeded but native init is not bound" install-name)))
+
 (defun kuro--prompt-and-install-module ()
   "Prompt the user to install the native module, then load it.
 Offers three choices via `read-char-choice':
@@ -348,12 +365,8 @@ successful install and load."
           (concat "Kuro native module not found. "
                   "Install: [d]ownload prebuilt, [b]uild from source, [q]uit? ")
           '(?d ?b ?q))
-    (?d (kuro-module-download) (kuro-module-load)
-        (or (kuro--module-loadable-p)
-            (error "Kuro: download succeeded but native init is not bound")))
-    (?b (kuro-module-build)    (kuro-module-load)
-        (or (kuro--module-loadable-p)
-            (error "Kuro: cargo build succeeded but native init is not bound")))
+    (?d (kuro--install-and-load-module #'kuro-module-download "download"))
+    (?b (kuro--install-and-load-module #'kuro-module-build    "cargo build"))
     (?q (user-error "Aborted: kuro native module is required"))))
 
 (defun kuro--ensure-module-installed ()
@@ -365,12 +378,8 @@ interactive prompt.  Returns non-nil on success; signals an error
 otherwise."
   (or (kuro--try-load-module)
       (pcase kuro-module-installation-method
-        ('prebuilt (kuro-module-download) (kuro-module-load)
-                   (or (kuro--module-loadable-p)
-                       (error "Kuro: download succeeded but native init is not bound")))
-        ('cargo    (kuro-module-build)    (kuro-module-load)
-                   (or (kuro--module-loadable-p)
-                       (error "Kuro: cargo build succeeded but native init is not bound")))
+        ('prebuilt (kuro--install-and-load-module #'kuro-module-download "download"))
+        ('cargo    (kuro--install-and-load-module #'kuro-module-build    "cargo build"))
         ('manual   (user-error "Native module missing; install manually then retry"))
         (_         (kuro--prompt-and-install-module)))))
 
@@ -401,6 +410,35 @@ prompt is skipped when `kuro-module-installation-method' is set."
   "Send STRING to the terminal."
   (interactive "sSend string: ")
   (kuro--send-key string))
+
+(defun kuro--most-recent-buffer ()
+  "Return the most recently active live Kuro terminal buffer, or nil.
+Searches `buffer-list' which is ordered by most-recently-selected buffer,
+so this returns the Kuro buffer the user was last in across all windows."
+  (seq-find (lambda (b)
+              (with-current-buffer b (derived-mode-p 'kuro-mode)))
+            (buffer-list)))
+
+;;;###autoload
+(defun kuro-send-region (start end)
+  "Send the text between START and END to a Kuro terminal buffer.
+When called inside a Kuro buffer, sends to the current buffer's PTY.
+When called from any other buffer, sends to the most recently active
+Kuro session.  The text is wrapped with bracketed-paste sequences
+(ESC[200~/ESC[201~) when the target terminal has mode 2004 active,
+preventing injection attacks through multi-line content.
+
+Typical use: select a code block in a source buffer, call this command
+to send it to a running shell or REPL without using the kill ring."
+  (interactive "r")
+  (let ((text (buffer-substring-no-properties start end)))
+    (let ((target (if (derived-mode-p 'kuro-mode)
+                      (current-buffer)
+                    (or (kuro--most-recent-buffer)
+                        (user-error "No live Kuro session found")))))
+      (with-current-buffer target
+        (kuro--send-paste-or-raw text)
+        (kuro--schedule-immediate-render)))))
 
 (defmacro kuro--def-control-key (name sequence doc)
   "Define an interactive command NAME that sends SEQUENCE to the terminal.
@@ -473,10 +511,11 @@ Each entry is expected to be (ID COMMAND DETACHED-P ALIVE-P)."
   (seq-filter (lambda (entry) (nth 2 entry)) sessions))
 
 (defun kuro--session-candidates (sessions)
-  "Convert detached session SESSIONS into `completing-read' candidates."
+  "Convert detached session SESSIONS into `completing-read' candidates.
+Each entry is (ID COMMAND DETACHED-P ALIVE-P); only ID and COMMAND are used."
   (mapcar (lambda (entry)
-            (pcase-let ((`(,id ,cmd ,_detached-p ,_alive-p) entry))
-              (cons (format "Session %d: %s" id cmd) id)))
+            (cons (format "Session %d: %s" (car entry) (cadr entry))
+                  (car entry)))
           sessions))
 
 (defun kuro--read-attach-session-id ()

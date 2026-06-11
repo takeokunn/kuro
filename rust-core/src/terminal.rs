@@ -61,6 +61,10 @@ pub struct TerminalCore {
     saved_g1_charset: Option<types::charset::CharsetType>,
     /// Saved GL shift state for DECSC/DECRC (ESC 7 / ESC 8)
     saved_gl_is_g1: Option<bool>,
+    /// Last printed (non-combining) character, tracked for REP (CSI Ps b).
+    pub(crate) last_printed_char: Option<char>,
+    /// SGR attributes stack for XTPUSHSGR (CSI # {) / XTPOPSGR (CSI # }).
+    pub(crate) sgr_stack: Vec<types::cell::SgrAttributes>,
 }
 
 impl TerminalCore {
@@ -89,7 +93,23 @@ impl TerminalCore {
             saved_g0_charset: None,
             saved_g1_charset: None,
             saved_gl_is_g1: None,
+            last_printed_char: None,
+            sgr_stack: Vec::new(),
         }
+    }
+
+    /// Push an in-band resize report (`CSI 48 ; rows ; cols ; 0 ; 0 t`) to
+    /// `meta.pending_responses`.
+    ///
+    /// Called when DEC mode 2048 (resize-in-band) is enabled or re-enabled
+    /// so the receiving application learns the current size immediately.
+    /// Pixel dimensions are reported as 0 (cell-based core has no pixel geometry).
+    #[inline]
+    pub(crate) fn push_in_band_resize_report(&mut self) {
+        let rows = self.screen.rows();
+        let cols = self.screen.cols();
+        let response = format!("\x1b[48;{rows};{cols};0;0t");
+        self.meta.pending_responses.push(response.into_bytes());
     }
 
     /// Flush the VTE print buffer — sends any buffered ASCII bytes to
@@ -177,10 +197,17 @@ impl TerminalCore {
         parser::apc::advance_with_apc(self, bytes);
     }
 
-    /// Resize the terminal screen
+    /// Resize the terminal screen.
+    ///
+    /// When DEC mode 2048 (in-band resize notifications) is active, emits a
+    /// `CSI 48 ; rows ; cols ; 0 ; 0 t` report so the running application
+    /// learns the new size without relying on SIGWINCH.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.screen.resize(rows, cols);
         self.tab_stops.resize(cols as usize);
+        if self.dec_modes.resize_in_band {
+            self.push_in_band_resize_report();
+        }
     }
 
     /// Save cursor position, SGR attributes, and charset state (DECSC - ESC 7)
@@ -283,6 +310,12 @@ impl TerminalCore {
     #[must_use]
     pub fn current_underline(&self) -> bool {
         self.current_attrs.underline()
+    }
+
+    /// Get whether overline SGR attribute (SGR 53) is currently set
+    #[must_use]
+    pub const fn current_overline(&self) -> bool {
+        self.current_attrs.overline
     }
 
     /// Get a cell from the screen at the given (row, col) position
@@ -399,8 +432,16 @@ impl TerminalCore {
         self.dec_modes.auto_wrap = true;
         // Cursor visible
         self.dec_modes.cursor_visible = true;
+        // IRM (ANSI mode 4) back to replace
+        self.dec_modes.insert_mode = false;
+        // LNM (ANSI mode 20) off
+        self.dec_modes.newline_mode = false;
+        // Reverse-wraparound (DEC private mode 45) off
+        self.dec_modes.reverse_wraparound = false;
         // Reset SGR attributes
         self.current_attrs = types::cell::SgrAttributes::default();
+        // Clear the XTPUSHSGR stack so a later XTPOPSGR cannot restore stale attrs
+        self.sgr_stack.clear();
         // Reset scroll region to full screen
         let rows = self.screen.rows() as usize;
         self.screen.set_scroll_region(0, rows);
@@ -470,8 +511,6 @@ impl TerminalCore {
 
 #[cfg(test)]
 mod tests {
-    use crate::types;
-
     /// Create a standard 24x80 `TerminalCore` for testing.
     fn make_term() -> super::TerminalCore {
         super::TerminalCore::new(24, 80)

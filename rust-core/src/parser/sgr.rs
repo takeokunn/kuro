@@ -1,6 +1,6 @@
 //! SGR (Select Graphic Rendition) parameter parsing
 
-use crate::types::cell::{SgrFlags, UnderlineStyle};
+use crate::types::cell::{SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::{Color, NamedColor};
 
 /// Maximum number of SGR parameter groups in a single CSI sequence.
@@ -158,6 +158,16 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
             48 => parse_extended_color(term, groups, &mut i, group, false),
             49 => term.current_attrs.background = Color::Default,
 
+            // Overline (SGR 53/55)
+            53 => term.current_attrs.overline = true,
+            55 => term.current_attrs.overline = false,
+
+            // Superscript / subscript (SGR 73/74/75)
+            // 73 = superscript on, 74 = cancel both, 75 = subscript on
+            73 => { term.current_attrs.superscript = true;  term.current_attrs.subscript = false; }
+            74 => { term.current_attrs.superscript = false; term.current_attrs.subscript = false; }
+            75 => { term.current_attrs.subscript = true;    term.current_attrs.superscript = false; }
+
             // Underline color (SGR 58/59)
             58 => parse_underline_color(term, groups, &mut i, group),
             59 => term.current_attrs.underline_color = Color::Default,
@@ -313,6 +323,186 @@ fn parse_underline_color(
 ) {
     if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
         term.current_attrs.underline_color = color;
+    }
+}
+
+/// Apply pre-parsed SGR parameter groups directly to `attrs`.
+///
+/// Same inner logic as [`handle_sgr`] but operates on a bare [`SgrAttributes`]
+/// instead of a full [`TerminalCore`].  Used by
+/// [`handle_deccara`][crate::parser::erase::handle_deccara] to apply SGR
+/// parameters to cells in a rectangular area without a `TerminalCore` borrow.
+///
+/// `groups` is a slice of sub-parameter slices as produced by iterating
+/// [`vte::Params`] and collecting into a `[&[u16]; N]` array.
+#[inline]
+pub(crate) fn apply_sgr_attrs(attrs: &mut SgrAttributes, groups: &[&[u16]]) {
+    if groups.is_empty() {
+        attrs.reset();
+        return;
+    }
+    let mut i = 0;
+    while i < groups.len() {
+        let group = groups[i];
+        if group.is_empty() {
+            i += 1;
+            continue;
+        }
+        let param = group[0];
+        i += 1;
+        match param {
+            0 => attrs.reset(),
+            1 => attrs.flags.insert(SgrFlags::BOLD),
+            2 => attrs.flags.insert(SgrFlags::DIM),
+            3 => attrs.flags.insert(SgrFlags::ITALIC),
+            4 => {
+                if group.len() > 1 {
+                    attrs.underline_style = match group[1] {
+                        0 => UnderlineStyle::None,
+                        2 => UnderlineStyle::Double,
+                        3 => UnderlineStyle::Curly,
+                        4 => UnderlineStyle::Dotted,
+                        5 => UnderlineStyle::Dashed,
+                        _ => UnderlineStyle::Straight,
+                    };
+                } else {
+                    attrs.underline_style = UnderlineStyle::Straight;
+                }
+            }
+            5  => attrs.flags.insert(SgrFlags::BLINK_SLOW),
+            6  => attrs.flags.insert(SgrFlags::BLINK_FAST),
+            7  => attrs.flags.insert(SgrFlags::INVERSE),
+            8  => attrs.flags.insert(SgrFlags::HIDDEN),
+            9  => attrs.flags.insert(SgrFlags::STRIKETHROUGH),
+            21 => attrs.underline_style = UnderlineStyle::Double,
+            22 => {
+                attrs.flags.remove(SgrFlags::BOLD);
+                attrs.flags.remove(SgrFlags::DIM);
+            }
+            23 => attrs.flags.remove(SgrFlags::ITALIC),
+            24 => attrs.underline_style = UnderlineStyle::None,
+            25 => {
+                attrs.flags.remove(SgrFlags::BLINK_SLOW);
+                attrs.flags.remove(SgrFlags::BLINK_FAST);
+            }
+            27 => attrs.flags.remove(SgrFlags::INVERSE),
+            28 => attrs.flags.remove(SgrFlags::HIDDEN),
+            29 => attrs.flags.remove(SgrFlags::STRIKETHROUGH),
+            30..=37  => attrs.foreground = named_color_from_offset(param - 30),
+            38 => {
+                if let Some(c) = parse_color_from_subparams(groups, &mut i, group) {
+                    attrs.foreground = c;
+                }
+            }
+            39 => attrs.foreground = Color::Default,
+            40..=47  => attrs.background = named_color_from_offset(param - 40),
+            48 => {
+                if let Some(c) = parse_color_from_subparams(groups, &mut i, group) {
+                    attrs.background = c;
+                }
+            }
+            49 => attrs.background = Color::Default,
+            53 => attrs.overline = true,
+            55 => attrs.overline = false,
+            58 => {
+                if let Some(c) = parse_color_from_subparams(groups, &mut i, group) {
+                    attrs.underline_color = c;
+                }
+            }
+            59  => attrs.underline_color = Color::Default,
+            73  => { attrs.superscript = true;  attrs.subscript = false; }
+            74  => { attrs.superscript = false; attrs.subscript = false; }
+            75  => { attrs.subscript = true;    attrs.superscript = false; }
+            90..=97   => attrs.foreground = bright_named_color_from_offset(param - 90),
+            100..=107 => attrs.background = bright_named_color_from_offset(param - 100),
+            _ => {}
+        }
+    }
+}
+
+/// Serialize `attrs` back into an SGR parameter string for DECRQSS (`DCS $ q m`).
+///
+/// Begins with `0` (reset) and appends a parameter for each active attribute,
+/// matching the xterm convention (so the default rendition serializes to `0`).
+/// Every emitted form round-trips through this module's own parser — semicolon
+/// form for the 38/48/58 extended colors, `4:n` for styled underlines — so a
+/// client that re-applies the reported string recreates the exact rendition.
+pub(crate) fn serialize_sgr(attrs: &SgrAttributes) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::from("0");
+    let f = attrs.flags;
+    if f.contains(SgrFlags::BOLD) {
+        out.push_str(";1");
+    }
+    if f.contains(SgrFlags::DIM) {
+        out.push_str(";2");
+    }
+    if f.contains(SgrFlags::ITALIC) {
+        out.push_str(";3");
+    }
+    match attrs.underline_style {
+        UnderlineStyle::None => {}
+        UnderlineStyle::Straight => out.push_str(";4"),
+        UnderlineStyle::Double => out.push_str(";4:2"),
+        UnderlineStyle::Curly => out.push_str(";4:3"),
+        UnderlineStyle::Dotted => out.push_str(";4:4"),
+        UnderlineStyle::Dashed => out.push_str(";4:5"),
+    }
+    if f.contains(SgrFlags::BLINK_SLOW) {
+        out.push_str(";5");
+    }
+    if f.contains(SgrFlags::BLINK_FAST) {
+        out.push_str(";6");
+    }
+    if f.contains(SgrFlags::INVERSE) {
+        out.push_str(";7");
+    }
+    if f.contains(SgrFlags::HIDDEN) {
+        out.push_str(";8");
+    }
+    if f.contains(SgrFlags::STRIKETHROUGH) {
+        out.push_str(";9");
+    }
+    append_sgr_color(&mut out, attrs.foreground, 30, 90, 38);
+    append_sgr_color(&mut out, attrs.background, 40, 100, 48);
+    // Underline color: only indexed (58;5;n) or RGB (58;2;r;g;b) — the parser
+    // never produces a named underline color, so that variant is unreachable.
+    match attrs.underline_color {
+        Color::Indexed(n) => {
+            let _ = write!(out, ";58;5;{n}");
+        }
+        Color::Rgb(r, g, b) => {
+            let _ = write!(out, ";58;2;{r};{g};{b}");
+        }
+        Color::Default | Color::Named(_) => {}
+    }
+    out
+}
+
+/// Append one foreground/background color to an SGR string.
+///
+/// `base`/`bright_base` are the named-color SGR bases (30/90 for fg, 40/100 for
+/// bg) and `ext` is the extended-color introducer (38 fg, 48 bg).
+fn append_sgr_color(out: &mut String, color: Color, base: u8, bright_base: u8, ext: u8) {
+    use std::fmt::Write as _;
+    match color {
+        Color::Default => {}
+        Color::Named(n) => {
+            let idx = n as u8;
+            let code = if idx < 8 {
+                base + idx
+            } else {
+                bright_base + (idx - 8)
+            };
+            let _ = write!(out, ";{code}");
+        }
+        Color::Indexed(i) => {
+            let _ = write!(out, ";{ext};5;{i}");
+        }
+        Color::Rgb(r, g, b) => {
+            let _ = write!(out, ";{ext};2;{r};{g};{b}");
+        }
     }
 }
 

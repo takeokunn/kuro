@@ -62,6 +62,64 @@ fn csi_ech(term: &mut crate::TerminalCore, params: &vte::Params) {
     term.screen.erase_chars(n, attrs);
 }
 
+/// DECIC — Insert Column(s) (CSI Ps ' })
+///
+/// Inserts `Ps` blank columns at the cursor column in every row within the
+/// current scroll region. Existing content shifts right; columns that shift
+/// past the right margin are discarded.
+pub fn handle_decic(term: &mut crate::TerminalCore, params: &vte::Params) {
+    use crate::types::Cell;
+    let n = get_param(params);
+    let cursor_col = term.screen.cursor().col;
+    let cols = term.screen.cols() as usize;
+    let bg = term.current_attrs.background;
+    let region = term.screen.get_scroll_region();
+    let shift = n.min(cols.saturating_sub(cursor_col));
+    if shift == 0 {
+        return;
+    }
+    let mut blank = Cell::default();
+    blank.attrs.background = bg;
+    for row in region.top..region.bottom {
+        if let Some(line) = term.screen.get_line_mut(row) {
+            let len = line.cells.len();
+            if cursor_col < len {
+                line.cells[cursor_col..].rotate_right(shift.min(len - cursor_col));
+                let fill_end = (cursor_col + shift).min(len);
+                line.cells[cursor_col..fill_end].fill(blank.clone());
+            }
+        }
+        term.screen.mark_line_dirty(row);
+    }
+}
+
+/// DECDC — Delete Column(s) (CSI Ps ' ~)
+///
+/// Deletes `Ps` columns starting at the cursor column in every row within the
+/// current scroll region. Content to the right of the deleted columns shifts
+/// left; blank columns fill the right end of each row.
+pub fn handle_decdc(term: &mut crate::TerminalCore, params: &vte::Params) {
+    use crate::types::Cell;
+    let n = get_param(params);
+    let cursor_col = term.screen.cursor().col;
+    let bg = term.current_attrs.background;
+    let region = term.screen.get_scroll_region();
+    let mut blank = Cell::default();
+    blank.attrs.background = bg;
+    for row in region.top..region.bottom {
+        if let Some(line) = term.screen.get_line_mut(row) {
+            let len = line.cells.len();
+            if cursor_col < len {
+                let shift = n.min(len - cursor_col);
+                line.cells[cursor_col..].rotate_left(shift);
+                let fill_start = len - shift;
+                line.cells[fill_start..].fill(blank.clone());
+            }
+        }
+        term.screen.mark_line_dirty(row);
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/insert_delete.rs"]
 mod tests;

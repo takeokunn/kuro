@@ -154,17 +154,16 @@ fn test_csi_vpa_moves_to_absolute_row() {
 }
 
 /// HPA (CSI `` ` ``) — not yet implemented; must be silently ignored.
-/// Cursor column must remain unchanged after receiving HPA.
+/// HPA (CSI Ps `) positions cursor at the given absolute column (1-indexed).
 #[test]
-fn test_csi_hpa_unimplemented_is_noop() {
+fn test_csi_hpa_positions_cursor_absolutely() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[5;1H"); // cursor to row 4, col 0
-    term.advance(b"\x1b[15`"); // HPA 15 — silently ignored
-    // Column must not have changed (stays at 0)
+    term.advance(b"\x1b[15`"); // HPA 15 (1-indexed) → col 14 (0-indexed)
     assert_eq!(
         term.screen.cursor().col,
-        0,
-        "HPA (unimplemented) must not change cursor col"
+        14,
+        "HPA 15 must move cursor to col 14 (0-indexed)"
     );
 }
 
@@ -181,19 +180,56 @@ fn test_csi_decstr_clears_sgr_bold() {
     );
 }
 
-/// REP (CSI b) — not yet implemented; must be silently ignored without panic.
-/// After REP the printed character must still be in col 0; the cursor must
-/// remain at col 1 (positioned after the original 'A' print, not moved by REP).
+/// REP (CSI b) — repeats the last printed character Ps times.
+/// 'A' REP 3 → 'A' at col 0, 'A' at cols 1-3, cursor at col 4.
 #[test]
-fn test_csi_rep_unimplemented_is_noop() {
-    let term = term_with!(b"A\x1b[3b"); // 'A' then REP 3 — silently ignored
-    // 'A' printed at col 0; cursor advanced to col 1
+fn test_csi_rep_repeats_last_char() {
+    let term = term_with!(b"A\x1b[3b"); // 'A' then REP 3
+    // 'A' printed at col 0, then repeated at cols 1, 2, 3
     assert_cell_char!(term, row 0, col 0, 'A');
-    // Cols 1-3 are blank — REP did nothing
-    assert_cell_char!(term, row 0, col 1, ' ');
-    assert_cell_char!(term, row 0, col 2, ' ');
-    // Cursor must be at col 1 (after the 'A'), not moved further by REP
-    assert_cursor!(term, row 0, col 1);
+    assert_cell_char!(term, row 0, col 1, 'A');
+    assert_cell_char!(term, row 0, col 2, 'A');
+    assert_cell_char!(term, row 0, col 3, 'A');
+    // Cursor must be at col 4 (after all 4 copies)
+    assert_cursor!(term, row 0, col 4);
+}
+
+/// XTPUSHSGR/XTPOPSGR — push/pop SGR attribute stack (CSI # { / CSI # }).
+/// Push saves current SGR; pop restores it.
+#[test]
+fn test_xtpushsgr_xtpopsgr_roundtrip() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[1m");   // bold on
+    term.advance(b"\x1b[#{\x1b[0m"); // push bold, then reset
+    assert!(!term.current_bold(), "bold must be cleared after SGR reset");
+    term.advance(b"\x1b[#}");   // pop → bold restored
+    assert!(term.current_bold(), "bold must be restored after XTPOPSGR");
+}
+
+#[test]
+fn test_xtpushsgr_stack_survives_decrc() {
+    // Demonstrate that XTPUSHSGR stack depth is unaffected by DECSC/DECRC.
+    // Push twice; one DECRC should not shrink the stack.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[1m");       // bold on
+    term.advance(b"\x1b[#{\x1b[0m"); // push (bold), reset
+    term.advance(b"\x1b[3m");       // italic on
+    term.advance(b"\x1b7");         // DECSC: save italic state
+    term.advance(b"\x1b[#{\x1b[0m"); // push (italic), reset again
+    term.advance(b"\x1b8");         // DECRC: restore to italic state (does NOT pop XTPUSHSGR)
+    // XTPUSHSGR stack still has 2 entries; pop twice to confirm
+    term.advance(b"\x1b[#}");       // pop → italic
+    assert!(term.current_italic(), "first pop must restore italic");
+    term.advance(b"\x1b[#}");       // pop → bold
+    assert!(term.current_bold(), "second pop must restore bold");
+}
+
+#[test]
+fn test_xtpopsgr_on_empty_stack_is_noop() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[1m");   // bold on
+    term.advance(b"\x1b[#}");   // pop empty stack — must not panic, attrs unchanged
+    assert!(term.current_bold(), "bold must survive XTPOPSGR on empty stack");
 }
 
 /// IL (CSI L) — Insert Line: inserts a blank line at the cursor row.

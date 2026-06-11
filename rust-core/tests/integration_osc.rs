@@ -403,4 +403,49 @@ fn osc52_invalid_base64_is_ignored() {
     assert!(t.cursor_row() < 24);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OSC 110 / 111 / 112 — reset default fg / bg / cursor color
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// OSC 110 resets the default foreground color to None (terminal default).
+#[test]
+fn osc110_resets_default_fg_to_none() {
+    let mut t = common::new_terminal();
+    // Set fg to a color first (OSC 10 ; rgb:ff/00/00)
+    t.advance(b"\x1b]10;rgb:ff/00/00\x07");
+    assert!(t.osc_data().default_fg.is_some(), "default_fg must be Some after OSC 10");
+    // Now reset via OSC 110
+    t.advance(b"\x1b]110\x07");
+    assert!(t.osc_data().default_fg.is_none(), "default_fg must be None after OSC 110");
+}
+
+/// OSC 111 resets the default background color to None.
+#[test]
+fn osc111_resets_default_bg_to_none() {
+    let mut t = common::new_terminal();
+    t.advance(b"\x1b]11;rgb:00/ff/00\x07");
+    assert!(t.osc_data().default_bg.is_some(), "default_bg must be Some after OSC 11");
+    t.advance(b"\x1b]111\x07");
+    assert!(t.osc_data().default_bg.is_none(), "default_bg must be None after OSC 111");
+}
+
+/// OSC 112 resets the cursor color to None.
+#[test]
+fn osc112_resets_cursor_color_to_none() {
+    let mut t = common::new_terminal();
+    t.advance(b"\x1b]12;rgb:00/00/ff\x07");
+    assert!(t.osc_data().cursor_color.is_some(), "cursor_color must be Some after OSC 12");
+    t.advance(b"\x1b]112\x07");
+    assert!(t.osc_data().cursor_color.is_none(), "cursor_color must be None after OSC 112");
+}
+
+/// OSC 110 on an already-unset fg is a no-op (must not panic).
+#[test]
+fn osc110_on_already_none_fg_is_noop() {
+    let mut t = common::new_terminal();
+    assert!(t.osc_data().default_fg.is_none());
+    t.advance(b"\x1b]110\x07");
+    assert!(t.osc_data().default_fg.is_none());
+}
+
 include!("include/integration_osc_cwd.rs");

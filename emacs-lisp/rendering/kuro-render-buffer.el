@@ -435,6 +435,27 @@ calling `get-buffer-window' with t (walks every live frame's window tree).
 Reset to nil by `kuro--start-render-loop' so the cache is rebuilt after
 buffer re-display in a new window.")
 
+;;; Cursor update helpers
+
+(defsubst kuro--resolve-window ()
+  "Return the live window for this buffer, refreshing the cache if stale.
+`window-live-p' is an O(1) C predicate; `get-buffer-window' with t walks
+every live frame's window tree — called only on cache miss."
+  (if (window-live-p kuro--cached-window)
+      kuro--cached-window
+    (setq kuro--cached-window (get-buffer-window (current-buffer) t))))
+
+(defsubst kuro--ensure-cursor-marker (pos)
+  "Ensure `kuro--cursor-marker' exists and points to POS."
+  (if kuro--cursor-marker
+      (set-marker kuro--cursor-marker pos)
+    (setq kuro--cursor-marker (copy-marker pos))))
+
+(defsubst kuro--cursor-fallback-pos (row col)
+  "Return current cursor buffer position from marker or by computing it."
+  (or (and kuro--cursor-marker (marker-position kuro--cursor-marker))
+      (kuro--grid-col-to-buffer-pos row col)))
+
 ;;; Cursor update
 
 (defun kuro--update-cursor ()
@@ -447,33 +468,23 @@ native redisplay from drifting the viewport between render cycles."
   (unless (> kuro--scroll-offset 0)
     (when-let ((state (kuro--get-cursor-state)))
       ;; cdr-chain: each cdr advances the spine once (shared intermediate cells).
-      ;; cadr/caddr/cadddr would re-traverse from head each time.
       (let* ((row     (car state))
              (s1      (cdr state))
              (col     (car s1))
              (s2      (cdr s1))
              (visible (car s2))
              (shape   (car (cdr s2))))
-        ;; Fast path: reuse cached window (window-live-p is an O(1) C check).
-        ;; Fallback to get-buffer-window (O(frames×windows)) only on miss.
-        (when-let ((win (or (and (window-live-p kuro--cached-window)
-                                 kuro--cached-window)
-                            (setq kuro--cached-window
-                                  (get-buffer-window (current-buffer) t)))))
+        ;; `visible' may be nil (hidden cursor) — guard only on window availability.
+        (when-let ((win (kuro--resolve-window)))
           (if (kuro--cursor-state-changed-p row col visible shape)
-              ;; State changed: update cache, position, and shape.
+              ;; State changed: recompute position, update cache and display.
               (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
                 (kuro--cache-cursor-state row col visible shape)
-                ;; Always ensure the marker exists; create it on first use.
-                (if kuro--cursor-marker
-                    (set-marker kuro--cursor-marker target-pos)
-                  (setq kuro--cursor-marker (copy-marker target-pos)))
+                (kuro--ensure-cursor-marker target-pos)
                 (kuro--anchor-window-at-pos win target-pos)
                 (kuro--apply-cursor-display visible shape))
-            ;; Cursor unchanged — still re-anchor to prevent viewport drift.
-            (kuro--anchor-window-at-pos win (or (and kuro--cursor-marker
-                                                     (marker-position kuro--cursor-marker))
-                                                (kuro--grid-col-to-buffer-pos row col)))))))))
+            ;; Cursor unchanged — re-anchor to prevent viewport drift.
+            (kuro--anchor-window-at-pos win (kuro--cursor-fallback-pos row col))))))))
 
 ;;; Scrollback indicator
 

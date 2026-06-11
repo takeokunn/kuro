@@ -67,6 +67,7 @@ mod tests {
         ($id:expr, row=$r:expr, col=$c:expr, cols=$w:expr, rows=$h:expr) => {
             ImagePlacement {
                 image_id: $id,
+                placement_id: None,
                 row: $r,
                 col: $c,
                 display_cols: $w,

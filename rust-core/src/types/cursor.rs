@@ -28,13 +28,13 @@ pub struct Cursor {
     /// Cursor shape
     #[expect(
         dead_code,
-        reason = "set by VTE parser; read only in #[cfg(test)] blocks"
+        reason = "set by VTE parser; read only in #[cfg(test)] blocks — dead_code does not fire under --tests"
     )]
     pub(crate) shape: CursorShape,
     /// Cursor is visible
     #[expect(
         dead_code,
-        reason = "set by VTE parser; read only in #[cfg(test)] blocks"
+        reason = "set by VTE parser; read only in #[cfg(test)] blocks — dead_code does not fire under --tests"
     )]
     pub(crate) visible: bool,
     /// DEC pending wrap flag (DECAWM last-column behavior).

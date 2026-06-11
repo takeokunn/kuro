@@ -171,6 +171,55 @@ pub fn handle_tbc(screen: &crate::grid::Screen, tabs: &mut TabStops, params: &vt
     }
 }
 
+/// CHT — Cursor Horizontal Tab (CSI Ps I)
+///
+/// Move cursor forward to the Ps-th tab stop (default 1).
+/// Stops at the right margin if there are fewer tab stops remaining.
+pub fn handle_cht(screen: &mut crate::grid::Screen, tabs: &TabStops, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as usize;
+    let cols = screen.cols() as usize;
+    let mut col = screen.cursor().col;
+    for _ in 0..n {
+        let next = tabs.next_stop(col + 1);
+        if next >= cols {
+            col = cols - 1;
+            break;
+        }
+        col = next;
+    }
+    screen.cursor_mut().col = col;
+}
+
+/// CBT — Cursor Backward Tab (CSI Ps Z)
+///
+/// Move cursor backward to the Ps-th tab stop to the left (default 1).
+/// Stops at column 0 if there are fewer tab stops to the left.
+pub fn handle_cbt(screen: &mut crate::grid::Screen, tabs: &TabStops, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as usize;
+    let mut col = screen.cursor().col;
+    for _ in 0..n {
+        if col == 0 {
+            break;
+        }
+        // Scan backward from col-1
+        let prev = (0..col).rev().find(|&c| tabs.stops[c]);
+        col = prev.unwrap_or(0);
+    }
+    screen.cursor_mut().col = col;
+}
+
 #[cfg(test)]
 #[path = "tests/tabs.rs"]
 mod tests;

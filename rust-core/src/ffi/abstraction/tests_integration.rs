@@ -86,6 +86,9 @@ fn arb_sgr_attrs() -> impl Strategy<Value = SgrAttributes> {
                         crate::types::cell::UnderlineStyle::None
                     },
                     underline_color: Color::Default,
+                    overline: false,
+                    superscript: false,
+                    subscript: false,
                 }
             },
         )

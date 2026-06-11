@@ -243,6 +243,22 @@ Changes take effect immediately in all running Kuro buffers."
                  (const :tag "Prompt for each access" prompt))
   :group 'kuro)
 
+(defcustom kuro-notifications-enabled t
+  "Whether to surface terminal desktop notifications (OSC 9 / OSC 777).
+When non-nil, notifications emitted by terminal applications are displayed
+via `kuro-notification-function'.  Pending notifications are always drained
+from the Rust core regardless of this setting, so they cannot accumulate."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-notification-function 'kuro--default-notify
+  "Function that displays a terminal desktop notification.
+Called with two arguments: TITLE (a string or nil) and BODY (a string).
+The default, `kuro--default-notify', prefers `notifications-notify' (D-Bus)
+when available and otherwise falls back to the echo area."
+  :type 'function
+  :group 'kuro)
+
 ;;; Display Settings
 
 (defcustom kuro-frame-rate 120

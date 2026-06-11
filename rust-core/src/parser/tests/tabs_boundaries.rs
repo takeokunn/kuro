@@ -95,29 +95,28 @@ fn test_tab_movement_basic() {
 /// vte_handler (`'I'` falls through to `_ => {}`), so the cursor must remain
 /// at its starting column without panicking.
 #[test]
-fn test_cht_unimplemented_is_noop() {
+fn test_cht_advances_two_tab_stops() {
+    // CHT 2 from col 5 → next two tab stops → col 8 then col 16
     let mut term = crate::TerminalCore::new(24, 80);
     term.screen.move_cursor(0, 5);
-    term.advance(b"\x1b[2I"); // CHT 2 — silently ignored
+    term.advance(b"\x1b[2I"); // CHT 2
     assert_eq!(
         term.screen.cursor().col,
-        5,
-        "CHT 2 must be a no-op (unimplemented) and leave the cursor at col 5"
+        16,
+        "CHT 2 from col 5 must advance to col 16 (two tab stops)"
     );
 }
 
-/// CBT (Cursor Backward Tabulation, CSI n Z) is not yet dispatched by the
-/// vte_handler (`'Z'` falls through to `_ => {}`), so the cursor must remain
-/// at its starting column without panicking.
+/// CBT (Cursor Backward Tabulation, CSI n Z) moves cursor to previous tab stop.
 #[test]
-fn test_cbt_unimplemented_is_noop() {
+fn test_cbt_moves_back_one_tab_stop() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.screen.move_cursor(0, 20);
-    term.advance(b"\x1b[1Z"); // CBT 1 — silently ignored
+    term.advance(b"\x1b[1Z"); // CBT 1: col 20 → col 16
     assert_eq!(
         term.screen.cursor().col,
-        20,
-        "CBT 1 must be a no-op (unimplemented) and leave the cursor at col 20"
+        16,
+        "CBT 1 from col 20 must move to col 16"
     );
 }
 

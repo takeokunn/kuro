@@ -26,7 +26,7 @@ pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: ch
     match c {
         'r' => csi_decstbm(term, params), // DECSTBM
         'S' => csi_su(term, params),      // SU - Scroll Up
-        'T' => csi_sd(term, params),      // SD - Scroll Down
+        'T' | '^' => csi_sd(term, params), // SD - Scroll Down (^ = MINTTY alternate)
         _ => {}
     }
 }
@@ -113,6 +113,74 @@ fn csi_sd(term: &mut crate::TerminalCore, params: &vte::Params) {
     // Scroll down (content moves up), applying BCE background to new blank lines
     term.screen
         .scroll_down(n as usize, term.current_attrs.background);
+}
+
+/// SL — Scroll Left (CSI Ps SP @)
+///
+/// Shifts each row in the scroll region left by `Ps` columns. Columns shifted
+/// off the left edge are discarded; `Ps` blank columns appear at the right.
+pub fn handle_sl(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as usize;
+
+    let bg = term.current_attrs.background;
+    let region = term.screen.get_scroll_region();
+    let cols = term.screen.cols() as usize;
+    let shift = n.min(cols);
+    let mut blank = crate::types::Cell::default();
+    blank.attrs.background = bg;
+
+    for row in region.top..region.bottom {
+        if let Some(line) = term.screen.get_line_mut(row) {
+            let len = line.cells.len();
+            if shift < len {
+                line.cells.rotate_left(shift);
+                line.cells[len - shift..].fill(blank.clone());
+            } else {
+                line.cells.fill(blank.clone());
+            }
+        }
+        term.screen.mark_line_dirty(row);
+    }
+}
+
+/// SR — Scroll Right (CSI Ps SP A)
+///
+/// Shifts each row in the scroll region right by `Ps` columns. Columns shifted
+/// off the right edge are discarded; `Ps` blank columns appear at the left.
+pub fn handle_sr(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .max(1) as usize;
+
+    let bg = term.current_attrs.background;
+    let region = term.screen.get_scroll_region();
+    let cols = term.screen.cols() as usize;
+    let shift = n.min(cols);
+    let mut blank = crate::types::Cell::default();
+    blank.attrs.background = bg;
+
+    for row in region.top..region.bottom {
+        if let Some(line) = term.screen.get_line_mut(row) {
+            let len = line.cells.len();
+            if shift < len {
+                line.cells.rotate_right(shift);
+                line.cells[..shift].fill(blank.clone());
+            } else {
+                line.cells.fill(blank.clone());
+            }
+        }
+        term.screen.mark_line_dirty(row);
+    }
 }
 
 #[cfg(test)]

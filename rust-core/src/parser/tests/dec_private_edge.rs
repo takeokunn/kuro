@@ -132,3 +132,37 @@ fn test_decrqm_multi_param_queues_multiple_responses() {
     assert_eq!(r0, "\x1b[?25;1$y");
     assert_eq!(r1, "\x1b[?1049;2$y");
 }
+
+#[test]
+fn test_decrqm_alt_screen_47_reports_reset_then_set() {
+    // Mode 47 is a settable alternate-screen variant; DECRQM must report its
+    // real state (2 = reset on primary, 1 = set on alt), not 0 (unrecognised).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?47$p"); // default: primary screen → reset
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?47;2$y",
+        "DECRQM 47 on the primary screen must report status 2 (reset)"
+    );
+    term.meta.pending_responses.clear();
+    term.advance(b"\x1b[?47h"); // enter alternate screen
+    term.advance(b"\x1b[?47$p");
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?47;1$y",
+        "DECRQM 47 on the alternate screen must report status 1 (set)"
+    );
+}
+
+#[test]
+fn test_decrqm_alt_screen_1047_is_queryable() {
+    // Mode 1047 was settable but not queryable before — must no longer
+    // report status 0 (unrecognised).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1047$p");
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?1047;2$y",
+        "DECRQM 1047 must report reset (2), not unrecognised (0)"
+    );
+}

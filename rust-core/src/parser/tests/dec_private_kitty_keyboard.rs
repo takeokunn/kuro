@@ -147,6 +147,26 @@ test_decrqm!(
 test_decrqm!(test_decrqm_cursor_visible_default, b"", 25, "\x1b[?25;1$y");
 test_decrqm!(test_decrqm_auto_wrap_default, b"", 7, "\x1b[?7;1$y");
 
+// ── mouse_utf8 (?1005) ────────────────────────────────────────────────────────
+
+test_decrqm!(test_decrqm_mouse_utf8_disabled, b"", 1005, "\x1b[?1005;2$y");
+test_decrqm!(
+    test_decrqm_mouse_utf8_enabled,
+    b"\x1b[?1005h",
+    1005,
+    "\x1b[?1005;1$y"
+);
+
+#[test]
+fn test_get_mode_mouse_utf8() {
+    let mut modes = DecModes::new();
+    assert_eq!(modes.get_mode(1005), Some(false));
+    modes.set_mode(1005);
+    assert_eq!(modes.get_mode(1005), Some(true));
+    modes.reset_mode(1005);
+    assert_eq!(modes.get_mode(1005), Some(false));
+}
+
 // ── mouse_pixel (?1016) ────────────────────────────────────────────────────────
 
 #[test]

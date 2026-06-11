@@ -48,6 +48,15 @@ Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 (defconst kuro--sgr-flag-strikethrough #x100
   "SGR strikethrough attribute flag (bit 8).
 Must match encode_attrs in rust-core/src/ffi/codec.rs.")
+(defconst kuro--sgr-flag-overline #x1000
+  "SGR overline attribute flag (bit 12, SGR 53/55).
+Must match ATTRS_OVERLINE_BIT in rust-core/src/ffi/codec/color.rs.")
+(defconst kuro--sgr-flag-superscript #x2000
+  "SGR superscript flag (bit 13, SGR 73).
+Must match ATTRS_SUPERSCRIPT_BIT in rust-core/src/ffi/codec/color.rs.")
+(defconst kuro--sgr-flag-subscript #x4000
+  "SGR subscript flag (bit 14, SGR 75).
+Must match ATTRS_SUBSCRIPT_BIT in rust-core/src/ffi/codec/color.rs.")
 (defconst kuro--sgr-underline-style-mask  #xE00
   "Bitmask for underline style field (bits 9-11).
 Must match encode_attrs in rust-core/src/ffi/codec.rs.")
@@ -87,6 +96,7 @@ only nil is falsy."
         (inverse        (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-inverse))
         (hidden         (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-hidden))
         (strikethrough  (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-strikethrough))
+        (overline       (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-overline))
         ;; Underline style: bits 9-11 (mask 0xE00, shift right 9)
         (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask) (- kuro--sgr-underline-style-shift))))
     (list :bold bold
@@ -94,6 +104,7 @@ only nil is falsy."
           :underline underline
           :underline-style underline-style
           :strike-through strikethrough
+          :overline overline
           :inverse inverse
           :dim dim
           :blink-slow blink-slow
@@ -151,6 +162,9 @@ that `kuro--decode-attrs' would allocate on every call."
          (italic        (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-italic))
          (underline     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-underline))
          (strikethrough (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-strikethrough))
+         (overline      (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-overline))
+         (superscript   (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-superscript))
+         (subscript     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-subscript))
          (inverse       (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-inverse))
          (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask)
                                (- kuro--sgr-underline-style-shift)))
@@ -169,6 +183,10 @@ that `kuro--decode-attrs' would allocate on every call."
       ;; Push in reverse desired order so the final plist has :foreground first.
       (when inverse     (push t result) (push :inverse-video result))
       (when strikethrough (push t result) (push :strike-through result))
+      (when overline    (push t result) (push :overline result))
+      ;; Superscript/subscript via :display raise property (mutually exclusive)
+      (when superscript (push '(raise 0.4) result) (push :display result))
+      (when subscript   (push '(raise -0.2) result) (push :display result))
       (when underline-val (push underline-val result) (push :underline result))
       (when italic      (push 'italic result) (push :slant result))
       (cond (bold       (push 'bold result)  (push :weight result))

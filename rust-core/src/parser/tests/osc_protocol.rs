@@ -466,10 +466,10 @@ fn da1_then_da3_responses_in_submission_order() {
         2,
         "both DA1 and DA3 must enqueue a response"
     );
-    // DA1 response: CSI ? 1 ; 2 c
+    // DA1 response: CSI ? 1 ; 2 ; 4 c (VT100 + advanced video + Sixel)
     assert_eq!(
         responses[0].as_slice(),
-        b"\x1b[?1;2c",
+        b"\x1b[?1;2;4c",
         "first response must be DA1 (submitted first)"
     );
     // DA3 response: DCS ! | 00000000 ST
@@ -489,6 +489,57 @@ fn dec_modes_new_mode_2031_default_false() {
         !modes.color_scheme_notifications,
         "mode 2031 (color scheme notifications) must default to false"
     );
+}
+
+// ── OSC 9 / OSC 777 desktop notifications ──────────────────────────────────────
+
+#[test]
+fn osc_9_iterm2_form_pushes_notification() {
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]9;Build finished\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    assert_eq!(core.osc_data.notifications[0].title, None);
+    assert_eq!(core.osc_data.notifications[0].body, "Build finished");
+}
+
+#[test]
+fn osc_9_conemu_progress_form_is_ignored() {
+    // OSC 9 ; 4 ; ... is ConEmu progress, not an iTerm2 notification.
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]9;4;1;50\x07");
+    assert!(core.osc_data.notifications.is_empty());
+}
+
+#[test]
+fn osc_9_empty_body_is_ignored() {
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]9;\x07");
+    assert!(core.osc_data.notifications.is_empty());
+}
+
+#[test]
+fn osc_777_notify_pushes_title_and_body() {
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]777;notify;CI;passed\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    assert_eq!(core.osc_data.notifications[0].title.as_deref(), Some("CI"));
+    assert_eq!(core.osc_data.notifications[0].body, "passed");
+}
+
+#[test]
+fn osc_777_empty_title_becomes_none() {
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]777;notify;;body only\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    assert_eq!(core.osc_data.notifications[0].title, None);
+    assert_eq!(core.osc_data.notifications[0].body, "body only");
+}
+
+#[test]
+fn osc_777_non_notify_subcommand_is_ignored() {
+    let mut core = TerminalCore::new(24, 80);
+    core.advance(b"\x1b]777;other;x;y\x07");
+    assert!(core.osc_data.notifications.is_empty());
 }
 
 include!("osc_protocol_colors.rs");

@@ -256,7 +256,7 @@ test_encode_color!(
 fn test_encode_color_rgb_true_white_no_marker_bits() {
     let encoded = encode_color(&Color::Rgb(255, 255, 255));
     assert_eq!(
-        encoded, COLOR_RGB_MASK,
+        encoded, 0x00FF_FFFF,
         "Rgb(255,255,255) must be 0x00FFFFFF"
     );
     // Must not have named-color marker (bit 31).

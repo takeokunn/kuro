@@ -1,403 +1,112 @@
 # Kuro Test Suite
 
-This directory contains the Emacs Lisp (ERT) test suite for Kuro, organized by test type and functionality.
+This directory holds the Emacs Lisp (ERT) tests for Kuro. The Rust core has its
+own tests under [`rust-core/`](../rust-core) (see the table at the bottom).
 
-## Test Structure
+## Layout
 
 ```
 test/
-├── README.md                             # This file
-├── elisp/
-│   ├── kuro-e2e-test.el                 # End-to-end tests (requires Rust module)
-│   ├── kuro-renderer-unit-test.el       # Unit tests for kuro-renderer.el
-│   ├── kuro-ffi-test.el                 # FFI layer tests
-│   ├── kuro-faces-test.el               # Face/color tests
-│   ├── kuro-config-test.el              # Unit tests for kuro-config.el
-│   ├── kuro-overlays-test.el            # Overlay tests
-│   ├── kuro-input-test.el               # Input handling tests
-│   └── kuro-performance-test.el         # Performance tests
-├── shell/
-│   ├── run-e2e.sh                       # Shell script to run all E2E tests
-│   ├── vttest-compliance.sh             # VTE compliance check
-│   ├── kuro-comprehensive-test.sh       # Comprehensive test runner
-│   └── bench-validate.sh                # Benchmark validation
-├── manual/                              # Manual test cases
-└── vttest/                              # VT100 test suite (git submodule)
+├── unit/                 # Pure-Elisp ERT unit tests — no Rust module required
+│   ├── core/             #   kuro.el, kuro-config, kuro-lifecycle, kuro-module, …
+│   ├── ffi/              #   FFI bridge, binary decoder, OSC plumbing, eval whitelist
+│   ├── rendering/        #   renderer pipeline, overlays, render-buffer, typewriter
+│   ├── input/            #   keymap, mouse, input dispatch
+│   ├── faces/            #   face construction, palette, attributes
+│   └── features/         #   stream, sessions, navigation, prompt-status, …
+├── e2e/                  # End-to-end tests — spawn a real PTY (need the built module)
+└── scripts/
+    ├── runners/          # run-e2e.sh, vttest-compliance.sh
+    ├── benchmarks/       # bench-validate.sh, kuro-daemon-debug.sh
+    └── stress/           # interactive stress scripts (colors, TUI, comprehensive)
 ```
 
-## Test Categories
+The unit tests are **pure Elisp**: they stub the Rust FFI (`kuro-test-stubs.el`)
+and never load `libkuro_core`, so they run anywhere Emacs does. The e2e tests
+spawn an actual shell over a PTY and require the native module to be built.
 
-### 1. Unit Tests (Pure Elisp)
+## Running
 
-Tests that only require Emacs Lisp and **do not** need the Rust dynamic module (`libkuro_core`).
-
-**Files:**
-- `kuro-renderer-unit-test.el` - Tests for `kuro-renderer.el` internal functions
-- `kuro-config-test.el` - Tests for `kuro-config.el` validation and setup
-
-**What they test:**
-- Render cycle state management
-- Cursor positioning and marker handling
-- Face caching and application
-- Line update operations
-- Configuration validation
-- Named color mapping
-
-**Running:**
+### Everything (recommended)
 
 ```bash
-# Run renderer unit tests only
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro-renderer-unit-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
-
-# Run config unit tests only
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro-config-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
+nix flake check
 ```
 
-### 2. E2E Tests (Integration)
+Runs the Rust unit + integration tests, the full ERT suite on Emacs 29.4 and
+30.1, byte-compilation, `clippy -D warnings`, `cargo fmt --check`, `package-lint`,
+and a `cargo-audit` security scan — the same checks CI runs.
 
-Tests that require the Rust module to be built and spawn actual PTY sessions. These tests simulate real terminal usage.
+### The ERT unit suite directly
 
-**File:**
-- `kuro-e2e-test.el` - End-to-end tests covering:
-  - Module loading and initialization
-  - Basic terminal commands (echo, printf)
-  - ANSI colors (16-color, 256-color, TrueColor)
-  - Text attributes (bold, underline, inverse, hidden, blink)
-  - Terminal resizing
-  - Multi-line output
-  - Vim compatibility (alternate screen)
-  - Mouse encoding (X10, SGR modes)
-  - Bracketed paste mode
-  - Application cursor keys
-  - OSC title sequences
-
-**Prerequisites:**
-- Built Rust module: `cargo build --release`
-- Shell: `/bin/bash`, `/bin/sh`, or `$SHELL`
-
-**Running:**
+The load order is load-bearing: `test/unit/core/kuro-test.el` installs the FFI
+stubs and loads `kuro.el`, so it must load **first**; the remaining files are
+then loaded and all `ert-deftest`s run together.
 
 ```bash
-# Run all E2E tests
-make test-e2e
-
-# Or manually:
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro)" \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")"
+emacs -Q --batch \
+  -L emacs-lisp/core -L test/unit -L test/unit/core -L test/unit/ffi \
+  -L test/unit/rendering -L test/unit/input -L test/unit/faces -L test/unit/features \
+  --eval "(setq load-prefer-newer t)" \
+  --eval "(load (expand-file-name \"test/unit/core/kuro-test.el\"))" \
+  --eval "(mapc #'load \
+            (seq-remove (lambda (f) (string-suffix-p \"/kuro-test.el\" f)) \
+              (directory-files-recursively (expand-file-name \"test/unit\") \"\\.el$\")))" \
+  --eval "(ert-run-tests-batch-and-exit)"
 ```
 
-### 3. Unit Tests in E2E File
+Filter to a subset by passing a selector regexp to
+`ert-run-tests-batch-and-exit`, e.g. `"^kuro-renderer-"` or
+`"^kuro-input-mouse-"`.
 
-`kuro-e2e-test.el` also contains pure unit tests (prefixed with `kuro-unit-`). These test specific functions without needing a live terminal.
-
-**Running:**
+### End-to-end tests (PTY — run outside the Nix sandbox)
 
 ```bash
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro)" \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")"
+nix develop --command bash test/scripts/runners/run-e2e.sh
 ```
 
-### 4. Rust Tests
+These build the release module, spawn real shells, and exercise colors,
+attributes, resize, alternate screen, mouse encoding, bracketed paste, and OSC
+sequences end-to-end.
 
-For Rust core library tests, see the parent directory:
+### VTE compliance
 
 ```bash
-# Run all Rust tests
-make test
+nix develop --command bash test/scripts/runners/vttest-compliance.sh
 ```
 
-### 5. Benchmarks
+## Conventions
 
-Performance benchmarks for the Rust core:
+- **File names**: unit test files end in `-test.el`; shared fixtures live in
+  `*-test-support.el` and are loaded by the files that need them. Split a large
+  file by descriptive area (e.g. `kuro-input-mouse-test.el`), not numeric
+  `-ext` suffixes.
+- **Test names**: `kuro-<area>-<behavior>` for unit tests (e.g.
+  `kuro-renderer-pipeline-apply-dirty-lines-...`); `kuro-e2e-<feature>` for e2e.
+- **No real module in unit tests**: rely on the stubs in `kuro-test-stubs.el`;
+  add a stub there if your code calls a new `kuro-core-*` FFI function.
 
-```bash
-# Run benchmarks (requires nightly Rust)
-make bench
-```
-
-### 6. Fuzz Tests
-
-Fuzzing tests are located in the `fuzz/` directory. These use AFL-style fuzzing to find edge cases in the VTE parser.
-
-## Running All Tests
-
-The easiest way to run all tests (Rust + Elisp):
-
-```bash
-# Run everything
-make test-all
-
-# This is equivalent to:
-make test           # Rust tests
-make test-e2e       # Elisp ERT tests
-```
-
-## Running Specific Test Patterns
-
-You can filter tests by name pattern:
-
-```bash
-# Run tests matching a pattern
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval '(ert-run-tests-batch-and-exit "kuro-e2e-.*color")'
-
-# Run a single test
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval '(ert-run-tests-batch-and-exit "^kuro-e2e-echo-command$")'
-```
-
-## Test Categories by Functional Area
-
-### Renderer Tests (`kuro-renderer-unit-test.el`)
-
-- **Cycle State Machine** (`test-kuro-render-cycle-*`)
-  - Initialization and updates
-  - Blink toggling
-  - Nil update handling
-
-- **Cursor Updates** (`test-kuro-cursor-*`)
-  - Marker positioning
-  - Column clamping
-  - Visible region handling
-  - Type setting
-
-- **Face Application** (`test-kuro-face-*`)
-  - Face caching
-  - Cache invalidation
-  - Face application to buffer
-  - Default face handling
-  - Attribute decoding
-
-- **Line Updates** (`test-kuro-update-line-*`)
-  - Content updates
-  - Deletion and insertion
-  - Unicode handling
-  - Newline preservation
-
-### E2E Tests (`kuro-e2e-test.el`)
-
-- **Module Loading**
-  - `kuro-e2e-module-loads` - Verifies FFI functions are available
-
-- **Basic Terminal**
-  - `kuro-e2e-terminal-init` - Session initialization
-  - `kuro-e2e-echo-command` - Simple command execution
-  - `kuro-e2e-multiple-commands` - Sequential commands
-  - `kuro-e2e-cursor-position` - Cursor reporting
-
-- **ANSI Colors**
-  - `kuro-e2e-ansi-colors` - Basic 16-color support
-  - `kuro-e2e-256-color-indexed-fg` - 256-color indexed mode
-  - `kuro-e2e-truecolor-rgb-fg` - TrueColor RGB mode
-  - `kuro-e2e-bright-color` - Bright color variants
-
-- **Text Attributes**
-  - `kuro-e2e-bold-text` - Bold (SGR 1)
-  - `kuro-e2e-underline-text` - Underline (SGR 4)
-  - `kuro-e2e-background-color` - Background colors
-  - `kuro-e2e-inverse-video` - Inverse/reverse video
-  - `kuro-e2e-hidden-text` - Hidden/conceal (SGR 8)
-  - `kuro-e2e-blink-structural` - Blink attributes
-
-- **Terminal Features**
-  - `kuro-e2e-resize` - Terminal resizing
-  - `kuro-e2e-no-double-newlines` - No line accumulation
-  - `kuro-e2e-clear-command` - Clear screen functionality
-  - `kuro-e2e-multiline-output` - Multi-line text handling
-  - `kuro-e2e-tab-alignment` - Tab stop handling
-
-- **Application Compatibility**
-  - `kuro-e2e-vim-basic` - Vim (alternate screen mode)
-
-### Config Tests (`kuro-config-test.el`)
-
-- **Validation** (`test-kuro-validate-config-*`)
-  - Valid configuration
-  - Invalid shell paths
-  - Invalid scrollback sizes
-  - Invalid colors
-  - Invalid font sizes
-  - Multi-error detection
-
-- **Named Colors** (`test-kuro-rebuild-named-colors-*`)
-  - Basic color mapping
-  - Color count (16 entries)
-  - Custom color updates
-  - All color keys present
-
-- **Frame Rate** (`test-kuro-set-frame-rate-*`)
-  - Valid frame rates
-  - Invalid frame rates (zero/negative)
-
-### Input Tests (in `kuro-e2e-test.el`)
-
-- **Mouse Encoding** (`kuro-unit-mouse-*`)
-  - X10 mode (press/release)
-  - SGR mode
-  - Scroll events
-  - Overflow protection
-
-- **Bracketed Paste** (`kuro-unit-yank*`)
-  - With and without bracketed paste mode
-  - Yank and yank-pop
-
-- **Application Modes** (`kuro-unit-*`)
-  - Application cursor keys (DECCKM)
-  - Application keypad mode
-  - Buffer-local behavior
-
-### Unit Tests (in `kuro-e2e-test.el`)
-
-- **Color Decoding** (`kuro-unit-decode-ffi-color-*`)
-  - Default color
-  - Named colors (16 basic + 16 bright)
-  - Indexed colors (0-255)
-  - RGB truecolor
-
-- **Attribute Decoding** (`kuro-unit-decode-attrs-*`)
-  - Individual attributes (bold, italic, underline, etc.)
-  - Combined attributes
-  - All-flags set
-
-- **Title Sanitization** (`kuro-unit-sanitize-title-*`)
-  - Clean ASCII
-  - Control character stripping
-  - BIDI character removal
-  - Mixed content handling
-
-## Debugging Failing Tests
-
-### Run Test Verbosely
-
-```bash
-# Run with verbose output
-emacs --batch -L emacs-lisp -L test/elisp \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\" t)"
-```
-
-### Run Test Interactively in Emacs
-
-For faster iteration during development, run tests directly in Emacs:
+## Writing a unit test
 
 ```elisp
-;; Load test files
-(add-to-list 'load-path "~/path/to/kuro/emacs-lisp")
-(add-to-list 'load-path "~/path/to/kuro/test/elisp")
-
-(require 'kuro-e2e-test)
-
-;; Run specific test
-(ert-run-tests-interactively "kuro-e2e-echo-command")
-
-;; Run all E2E tests
-(ert-run-tests-interactively "kuro-e2e")
-
-;; View test results buffer
-(ert-results-switch-to-buffer)
+(ert-deftest kuro-config-validate-rejects-bad-scrollback ()
+  "kuro--validate-config flags a non-positive scrollback size."
+  (let ((kuro-scrollback-size -1))
+    (should (kuro--validate-config))))   ; returns the list of problems
 ```
 
-### Common Issues
+## Rust tests
 
-**Issue: "Cannot open shared object file"**
-- Solution: Build Rust module first with `cargo build --release`
-
-**Issue: Tests timeout waiting for shell output**
-- Solution: Check that your shell (`$SHELL` or `/bin/bash`) is working
-- Solution: Increase timeout in test file by modifying `kuro-test--timeout`
-
-**Issue: "Module not found" errors**
-- Solution: Ensure `emacs-lisp/` directory is in load path
-- Solution: Verify `libkuro_core.so` or `.dylib` exists in `target/release/`
-
-**Issue: Tests fail only in batch mode**
-- Solution: Some tests may need interactive mode features. Check test code for `skip-unless` conditions.
-
-**Issue: Vim test fails**
-- Solution: Ensure `vim` is installed and in `$PATH`
-
-## Writing New Tests
-
-### Test Naming Convention
-
-- **Unit tests:** `test-<module>-<function>-<behavior>`
-  - Example: `test-kuro-face-caching`
-
-- **E2E tests:** `kuro-e2e-<feature>-<scenario>`
-  - Example: `kuro-e2e-ansi-colors`
-
-- **Unit tests in E2E file:** `kuro-unit-<function>-<scenario>`
-  - Example: `kuro-unit-decode-ffi-color-named-red`
-
-### Test Template
-
-```elisp
-(ert-deftest test-kuro-your-function-description ()
-  "Brief description of what this test verifies."
-  ;; Setup
-  (let ((original-value some-variable))
-    (unwind-protect
-        (progn
-          ;; Test body
-          (should (equal expected actual)))
-      ;; Cleanup
-      (setq some-variable original-value))))
+```bash
+nix flake check                         # includes Rust unit + integration tests
+cargo test --manifest-path rust-core/Cargo.toml   # just the Rust tests, locally
+cargo clippy --manifest-path rust-core/Cargo.toml --workspace -- -D warnings
+nix run .#bench                         # criterion benchmarks (nightly Rust)
 ```
 
-### E2E Test Template
-
-```elisp
-(ert-deftest kuro-e2e-your-feature ()
-  "Test that your feature works end-to-end."
-  (kuro-test--with-terminal
-   ;; Send commands
-   (kuro-test--send "your command")
-   (kuro-test--send "\r")
-   ;; Wait for output
-   (should (kuro-test--wait-for buf "expected output"))))
-```
-
-## Continuous Integration
-
-All tests run in CI via GitHub Actions. The CI runs:
-
-1. `cargo fmt --all -- --check` - Rust formatting check
-2. `cargo clippy --workspace -- -D warnings` - Rust linting
-3. `cargo doc --workspace --no-deps` - Build documentation
-4. `cargo audit` - Security audit
-5. `cargo test --workspace` - Rust tests
-6. `cargo test --workspace --release` - Rust tests (release mode)
-7. `bash test/scripts/runners/run-e2e.sh` - Elisp ERT tests
-
-See `.github/workflows/` for CI configuration.
-
-## Coverage
-
-Current test coverage by module:
-
-| Module | Test File | Tests | Coverage |
-|--------|-----------|-------|----------|
-| `kuro-renderer.el` | `kuro-renderer-unit-test.el` | 21 | Core logic |
-| `kuro-config.el` | `kuro-config-test.el` | 26 | Full |
-| `kuro-ffi.el` | `kuro-e2e-test.el` (unit) | ~30 | FFI functions |
-| `kuro-input.el` | `kuro-e2e-test.el` (unit) | ~40 | Input handling |
-| Terminal E2E | `kuro-e2e-test.el` (e2e) | ~170 | Integration |
-
-Total: **287 ERT tests** covering unit, integration, and E2E scenarios.
-
-## Resources
-
-- [ERT Documentation](https://www.gnu.org/software/emacs/manual/html_node/ert/)
-- [Emacs Lisp Testing Guide](https://www.gnu.org/software/emacs/manual/html_node/elisp/Testing.html)
-- [Kuro Architecture](../docs/architecture.md)
-- [Contributing Guide](../CONTRIBUTING.md)
+| Layer | Location | Notes |
+|-------|----------|-------|
+| Rust unit | `rust-core/src/**/tests/` | same crate; `pub(crate)` items visible |
+| Rust integration | `rust-core/tests/` | external crate; only `pub` items visible |
+| Elisp unit | `test/unit/` | pure Elisp, FFI stubbed |
+| Elisp e2e | `test/e2e/` | real PTY, needs the built module |

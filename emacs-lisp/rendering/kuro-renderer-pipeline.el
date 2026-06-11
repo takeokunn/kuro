@@ -124,19 +124,6 @@ the unchanged-state fast path and always query Rust for fresh cursor data."
          kuro--last-cursor-visible nil
          kuro--last-cursor-shape   nil))
 
-;;; Binary FFI poll wrapper
-
-(defun kuro--poll-updates-binary ()
-  "Poll terminal update via binary FFI protocol (with-strings optimised path).
-Returns the same format as `kuro--poll-updates-with-faces'."
-  (let ((result (kuro--call nil (kuro-core-poll-updates-binary-with-strings kuro--session-id))))
-    (when result
-      (condition-case err
-          (kuro--decode-binary-updates-with-strings (car result) (cdr result))
-        (args-out-of-range
-         (message "kuro: binary FFI decoder error (malformed frame): %S" err)
-         nil)))))
-
 ;;; Utility
 
 (defconst kuro--title-sanitize-regexp
@@ -383,7 +370,8 @@ high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
 loop.  Process-exit detection is always performed regardless of budget.")
 
 (defvar kuro--frame-duration-ring (make-vector kuro--frame-duration-ring-size 0.0)
-  "Ring buffer of the last `kuro--frame-duration-ring-size' frame durations (seconds).")
+  "Ring buffer of recent frame durations in seconds.
+Length is `kuro--frame-duration-ring-size'.")
 
 (defvar kuro--frame-duration-ring-index 0
   "Current write index into `kuro--frame-duration-ring'.")

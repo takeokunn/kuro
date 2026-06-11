@@ -63,6 +63,17 @@
              ((symbol-function 'kuro--start-render-loop)   #'ignore))
      ,@body))
 
+(defmacro kuro-lifecycle-test--assert-noop-when-uninitialized (fn-call)
+  "Assert FN-CALL is a no-op when `kuro--initialized' is nil.
+Verifies that `kuro-core-send-key' (the Rust FFI) is never reached,
+i.e. the init guard in `kuro--send-key' / `kuro--call' short-circuits."
+  `(let ((kuro--initialized nil)
+         (called nil))
+     (cl-letf (((symbol-function 'kuro-core-send-key)
+                (lambda (_bytes) (setq called t))))
+       ,fn-call)
+     (should-not called)))
+
 (provide 'kuro-lifecycle-test-support)
 
 ;;; kuro-lifecycle-test-support.el ends here

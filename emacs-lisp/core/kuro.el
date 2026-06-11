@@ -40,15 +40,30 @@
 (require 'kuro-overlays)
 (require 'kuro-navigation)
 (require 'kuro-input)
+;; kuro-input-mode is required AFTER kuro-mode-map is defined below, because
+;; kuro-input-mode.el references kuro-mode-map and must not shadow its defvar.
 (require 'kuro-stream)
 (require 'kuro-render-buffer)
 (require 'kuro-renderer)
 (require 'kuro-lifecycle)
 
 ;; kuro-send-next-key is defined in kuro-input.el (loaded before kuro.el uses it).
-(declare-function kuro-send-next-key "kuro-input" ())
-(declare-function kuro--handle-focus-in "kuro-navigation" ())
+(declare-function kuro-send-next-key    "kuro-input"      ())
+(declare-function kuro--handle-focus-in  "kuro-navigation" ())
 (declare-function kuro--handle-focus-out "kuro-navigation" ())
+
+;; Input mode commands are in kuro-input-mode.el.
+(declare-function kuro-cycle-input-mode  "kuro-input-mode" ())
+(declare-function kuro--input-mode-lighter "kuro-input-mode" ())
+
+;; Scrollback search and editing commands are defined later in this file;
+;; same-file forward references are resolved by the byte-compiler at end of
+;; file, so no `declare-function' stubs are needed (and self-referential ones
+;; would be flagged as duplicate definitions under Emacs 30).
+
+;; kuro-input-paste.el — used by kuro-scrollback-send
+(declare-function kuro--send-paste-or-raw        "kuro-input-paste" (text))
+(declare-function kuro--schedule-immediate-render "kuro-input"       ())
 
 ;; EA-Ambiguous font assignment and glyph-metric refinement are in kuro-char-width.el.
 (declare-function kuro--setup-char-width-table "kuro-char-width" ())
@@ -68,13 +83,33 @@
     ;; Prompt navigation (OSC 133)
     (define-key map [?\C-c ?\C-p] #'kuro-previous-prompt)
     (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
+    ;; Copy the output of the command at point (OSC 133), iTerm2-style
+    (define-key map [?\C-c ?\C-o] #'kuro-copy-command-output)
+    ;; Jump between failed commands (non-zero exit) — next-error for the shell
+    (define-key map (kbd "C-c C-M-n") #'kuro-next-failed-command)
+    (define-key map (kbd "C-c C-M-p") #'kuro-previous-failed-command)
+    ;; Jump to any past command via completion (OSC 133), fzf-history style
+    (define-key map [?\C-c ?\C-r] #'kuro-command-history)
     ;; Copy mode: suspend PTY input and enable normal Emacs navigation/selection
     (define-key map [?\C-c ?\C-t] #'kuro-copy-mode)
     (define-key map (kbd "C-c C-SPC") #'kuro-copy-mode)
     ;; Send next key directly to PTY, bypassing kuro-keymap-exceptions
     (define-key map [?\C-c ?\C-q] #'kuro-send-next-key)
+    ;; Input mode cycling: semi-char → char → line → semi-char
+    (define-key map [?\C-c ?\C-i] #'kuro-cycle-input-mode)
+    ;; Scrollback search: enter copy mode + isearch in one step.
+    ;; C-c prefix avoids stealing raw C-s (XOFF) from the PTY.
+    (define-key map (kbd "C-c C-s") #'kuro-search-forward)
+    ;; Scrollback editing: open a writable snapshot buffer
+    (define-key map (kbd "C-c C-e") #'kuro-edit-scrollback)
     map)
   "Keymap for Kuro major mode.")
+
+;; Load kuro-input-mode here — AFTER kuro-mode-map is defined — so the
+;; (defvar kuro-mode-map) forward declaration in kuro-input-mode.el does
+;; not shadow the real initialization above.
+(require 'kuro-input-mode)
+(require 'kuro-copy)
 
 (defun kuro--window-size-change (frame)
   "Handle window size change for kuro buffers in FRAME.
@@ -97,69 +132,90 @@ cycle independently call `kuro--resize'."
               ;; synchronously, avoiding a race where both paths call kuro--resize.
               (setq kuro--resize-pending (cons new-rows new-cols)))))))))
 
-(kuro--defvar-permanent-local kuro--copy-mode nil
-  "Non-nil when Kuro copy mode is active.
-In copy mode the PTY keymap parent is detached so standard Emacs
-navigation and text-selection commands work in the terminal buffer.")
+;;;; Scrollback edit mode — writable snapshot for full Emacs editing
 
-(defcustom kuro-copy-mode-auto-exit t
-  "When non-nil, exit copy mode automatically after \\[kill-ring-save].
-This streamlines the copy workflow: enter copy mode, select a region,
-call `kill-ring-save' to copy and return to terminal mode."
-  :type 'boolean
-  :group 'kuro)
+(defvar-local kuro-edit-scrollback--source-buffer nil
+  "The `kuro-mode' buffer this scrollback snapshot was created from.
+Set by `kuro-edit-scrollback' in the snapshot buffer.")
 
-(defun kuro--copy-mode-save-and-exit ()
-  "Copy the region with `kill-ring-save', optionally exiting copy mode.
-When `kuro-copy-mode-auto-exit' is non-nil, also exits copy mode."
-  (interactive)
-  (call-interactively #'kill-ring-save)
-  (when kuro-copy-mode-auto-exit
-    (kuro--exit-copy-mode)))
-
-(defun kuro--enter-copy-mode ()
-  "Enter Kuro copy mode: suspend PTY input and enable Emacs navigation.
-Uses `use-local-map' so only the current buffer is affected; other Kuro
-buffers keep their normal terminal keymaps."
-  (setq-local kuro--copy-mode t)
-  ;; Install a minimal buffer-local keymap: C-c C-t to exit, M-w to
-  ;; copy-and-optionally-exit.  No parent → the global keymap applies,
-  ;; giving full Emacs navigation.
-  (let ((copy-map (make-sparse-keymap)))
-    (define-key copy-map [?\C-c ?\C-t] #'kuro-copy-mode)
-    (define-key copy-map (kbd "C-c C-SPC") #'kuro-copy-mode)
-    (define-key copy-map (kbd "M-w") #'kuro--copy-mode-save-and-exit)
-    (use-local-map copy-map))
-  (setq mode-name (propertize "Kuro[Copy]" 'face 'font-lock-warning-face))
-  (force-mode-line-update)
-  (message "Kuro copy mode on (C-c C-t or C-c C-SPC to exit)"))
-
-(defun kuro--exit-copy-mode ()
-  "Exit Kuro copy mode: restore PTY input keymap."
-  (setq-local kuro--copy-mode nil)
-  ;; Restore the standard kuro-mode-map (includes kuro--keymap as parent).
-  (use-local-map kuro-mode-map)
-  (setq mode-name "Kuro")
-  (force-mode-line-update)
-  ;; Re-render so the terminal cursor is restored to its correct position.
-  (when (fboundp 'kuro--render-cycle)
-    (kuro--render-cycle))
-  (message "Kuro copy mode off"))
+(defvar kuro--scrollback-edit-keymap
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'kuro-scrollback-send)
+    (define-key map (kbd "C-c C-k") #'kuro-scrollback-discard)
+    map)
+  "Keymap installed in buffers created by `kuro-edit-scrollback'.")
 
 ;;;###autoload
-(defun kuro-copy-mode ()
-  "Toggle Kuro copy mode.
-In copy mode the PTY keymap is suspended and standard Emacs cursor
-movement, region selection, and copy commands (\\[kill-ring-save],
-\\[kill-region], \\[isearch-forward]…) become available.
-The buffer remains read-only; only navigation and selection
-are enabled.  Call \\[kuro-copy-mode] again to return to terminal mode."
+(define-derived-mode kuro-scrollback-edit-mode text-mode "Kuro-Edit"
+  "Major mode for editing a writable snapshot of Kuro terminal output.
+Created by `kuro-edit-scrollback'.
+
+The buffer holds a verbatim copy of the terminal content at the time
+the snapshot was taken.  All Emacs editing commands apply: `isearch',
+`query-replace', `string-rectangle', `delete-rectangle', `swiper',
+M-x, etc.
+
+\\[kuro-scrollback-send]    — send entire buffer to the PTY and close
+\\[kuro-scrollback-discard] — discard edits and close this buffer"
+  (setq buffer-read-only nil)
+  (use-local-map (make-composed-keymap kuro--scrollback-edit-keymap
+                                       (current-local-map))))
+
+;;;###autoload
+(defun kuro-edit-scrollback ()
+  "Open a writable snapshot of the terminal scrollback buffer for editing.
+Creates a dedicated buffer named `*kuro-scrollback: <name>*' containing
+the current terminal content.  The snapshot is fully editable: apply
+`query-replace', `string-rectangle', `occur', `isearch', or any other
+Emacs command freely.
+
+When done:
+  \\[kuro-scrollback-send]    — send the result to the PTY (C-c C-c)
+  \\[kuro-scrollback-discard] — discard without sending   (C-c C-k)
+
+The original terminal buffer is not modified; the PTY continues to run."
   (interactive)
   (unless (derived-mode-p 'kuro-mode)
-    (user-error "Kuro-copy-mode: not in a Kuro terminal buffer"))
-  (if kuro--copy-mode
-      (kuro--exit-copy-mode)
-    (kuro--enter-copy-mode)))
+    (user-error "Not in a Kuro terminal buffer"))
+  (let* ((source (current-buffer))
+         (snap-name (format "*kuro-scrollback: %s*" (buffer-name source)))
+         (snap (get-buffer-create snap-name)))
+    (with-current-buffer snap
+      (kuro-scrollback-edit-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert-buffer-substring source))
+      (setq kuro-edit-scrollback--source-buffer source)
+      (goto-char (point-min)))
+    (switch-to-buffer snap)
+    (message "Kuro scrollback edit — C-c C-c: send to PTY, C-c C-k: discard")))
+
+;;;###autoload
+(defun kuro-scrollback-send ()
+  "Send the snapshot buffer contents to the source Kuro PTY and close.
+The entire buffer is sent via `kuro--send-paste-or-raw' which applies
+bracketed-paste wrapping when the target terminal has mode 2004 active.
+Signals `user-error' when the source buffer no longer exists."
+  (interactive)
+  (unless (derived-mode-p 'kuro-scrollback-edit-mode)
+    (user-error "Not in a Kuro scrollback edit buffer"))
+  (let ((text   (buffer-string))
+        (source kuro-edit-scrollback--source-buffer))
+    (unless (buffer-live-p source)
+      (user-error "Source Kuro buffer no longer exists"))
+    (kill-buffer (current-buffer))
+    (with-current-buffer source
+      (kuro--send-paste-or-raw text)
+      (kuro--schedule-immediate-render)
+      (message "kuro: scrollback content sent to PTY"))))
+
+;;;###autoload
+(defun kuro-scrollback-discard ()
+  "Discard the scrollback snapshot without sending to the PTY."
+  (interactive)
+  (kill-buffer (current-buffer))
+  (message "kuro: scrollback snapshot discarded"))
+
 
 (kuro--defvar-permanent-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")
@@ -186,6 +242,9 @@ When PREV is a function it is called at the end; nil is ignored."
   ;; terminal until later.  Both helpers are idempotent.
   (kuro-char-width-setup)
   (kuro--rebuild-named-colors)
+  ;; Show current input mode in the mode line: [C]=char [S]=semi-char [L]=line
+  (setq-local mode-name
+              '("Kuro" (:eval (kuro--input-mode-lighter))))
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
   (setq-local bidi-paragraph-direction 'left-to-right)

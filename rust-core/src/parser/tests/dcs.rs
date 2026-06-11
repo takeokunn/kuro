@@ -200,6 +200,29 @@ fn test_xtgettcap_colors_capability_response() {
     );
 }
 
+/// XTGETTCAP for "E3" (clear-scrollback) must report the `CSI 3 J` sequence so
+/// tmux knows it can clear the host scrollback.
+/// "E3" hex = "4533"; value "\x1b[3J" hex = "1b5b334a".
+#[test]
+fn test_xtgettcap_e3_clear_scrollback_response() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    run_dcs(&mut core, b"+", 'q', b"4533");
+
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp =
+        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
+    assert!(
+        resp.starts_with("\x1bP1+r"),
+        "E3 must be a known capability (ESC P 1 + r), got: {resp:?}"
+    );
+    assert!(resp.contains("4533"), "response must echo the E3 name hex");
+    assert!(
+        resp.contains("1b5b334a"),
+        "E3 value must be the hex of ESC [ 3 J, got: {resp:?}"
+    );
+}
+
 /// XTGETTCAP with three semicolon-separated capabilities (one unknown) must
 /// produce one failure response and two success responses, in order.
 #[test]
@@ -243,6 +266,69 @@ fn test_xtgettcap_multiple_unknown_capabilities() {
             "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
         );
     }
+}
+
+/// XTGETTCAP for Ts (strikethrough set) must return the SGR 9 sequence.
+#[test]
+fn test_xtgettcap_strikethrough_ts() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    run_dcs(&mut core, b"+", 'q', b"5473"); // "Ts" hex-encoded
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "Ts must succeed: {resp:?}");
+    assert!(resp.contains("5473="), "response must echo Ts hex: {resp:?}");
+}
+
+/// XTGETTCAP for Te (strikethrough reset) must return the SGR 29 sequence.
+#[test]
+fn test_xtgettcap_strikethrough_te() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    run_dcs(&mut core, b"+", 'q', b"5465"); // "Te" hex-encoded
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "Te must succeed: {resp:?}");
+}
+
+/// XTGETTCAP for setrgbf (truecolor foreground terminfo) must succeed.
+#[test]
+fn test_xtgettcap_setrgbf() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    // "setrgbf" = 73 65 74 72 67 62 66
+    run_dcs(&mut core, b"+", 'q', b"73657472676266");
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "setrgbf must succeed: {resp:?}");
+}
+
+/// XTGETTCAP for setrgbb (truecolor background terminfo) must succeed.
+#[test]
+fn test_xtgettcap_setrgbb() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    // "setrgbb" = 73 65 74 72 67 62 62
+    run_dcs(&mut core, b"+", 'q', b"73657472676262");
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "setrgbb must succeed: {resp:?}");
+}
+
+/// XTGETTCAP for kbs (backspace key) must succeed.
+#[test]
+fn test_xtgettcap_kbs() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    run_dcs(&mut core, b"+", 'q', b"6B6273"); // "kbs" hex-encoded
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "kbs must succeed: {resp:?}");
+}
+
+/// XTGETTCAP for Sync (synchronized output) must succeed.
+#[test]
+fn test_xtgettcap_sync() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    run_dcs(&mut core, b"+", 'q', b"53796E63"); // "Sync" hex-encoded
+    assert_eq!(core.meta.pending_responses.len(), 1);
+    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
+    assert!(resp.starts_with("\x1bP1+r"), "Sync must succeed: {resp:?}");
 }
 
 /// A Sixel DCS sequence with valid pixel data must produce exactly one image

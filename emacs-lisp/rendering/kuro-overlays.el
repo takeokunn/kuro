@@ -132,6 +132,21 @@ Modifies `kuro--blink-visible-slow' or `kuro--blink-visible-fast' in-place."
 
 ;;; Blink overlays
 
+(defmacro kuro--register-blink-overlay (ov blink-type row)
+  "Register OV in all three blink overlay tracking structures.
+Maintains the invariant that every blink overlay simultaneously appears in:
+  `kuro--blink-overlays'           — full list for bulk iteration
+  `kuro--blink-overlays-slow/fast' — typed sub-list for O(1) per-phase toggling
+  `kuro--blink-overlays-by-row'    — row hash for O(1) per-row eviction
+Each removal path (`kuro--clear-line-blink-overlays') must mirror this."
+  `(progn
+     (push ,ov kuro--blink-overlays)
+     (if (eq ,blink-type 'slow)
+         (push ,ov kuro--blink-overlays-slow)
+       (push ,ov kuro--blink-overlays-fast))
+     (puthash ,row (cons ,ov (gethash ,row kuro--blink-overlays-by-row))
+              kuro--blink-overlays-by-row)))
+
 (defsubst kuro--apply-blink-overlay (start end blink-type)
   "Create a blink overlay covering buffer positions START to END.
 BLINK-TYPE is the symbol `slow' or `fast', controlling which blink
@@ -148,14 +163,7 @@ Uses `kuro--current-render-row' when set (O(1)); falls back to
     (overlay-put ov 'kuro-blink t)
     (overlay-put ov 'kuro-blink-type blink-type)
     (overlay-put ov 'invisible (not visible))
-    (push ov kuro--blink-overlays)
-    ;; Also push into the typed sub-list so kuro--toggle-blink-phase can iterate
-    ;; only the relevant half without an overlay-get dispatch per overlay.
-    (if (eq blink-type 'slow)
-        (push ov kuro--blink-overlays-slow)
-      (push ov kuro--blink-overlays-fast))
-    (puthash row (cons ov (gethash row kuro--blink-overlays-by-row))
-             kuro--blink-overlays-by-row)))
+    (kuro--register-blink-overlay ov blink-type row)))
 
 (defun kuro--toggle-blink-phase (blink-type)
   "Toggle BLINK-TYPE (`slow' or `fast') visibility; update matching overlays.

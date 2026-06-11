@@ -104,11 +104,19 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // ASCII fast-path: scan for printable ASCII run at start of buffer.
     // Disabled when a non-ASCII charset (e.g. DEC line drawing) is active,
     // since those bytes need per-character translation via VTE print().
-    if core.parser_in_ground && core.active_charset() == crate::types::charset::CharsetType::Ascii {
+    // Disabled when IRM (Insert Mode) is active — each character must be
+    // individually inserted via ICH before printing, which is incompatible
+    // with batch print_ascii_run.
+    if core.parser_in_ground
+        && core.active_charset() == crate::types::charset::CharsetType::Ascii
+        && !core.dec_modes.insert_mode
+    {
         while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
             pos += 1;
         }
         if pos > 0 {
+            // Track last char for REP (CSI Ps b) — fast-path bypasses VTE print().
+            core.last_printed_char = bytes[..pos].last().map(|&b| b as char);
             core.screen.print_ascii_run(
                 &bytes[..pos],
                 core.current_attrs,
@@ -189,7 +197,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             pixel_height,
             columns,
             rows,
-            ..
+            placement_id,
         } => {
             let data = ImageData {
                 pixels,
@@ -204,6 +212,7 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             let cursor = *core.screen.cursor();
             let placement = ImagePlacement {
                 image_id: actual_id,
+                placement_id,
                 row: cursor.row,
                 col: cursor.col,
                 display_cols: columns.unwrap_or(1),
@@ -216,13 +225,14 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
 
         KittyCommand::Place {
             image_id,
+            placement_id,
             columns,
             rows,
-            ..
         } => {
             let cursor = *core.screen.cursor();
             let placement = ImagePlacement {
                 image_id,
+                placement_id,
                 row: cursor.row,
                 col: cursor.col,
                 display_cols: columns.unwrap_or(1),
@@ -236,16 +246,25 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
         KittyCommand::Delete {
             delete_sub,
             image_id,
-            ..
+            placement_id,
         } => {
+            let cursor = *core.screen.cursor();
+            let graphics = core.screen.active_graphics_mut();
             match delete_sub {
-                'a' => core.screen.active_graphics_mut().clear_all_placements(),
-                'I' | 'i' => {
+                'a' | 'A' => graphics.clear_all_placements(),
+                'i' | 'I' => {
                     if let Some(id) = image_id {
-                        core.screen.active_graphics_mut().delete_by_id(id);
+                        graphics.delete_by_id(id);
                     }
                 }
-                _ => {} // other delete sub-commands not supported in Phase 15
+                'p' | 'P' => {
+                    if let (Some(id), Some(pid)) = (image_id, placement_id) {
+                        graphics.delete_by_placement(id, pid);
+                    }
+                }
+                'x' | 'X' => graphics.delete_by_col(cursor.col),
+                'y' | 'Y' => graphics.delete_by_row(cursor.row),
+                _ => {}
             }
         }
 

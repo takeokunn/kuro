@@ -30,9 +30,11 @@ pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c
         'E' => csi_cnl(term, params), // CNL - Cursor Next Line
         'F' => csi_cpl(term, params), // CPL - Cursor Previous Line
         'd' => csi_vpa(term, params), // VPA - Vertical Position Absolute
-        'G' => csi_cha(term, params), // CHA - Character Position Absolute
+        'G' | '`' => csi_cha(term, params), // CHA / HPA — both move to absolute column
         'f' => csi_hvp(term, params), // HVP - Horizontal and Vertical Position
         'n' => csi_dsr(term, params), // DSR - Device Status Report
+        'a' => csi_cuf(term, params), // HPR - Horizontal Position Relative (≡ CUF)
+        'e' => csi_cud(term, params), // VPR - Vertical Position Relative (≡ CUD)
         _ => {}
     }
 }
@@ -125,7 +127,12 @@ fn csi_cpl(term: &mut crate::TerminalCore, params: &vte::Params) {
 
 /// DSR - Device Status Report (CSI n)
 ///
-/// Param 6: respond with current cursor position as ESC[row;colR (1-indexed).
+/// Param 5: operating-status query — respond `CSI 0 n` ("ready, no
+///          malfunction"). Programs use this to probe terminal liveness.
+/// Param 6: respond with current cursor position as `ESC[row;colR`
+///          (1-indexed); this is CPR (Cursor Position Report).
+///
+/// Any other parameter is a silent no-op.
 #[inline]
 fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
     let code = params
@@ -135,11 +142,18 @@ fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
         .copied()
         .unwrap_or(0);
 
-    if code == 6 {
-        let row = term.screen.cursor().row + 1; // Convert to 1-indexed
-        let col = term.screen.cursor().col + 1;
-        let response = format!("\x1b[{row};{col}R");
-        term.meta.pending_responses.push(response.into_bytes());
+    match code {
+        5 => {
+            // Operating status: terminal is ready / no malfunction.
+            term.meta.pending_responses.push(b"\x1b[0n".to_vec());
+        }
+        6 => {
+            let row = term.screen.cursor().row + 1; // Convert to 1-indexed
+            let col = term.screen.cursor().col + 1;
+            let response = format!("\x1b[{row};{col}R");
+            term.meta.pending_responses.push(response.into_bytes());
+        }
+        _ => {}
     }
 }
 
@@ -249,6 +263,82 @@ pub fn handle_decscusr(term: &mut crate::TerminalCore, params: &vte::Params) {
         .unwrap_or(0);
     term.dec_modes.cursor_shape =
         CursorShape::try_from(i64::from(ps)).unwrap_or(CursorShape::BlinkingBlock);
+}
+
+/// Handle XTWINOPS window manipulation (`CSI Ps ; ... t`).
+///
+/// Only the *size-report* queries are answered.  Window-manipulation ops
+/// Window manipulation operations other than size queries and title stack
+/// (resize/move/iconify/raise/lower; `Ps` 1–10) and host-revealing reports
+/// (window position `Ps` 13, icon/window title `Ps` 20/21) are deliberately
+/// ignored as a security measure: a terminal embedded in Emacs must never let
+/// applications move, resize, or interrogate the host window
+/// (cf. xterm's `allowWindowOps`, disabled by default in many emulators).
+///
+/// Answered queries (`height` = rows, `width` = cols; pixels are unknown for a
+/// cell-based core and so reported as 0):
+/// - `Ps` 14 → `CSI 4 ; 0 ; 0 t`        (text-area size in pixels)
+/// - `Ps` 18 → `CSI 8 ; rows ; cols t`  (text-area size in characters)
+/// - `Ps` 19 → `CSI 9 ; rows ; cols t`  (screen size in characters)
+///
+/// Title stack operations (safe — no host window interrogation):
+/// - `Ps` 22 → XTPUSHTITLE: push current window title onto internal stack
+/// - `Ps` 23 → XTPOPTITLE: pop window title from stack and apply it
+#[inline]
+pub fn handle_xtwinops(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let op = params
+        .iter()
+        .next()
+        .and_then(|p| p.first().copied())
+        .unwrap_or(0);
+    let rows = term.screen.rows();
+    let cols = term.screen.cols();
+    match op {
+        14 => term.meta.pending_responses.push(b"\x1b[4;0;0t".to_vec()),
+        18 => term
+            .meta
+            .pending_responses
+            .push(format!("\x1b[8;{rows};{cols}t").into_bytes()),
+        19 => term
+            .meta
+            .pending_responses
+            .push(format!("\x1b[9;{rows};{cols}t").into_bytes()),
+        // XTPUSHTITLE — save current title; second param selects what to save:
+        //   0 = icon+window title, 1 = icon, 2 = window title. We treat all as window title.
+        22 => term.meta.title_stack.push(term.meta.title.clone()),
+        // XTPOPTITLE — restore title from stack; same sub-param semantics as above.
+        23 => {
+            if let Some(saved) = term.meta.title_stack.pop() {
+                term.meta.title = saved;
+                term.meta.title_dirty = true;
+            }
+        }
+        // All other XTWINOPS: intentionally ignored (see fn docs).
+        _ => {}
+    }
+}
+
+/// DECREQTPARM — Request Terminal Parameters (CSI Ps x).
+///
+/// Per the VT100 spec, only `Ps = 0` or `Ps = 1` produce a report (DECREPTPARM):
+/// `CSI <sol> ; 1 ; 1 ; 128 ; 128 ; 1 ; 0 x` where `sol` is 2 (for request 0) or
+/// 3 (for request 1). Fields are: parity=none, nbits=8, xspeed/rspeed=38400,
+/// clock-multiplier=1, flags=0 — the standard "no special settings" report that
+/// xterm emits. Any other `Ps` value is ignored (VT100 behavior).
+#[inline]
+pub fn handle_decreqtparm(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let req = params
+        .iter()
+        .next()
+        .and_then(|p| p.first().copied())
+        .unwrap_or(0);
+    let sol = match req {
+        0 => 2,
+        1 => 3,
+        _ => return, // other values produce no report
+    };
+    let response = format!("\x1b[{sol};1;1;128;128;1;0x");
+    term.meta.pending_responses.push(response.into_bytes());
 }
 
 #[cfg(test)]

@@ -16,6 +16,10 @@ A high-performance terminal emulator for Emacs, powered by a Rust dynamic module
 - **OSC Support**: OSC 7 (CWD), OSC 8 (hyperlinks), OSC 52 (clipboard), OSC 133 shell integration with FinalTerm/Ghostty extras (`aid=`, `duration=`, `err=`, exit code on D-mark), with extras (aid, duration, err) rendered as left-margin status indicators and end-of-line annotations
 - **Device Attributes**: DA1, DA2, DA3 (`CSI = c` → `DCS ! | 00000000 ST`)
 - **Color Scheme Notifications**: DEC private mode 2031 + DSR 996 (Contour/Ghostty extension), automatically synchronized to Emacs's current theme via `enable-theme-functions`
+- **In-band Resize Notifications**: DEC private mode 2048 reports text-area size changes as `CSI 48 ; rows ; cols ; 0 ; 0 t` sequences directly in the PTY stream — a robust modern alternative to SIGWINCH, compatible with foot/Ghostty/kitty/iTerm2/Contour
+- **Window Size Queries**: XTWINOPS `CSI 14/18/19 t` report the text-area/screen size on demand (`CSI 8 ; rows ; cols t`); window-manipulation and position/title ops are ignored for security
+- **Status String Queries**: DECRQSS `DCS $ q ... ST` reports the current cursor style (DECSCUSR), scroll region (DECSTBM), and SGR rendition (round-trip-faithful) — e.g. so neovim can restore your cursor shape on exit
+- **Desktop Notifications**: OSC 9 (iTerm2) and OSC 777 notifications surface to Emacs and display via `notifications-notify` (D-Bus, with echo-area fallback) — long-running TUIs can alert you when you're looking elsewhere
 - **Sixel Graphics**: Inline image display via Sixel protocol
 - **Unicode**: Full CJK support, grapheme clusters, emoji (unicode-width)
 - **Multi-session**: Multiple terminal sessions with independent state, auto-reaping of dead sessions
@@ -55,11 +59,12 @@ cd kuro
 cargo build --release --manifest-path rust-core/Cargo.toml
 mkdir -p ~/.local/share/kuro
 
+# The workspace target directory is at the repo root.
 # Linux:
-cp rust-core/target/release/libkuro_core.so ~/.local/share/kuro/
+cp target/release/libkuro_core.so ~/.local/share/kuro/
 
 # macOS:
-cp rust-core/target/release/libkuro_core.dylib ~/.local/share/kuro/
+cp target/release/libkuro_core.dylib ~/.local/share/kuro/
 ```
 
 After installing the Emacs package via `package.el` (see MELPA section below), you can also run `M-x kuro-module-build` to compile the native module from source via cargo, or `M-x kuro-module-download` to fetch a prebuilt binary.

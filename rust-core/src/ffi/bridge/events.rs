@@ -75,6 +75,34 @@ fn kuro_core_poll_clipboard_actions(env: &Env, session_id: u64) -> EmacsResult<V
     Ok(list)
 }
 
+/// Poll for pending desktop notifications (OSC 9 / OSC 777) and clear them.
+///
+/// Returns a list of `(TITLE . BODY)` cons cells, where TITLE is the
+/// notification title string (OSC 777) or nil (the iTerm2 OSC 9 form), and
+/// BODY is the notification body string.
+#[defun]
+fn kuro_core_poll_notifications(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    let notifications = drain_session_vec(
+        env,
+        session_id,
+        "poll_notifications",
+        super::super::abstraction::session::TerminalSession::take_notifications,
+    );
+
+    let nil = false.into_lisp(env)?;
+    let mut list = nil;
+    for notif in notifications.into_iter().rev() {
+        let title = match notif.title {
+            Some(t) => t.into_lisp(env)?,
+            None => nil,
+        };
+        let body = notif.body.into_lisp(env)?;
+        let item = env.cons(title, body)?;
+        list = env.cons(item, list)?;
+    }
+    Ok(list)
+}
+
 /// Poll for pending prompt mark events from OSC 133 and clear them.
 ///
 /// Returns a list of prompt mark descriptors, each of the form:

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 const MAX_SIXEL_SIZE: usize = 4096 * 4096; // 4K x 4K pixel limit
+const MAX_COLOR_REGISTERS: u16 = 1024; // matches WezTerm / Ghostty / foot (VT340 = 16, xterm = 256)
 
 /// In-progress sixel decoder state.
 pub struct SixelDecoder {
@@ -63,13 +64,34 @@ macro_rules! accumulate_digit {
 }
 
 impl SixelDecoder {
-    /// Create a decoder using Sixel P2 behavior.
     #[must_use]
     #[expect(
         clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "VT340 default palette values are 0-100 (positive); (v * 255 / 100) is always ≤ 255"
+        reason = "register index is bounds-checked against MAX_COLOR_REGISTERS before the u16 cast"
     )]
+    /// Create a new sixel decoder, optionally seeding the palette from terminal OSC 4 overrides.
+    ///
+    /// `osc4_palette` is the terminal's 256-entry OSC 4 palette; entries with `Some([r,g,b])`
+    /// override the VT340 defaults. This ensures `#N` references in sixel data that reference
+    /// unredefined registers use the terminal's current color assignments.
+    pub fn new_with_palette(p2: u16, osc4_palette: &[Option<[u8; 3]>]) -> Self {
+        let mut decoder = Self::new(p2);
+        // Override VT340 defaults with any OSC 4 terminal palette entries.
+        for (idx, entry) in osc4_palette.iter().enumerate() {
+            if let Some(rgb) = entry {
+                let reg = idx as u16;
+                if reg < MAX_COLOR_REGISTERS {
+                    decoder.color_map.insert(reg, *rgb);
+                }
+            }
+        }
+        decoder
+    }
+
+    /// Create a Sixel decoder seeded with the VT340 default 16-color palette.
+    ///
+    /// `p2` is the DCS P2 parameter selecting background fill behaviour
+    /// (0/2 = pixels default to background color, 1 = leave untouched).
     pub fn new(p2: u16) -> Self {
         let mut color_map = HashMap::new();
         // VT340-like default palette (first 16 entries, 0-100 mapped to 0-255).
@@ -221,7 +243,7 @@ impl SixelDecoder {
 
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "register index: DCS params are u32 but Sixel only defines 0-255 registers (VT340); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255"
+        reason = "register index: DCS params are u32 but we cap at MAX_COLOR_REGISTERS (1024); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255"
     )]
     #[expect(
         clippy::cast_precision_loss,
@@ -232,7 +254,7 @@ impl SixelDecoder {
             return;
         }
 
-        let reg = self.params[0] as u16;
+        let reg = (self.params[0] as u16).min(MAX_COLOR_REGISTERS - 1);
         self.current_color = reg;
 
         // #N;2;R;G;B (0-100 each) or #N;1;H;L;S.

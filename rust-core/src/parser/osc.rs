@@ -2,7 +2,7 @@
 
 use super::osc_protocol::{
     encode_color_spec, handle_osc_104, handle_osc_133, handle_osc_1337, handle_osc_51,
-    handle_osc_52, handle_osc_default_colors, parse_color_spec,
+    handle_osc_52, handle_osc_777, handle_osc_9, handle_osc_default_colors, parse_color_spec,
 };
 
 use std::sync::Arc;
@@ -20,6 +20,8 @@ use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_B
 /// - OSC 7: Current Working Directory notification (`file://host/path`).
 /// - OSC 8: Hyperlinks (`ESC]8;params;uri ST`).
 /// - OSC 10/11/12: Set/query default foreground/background/cursor colors.
+/// - OSC 22: Window pointer cursor shape (CSS cursor name, e.g. "pointer", "default").
+/// - OSC 110/111/112: Reset default foreground/background/cursor color to terminal default.
 /// - OSC 51: Emacs eval command request (security: Elisp-side whitelist filtering).
 /// - OSC 52: Clipboard access.
 /// - OSC 104: Reset color palette.
@@ -46,8 +48,32 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         }
         b"7" => handle_osc_7(core, params),
         b"8" => handle_osc_8(core, params),
+        b"9" => handle_osc_9(core, params),
+        b"777" => handle_osc_777(core, params),
         b"4" => handle_osc_4(core, params),
         b"10" | b"11" | b"12" => handle_osc_default_colors(core, params),
+        // OSC 22 — window pointer cursor shape (e.g. "default", "pointer", "text", "crosshair").
+        // Applications set this to change the OS mouse cursor within the terminal area.
+        b"22" => {
+            if let Some(raw) = params.get(1) {
+                let name = String::from_utf8_lossy(raw).into_owned();
+                core.osc_data.pointer_shape = if name.is_empty() { None } else { Some(name) };
+            }
+        }
+        // OSC 110/111/112: reset default fg/bg/cursor color to terminal default.
+        // Symmetric counterparts to OSC 10/11/12 set/query.
+        b"110" => {
+            core.osc_data.default_fg = None;
+            core.osc_data.default_colors_dirty = true;
+        }
+        b"111" => {
+            core.osc_data.default_bg = None;
+            core.osc_data.default_colors_dirty = true;
+        }
+        b"112" => {
+            core.osc_data.cursor_color = None;
+            core.osc_data.default_colors_dirty = true;
+        }
         b"51" => handle_osc_51(core, params),
         b"52" => handle_osc_52(core, params),
         b"104" => handle_osc_104(core, params),
@@ -111,6 +137,36 @@ fn handle_osc_8(core: &mut TerminalCore, params: &[&[u8]]) {
     }
 }
 
+/// Compute the standard xterm 256-color built-in color for palette index `idx`.
+///
+/// - Indices   0–15:  Standard 16 ANSI colors (xterm defaults).
+/// - Indices  16–231: 6×6×6 RGB cube; component `c` → 0 if c==0, else 55+40×c.
+/// - Indices 232–255: Grayscale ramp; value = 8 + 10×(idx−232).
+fn xterm_default_color(idx: usize) -> [u8; 3] {
+    const ANSI16: [[u8; 3]; 16] = [
+        [  0,   0,   0], [128,   0,   0], [  0, 128,   0], [128, 128,   0],
+        [  0,   0, 128], [128,   0, 128], [  0, 128, 128], [192, 192, 192],
+        [128, 128, 128], [255,   0,   0], [  0, 255,   0], [255, 255,   0],
+        [  0,   0, 255], [255,   0, 255], [  0, 255, 255], [255, 255, 255],
+    ];
+    match idx {
+        0..=15 => ANSI16[idx],
+        16..=231 => {
+            let i = idx - 16;
+            let b = i % 6;
+            let g = (i / 6) % 6;
+            let r = i / 36;
+            let c = |v: usize| -> u8 { if v == 0 { 0 } else { (55 + 40 * v) as u8 } };
+            [c(r), c(g), c(b)]
+        }
+        232..=255 => {
+            let v = (8 + 10 * (idx - 232)) as u8;
+            [v, v, v]
+        }
+        _ => [0, 0, 0],
+    }
+}
+
 /// Handle OSC 4 — 256-color palette set/query.
 ///
 /// Wire format: `OSC 4 ; index ; spec BEL`
@@ -126,8 +182,9 @@ fn handle_osc_4(core: &mut TerminalCore, params: &[&[u8]]) {
         if let Ok(idx) = idx_str.parse::<usize>() {
             if idx < 256 {
                 if *spec_raw == b"?" {
-                    // Query: respond with current color
-                    let rgb = core.osc_data.palette[idx].unwrap_or([0, 0, 0]);
+                    // Query: return the application override if set, else the xterm built-in default.
+                    let rgb = core.osc_data.palette[idx]
+                        .unwrap_or_else(|| xterm_default_color(idx));
                     let resp = format!("\x1b]4;{};{}\x07", idx, encode_color_spec(rgb));
                     core.meta.pending_responses.push(resp.into_bytes());
                 } else {

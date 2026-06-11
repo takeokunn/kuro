@@ -268,11 +268,35 @@ fn color_no_params_does_not_panic() {
 }
 
 #[test]
-fn color_index_high_value_does_not_panic() {
-    // Index 65535 is the maximum u16; must not panic
+fn color_index_high_value_clamped_to_max_register() {
+    // Indices above 1023 are clamped to 1023 (MAX_COLOR_REGISTERS - 1).
+    // Must not panic; the color must land at register 1023, not 65535.
     let mut d = make_decoder();
     feed(&mut d, b"#65535;2;50;50;50$");
-    assert!(d.color_map.contains_key(&65535));
+    assert!(
+        d.color_map.contains_key(&1023),
+        "out-of-range register must be clamped to 1023"
+    );
+    assert!(
+        !d.color_map.contains_key(&65535),
+        "register 65535 must not exist after clamping"
+    );
+}
+
+#[test]
+fn color_index_at_max_register_is_stored() {
+    // Register 1023 is the last valid register; must be stored normally.
+    let mut d = make_decoder();
+    feed(&mut d, b"#1023;2;50;50;50$");
+    assert!(d.color_map.contains_key(&1023));
+}
+
+#[test]
+fn color_index_just_below_max_is_stored() {
+    // Register 1022 is within bounds.
+    let mut d = make_decoder();
+    feed(&mut d, b"#1022;2;100;0;0$");
+    assert!(d.color_map.contains_key(&1022));
 }
 
 #[test]

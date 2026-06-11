@@ -63,6 +63,17 @@
 (declare-function kuro--schedule-immediate-render "kuro-input" ())
 (declare-function kuro--scroll-aware-ctrl-v "kuro-input" ())
 (declare-function kuro--scroll-aware-meta-v "kuro-input" ())
+(declare-function kuro--kkp-flag-p "kuro-input-keys" (flag))
+
+;; kuro--keyboard-flags is defvar-permanent-local in kuro-input-paste.el.
+;; Forward-declare here so the escape-key lambda can reference it.
+(defvar kuro--keyboard-flags 0
+  "Forward reference; defvar-permanent-local in kuro-input-paste.el.")
+
+;; kuro--kkp-* constants are defconst in kuro-input-keys.el (loaded before this file
+;; via kuro-input.el). Declare them here to silence byte-compiler warnings.
+(defvar kuro--kkp-disambiguate  #x01 "Forward reference; defconst in kuro-input-keys.el.")
+(defvar kuro--kkp-all-escape    #x08 "Forward reference; defconst in kuro-input-keys.el.")
 
 
 ;;; Keymap Variable
@@ -116,7 +127,13 @@ Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
   ;; C-v: scroll-aware — scrolls when in scrollback, sends ctrl byte when at live view.
   (define-key map (kbd "C-v") #'kuro--scroll-aware-ctrl-v)
   ;; ESC must use [escape] (not kbd "ESC") to avoid shadowing all ESC-prefixed bindings.
-  (define-key map [escape] (lambda () (interactive) (kuro--send-ctrl 27))))
+  ;; With KKP DISAMBIGUATE (0x01): send CSI 27;1u so the app sees an unambiguous Escape
+  ;; event, rather than a bare \e that could be mistaken as the start of an escape sequence.
+  (define-key map [escape]
+    (lambda () (interactive)
+      (if (not (zerop (logand kuro--keyboard-flags #x01)))
+          (progn (kuro--send-key "\e[27;1u") (kuro--schedule-immediate-render))
+        (kuro--send-ctrl 27)))))
 
 (defun kuro--send-meta-backspace ()
   "Send ESC+DEL (Meta-Backspace) to the PTY.
@@ -195,6 +212,12 @@ The letters A/B/C/D are the original VT100 cursor movement codes
 \(CUU/CUD/CUF/CUB).  Used with `kuro--xterm-modifier-codes' to build the 12
 modifier+arrow sequences like \\e[1;2A (Shift+Up), \\e[1;5C (Ctrl+Right), etc.")
 
+(defconst kuro--kkp-arrow-codepoints
+  '((up . 57352) (down . 57353) (right . 57351) (left . 57350))
+  "KKP Unicode codepoints for arrow keys.
+Used when `kuro--kkp-all-escape' (0x08) is active to send CSI cp;mod u instead
+of the xterm CSI 1;Nm form.  Mirrors `kuro--xterm-arrow-codes' key order.")
+
 (defconst kuro--fkey-handlers
   '((f1  . kuro--F1)  (f2  . kuro--F2)  (f3  . kuro--F3)  (f4  . kuro--F4)
     (f5  . kuro--F5)  (f6  . kuro--F6)  (f7  . kuro--F7)  (f8  . kuro--F8)
@@ -229,15 +252,45 @@ Applied by `kuro--keymap-setup-navigation'.")
   (dolist (entry kuro--fkey-handlers)
     (define-key map (vector (car entry)) (cdr entry)))
 
-  ;; Modifier + arrow keys: xterm CSI 1;Nm sequences
+  ;; Modifier + arrow keys: xterm CSI 1;Nm sequences (or KKP with flag 0x08)
   (dolist (mod kuro--xterm-modifier-codes)
     (dolist (arrow kuro--xterm-arrow-codes)
-      (let* ((event (intern (format "%s-%s" (car mod) (car arrow))))
-             (seq   (format "\e[1;%d%c" (cdr mod) (cdr arrow))))
+      (let* ((dir    (car arrow))
+             (mod-sym (car mod))
+             (xterm-mod (cdr mod))
+             (event  (intern (format "%s-%s" mod-sym dir)))
+             (xterm-seq (format "\e[1;%d%c" xterm-mod (cdr arrow)))
+             ;; KKP wire modifier: shift=1→2, alt=2→3, ctrl=4→5
+             (kkp-mod   (1+ xterm-mod))
+             (kkp-cp    (cdr (assq dir kuro--kkp-arrow-codepoints))))
         (define-key map (vector event)
           (lambda () (interactive)
-            (kuro--send-key seq)
-            (kuro--schedule-immediate-render)))))))
+            (if (and kkp-cp (kuro--kkp-flag-p kuro--kkp-all-escape))
+                (kuro--send-key (format "\e[%d;%du" kkp-cp kkp-mod))
+              (kuro--send-key xterm-seq))
+            (kuro--schedule-immediate-render))))))
+
+  ;; Shift+Tab (backtab): legacy = ESC [ Z; KKP = CSI 9;2u
+  (define-key map [backtab]
+    (lambda () (interactive)
+      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+          (kuro--send-key "\e[9;2u")
+        (kuro--send-key "\e[Z"))
+      (kuro--schedule-immediate-render)))
+  (define-key map [S-tab]
+    (lambda () (interactive)
+      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+          (kuro--send-key "\e[9;2u")
+        (kuro--send-key "\e[Z"))
+      (kuro--schedule-immediate-render)))
+
+  ;; Shift+Return: legacy = CR (same as Return); KKP = CSI 13;2u
+  (define-key map [S-return]
+    (lambda () (interactive)
+      (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+          (kuro--send-key "\e[13;2u")
+        (kuro--send-key "\r"))
+      (kuro--schedule-immediate-render))))
 
 (defconst kuro--mouse-bindings
   '(([down-mouse-1] . kuro--mouse-press)
@@ -257,16 +310,19 @@ Applied by `kuro--keymap-setup-mouse'.")
     (define-key map key cmd)))
 
 (defun kuro--keymap-setup-yank (map)
-  "Add yank remapping and keymap-exception removal to MAP.
+  "Add yank remapping to MAP.
 Remaps `yank', `yank-pop', and `clipboard-yank' (Cmd+V on macOS)
 all to `kuro--yank' / `kuro--yank-pop' so paste always goes through the PTY
 with optional bracketed-paste wrapping."
   (define-key map [remap yank]          #'kuro--yank)
   (define-key map [remap yank-pop]      #'kuro--yank-pop)
-  (define-key map [remap clipboard-yank] #'kuro--yank)
+  (define-key map [remap clipboard-yank] #'kuro--yank))
 
-  ;; Remove bindings for keys listed in kuro-keymap-exceptions so they fall
-  ;; through to the standard Emacs global keymap (e.g. M-x, C-g, C-x).
+(defun kuro--keymap-apply-exceptions (map)
+  "Remove exception keys from MAP per `kuro-keymap-exceptions'.
+Keys in `kuro-keymap-exceptions' are unbound so they fall through
+to the standard Emacs global keymap (e.g. M-x, C-g, C-x).
+Called on the semi-char keymap; NOT called when building the char keymap."
   (dolist (exc (bound-and-true-p kuro-keymap-exceptions))
     (condition-case nil
         (progn
@@ -281,13 +337,19 @@ with optional bracketed-paste wrapping."
       (error nil))))
 
 
+;;; Keymap Variables
+
+(defvar kuro--char-keymap nil
+  "Full Kuro keymap with ALL keys bound (char mode: no exceptions).
+Built by `kuro--build-keymap' alongside `kuro--keymap'.")
+
+
 ;;; Keymap Builder
 
-(defun kuro--build-keymap ()
-  "Build and return the Kuro terminal input keymap.
-Keys listed in `kuro-keymap-exceptions' are omitted so they fall through
-to the standard Emacs global keymap.  Also stores the result in
-`kuro--keymap' for use as the parent of `kuro-mode-map'."
+(defun kuro--build-full-keymap ()
+  "Build and return a full Kuro keymap with all keys bound (no exceptions).
+This is the char-mode base; used directly in char mode and as the basis
+for `kuro--keymap' (semi-char) after exception removal."
   (let ((map (make-sparse-keymap)))
     (define-key map [remap self-insert-command] #'kuro--self-insert)
     (kuro--keymap-setup-special map)
@@ -296,6 +358,17 @@ to the standard Emacs global keymap.  Also stores the result in
     (kuro--keymap-setup-navigation map)
     (kuro--keymap-setup-mouse map)
     (kuro--keymap-setup-yank map)
+    map))
+
+(defun kuro--build-keymap ()
+  "Build `kuro--keymap' (semi-char) and `kuro--char-keymap' (char mode).
+`kuro--char-keymap': all keys bound, no exceptions — used in char mode.
+`kuro--keymap': exceptions from `kuro-keymap-exceptions' removed — default.
+Returns `kuro--keymap' for backward compatibility."
+  (setq kuro--char-keymap (kuro--build-full-keymap))
+  ;; Semi-char: start from a copy of the full keymap, then punch holes
+  (let ((map (copy-keymap kuro--char-keymap)))
+    (kuro--keymap-apply-exceptions map)
     (setq kuro--keymap map)
     map))
 

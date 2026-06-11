@@ -106,9 +106,13 @@
   "kuro--eval-command-allowed-p returns non-nil for setenv command."
   (should (kuro--eval-command-allowed-p "(setenv \"FOO\" \"bar\")")))
 
-(ert-deftest kuro-eval-allowed-kuro-prefix ()
-  "kuro--eval-command-allowed-p returns non-nil for kuro- prefixed commands."
-  (should (kuro--eval-command-allowed-p "(kuro-create)")))
+(ert-deftest kuro-eval-blocked-kuro-prefix ()
+  "kuro--eval-command-allowed-p returns nil for kuro- prefixed commands.
+The `kuro-' function-namespace prefix is deliberately excluded from
+`kuro-eval-command-whitelist': allowing it would let malicious terminal
+output invoke arbitrary kuro- commands via OSC 51 (see the defcustom
+security note)."
+  (should-not (kuro--eval-command-allowed-p "(kuro-create)")))
 
 (ert-deftest kuro-eval-blocked-delete-file ()
   "kuro--eval-command-allowed-p returns nil for delete-file."
@@ -149,10 +153,13 @@
 ;;; Group 3: defcustom defaults
 
 (ert-deftest kuro-eval-whitelist-default-entries ()
-  "kuro-eval-command-whitelist default has cd, setenv, and kuro- entries."
+  "kuro-eval-command-whitelist default has cd and setenv, but not kuro-.
+The `kuro-' prefix is intentionally excluded for security (see the
+defcustom docstring): allowing it would let terminal output invoke any
+kuro- command via OSC 51."
   (should (member "cd" kuro-eval-command-whitelist))
   (should (member "setenv" kuro-eval-command-whitelist))
-  (should (member "kuro-" kuro-eval-command-whitelist)))
+  (should-not (member "kuro-" kuro-eval-command-whitelist)))
 
 ;;; Group 4: kuro--poll-eval-command-updates integration
 

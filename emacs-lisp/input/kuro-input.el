@@ -94,9 +94,38 @@ DOC is the function docstring."
      (interactive)
      (kuro--send-special ,byte)))
 
-(kuro--def-special-key kuro--RET ?\r "Send Return key.")
-(kuro--def-special-key kuro--TAB ?\t "Send Tab key.")
-(kuro--def-special-key kuro--DEL ?\x7f "Send Delete (backspace) key.")
+;; kuro--keyboard-flags is defvar-permanent-local in kuro-input-paste.el.
+;; Forward-declare here so kuro--RET/TAB/DEL can reference it before that file loads.
+(defvar kuro--keyboard-flags 0
+  "Forward reference; defvar-permanent-local in kuro-input-paste.el.")
+
+(defun kuro--RET ()
+  "Send Return key.
+With KKP REPORT_ALL_KEYS flag (0x08), send CSI 13;1u for unambiguous reporting.
+Otherwise send bare CR (\\r) as in the legacy protocol."
+  (interactive)
+  (if (not (zerop (logand kuro--keyboard-flags #x08)))
+      (kuro--send-key "\e[13;1u")
+    (kuro--send-special ?\r)))
+
+(defun kuro--TAB ()
+  "Send Tab key.
+With KKP REPORT_ALL_KEYS flag (0x08), send CSI 9;1u so the app can
+distinguish Tab from Ctrl+I (which becomes CSI 105;5u).
+Otherwise send bare HT (\\t) as in the legacy protocol."
+  (interactive)
+  (if (not (zerop (logand kuro--keyboard-flags #x08)))
+      (kuro--send-key "\e[9;1u")
+    (kuro--send-special ?\t)))
+
+(defun kuro--DEL ()
+  "Send Delete (backspace) key.
+With KKP REPORT_ALL_KEYS flag (0x08), send CSI 127;1u.
+Otherwise send bare DEL (0x7f) as in the legacy protocol."
+  (interactive)
+  (if (not (zerop (logand kuro--keyboard-flags #x08)))
+      (kuro--send-key "\e[127;1u")
+    (kuro--send-special ?\x7f)))
 
 
 ;;; Helper Function for Key Sequences

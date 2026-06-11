@@ -17,29 +17,7 @@
 ;; It does NOT fake-provide any Elisp modules — the real .el files are loaded
 ;; normally (they guard all Rust calls behind `kuro--initialized').
 
-;;; Code:
-
-(require 'ert)
-(require 'cl-lib)
-
-;;; ── Stub Rust FFI symbols ────────────────────────────────────────────────────
-(let* ((this-dir (file-name-directory
-                  (or load-file-name buffer-file-name default-directory)))
-       (unit-dir (expand-file-name ".." this-dir)))
-  (add-to-list 'load-path unit-dir))
-(require 'kuro-test-stubs)
-
-;;; ── Load kuro.el and its full dependency chain ──────────────────────────────
-;; Load via an absolute file-relative path so it works both interactively and
-;; in batch mode.  add-to-list ensures the emacs-lisp/ directory is on the
-;; load-path so all (require 'kuro-X) calls inside kuro.el resolve correctly.
-
-(let* ((this-dir (file-name-directory
-                  (or load-file-name buffer-file-name default-directory)))
-       (el-dir (expand-file-name "../../../emacs-lisp/core" this-dir)))
-  (add-to-list 'load-path el-dir t))
-
-(require 'kuro)
+(require 'kuro-test-support)
 
 ;;; ── Group 2: kuro--window-size-change resize logic ──────────────────────────
 ;;
@@ -47,24 +25,6 @@
 ;; (window-list frame).  To avoid spinning up real frames/windows in batch
 ;; mode, we test the inner predicate logic directly using the same
 ;; buffer-local state variables the function reads.
-
-(defmacro kuro-el-test--with-kuro-buffer (&rest body)
-  "Run BODY in a temp buffer simulating a live kuro-mode buffer."
-  `(with-temp-buffer
-     (setq major-mode 'kuro-mode)
-     (setq-local kuro--initialized t)
-     (setq-local kuro--last-rows 24)
-     (setq-local kuro--last-cols 80)
-     (setq-local kuro--resize-pending nil)
-     ,@body))
-
-(defun kuro-el-test--apply-resize-logic (initialized new-rows new-cols last-rows last-cols)
-  "Evaluate the resize-pending predicate used inside kuro--window-size-change.
-Returns the value that kuro--resize-pending would be set to, or nil."
-  (when (and initialized
-             (or (/= new-rows last-rows)
-                 (/= new-cols last-cols)))
-    (cons new-rows new-cols)))
 
 (ert-deftest kuro-el-test--window-size-change-sets-resize-pending ()
   "resize-pending is set when both rows and cols change."
@@ -136,15 +96,6 @@ Verified by asserting the mode-predicate guard independently."
 ;;   sets mode-name to "Kuro", calls kuro--render-cycle if fboundp.
 ;; kuro-copy-mode (interactive): guards with (derived-mode-p 'kuro-mode),
 ;;   then toggles by calling enter or exit.
-
-(defmacro kuro-el-test--with-kuro-mode-buffer (&rest body)
-  "Run BODY in a temp buffer with major-mode set to kuro-mode (no real init)."
-  `(with-temp-buffer
-     (setq major-mode 'kuro-mode)
-     (setq-local kuro--copy-mode nil)
-     (setq mode-name "Kuro")
-     (use-local-map kuro-mode-map)
-     ,@body))
 
 (ert-deftest kuro-el-test--enter-copy-mode-sets-flag ()
   "kuro--enter-copy-mode sets kuro--copy-mode to non-nil."
@@ -325,14 +276,6 @@ Verified by asserting the mode-predicate guard independently."
   (should (fboundp #'kuro--window-size-change)))
 
 ;;; ── Group 13 (ext): kuro--resize-pending is nil by default ────────────────────
-
-(defun kuro-el-ext-test--apply-resize-logic (initialized new-rows new-cols last-rows last-cols)
-  "Evaluate the resize-pending predicate used inside kuro--window-size-change.
-Returns the value that kuro--resize-pending would be set to, or nil."
-  (when (and initialized
-             (or (/= new-rows last-rows)
-                 (/= new-cols last-cols)))
-    (cons new-rows new-cols)))
 
 (ert-deftest kuro-el-ext-test--resize-pending-nil-when-initialized-false ()
   "Apply-resize logic returns nil when `initialized' arg is nil, regardless of dims."
@@ -517,12 +460,12 @@ Returns the value that kuro--resize-pending would be set to, or nil."
     (kuro--enter-copy-mode)
     (should (lookup-key (current-local-map) (kbd "M-w")))))
 
-(ert-deftest kuro-el-test--copy-mode-m-w-bound-to-save-and-exit ()
-  "M-w in copy mode is bound to kuro--copy-mode-save-and-exit."
+(ert-deftest kuro-el-test--copy-mode-m-w-bound-to-copy-region-and-exit ()
+  "M-w in copy mode is bound to kuro--copy-copy-region-and-exit."
   (kuro-el-test--with-kuro-mode-buffer
     (kuro--enter-copy-mode)
     (should (eq (lookup-key (current-local-map) (kbd "M-w"))
-                #'kuro--copy-mode-save-and-exit))))
+                #'kuro--copy-copy-region-and-exit))))
 
 (ert-deftest kuro-el-test--copy-mode-save-and-exit-exits-when-auto-exit-t ()
   "kuro--copy-mode-save-and-exit exits copy mode when kuro-copy-mode-auto-exit is t."
@@ -595,174 +538,5 @@ Returns the value that kuro--resize-pending would be set to, or nil."
     (setq-local kuro--copy-mode nil)
     (should-not kuro--copy-mode)))
 
-;;; ── Group 10 (keymap): kuro-mode-map keymap ─────────────────────────────────
-
-(ert-deftest kuro-el-test--mode-map-is-sparse-keymap ()
-  "kuro-mode-map is a sparse keymap (not a char-table or other variant)."
-  ;; A sparse keymap's car is the symbol `keymap'.
-  (should (eq (car kuro-mode-map) 'keymap)))
-
-;;; ── Group 11 (keymap): kuro--make-focus-change-fn — both branches in one call ─
-
-(ert-deftest kuro-el-test--make-focus-change-fn-focus-out-does-not-call-focus-in ()
-  "When focus is lost, only focus-out is called, not focus-in."
-  (let ((in-called nil)
-        (out-called nil))
-    (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
-              ((symbol-function 'kuro--handle-focus-in)
-               (lambda () (setq in-called t)))
-              ((symbol-function 'kuro--handle-focus-out)
-               (lambda () (setq out-called t))))
-      (funcall (kuro--make-focus-change-fn nil))
-      (should-not in-called)
-      (should out-called))))
-
-(ert-deftest kuro-el-test--make-focus-change-fn-focus-in-does-not-call-focus-out ()
-  "When focus is gained, only focus-in is called, not focus-out."
-  (let ((in-called nil)
-        (out-called nil))
-    (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
-              ((symbol-function 'kuro--handle-focus-in)
-               (lambda () (setq in-called t)))
-              ((symbol-function 'kuro--handle-focus-out)
-               (lambda () (setq out-called t))))
-      (funcall (kuro--make-focus-change-fn nil))
-      (should in-called)
-      (should-not out-called))))
-
-;;; ── Group 12 (keymap): kuro--window-size-change — function existence ──────────
-
-(ert-deftest kuro-el-test--window-size-change-is-a-function ()
-  "kuro--window-size-change is a bound function in the test environment."
-  (should (fboundp #'kuro--window-size-change)))
-
-;;; ── Group 13 (keymap): kuro--resize-pending is nil by default ───────────────
-
-(ert-deftest kuro-el-test--resize-pending-nil-when-initialized-false ()
-  "Apply-resize logic returns nil when `initialized' arg is nil, regardless of dims."
-  ;; Already covered for different dim combos, but verify the degenerate case:
-  ;; even if new-rows = last-rows + 1 the uninitialized guard wins.
-  (should (null (kuro-el-test--apply-resize-logic nil 25 80 24 80))))
-
-(ert-deftest kuro-el-test--resize-pending-cons-carries-exact-values ()
-  "The (rows . cols) cons returned by resize logic carries the exact new values."
-  (let ((result (kuro-el-test--apply-resize-logic t 1 1 24 80)))
-    (should (= (car result) 1))
-    (should (= (cdr result) 1))))
-
-;;; ── Group 14 (keymap): kuro.el constants, guards, and session-level state ─────
-
-(ert-deftest kuro-el-test--buffer-name-default-is-string ()
-  "kuro--buffer-name-default is a non-empty string constant."
-  (should (stringp kuro--buffer-name-default))
-  (should (< 0 (length kuro--buffer-name-default))))
-
-(ert-deftest kuro-el-test--copy-mode-guard-signals-outside-kuro-mode ()
-  "kuro-copy-mode signals user-error when the buffer is not in kuro-mode.
-This is the same guard that kuro--assert-terminal-p would implement."
-  (with-temp-buffer
-    (setq major-mode 'fundamental-mode)
-    (should-error (kuro-copy-mode) :type 'user-error)))
-
-(ert-deftest kuro-el-test--derived-mode-p-passes-in-kuro-mode-buffer ()
-  "derived-mode-p returns non-nil in a buffer whose major-mode is kuro-mode."
-  (kuro-el-test--with-kuro-mode-buffer
-    (should (derived-mode-p 'kuro-mode))))
-
-(ert-deftest kuro-el-test--call-macro-returns-nil-when-not-initialized ()
-  "kuro--call returns nil when kuro--initialized is nil (no active session)."
-  (with-temp-buffer
-    (setq-local kuro--initialized nil)
-    ;; kuro--call expands to (when kuro--initialized …); with nil it returns nil.
-    (should-not (kuro--call nil (error "should not reach")))))
-
-(ert-deftest kuro-el-test--call-macro-executes-when-initialized ()
-  "kuro--call evaluates body when kuro--initialized is non-nil."
-  (with-temp-buffer
-    (setq-local kuro--initialized t)
-    (let ((result (kuro--call nil (+ 1 1))))
-      (should (= result 2)))))
-
-(ert-deftest kuro-el-test--buffer-live-p-nil-for-killed-buffer ()
-  "buffer-live-p returns nil for a buffer that has been killed."
-  (let ((buf (generate-new-buffer " *kuro-test-killed*")))
-    (kill-buffer buf)
-    (should-not (buffer-live-p buf))))
-
-(ert-deftest kuro-el-test--buffer-live-p-t-for-live-buffer ()
-  "buffer-live-p returns non-nil for a buffer that is still alive."
-  (let ((buf (generate-new-buffer " *kuro-test-live*")))
-    (unwind-protect
-        (should (buffer-live-p buf))
-      (kill-buffer buf))))
-
-(ert-deftest kuro-el-test--session-id-initial-value-is-zero ()
-  "kuro--session-id initial buffer-local value is 0 (no session attached)."
-  (with-temp-buffer
-    (setq-local kuro--session-id 0)
-    (should (= kuro--session-id 0))))
-
-(ert-deftest kuro-el-test--initialized-initial-value-is-nil ()
-  "kuro--initialized initial buffer-local value is nil."
-  (with-temp-buffer
-    (setq-local kuro--initialized nil)
-    (should-not kuro--initialized)))
-
-(ert-deftest kuro-el-test--core-list-sessions-stub-returns-nil ()
-  "kuro-core-list-sessions stub returns nil (no sessions in the test environment)."
-  ;; The stub defined at the top of this file is a no-op lambda returning nil.
-  ;; This mirrors the contract that kuro-list-sessions relies on: an empty list
-  ;; means \"no active sessions\".
-  (should-not (kuro-core-list-sessions)))
-
-;;; ── Group 15 (keymap): kuro-mode scroll-margin variables (TUI distortion fix) ─
-
-(ert-deftest kuro-el-test--mode-sets-scroll-margin-zero ()
-  "kuro-mode sets scroll-margin to 0 to prevent auto-scroll near window edges."
-  (kuro-el-test--with-kuro-buffer
-    (setq-local scroll-margin 0)
-    (should (= scroll-margin 0))))
-
-(ert-deftest kuro-el-test--mode-sets-scroll-conservatively ()
-  "kuro-mode sets scroll-conservatively to 101 to prevent recentering."
-  (kuro-el-test--with-kuro-buffer
-    (setq-local scroll-conservatively 101)
-    (should (> scroll-conservatively 100))))
-
-(ert-deftest kuro-el-test--mode-sets-auto-window-vscroll-nil ()
-  "kuro-mode sets auto-window-vscroll to nil to prevent vscroll drift."
-  (kuro-el-test--with-kuro-buffer
-    (setq-local auto-window-vscroll nil)
-    (should-not auto-window-vscroll)))
-
-;;; ── Group 16 (keymap): FR-007 — Copy mode UX enhancements ───────────────────
-
-(ert-deftest kuro-el-test--mode-map-has-c-spc-copy-mode-binding ()
-  "kuro-mode-map binds C-c C-SPC to kuro-copy-mode."
-  (should (eq (lookup-key kuro-mode-map (kbd "C-c C-SPC")) #'kuro-copy-mode)))
-
-(ert-deftest kuro-el-test--copy-mode-keymap-has-c-spc-exit-binding ()
-  "The copy-mode local keymap binds C-c C-SPC for exiting copy mode."
-  (kuro-el-test--with-kuro-mode-buffer
-    (kuro--enter-copy-mode)
-    (should (eq (lookup-key (current-local-map) (kbd "C-c C-SPC"))
-                #'kuro-copy-mode))))
-
-(ert-deftest kuro-el-test--enter-copy-mode-propertizes-mode-name ()
-  "kuro--enter-copy-mode sets mode-name with font-lock-warning-face."
-  (kuro-el-test--with-kuro-mode-buffer
-    (kuro--enter-copy-mode)
-    (should (eq (get-text-property 0 'face mode-name) 'font-lock-warning-face))))
-
-(ert-deftest kuro-el-test--exit-copy-mode-restores-plain-mode-name ()
-  "kuro--exit-copy-mode restores mode-name to plain \"Kuro\" without properties."
-  (kuro-el-test--with-kuro-mode-buffer
-    (kuro--enter-copy-mode)
-    (cl-letf (((symbol-function 'kuro--render-cycle) #'ignore))
-      (kuro--exit-copy-mode))
-    (should (equal mode-name "Kuro"))
-    (should-not (text-properties-at 0 mode-name))))
-
 (provide 'kuro-test)
-
 ;;; kuro-test.el ends here

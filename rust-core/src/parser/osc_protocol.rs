@@ -111,6 +111,58 @@ pub(crate) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
     }
 }
 
+/// Maximum byte length for a notification title or body (DoS prevention).
+const NOTIFICATION_MAX_BYTES: usize = 4096;
+
+/// Handle OSC 9 — desktop notification, iTerm2 form (`OSC 9 ; <body> ST`).
+///
+/// Only the single-parameter iTerm2 form is surfaced as a notification; the
+/// multi-parameter ConEmu form (`OSC 9 ; 4 ; …` progress, etc.) is ignored so
+/// progress updates are not shown as notifications.
+pub(crate) fn handle_osc_9(core: &mut TerminalCore, params: &[&[u8]]) {
+    if params.len() != 2 {
+        return;
+    }
+    if let Some(body_raw) = params.get(1) {
+        if !body_raw.is_empty() && body_raw.len() <= NOTIFICATION_MAX_BYTES {
+            core.osc_data
+                .notifications
+                .push(crate::types::osc::Notification {
+                    title: None,
+                    body: String::from_utf8_lossy(body_raw).into_owned(),
+                });
+        }
+    }
+}
+
+/// Handle OSC 777 — desktop notification (`OSC 777 ; notify ; <title> ; <body> ST`).
+///
+/// Only the `notify` subcommand is supported. An empty title is reported as
+/// `None`; an empty body (or any field over [`NOTIFICATION_MAX_BYTES`]) is
+/// ignored.
+pub(crate) fn handle_osc_777(core: &mut TerminalCore, params: &[&[u8]]) {
+    match params.get(1) {
+        Some(sub) if *sub == b"notify" => {}
+        _ => return, // only the "notify" subcommand is supported
+    }
+    let title_raw: &[u8] = params.get(2).copied().unwrap_or(b"");
+    let body_raw: &[u8] = params.get(3).copied().unwrap_or(b"");
+    if body_raw.is_empty()
+        || body_raw.len() > NOTIFICATION_MAX_BYTES
+        || title_raw.len() > NOTIFICATION_MAX_BYTES
+    {
+        return;
+    }
+    let title =
+        (!title_raw.is_empty()).then(|| String::from_utf8_lossy(title_raw).into_owned());
+    core.osc_data
+        .notifications
+        .push(crate::types::osc::Notification {
+            title,
+            body: String::from_utf8_lossy(body_raw).into_owned(),
+        });
+}
+
 /// Handle OSC 104 — Reset color palette.
 pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(idx_raw) = params.get(1) {
@@ -421,6 +473,7 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
     let cursor = *core.screen.cursor();
     let placement = ImagePlacement {
         image_id: actual_id,
+        placement_id: None,
         row: cursor.row,
         col: cursor.col,
         display_cols: cols,

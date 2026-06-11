@@ -27,6 +27,9 @@ fn test_encode_attrs_all_flags_set() {
             | SgrFlags::STRIKETHROUGH,
         underline_style: UnderlineStyle::Straight,
         underline_color: Color::Default,
+        overline: false,
+        superscript: false,
+        subscript: false,
     };
     let result = encode_attrs(&attrs);
     // All 9 flag bits plus underline-style=1 in bits 9-11 must be set
@@ -88,6 +91,9 @@ fn encode_attrs_max_combination_non_zero() {
             | SgrFlags::STRIKETHROUGH,
         underline_style: UnderlineStyle::Curly,
         underline_color: Color::Rgb(0, 255, 0),
+        overline: false,
+        superscript: false,
+        subscript: false,
     };
     let bits = encode_attrs(&attrs);
     // All 9 flag bits (0x1FF) must be set

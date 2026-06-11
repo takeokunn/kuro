@@ -28,13 +28,29 @@ fn test_dsr_param6_at_origin_is_1_1() {
 }
 
 #[test]
-fn test_dsr_non_6_param_is_silent_noop() {
-    // DSR with param 5 (operating status) is not implemented — must not enqueue anything.
+fn test_dsr_param5_reports_operating_status_ok() {
+    // CSI 5 n (operating-status query) must reply CSI 0 n ("ready, no malfunction").
     let mut term = term!(24, 80);
     term.advance(b"\x1b[5n");
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        1,
+        "DSR 5 must enqueue exactly one status response"
+    );
+    assert_eq!(
+        term.meta.pending_responses[0], b"\x1b[0n",
+        "DSR 5 response must be ESC[0n (terminal OK)"
+    );
+}
+
+#[test]
+fn test_dsr_unknown_param_is_silent_noop() {
+    // DSR codes other than 5 / 6 are not defined here and must stay silent.
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[99n");
     assert!(
         term.meta.pending_responses.is_empty(),
-        "DSR 5 is unimplemented and must not enqueue a response"
+        "Unknown DSR code must not enqueue a response"
     );
 }
 

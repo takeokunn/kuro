@@ -285,6 +285,97 @@
   "kuro-prompt-status-annotations defaults to t."
   (should (eq (default-value 'kuro-prompt-status-annotations) t)))
 
+;;; Group 7: kuro-prompt-status-min-duration-ms threshold
+
+(ert-deftest kuro-prompt-status--min-duration-default-is-zero ()
+  "`kuro-prompt-status-min-duration-ms' defaults to 0 (show all durations)."
+  (should (= (default-value 'kuro-prompt-status-min-duration-ms) 0)))
+
+(ert-deftest kuro-prompt-status--duration-shown-at-or-above-threshold ()
+  "Duration appears in extras when duration-ms >= threshold."
+  (let ((kuro-prompt-status-min-duration-ms 2000))
+    (let ((result (kuro--format-prompt-extras nil 2000 nil)))
+      (should (and result (string-match-p "2.0s" result))))))
+
+(ert-deftest kuro-prompt-status--duration-suppressed-below-threshold ()
+  "Duration is suppressed from extras when duration-ms < threshold."
+  (let ((kuro-prompt-status-min-duration-ms 2000))
+    (let ((result (kuro--format-prompt-extras nil 500 nil)))
+      (should (null result)))))
+
+(ert-deftest kuro-prompt-status--duration-shown-when-threshold-zero ()
+  "With threshold 0 (default), all durations including fast ones are shown."
+  (let ((kuro-prompt-status-min-duration-ms 0))
+    (let ((result (kuro--format-prompt-extras nil 50 nil)))
+      (should (and result (string-match-p "50ms" result))))))
+
+(ert-deftest kuro-prompt-status--aid-still-shown-below-threshold ()
+  "Aid annotation is unaffected by duration threshold."
+  (let ((kuro-prompt-status-min-duration-ms 2000))
+    (let ((result (kuro--format-prompt-extras "abc" 100 nil)))
+      (should (and result (string-match-p "aid=abc" result))))))
+
+(ert-deftest kuro-prompt-status--threshold-exact-boundary-is-inclusive ()
+  "Duration equal to threshold is shown (>= not >)."
+  (let ((kuro-prompt-status-min-duration-ms 1000))
+    (let ((result (kuro--format-prompt-extras nil 1000 nil)))
+      (should (and result (string-match-p "1.0s" result))))))
+
+;;; Group 8: mode-line exit-status segment
+
+(ert-deftest kuro-prompt-status--records-last-exit-code ()
+  "`kuro--update-prompt-status' records the most recent command-end exit code."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (let ((kuro--last-exit-code nil))
+      (kuro--update-prompt-status '(("command-end" 2 0 0)
+                                    ("command-end" 4 0 3)))
+      (should (= kuro--last-exit-code 3)))))
+
+(ert-deftest kuro-prompt-status--records-exit-even-when-annotations-off ()
+  "Exit code is tracked for the mode line even when margin annotations are off."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (let ((kuro-prompt-status-annotations nil)
+          (kuro--last-exit-code nil))
+      (kuro--update-prompt-status '(("command-end" 2 0 7)))
+      (should (= kuro--last-exit-code 7))
+      (should (null kuro--prompt-status-overlays)))))
+
+(ert-deftest kuro-prompt-status--segment-empty-before-any-command ()
+  "The segment is an empty string when no command has completed."
+  (kuro-prompt-status-test--with-buffer
+    (let ((kuro--last-exit-code nil))
+      (should (equal (kuro-prompt-status-mode-line-segment) "")))))
+
+(ert-deftest kuro-prompt-status--segment-shows-success-indicator ()
+  "Exit 0 renders the success indicator with the success face."
+  (kuro-prompt-status-test--with-buffer
+    (let ((kuro--last-exit-code 0))
+      (let ((seg (kuro-prompt-status-mode-line-segment)))
+        (should (string-match-p "✓" seg))
+        (should (eq (get-text-property (1- (length seg)) 'face seg)
+                    'kuro-prompt-success))))))
+
+(ert-deftest kuro-prompt-status--segment-shows-failure-with-code ()
+  "Non-zero exit renders the failure indicator plus the numeric code."
+  (kuro-prompt-status-test--with-buffer
+    (let ((kuro--last-exit-code 127))
+      (let ((seg (kuro-prompt-status-mode-line-segment)))
+        (should (string-match-p "✗127" seg))
+        (should (eq (get-text-property (1- (length seg)) 'face seg)
+                    'kuro-prompt-failure))))))
+
+(ert-deftest kuro-prompt-status--install-mode-line-idempotent ()
+  "`kuro-prompt-status-install-mode-line' appends the segment exactly once."
+  (with-temp-buffer
+    (setq-local mode-line-format '("%b"))
+    (kuro-prompt-status-install-mode-line)
+    (kuro-prompt-status-install-mode-line)
+    (let ((count (cl-count '(:eval (kuro-prompt-status-mode-line-segment))
+                           mode-line-format :test #'equal)))
+      (should (= count 1)))))
+
 (provide 'kuro-prompt-status-test)
 
 ;;; kuro-prompt-status-test.el ends here

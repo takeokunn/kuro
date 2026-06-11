@@ -22,6 +22,7 @@
 (declare-function kuro-core-get-and-clear-title      "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-cwd                  "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-clipboard-actions   "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-notifications       "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-prompt-marks        "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-image                "ext:kuro-core" (session-id image-id))
 (declare-function kuro-core-poll-image-notifications "ext:kuro-core" (session-id))
@@ -58,6 +59,13 @@ Returns a list of (TYPE . DATA) pairs where TYPE is `write' or `query'.
 For `write' actions, DATA is the text string to place on the clipboard.
 For `query' actions, DATA is nil (terminal is requesting clipboard contents).
 Returns nil if no actions are pending.")
+
+ (kuro--poll-notifications
+  kuro-core-poll-notifications nil
+  "Poll for pending OSC 9 / OSC 777 desktop notifications from the terminal.
+Returns a list of (TITLE . BODY) cons cells, where TITLE is a string
+\(OSC 777) or nil (the iTerm2 OSC 9 form) and BODY is the notification
+text.  Returns nil if no notifications are pending.")
 
  (kuro--poll-prompt-marks
   kuro-core-poll-prompt-marks nil

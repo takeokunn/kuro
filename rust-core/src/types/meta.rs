@@ -14,6 +14,9 @@ pub(crate) struct TerminalMeta {
     pub(crate) pending_responses: Vec<Vec<u8>>,
     /// DCS (Device Control String) sequence state
     pub(crate) dcs_state: DcsState,
+    /// Window title push/pop stack for XTPUSHTITLE/XTPOPTITLE (CSI 22;0;0t / CSI 23;0;0t).
+    /// Used by tmux and other programs to save/restore the window title.
+    pub(crate) title_stack: Vec<String>,
     /// Current Emacs color scheme, pushed in from Elisp side via
     /// `kuro_core_set_color_scheme`. `true` = dark (default), `false` = light.
     ///
@@ -32,6 +35,7 @@ impl Default for TerminalMeta {
             bell_pending: false,
             pending_responses: Vec::new(),
             dcs_state: DcsState::default(),
+            title_stack: Vec::new(),
             color_scheme_dark: true,
         }
     }

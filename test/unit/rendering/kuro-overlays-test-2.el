@@ -431,6 +431,37 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
   "`kuro--ffi-face-has-visual-effects-p' detects blink when combined with other flags."
   (should (kuro--ffi-face-has-visual-effects-p (logior #x01 kuro--sgr-flag-blink-slow))))
 
+;;; Group 21: kuro--apply-ffi-face-effects — blink and hidden text-property dispatch
+
+(ert-deftest kuro-overlays-ffi-face-effects-hidden-flag-adds-invisible ()
+  "`kuro--apply-ffi-face-effects' adds invisible property when hidden flag is set."
+  (kuro-overlays-test--with-buffer
+    (insert "hello")
+    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-hidden)
+    (should (get-text-property (point-min) 'invisible))))
+
+(ert-deftest kuro-overlays-ffi-face-effects-no-hidden-no-invisible ()
+  "`kuro--apply-ffi-face-effects' does not add invisible when hidden flag absent."
+  (kuro-overlays-test--with-buffer
+    (insert "hello")
+    (kuro--apply-ffi-face-effects (point-min) (point-max) 0)
+    (should-not (get-text-property (point-min) 'invisible))))
+
+(ert-deftest kuro-overlays-ffi-face-effects-blink-fast-creates-overlay ()
+  "`kuro--apply-ffi-face-effects' registers a fast-blink overlay for the region."
+  (kuro-overlays-test--with-buffer
+    (insert "xx")
+    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-blink-fast)
+    ;; The overlay list for 'fast must be non-nil
+    (should kuro--blink-overlays)))
+
+(ert-deftest kuro-overlays-ffi-face-effects-blink-slow-creates-overlay ()
+  "`kuro--apply-ffi-face-effects' registers a slow-blink overlay for the region."
+  (kuro-overlays-test--with-buffer
+    (insert "xx")
+    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-blink-slow)
+    (should kuro--blink-overlays)))
+
 (provide 'kuro-overlays-test-2)
 
 ;;; kuro-overlays-test-2.el ends here

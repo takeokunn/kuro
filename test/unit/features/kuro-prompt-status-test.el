@@ -376,6 +376,41 @@
                            mode-line-format :test #'equal)))
       (should (= count 1)))))
 
+;;; Group 9: kuro--apply-prompt-extras-overlay
+
+(ert-deftest kuro-prompt-status-apply-extras-overlay-nil-all-is-noop ()
+  "`kuro--apply-prompt-extras-overlay' does nothing when all extras are nil."
+  (with-temp-buffer
+    (insert "line0\n")
+    (let ((kuro--prompt-status-overlays nil))
+      (kuro--apply-prompt-extras-overlay 0 nil nil nil)
+      (should (null kuro--prompt-status-overlays)))))
+
+(ert-deftest kuro-prompt-status-apply-extras-overlay-with-aid-creates-overlay ()
+  "`kuro--apply-prompt-extras-overlay' creates an overlay when AID is non-empty."
+  (with-temp-buffer
+    (insert "line0\n")
+    (let ((kuro--prompt-status-overlays nil))
+      (kuro--apply-prompt-extras-overlay 0 "abc123" nil nil)
+      (should (= (length kuro--prompt-status-overlays) 1))
+      (should (overlay-get (car kuro--prompt-status-overlays) 'kuro-prompt-extras)))))
+
+(ert-deftest kuro-prompt-status-apply-extras-overlay-with-duration-creates-overlay ()
+  "`kuro--apply-prompt-extras-overlay' creates an overlay for duration-ms only."
+  (with-temp-buffer
+    (insert "row\n")
+    (let ((kuro--prompt-status-overlays nil))
+      (kuro--apply-prompt-extras-overlay 0 nil 1500 nil)
+      (should (= (length kuro--prompt-status-overlays) 1)))))
+
+(ert-deftest kuro-prompt-status-apply-extras-overlay-beyond-buffer-is-noop ()
+  "`kuro--apply-prompt-extras-overlay' does nothing when ROW is past buffer end."
+  (with-temp-buffer
+    (insert "one-line\n")
+    (let ((kuro--prompt-status-overlays nil))
+      (kuro--apply-prompt-extras-overlay 99 "x" nil nil)
+      (should (null kuro--prompt-status-overlays)))))
+
 (provide 'kuro-prompt-status-test)
 
 ;;; kuro-prompt-status-test.el ends here

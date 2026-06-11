@@ -10,6 +10,11 @@ use crate::parser;
 use crate::TerminalCore;
 use unicode_width::UnicodeWidthChar;
 
+/// Maximum depth of the XTPUSHCOLORS/XTPOPCOLORS palette save stack (CSI # P/Q).
+///
+/// Matches xterm's `colorSaveCount` default.
+const PALETTE_STACK_MAX: usize = 10;
+
 impl vte::Perform for TerminalCore {
     #[inline]
     fn print(&mut self, c: char) {
@@ -338,7 +343,7 @@ impl vte::Perform for TerminalCore {
             // Must precede the insert/delete arm which also catches bare 'P' (DCH).
             // Capped at 10 entries (same as xterm's colorSaveCount default).
             'P' if intermediates == b"#" => {
-                if self.osc_data.palette_stack.len() < 10 {
+                if self.osc_data.palette_stack.len() < PALETTE_STACK_MAX {
                     self.osc_data.palette_stack.push(self.osc_data.palette.clone());
                 }
             }

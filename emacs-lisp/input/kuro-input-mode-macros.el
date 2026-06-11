@@ -90,6 +90,26 @@ CPS continuation."
     (setq p (1- p)))
   p)
 
+;;;; Line mode: buffer replacement helpers
+
+(defsubst kuro--line-set-buffer (text)
+  "Set line buffer to TEXT with point at end, then refresh display.
+CPS continuation for history navigation and whole-buffer completion."
+  (setq kuro--line-buffer text
+        kuro--line-point  (length text))
+  (kuro--line-mode-update-display))
+
+(defmacro kuro--line-splice (from to replacement new-point)
+  "Replace buffer[FROM..TO] with REPLACEMENT and set point to NEW-POINT.
+Does NOT call `kuro--line-mode-update-display'; compose with
+`kuro--with-line-edit-undo' to get the display continuation."
+  (declare (indent 0))
+  `(setq kuro--line-buffer
+         (concat (substring kuro--line-buffer 0 ,from)
+                 ,replacement
+                 (substring kuro--line-buffer ,to))
+         kuro--line-point ,new-point))
+
 (provide 'kuro-input-mode-macros)
 
 ;;; kuro-input-mode-macros.el ends here

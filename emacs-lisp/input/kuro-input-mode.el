@@ -335,9 +335,7 @@ that prefix.  No-ops with a message when no entry matches."
                      kuro--line-history)))
         (progn
           (kuro--line-undo-push)
-          (setq kuro--line-buffer match)
-          (setq kuro--line-point (length kuro--line-buffer))
-          (kuro--line-mode-update-display))
+          (kuro--line-set-buffer match))
       (message "kuro: no history completion for %S" prefix))))
 
 (defun kuro--line-all-history-completions (prefix)
@@ -386,9 +384,7 @@ buffer; no match messages the user."
       (message "kuro: no history completions for %S" prefix))
      ((= (length candidates) 1)
       (kuro--line-undo-push)
-      (setq kuro--line-buffer (car candidates)
-            kuro--line-point  (length (car candidates)))
-      (kuro--line-mode-update-display))
+      (kuro--line-set-buffer (car candidates)))
      (t
       (with-output-to-temp-buffer "*Completions*"
         (display-completion-list candidates))
@@ -406,10 +402,8 @@ buffer; no match messages the user."
       (message "kuro: no completions for %S" prefix))
      ((= (length candidates) 1)
       (kuro--with-line-edit-undo
-       (let ((before (substring kuro--line-buffer 0 word-start))
-             (after  (substring kuro--line-buffer word-end)))
-         (setq kuro--line-buffer (concat before (car candidates) after)
-               kuro--line-point  (+ word-start (length (car candidates)))))))
+       (kuro--line-splice word-start word-end (car candidates)
+                          (+ word-start (length (car candidates))))))
      (t
       (with-output-to-temp-buffer "*Completions*"
         (display-completion-list candidates))
@@ -430,10 +424,8 @@ a message when no entry matches."
     (if (null expansion)
         (message "kuro: no abbreviation for %S" word)
       (kuro--with-line-edit-undo
-       (let ((before (substring kuro--line-buffer 0 start))
-             (after  (substring kuro--line-buffer end)))
-         (setq kuro--line-buffer (concat before expansion after)
-               kuro--line-point  (+ start (length expansion))))))))
+       (kuro--line-splice start end expansion
+                          (+ start (length expansion)))))))
 
 (defun kuro--line-history-search ()
   "Search `kuro--line-history' interactively using completion (C-r in line mode).
@@ -449,16 +441,12 @@ changing the line buffer."
                                     nil nil kuro--line-buffer)))
         (unless (string= match "")
           (kuro--line-undo-push)
-          (setq kuro--line-buffer match
-                kuro--line-point  (length match))
-          (kuro--line-mode-update-display)))
+          (kuro--line-set-buffer match)))
     (quit nil)))
 
 (defsubst kuro--line-load-history-entry (idx)
   "Load history entry IDX into the line buffer and refresh the display."
-  (setq kuro--line-buffer (nth idx kuro--line-history)
-        kuro--line-point  (length kuro--line-buffer))
-  (kuro--line-mode-update-display))
+  (kuro--line-set-buffer (nth idx kuro--line-history)))
 
 (defun kuro--line-history-prev ()
   "Navigate to the previous (older) entry in line-mode history.
@@ -482,10 +470,7 @@ in-progress input and resets the navigation index to -1."
   (unless (= kuro--line-history-idx -1)
     (setq kuro--line-history-idx (1- kuro--line-history-idx))
     (if (= kuro--line-history-idx -1)
-        (progn
-          (setq kuro--line-buffer kuro--line-history-stash
-                kuro--line-point  (length kuro--line-buffer))
-          (kuro--line-mode-update-display))
+        (kuro--line-set-buffer kuro--line-history-stash)
       (kuro--line-load-history-entry kuro--line-history-idx))))
 
 (defun kuro--line-goto-history-oldest ()
@@ -506,10 +491,8 @@ Restores `kuro--line-history-stash' and resets the navigation index to -1,
 mirroring the behavior of `kuro--line-history-next' at the bottom of history."
   (interactive)
   (unless (= kuro--line-history-idx -1)
-    (setq kuro--line-buffer    kuro--line-history-stash
-          kuro--line-point     (length kuro--line-buffer)
-          kuro--line-history-idx -1)
-    (kuro--line-mode-update-display)))
+    (setq kuro--line-history-idx -1)
+    (kuro--line-set-buffer kuro--line-history-stash)))
 
 (kuro--def-line-nav kuro--line-beginning-of-line
   "Move `kuro--line-point' to the beginning of the line (C-a)."

@@ -405,6 +405,11 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
     }
 }
 
+/// Maximum depth of the Kitty keyboard flags push/pop stack (CSI > Ps u / CSI < u).
+///
+/// Matches the limit used by other terminal emulators (e.g. foot, kitty).
+const KEYBOARD_FLAGS_STACK_MAX: usize = 64;
+
 /// Handle Kitty keyboard mode push (CSI > Ps u).
 ///
 /// Pushes the current keyboard flags onto the stack (capped at 64 entries)
@@ -420,7 +425,7 @@ pub fn handle_kitty_kb_push(term: &mut crate::TerminalCore, params: &vte::Params
         .next()
         .and_then(|p| p.first().copied())
         .unwrap_or(0);
-    if term.dec_modes.keyboard_flags_stack.len() < 64 {
+    if term.dec_modes.keyboard_flags_stack.len() < KEYBOARD_FLAGS_STACK_MAX {
         term.dec_modes
             .keyboard_flags_stack
             .push(term.dec_modes.keyboard_flags);

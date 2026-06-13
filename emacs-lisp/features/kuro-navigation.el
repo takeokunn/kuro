@@ -76,19 +76,27 @@ to the exact buffer position corresponding to grid row ROW."
   (goto-char (point-min))
   (forward-line row))
 
+(defun kuro--find-mark-in-direction (direction type-pred)
+  "Return the nearest entry in `kuro--prompt-positions' matching TYPE-PRED in DIRECTION.
+DIRECTION is `previous' (towards the top) or `next' (towards the bottom).
+TYPE-PRED is called with each entry and must return non-nil for a match.
+Returns the closest matching entry to point, or nil when none is found."
+  (let* ((cur      (1- (line-number-at-pos)))
+         (row-pred (if (eq direction 'previous)
+                       (lambda (e) (< (cadr e) cur))
+                     (lambda (e) (> (cadr e) cur))))
+         (matches  (seq-filter (lambda (e)
+                                 (and (funcall row-pred e)
+                                      (funcall type-pred e)))
+                               kuro--prompt-positions)))
+    (if (eq direction 'previous)
+        (car (last matches))
+      (car matches))))
+
 (defun kuro--navigate-to-prompt (direction)
   "Navigate to the nearest prompt-start in DIRECTION (`previous' or `next')."
-  (let* ((cur-line   (1- (line-number-at-pos)))
-         (row-pred   (if (eq direction 'previous)
-                         (lambda (e) (< (cadr e) cur-line))
-                       (lambda (e) (> (cadr e) cur-line))))
-         (candidates (seq-filter (lambda (e)
-                                   (and (funcall row-pred e)
-                                        (equal (car e) "prompt-start")))
-                                 kuro--prompt-positions))
-         (target     (if (eq direction 'previous)
-                         (car (last candidates))
-                       (car candidates))))
+  (let ((target (kuro--find-mark-in-direction
+                 direction (lambda (e) (equal (car e) "prompt-start")))))
     (if target
         (kuro--goto-prompt-row (cadr target))
       (message "kuro: no %s prompt" (symbol-name direction)))))
@@ -212,20 +220,11 @@ A failed command is a `command-end' mark whose OSC 133 exit code (the 4th
 element of each `kuro--prompt-positions' entry) is a non-zero integer.
 Messages the exit code on success, or a \"no … failed command\" notice
 when none is found."
-  (let* ((cur      (1- (line-number-at-pos)))
-         (row-pred (if (eq direction 'previous)
-                       (lambda (e) (< (cadr e) cur))
-                     (lambda (e) (> (cadr e) cur))))
-         (failed   (seq-filter
-                    (lambda (e)
-                      (and (equal (car e) "command-end")
-                           (integerp (nth 3 e))
-                           (/= (nth 3 e) 0)
-                           (funcall row-pred e)))
-                    kuro--prompt-positions))
-         (target   (if (eq direction 'previous)
-                       (car (last failed))
-                     (car failed))))
+  (let ((target (kuro--find-mark-in-direction
+                 direction (lambda (e)
+                             (and (equal (car e) "command-end")
+                                  (integerp (nth 3 e))
+                                  (/= (nth 3 e) 0))))))
     (if target
         (progn
           (kuro--goto-prompt-row (cadr target))

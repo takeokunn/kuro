@@ -159,13 +159,15 @@ Example: \\='((\"gs\" . \"git status\") (\"gl\" . \"git log --oneline\"))"
 
 ;;;; Mode-line lighter
 
+(defconst kuro--input-mode-lighter-alist
+  '((char      . " [C]")
+    (semi-char . " [S]")
+    (line      . " [L]"))
+  "Alist mapping input mode symbols to their mode-line lighter strings.")
+
 (defun kuro--input-mode-lighter ()
   "Return a mode-line string indicating the current input mode."
-  (pcase kuro--input-mode
-    ('char      " [C]")
-    ('semi-char " [S]")
-    ('line      " [L]")
-    (_          "")))
+  (or (alist-get kuro--input-mode kuro--input-mode-lighter-alist) ""))
 
 
 ;;;; Line mode: undo stack

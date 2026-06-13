@@ -99,33 +99,33 @@ DOC is the function docstring."
 (defvar kuro--keyboard-flags 0
   "Forward reference; defvar-permanent-local in kuro-input-paste.el.")
 
-(defun kuro--RET ()
+(defmacro kuro--def-kkp-key (name kkp-seq legacy-char doc)
+  "Define interactive KKP-aware key command NAME.
+With KKP REPORT_ALL_KEYS flag (0x08), sends KKP-SEQ string via `kuro--send-key'.
+Otherwise sends LEGACY-CHAR byte via `kuro--send-special'.
+DOC is the docstring for the generated command."
+  `(defun ,name ()
+     ,doc
+     (interactive)
+     (if (not (zerop (logand kuro--keyboard-flags #x08)))
+         (kuro--send-key ,kkp-seq)
+       (kuro--send-special ,legacy-char))))
+
+(kuro--def-kkp-key kuro--RET "\e[13;1u" ?\r
   "Send Return key.
 With KKP REPORT_ALL_KEYS flag (0x08), send CSI 13;1u for unambiguous reporting.
-Otherwise send bare CR (\\r) as in the legacy protocol."
-  (interactive)
-  (if (not (zerop (logand kuro--keyboard-flags #x08)))
-      (kuro--send-key "\e[13;1u")
-    (kuro--send-special ?\r)))
+Otherwise send bare CR (\\r) as in the legacy protocol.")
 
-(defun kuro--TAB ()
+(kuro--def-kkp-key kuro--TAB "\e[9;1u" ?\t
   "Send Tab key.
 With KKP REPORT_ALL_KEYS flag (0x08), send CSI 9;1u so the app can
 distinguish Tab from Ctrl+I (which becomes CSI 105;5u).
-Otherwise send bare HT (\\t) as in the legacy protocol."
-  (interactive)
-  (if (not (zerop (logand kuro--keyboard-flags #x08)))
-      (kuro--send-key "\e[9;1u")
-    (kuro--send-special ?\t)))
+Otherwise send bare HT (\\t) as in the legacy protocol.")
 
-(defun kuro--DEL ()
+(kuro--def-kkp-key kuro--DEL "\e[127;1u" ?\x7f
   "Send Delete (backspace) key.
 With KKP REPORT_ALL_KEYS flag (0x08), send CSI 127;1u.
-Otherwise send bare DEL (0x7f) as in the legacy protocol."
-  (interactive)
-  (if (not (zerop (logand kuro--keyboard-flags #x08)))
-      (kuro--send-key "\e[127;1u")
-    (kuro--send-special ?\x7f)))
+Otherwise send bare DEL (0x7f) as in the legacy protocol.")
 
 
 ;;; Helper Function for Key Sequences

@@ -118,6 +118,13 @@ Defined as `defun' (not `defsubst') so that `let' rebinding of
 
 ;;; Core: command-completion handler
 
+(defsubst kuro--activity-exit-code-status (exit-code)
+  "Return a short status suffix string for EXIT-CODE.
+nil → \"\", 0 → \" ✓\", nonzero → \" ✗ (exit N)\"."
+  (cond ((null exit-code) "")
+        ((= exit-code 0)  " ✓")
+        (t                (format " ✗ (exit %d)" exit-code))))
+
 (defun kuro--activity-on-command-complete (exit-code duration-ms
                                             _aid _err-path
                                             buffer-visible-p)
@@ -133,9 +140,7 @@ Fires when ALL conditions hold:
              duration-ms
              (>= duration-ms (* kuro-activity-notify-threshold 1000)))
     (let* ((dur    (kuro--format-prompt-duration duration-ms))
-           (status (cond ((null exit-code)  "")
-                         ((= exit-code 0)   " ✓")
-                         (t                 (format " ✗ (exit %d)" exit-code))))
+           (status (kuro--activity-exit-code-status exit-code))
            (body   (format "Finished in %s%s" dur status)))
       (kuro--activity-notify (buffer-name) body))))
 

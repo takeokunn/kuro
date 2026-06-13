@@ -232,11 +232,7 @@ immediately on every already-live kuro session."
 Cycles through windows on the selected frame that show a kuro-mode buffer,
 in `next-window' order.  Analogous to tmux prefix + o (next pane)."
   (interactive)
-  (let* ((kuro-wins (seq-filter
-                     (lambda (w)
-                       (with-current-buffer (window-buffer w)
-                         (derived-mode-p 'kuro-mode)))
-                     (window-list)))
+  (let* ((kuro-wins (kuro-mux--visible-windows))
          (next (cadr (memq (selected-window) kuro-wins))))
     (cond
      ((length< kuro-wins 1)
@@ -360,23 +356,25 @@ otherwise calls `switch-to-buffer'."
 
 ;;;; Splitting
 
-;;;###autoload
-(defun kuro-mux-split-right (&optional command)
-  "Split the current window to the right and open a new kuro terminal.
-COMMAND defaults to `kuro-shell'."
-  (interactive)
-  (let ((win (split-window-right)))
-    (select-window win)
-    (kuro-create (or command kuro-shell))))
+(defmacro kuro--def-mux-split (name split-fn docstring)
+  "Define a kuro-mux split command.
+SPLIT-FN is called with no arguments to create the new window."
+  `(defun ,name (&optional command)
+     ,docstring
+     (interactive)
+     (let ((win (,split-fn)))
+       (select-window win)
+       (kuro-create (or command kuro-shell)))))
 
 ;;;###autoload
-(defun kuro-mux-split-below (&optional command)
+(kuro--def-mux-split kuro-mux-split-right split-window-right
+  "Split the current window to the right and open a new kuro terminal.
+COMMAND defaults to `kuro-shell'.")
+
+;;;###autoload
+(kuro--def-mux-split kuro-mux-split-below split-window-below
   "Split the current window below and open a new kuro terminal.
-COMMAND defaults to `kuro-shell'."
-  (interactive)
-  (let ((win (split-window-below)))
-    (select-window win)
-    (kuro-create (or command kuro-shell))))
+COMMAND defaults to `kuro-shell'.")
 
 
 ;;;; Window management
@@ -451,6 +449,13 @@ WINDOW-NAV-FN is called with (selected-window nil \\='visible) to pick the peer.
 (kuro--def-mux-swap kuro-mux-swap-pane-backward previous-window
   "Swap the current window's buffer with the previous visible window (tmux: `{').")
 
+(defconst kuro--mux-resize-directions
+  '((up    . enlarge-window)
+    (down  . shrink-window)
+    (left  . shrink-window-horizontally)
+    (right . enlarge-window-horizontally))
+  "Alist mapping resize direction symbols to their window-resize functions.")
+
 ;;;###autoload
 (defun kuro-mux-resize-pane (direction &optional delta)
   "Resize the current window pane in DIRECTION by DELTA lines or columns.
@@ -461,17 +466,17 @@ Analogous to tmux's resize-pane command."
   (interactive
    (list (intern (completing-read
                   "Direction (up/down/left/right): "
-                  '("up" "down" "left" "right") nil t))
+                  (mapcar (lambda (e) (symbol-name (car e)))
+                          kuro--mux-resize-directions)
+                  nil t))
          (if current-prefix-arg
              (prefix-numeric-value current-prefix-arg)
            1)))
-  (let ((n (max 1 (or delta 1))))
-    (pcase direction
-      ('up    (enlarge-window n))
-      ('down  (shrink-window n))
-      ('left  (shrink-window-horizontally n))
-      ('right (enlarge-window-horizontally n))
-      (_      (user-error "kuro-mux: invalid direction: %s" direction)))))
+  (let ((n    (max 1 (or delta 1)))
+        (cell (assq direction kuro--mux-resize-directions)))
+    (if cell
+        (funcall (cdr cell) n)
+      (user-error "kuro-mux: invalid direction: %s" direction))))
 
 
 

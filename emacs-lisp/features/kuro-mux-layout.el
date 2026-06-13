@@ -13,10 +13,25 @@
 (declare-function derived-mode-p "subr" (&rest modes))
 
 
+(defconst kuro-mux--layout-handlers
+  (list
+   (cons "even-horizontal"
+         (lambda (win bufs) (kuro-mux--layout-chain win (cdr bufs) 'right)))
+   (cons "even-vertical"
+         (lambda (win bufs) (kuro-mux--layout-chain win (cdr bufs) 'below)))
+   (cons "main-vertical"
+         (lambda (win bufs) (kuro-mux--layout-main  win (cdr bufs) 'right 'below)))
+   (cons "main-horizontal"
+         (lambda (win bufs) (kuro-mux--layout-main  win (cdr bufs) 'below 'right)))
+   (cons "tiled"
+         (lambda (_win bufs) (kuro-mux--layout-tiled bufs))))
+  "Alist mapping layout name string to handler function (WIN BUFS).")
+
 (defconst kuro-mux-layouts
-  '("even-horizontal" "even-vertical" "main-vertical" "main-horizontal" "tiled")
+  (mapcar #'car kuro-mux--layout-handlers)
   "Preset layout names recognized by `kuro-mux-select-layout'.
-Modeled on tmux's five built-in layouts.")
+Derived from `kuro-mux--layout-handlers'; adding a layout there automatically
+extends this list.  Modeled on tmux's five built-in layouts.")
 
 
 ;;;; Internal helpers
@@ -109,12 +124,8 @@ collapsed to one window, then re-split.  Analogous to tmux select-layout."
     (delete-other-windows)
     (let ((win (selected-window)))
       (set-window-buffer win (car buffers))
-      (pcase layout
-        ("even-horizontal" (kuro-mux--layout-chain win (cdr buffers) 'right))
-        ("even-vertical"   (kuro-mux--layout-chain win (cdr buffers) 'below))
-        ("main-vertical"   (kuro-mux--layout-main  win (cdr buffers) 'right 'below))
-        ("main-horizontal" (kuro-mux--layout-main  win (cdr buffers) 'below 'right))
-        ("tiled"           (kuro-mux--layout-tiled buffers))))
+      (funcall (alist-get layout kuro-mux--layout-handlers nil nil #'equal)
+               win buffers))
     (balance-windows)
     ;; Record the applied layout on the frame so `kuro-mux-next-layout' /
     ;; `kuro-mux-previous-layout' can cycle relative to it.

@@ -344,6 +344,13 @@ Returns non-nil iff the module is loaded after the attempt."
   (ignore-errors (kuro-module-load))
   (kuro--module-loadable-p))
 
+(defconst kuro--module-install-methods
+  '((prebuilt ?d kuro-module-download "download")
+    (cargo    ?b kuro-module-build    "cargo build"))
+  "Auto-install methods as (SYMBOL KEY-CHAR INSTALL-FN DISPLAY-NAME).
+Each entry maps a `kuro-module-installation-method' symbol and an
+interactive key character to the install function and its display name.")
+
 (defun kuro--install-and-load-module (install-fn install-name)
   "Run INSTALL-FN, load the module, and verify it's callable.
 INSTALL-NAME is a display string used in the error message on failure.
@@ -354,34 +361,36 @@ Signals an error when the module is not loadable after installation."
       (error "Kuro: %s succeeded but native init is not bound" install-name)))
 
 (defun kuro--prompt-and-install-module ()
-  "Prompt the user to install the native module, then load it.
-Offers three choices via `read-char-choice':
-  d — download a prebuilt binary via `kuro-module-download'.
-  b — build from source via `kuro-module-build'.
-  q — abort with `user-error'.
-Signals a `user-error' on quit; otherwise returns non-nil after a
-successful install and load."
-  (pcase (read-char-choice
-          (concat "Kuro native module not found. "
-                  "Install: [d]ownload prebuilt, [b]uild from source, [q]uit? ")
-          '(?d ?b ?q))
-    (?d (kuro--install-and-load-module #'kuro-module-download "download"))
-    (?b (kuro--install-and-load-module #'kuro-module-build    "cargo build"))
-    (?q (user-error "Aborted: kuro native module is required"))))
+  "Prompt the user to choose an install method from `kuro--module-install-methods'.
+Reads a single character: one of the KEY-CHARs in the methods table or `q'
+to abort.  Dispatches to `kuro--install-and-load-module' on a match,
+or signals `user-error' for `q'."
+  (let* ((valid-keys (append (mapcar (lambda (m) (nth 1 m))
+                                     kuro--module-install-methods)
+                             '(?q)))
+         (key   (read-char-choice
+                 (concat "Kuro native module not found. "
+                         "Install: [d]ownload prebuilt, [b]uild from source, [q]uit? ")
+                 valid-keys))
+         (entry (seq-find (lambda (m) (eq (nth 1 m) key))
+                          kuro--module-install-methods)))
+    (if entry
+        (kuro--install-and-load-module (nth 2 entry) (nth 3 entry))
+      (user-error "Aborted: kuro native module is required"))))
 
 (defun kuro--ensure-module-installed ()
   "Ensure the native module is installed, prompting the user if not.
-Honours `kuro-module-installation-method' to skip the interactive
-prompt: the symbols `prebuilt', `cargo', and `manual' map to download,
-build, and abort-with-error respectively; nil falls through to the
-interactive prompt.  Returns non-nil on success; signals an error
-otherwise."
+Honours `kuro-module-installation-method': symbols in
+`kuro--module-install-methods' map to their install functions directly;
+`manual' aborts with an error; nil falls through to the interactive prompt.
+Returns non-nil on success; signals an error otherwise."
   (or (kuro--try-load-module)
-      (pcase kuro-module-installation-method
-        ('prebuilt (kuro--install-and-load-module #'kuro-module-download "download"))
-        ('cargo    (kuro--install-and-load-module #'kuro-module-build    "cargo build"))
-        ('manual   (user-error "Native module missing; install manually then retry"))
-        (_         (kuro--prompt-and-install-module)))))
+      (if-let ((entry (assq kuro-module-installation-method
+                            kuro--module-install-methods)))
+          (kuro--install-and-load-module (nth 2 entry) (nth 3 entry))
+        (pcase kuro-module-installation-method
+          ('manual (user-error "Native module missing; install manually then retry"))
+          (_       (kuro--prompt-and-install-module))))))
 
 ;;;###autoload
 (defun kuro-create (&optional command buffer-name)

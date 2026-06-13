@@ -412,6 +412,13 @@ Must be called after `kuro--build-keymap' so the parent is up to date."
 
 ;;;; Keymap application
 
+(defconst kuro--input-mode-keymaps
+  '((char      . kuro--char-keymap)
+    (semi-char . kuro--keymap))
+  "Alist mapping non-line input modes to their parent keymap variables.
+Used by `kuro--apply-input-mode' to install the correct keymap for each mode.
+Line mode is absent: it uses a composed keymap via `kuro--build-line-mode-keymap'.")
+
 (defun kuro--apply-input-mode ()
   "Update the current buffer's effective keymap for `kuro--input-mode'.
 Sets `kuro-mode-map' parent to:
@@ -419,17 +426,13 @@ Sets `kuro-mode-map' parent to:
   `semi-char' → `kuro--keymap'       (exceptions removed)
   `line'      → `kuro--line-mode-keymap' as a composed local map
 The mode-line is updated after every switch."
-  (pcase kuro--input-mode
-    ('char
-     (set-keymap-parent kuro-mode-map kuro--char-keymap)
-     (use-local-map kuro-mode-map))
-    ('semi-char
-     (set-keymap-parent kuro-mode-map kuro--keymap)
-     (use-local-map kuro-mode-map))
-    ('line
-     (kuro--build-line-mode-keymap)
-     ;; Compose: line-mode overrides on top, kuro-mode-map's C-c bindings below
-     (use-local-map (make-composed-keymap kuro--line-mode-keymap kuro-mode-map))))
+  (if-let ((entry (assq kuro--input-mode kuro--input-mode-keymaps)))
+      (progn
+        (set-keymap-parent kuro-mode-map (symbol-value (cdr entry)))
+        (use-local-map kuro-mode-map))
+    ;; Line mode: compose line-mode overrides on top of kuro-mode-map's C-c bindings
+    (kuro--build-line-mode-keymap)
+    (use-local-map (make-composed-keymap kuro--line-mode-keymap kuro-mode-map)))
   (force-mode-line-update))
 
 
@@ -465,6 +468,14 @@ PRE-APPLY forms run between the buffer reset and `kuro--apply-input-mode'."
   "Kuro: line mode — type locally, RET sends, C-g cancels"
   (kuro--line-mode-update-display))
 
+(defconst kuro--input-mode-cycle-table
+  '((semi-char . kuro-char-mode)
+    (char      . kuro-line-mode)
+    (line      . kuro-semi-char-mode))
+  "Alist mapping the current input mode to the command that activates the next one.
+The cycle is: semi-char → char → line → semi-char.
+Used by `kuro-cycle-input-mode'.")
+
 ;;;###autoload
 (defun kuro-cycle-input-mode ()
   "Cycle through Kuro input modes: semi-char → char → line → semi-char.
@@ -472,11 +483,8 @@ Provides a quick one-key way to switch without remembering three commands."
   (interactive)
   (unless (derived-mode-p 'kuro-mode)
     (user-error "Not in a Kuro buffer"))
-  (pcase kuro--input-mode
-    ('semi-char (kuro-char-mode))
-    ('char      (kuro-line-mode))
-    ('line      (kuro-semi-char-mode))
-    (_          (kuro-semi-char-mode))))
+  (funcall (or (cdr (assq kuro--input-mode kuro--input-mode-cycle-table))
+               #'kuro-semi-char-mode)))
 
 (provide 'kuro-input-mode-ext)
 

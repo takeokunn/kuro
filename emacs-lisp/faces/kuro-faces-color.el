@@ -107,6 +107,20 @@ Formula: index_offset * kuro--color-gray-step + kuro--color-gray-offset.")
 
 ;;; ANSI color conversion
 
+(defsubst kuro--color-named-to-emacs (name)
+  "Convert named color NAME to Emacs color string.
+Looks up NAME in `kuro--named-colors'; falls back to NAME itself so that
+unrecognised names are passed through rather than silently dropped."
+  (or (gethash name kuro--named-colors) name))
+
+(defconst kuro--color-type-handlers
+  '((named   . kuro--color-named-to-emacs)
+    (indexed  . kuro--indexed-to-emacs)
+    (rgb      . kuro--rgb-to-emacs))
+  "Alist mapping Rust Color variant symbols to their Emacs conversion functions.
+Each function receives the VALUE part of the `(type . value)' cons cell.
+Add a new entry here whenever a new Color variant is introduced on the Rust side.")
+
 (defun kuro--color-to-emacs (color)
   "Convert Rust Color enum value to Emacs color string or nil.
 COLOR can be:
@@ -114,15 +128,9 @@ COLOR can be:
   - A cons cell (named . color-name) for named colors
   - A cons cell (indexed . index) for 256-color palette
   - A cons cell (rgb . rgb-value) for truecolor (24-bit RGB)"
-  (pcase color
-    (:default nil)
-    ((pred consp)
-     (pcase (car color)
-       ('named (or (gethash (cdr color) kuro--named-colors)
-                   (cdr color)))
-       ('indexed (kuro--indexed-to-emacs (cdr color)))
-       ('rgb (kuro--rgb-to-emacs (cdr color)))))
-    (_ nil)))
+  (when (consp color)
+    (when-let ((fn (cdr (assq (car color) kuro--color-type-handlers))))
+      (funcall fn (cdr color)))))
 
 (defun kuro--indexed-to-emacs (idx)
   "Convert 256-color palette index IDX to Emacs color string."

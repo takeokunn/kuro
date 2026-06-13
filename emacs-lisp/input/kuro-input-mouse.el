@@ -91,10 +91,14 @@ Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
 
 ;;; Mouse Event Handler Macro
 
+(defconst kuro--mouse-button-alist
+  '((mouse-1 . 0) (mouse-2 . 1) (mouse-3 . 2))
+  "Alist mapping mouse button event-basic-type symbols to PTY button indices.")
+
 (defmacro kuro--def-mouse-cmd (name btn-form press doc)
   "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to PTY.
-BTN-FORM is evaluated at call time: a literal integer for scroll commands, or a
-pcase expression over `event-basic-type' for button commands.
+BTN-FORM is evaluated at call time: a literal integer for scroll commands, or an
+alist-get expression over `event-basic-type' for button commands.
 PRESS is t for press events, nil for release.
 DOC is the docstring for the generated command."
   `(defun ,name ()
@@ -107,14 +111,12 @@ DOC is the docstring for the generated command."
 ;;; Mouse Event Handlers
 
 (kuro--def-mouse-cmd kuro--mouse-press
-  (pcase (event-basic-type last-input-event)
-    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  (alist-get (event-basic-type last-input-event) kuro--mouse-button-alist)
   t
   "Handle mouse button press and forward to PTY.")
 
 (kuro--def-mouse-cmd kuro--mouse-release
-  (pcase (event-basic-type last-input-event)
-    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  (alist-get (event-basic-type last-input-event) kuro--mouse-button-alist)
   nil
   "Handle mouse button release and forward to PTY.")
 

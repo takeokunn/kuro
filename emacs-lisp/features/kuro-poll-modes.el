@@ -211,39 +211,51 @@ Avoid blocking operations; use `run-with-timer 0' for deferred work.")
      (format "\e]52;c;%s\a"
              (base64-encode-string (or text "") t)))))
 
+(defun kuro--clipboard-write (text)
+  "Place TEXT on the kill ring per `kuro-clipboard-policy'.
+Under `write-only' or `allow': accepts silently.  Under `prompt': asks first.
+Under `deny' or any other value: does nothing."
+  (pcase kuro-clipboard-policy
+    ((or 'write-only 'allow)
+     (kill-new text)
+     (message "Kuro: clipboard updated from terminal"))
+    ('prompt
+     (when (yes-or-no-p
+            (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
+                    (length text)))
+       (kill-new text)))))
+
+(defun kuro--clipboard-query ()
+  "Respond to a clipboard read request per `kuro-clipboard-policy'.
+Under `allow': responds immediately.  Under `prompt': asks first.
+Under `deny', `write-only', or any other value: does nothing."
+  (pcase kuro-clipboard-policy
+    ('allow (kuro--send-osc52-clipboard-response))
+    ('prompt
+     (when (yes-or-no-p "Kuro: terminal wants to read clipboard.  Allow? ")
+       (kuro--send-osc52-clipboard-response)))))
+
 (defun kuro--handle-clipboard-actions ()
   "Process pending OSC 52 clipboard actions per `kuro-clipboard-policy'.
-Drains the action queue returned by `kuro--poll-clipboard-actions' and
-dispatches each entry:
-  `write' -- place terminal-supplied text on the kill ring (optional prompt).
-  `query' — respond with the current `kill-ring' head (with optional prompt).
+Drains the action queue from `kuro--poll-clipboard-actions' and dispatches:
+  `write' → `kuro--clipboard-write'
+  `query' → `kuro--clipboard-query'"
+  (dolist (action (kuro--poll-clipboard-actions))
+    (pcase (car action)
+      ('write (kuro--clipboard-write (cdr action)))
+      ('query (kuro--clipboard-query)))))
 
-On `query': sends an OSC 52 response with the current `kill-ring' head
-  back to the PTY via `kuro--send-key' (active-terminal output).
-Returns nil."
-  (let ((actions (kuro--poll-clipboard-actions)))
-    (dolist (action actions)
-      (pcase (car action)
-        ('write
-         (pcase kuro-clipboard-policy
-           ((or 'write-only 'allow)
-            (kill-new (cdr action))
-            (message "Kuro: clipboard updated from terminal"))
-           ('prompt
-            (when (yes-or-no-p
-                   (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
-                           (length (cdr action))))
-              (kill-new (cdr action))))))
-        ('query
-         (pcase kuro-clipboard-policy
-           ('allow
-            (kuro--send-osc52-clipboard-response))
-           ('prompt
-            (when (yes-or-no-p "Kuro: terminal wants to read clipboard.  Allow? ")
-              (kuro--send-osc52-clipboard-response)))))))))
+(defun kuro--poll-terminal-mode-state ()
+  "Fetch all terminal mode state in a single consolidated FFI call (PERF-005).
+`kuro--get-terminal-modes' acquires one Mutex instead of seven separate
+acquisitions.  Must remain first in `kuro--tier1-poll-fns' so it runs before
+any poll that reads mode variables populated by `kuro--apply-terminal-modes'."
+  (when-let ((modes (kuro--get-terminal-modes)))
+    (kuro--apply-terminal-modes modes)))
 
 (defconst kuro--tier1-poll-fns
-  '(kuro--poll-cwd
+  '(kuro--poll-terminal-mode-state  ; consolidated FFI — must stay first
+    kuro--poll-cwd
     kuro--handle-clipboard-actions
     kuro--poll-prompt-mark-updates
     kuro--poll-eval-command-updates
@@ -251,25 +263,13 @@ Returns nil."
     kuro--apply-hyperlink-ranges
     kuro--check-process-exit)
   "Tier-1 poll functions called in order every `kuro--mode-poll-cadence' frames.
-Add new shell-interaction-timescale polls here; no changes to dispatch loop.")
+Add new shell-interaction-timescale polls here; the dispatch loop needs no changes.")
 
 ;;; Tier-1 consolidated dispatcher
 
 (defun kuro--poll-tier1-modes ()
-  "Poll tier-1 terminal state: modes, CWD, clipboard, prompt, images, exit.
-A single consolidated FFI call (`kuro--get-terminal-modes', PERF-005)
-replaces 7 individual Mutex acquisitions.  All other tier-1 items
-\(CWD, clipboard, prompt marks, image notifications, process exit) are
-at shell-interaction timescale so 167 ms lag is imperceptible."
-  (when-let ((modes (kuro--get-terminal-modes)))
-    (kuro--apply-terminal-modes modes))
-  (kuro--poll-cwd)
-  (kuro--handle-clipboard-actions)
-  (kuro--poll-prompt-mark-updates)
-  (kuro--poll-eval-command-updates)
-  (kuro--poll-image-events)
-  (kuro--apply-hyperlink-ranges)
-  (kuro--check-process-exit))
+  "Run all tier-1 poll functions from `kuro--tier1-poll-fns' in order."
+  (mapc #'funcall kuro--tier1-poll-fns))
 
 ;;; Top-level gated dispatcher
 

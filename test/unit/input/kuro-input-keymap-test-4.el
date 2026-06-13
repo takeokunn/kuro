@@ -2,12 +2,7 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-
-;; kuro-input-keymap.el before loading so the file loads without the module.
-(unless (fboundp 'kuro--send-key)
-  (defalias 'kuro--send-key (lambda (_data) nil)))
+(require 'kuro-input-keymap-test-support)
 
 ;; --- kuro--keymap-setup-navigation ---
 

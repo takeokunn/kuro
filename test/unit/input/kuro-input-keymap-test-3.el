@@ -2,9 +2,7 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-input-keymap)
+(require 'kuro-input-keymap-test-support)
 
 ;;; Group 10: kuro--keymap-setup-special — C-m, C-i, C-h, DEL aliases
 

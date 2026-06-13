@@ -1,335 +1,280 @@
-;;; kuro-char-width-test-2.el --- Unit tests for kuro-char-width.el (part 2)  -*- lexical-binding: t; -*-
+;;; kuro-char-width-test-2.el --- kuro-char-width-test (part 2)  -*- lexical-binding: t; -*-
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-char-width)
+(require 'kuro-char-width-test-support)
 
-;;; Group 25: kuro--probe-glyph-metrics
+;;; Group 17: Merged char-width — EA-Ambiguous AND emoji in one table
 
-(ert-deftest test-kuro-probe-glyph-metrics-nil-in-batch-mode ()
-  "kuro--probe-glyph-metrics returns nil when Emacs is in batch/non-graphical mode."
-  ;; In batch mode font-at would fail; the condition-case in the function
-  ;; catches that and returns nil.
-  (should-not (kuro--probe-glyph-metrics ?a)))
+(ert-deftest kuro-faces-test--setup-handles-ea-ambiguous-and-emoji ()
+  "Unified kuro--setup-char-width-table covers both EA-Ambiguous (width 1)
+and emoji (width 2) ranges correctly.  The width-1 pass runs last so
+EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    ;; EA-Ambiguous: must be 1
+    (should (= 1 (char-width #x2500)))   ; ─ Box Drawing
+    (should (= 1 (char-width #x2580)))   ; ▀ Block Elements
+    (should (= 1 (char-width #x25A0)))   ; ■ Geometric Shapes
+    (should (= 1 (char-width #x2600)))   ; ☀ Misc Symbols (also in emoji block)
+    (should (= 1 (char-width #x2702)))   ; ✂ Dingbats (also in emoji block)
+    (should (= 1 (char-width #x2800)))   ; ⠀ Braille
+    ;; Emoji: must be 2
+    (should (= 2 (char-width ?\U0001F525)))  ; 🔥
+    (should (= 2 (char-width ?日)))      ; 日 CJK
+    ;; Nerd Font PUA: must be 1
+    (should (= 1 (char-width ?\xE0B0)))      ; Powerline arrow
+    ;; Variation Selector: must be 0
+    (should (= 0 (char-width #xFE00)))))
 
-(ert-deftest test-kuro-probe-glyph-metrics-nil-when-font-at-nil ()
-  "kuro--probe-glyph-metrics returns nil when font-at returns nil."
-  (cl-letf (((symbol-function 'font-at) (lambda (&rest _) nil)))
-    (should-not (kuro--probe-glyph-metrics ?a))))
+;;; Group 19: kuro--reapply-char-width-in-all-buffers
 
-;;; Group 26: kuro--assign-mono-fonts error handling
+(ert-deftest kuro-faces-test--reapply-in-all-buffers-fixes-kuro-mode-buffer ()
+  "kuro--reapply-char-width-in-all-buffers re-applies overrides in kuro-mode buffers."
+  (let ((orig-env current-language-environment)
+        (test-buf (get-buffer-create " *kuro-reapply-test*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer test-buf
+            (setq major-mode 'kuro-mode)
+            (kuro--setup-char-width-table)
+            ;; Verify table is set up
+            (should (= 1 (char-width #x2500))))
+          ;; Simulate language environment change destroying the table
+          (set-language-environment "Japanese")
+          ;; After hook fires (called by set-language-environment),
+          ;; overrides should have been re-applied
+          (with-current-buffer test-buf
+            (should (= 1 (char-width #x2500)))
+            (should (= 1 (char-width #x2580)))))
+      (kill-buffer test-buf)
+      (set-language-environment orig-env))))
 
-(ert-deftest test-kuro-assign-mono-fonts-swallows-font-spec-error ()
-  "kuro--assign-mono-fonts completes without propagating errors from set-fontset-font.
-The per-range loop body is wrapped in (condition-case nil ... (error nil));
-errors from set-fontset-font must be silently swallowed."
-  ;; Build a minimal fake font object that font-get can read :family from.
-  (let ((fake-font (font-spec :family "MockFont" :size 12)))
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'face-attribute) (lambda (&rest _) fake-font))
-              ((symbol-function 'set-fontset-font)
-               (lambda (&rest _) (error "simulated set-fontset-font error"))))
-      (should-not (condition-case err
-                      (progn (kuro--assign-mono-fonts) nil)
-                    (error err))))))
-
-;;; Group 27: kuro--reapply-char-width-in-all-buffers dead buffer safety
-
-(ert-deftest test-kuro-reapply-char-width-skips-dead-buffer ()
-  "kuro--reapply-char-width-in-all-buffers completes without error on dead buffers."
-  ;; Create a buffer, record it, kill it, then call the function.
-  ;; The function uses buffer-live-p, so it should silently skip the dead buffer.
-  (let ((dead-buf (generate-new-buffer " *kuro-dead-buf-test*")))
-    (with-current-buffer dead-buf
-      (setq major-mode 'kuro-mode))
-    (kill-buffer dead-buf)
-    (should-not (buffer-live-p dead-buf))
+(ert-deftest kuro-faces-test--reapply-in-all-buffers-skips-non-kuro-buffers ()
+  "kuro--reapply-char-width-in-all-buffers does not touch non-kuro-mode buffers."
+  ;; Just verify it runs without error on buffers with other major modes.
+  (with-temp-buffer
+    (setq major-mode 'text-mode)
+    ;; Should not signal any error
     (should-not (condition-case err
                     (progn (kuro--reapply-char-width-in-all-buffers) nil)
                   (error err)))))
 
-;;; Group 28: kuro--setup-char-width-table — width-2 ranges (CJK, Hangul, Fullwidth)
+;;; Group 20: kuro--assign-mono-fonts fallback
 
-(ert-deftest kuro-char-width-test--cjk-unified-start-is-width-2 ()
-  "U+4E00 (first CJK Unified Ideograph) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #x4E00)))))
+(ert-deftest kuro-faces-test--assign-mono-fonts-no-ascii-font ()
+  "kuro--assign-mono-fonts is a no-op when face-attribute returns nil family."
+  ;; In batch mode display-graphic-p is nil, so this is always a no-op.
+  ;; Test verifies no error is signaled.
+  (should-not (kuro--assign-mono-fonts)))
 
-(ert-deftest kuro-char-width-test--cjk-unified-end-is-width-2 ()
-  "U+9FFF (last CJK Unified Ideograph in main block) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #x9FFF)))))
+;;; Group 21: kuro--setup-fontset nerd-font fallback
 
-(ert-deftest kuro-char-width-test--hangul-syllable-start-is-width-2 ()
-  "U+AC00 (first Hangul Syllable) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #xAC00)))))
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--setup-fontset-noop-in-batch   kuro--setup-fontset)
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--detect-nerd-font-nil-in-batch kuro--detect-nerd-font)
 
-(ert-deftest kuro-char-width-test--hangul-syllable-end-is-width-2 ()
-  "U+D7AF (last Hangul Syllable) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #xD7AF)))))
-
-(ert-deftest kuro-char-width-test--fullwidth-forms-start-is-width-2 ()
-  "U+FF01 (FULLWIDTH EXCLAMATION MARK) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #xFF01)))))
-
-(ert-deftest kuro-char-width-test--fullwidth-forms-end-is-width-2 ()
-  "U+FF60 (FULLWIDTH RIGHT WHITE PARENTHESIS) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #xFF60)))))
-
-(ert-deftest kuro-char-width-test--hiragana-start-is-width-2 ()
-  "U+3041 (HIRAGANA LETTER SMALL A) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #x3041)))))
-
-(ert-deftest kuro-char-width-test--katakana-start-is-width-2 ()
-  "U+30A1 (KATAKANA LETTER SMALL A) is width 2 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 2 (char-width #x30A1)))))
-
-(ert-deftest kuro-char-width-test--table-inherits-parent-for-ascii ()
-  "ASCII characters (U+0041 = 'A') must still be width 1 via parent table inheritance."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width ?A)))
-    (should (= 1 (char-width ?z)))
-    (should (= 1 (char-width ?0)))))
-
-(ert-deftest kuro-char-width-test--apply-overrides-is-idempotent ()
-  "Calling kuro--apply-char-width-overrides twice yields the same result as once."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (kuro--apply-char-width-overrides)
-    (dolist (range kuro--char-width-overrides)
-      (should (= 1 (char-table-range char-width-table range))))))
-
-;;; Group 29: kuro--setup-char-width-table — width-0 range full boundary
-
-(ert-deftest kuro-char-width-test--variation-selector-mid-range-is-width-0 ()
-  "U+FE08 (Variation Selector 9, mid-range) must be width 0 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 0 (char-width #xFE08)))))
-
-(ert-deftest kuro-char-width-test--char-outside-variation-selector-range-not-zero ()
-  "U+FDF0 (Arabic Ligature, well outside #xFE00-#xFE0F) must not be width 0.
-The VS range is strictly #xFE00-#xFE0F; characters before it should be unaffected."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should-not (= 0 (char-width #xFDF0)))))
-
-;;; Group 30: kuro--detect-nerd-font — priority ordering edge cases
-
-(ert-deftest kuro-char-width-test--detect-nerd-font-exact-name-wins-over-partial ()
-  "kuro--detect-nerd-font prefers 'Symbols Nerd Font Mono' even when another
-Nerd Font Mono is listed first in the font-family-list."
+(ert-deftest kuro-faces-test--setup-fontset-no-nerd-font-no-error ()
+  "kuro--setup-fontset does not error when no Nerd Font is available."
+  ;; Stub display-graphic-p to t and font-family-list to empty list.
   (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda ()
-               '("Hack Nerd Font Mono"
-                 "Symbols Nerd Font Mono"
-                 "JetBrains Mono Nerd Font"))))
-    (should (equal (kuro--detect-nerd-font) "Symbols Nerd Font Mono"))))
-
-(ert-deftest kuro-char-width-test--detect-nerd-font-nerd-mono-wins-over-non-mono ()
-  "kuro--detect-nerd-font prefers 'Nerd Font Mono' over bare 'Nerd Font'."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda ()
-               '("Hack Nerd Font"
-                 "Hack Nerd Font Mono"))))
-    (should (equal (kuro--detect-nerd-font) "Hack Nerd Font Mono"))))
-
-;;; Group 31: kuro--setup-fontset — argument verification
-
-(ert-deftest kuro-char-width-test--setup-fontset-calls-set-fontset-with-nerd-font ()
-  "kuro--setup-fontset calls set-fontset-font with the detected Nerd Font name
-for both PUA ranges when a Nerd Font is found."
-  (let (fontset-calls)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'font-family-list)
-               (lambda () '("Symbols Nerd Font Mono")))
-              ((symbol-function 'set-fontset-font)
-               (lambda (_target range font &rest _)
-                 (push (list range font) fontset-calls))))
-      (kuro--setup-fontset)
-      ;; Two PUA ranges should have been registered
-      (should (>= (length fontset-calls) 2))
-      ;; Every registered font name should be the Nerd Font
-      (dolist (call fontset-calls)
-        (when (stringp (cadr call))
-          (should (equal (cadr call) "Symbols Nerd Font Mono")))))))
-
-(ert-deftest kuro-char-width-test--setup-fontset-registers-emoji-font ()
-  "kuro--setup-fontset calls set-fontset-font for the emoji symbol set
-when an emoji font is found in the font family list."
-  (let (emoji-registered)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'font-family-list)
-               (lambda () '("Noto Color Emoji")))
-              ((symbol-function 'set-fontset-font)
-               (lambda (_target range font &rest _)
-                 (when (eq range 'emoji)
-                   (setq emoji-registered font)))))
-      (kuro--setup-fontset)
-      (should (equal emoji-registered "Noto Color Emoji")))))
-
-(ert-deftest kuro-char-width-test--setup-fontset-no-emoji-font-no-error ()
-  "kuro--setup-fontset does not error when no emoji font is available."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list) (lambda () '("Symbols Nerd Font Mono")))
+            ((symbol-function 'font-family-list) (lambda () '()))
             ((symbol-function 'set-fontset-font) (lambda (&rest _) nil)))
     (should-not (condition-case err
                     (progn (kuro--setup-fontset) nil)
                   (error err)))))
 
-;;; Group 32: kuro--refine-glyph-widths — additional guard paths
+(defconst kuro-char-width-test--detect-nerd-font-table
+  '((kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
+     ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
+     "Symbols Nerd Font Mono")
+    (kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
+     ("DejaVu Sans Mono" "Hack Nerd Font Mono")
+     "Hack Nerd Font Mono")
+    (kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
+     ("DejaVu Sans Mono" "Hack Nerd Font")
+     "Hack Nerd Font")
+    (kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
+     ("DejaVu Sans Mono" "Consolas" "Courier New")
+     nil))
+  "Table: (test-name fonts expected) for kuro--detect-nerd-font priority dispatch.")
 
-(ert-deftest kuro-char-width-test--refine-glyph-widths-noop-when-cell-height-zero ()
-  "kuro--refine-glyph-widths does nothing when frame-char-height returns 0."
+(defmacro kuro-char-width-test--def-detect-nerd-font (test-name fonts expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--detect-nerd-font' with fonts %S → %S." fonts expected)
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+               ((symbol-function 'font-family-list) (lambda () ',fonts)))
+       ,(if expected
+            `(should (equal (kuro--detect-nerd-font) ,expected))
+          `(should-not (kuro--detect-nerd-font))))))
+
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
+ ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
+ "Symbols Nerd Font Mono")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
+ ("DejaVu Sans Mono" "Hack Nerd Font Mono")
+ "Hack Nerd Font Mono")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
+ ("DejaVu Sans Mono" "Hack Nerd Font")
+ "Hack Nerd Font")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
+ ("DejaVu Sans Mono" "Consolas" "Courier New")
+ nil)
+
+(ert-deftest kuro-char-width-test--all-detect-nerd-font-cases-correct ()
+  "Invariant: every detect-nerd-font table entry returns the expected result."
+  (dolist (entry kuro-char-width-test--detect-nerd-font-table)
+    (pcase-let ((`(,_name ,fonts ,expected) entry))
+      (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                ((symbol-function 'font-family-list) (lambda () fonts)))
+        (if expected
+            (should (equal (kuro--detect-nerd-font) expected))
+          (should-not (kuro--detect-nerd-font)))))))
+
+;;; Group 22: char-width-table data integrity
+
+(defconst kuro-char-width-test--width-invariant-table
+  '(;; Variation Selectors (FE00-FE0F): zero width
+    (kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
+    (kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
+    ;; Nerd Font PUA (E000-F8FF): width 1
+    (kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
+    (kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
+    ;; Supplementary Nerd Font PUA (F0000): width 1
+    (kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1))
+  "Table of (test-name codepoint expected-width) for kuro--setup-char-width-table invariants.")
+
+(defmacro kuro-char-width-test--def-width-invariant (test-name codepoint expected-width)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--setup-char-width-table: char-width #x%X => %d." codepoint expected-width)
+     (with-temp-buffer
+       (kuro--setup-char-width-table)
+       (should (= ,expected-width (char-width ,codepoint))))))
+
+(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1)
+
+(ert-deftest kuro-char-width-test--all-width-invariants-correct ()
+  "Every entry in `kuro-char-width-test--width-invariant-table' has the expected char-width."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    (dolist (entry kuro-char-width-test--width-invariant-table)
+      (pcase-let ((`(,_name ,cp ,expected) entry))
+        (should (= expected (char-width cp)))))))
+
+;;; Group 23: kuro--refine-glyph-widths
+
+(ert-deftest test-kuro-refine-glyph-widths-noop-when-not-graphical ()
+  "kuro--refine-glyph-widths returns nil without probing when display-graphic-p is nil."
   (let (probe-called)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () nil))
+              ((symbol-function 'kuro--probe-glyph-metrics)
+               (lambda (&rest _) (setq probe-called t) nil)))
+      (should-not (kuro--refine-glyph-widths))
+      (should-not probe-called))))
+
+(ert-deftest test-kuro-refine-glyph-widths-noop-when-cell-width-zero ()
+  "kuro--refine-glyph-widths does nothing when frame-char-width returns 0."
+  (let (probe-called)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'frame-char-width) (lambda () 0))
+              ((symbol-function 'frame-char-height) (lambda () 16))
+              ((symbol-function 'kuro--probe-glyph-metrics)
+               (lambda (&rest _) (setq probe-called t) nil)))
+      (kuro--refine-glyph-widths)
+      (should-not probe-called))))
+
+(defconst kuro-char-width-test--refine-redraw-table
+  '((test-kuro-refine-glyph-widths-calls-redraw-when-changed  t   t)
+    (test-kuro-refine-glyph-widths-no-redraw-when-unchanged   nil nil))
+  "Table: (test-name rescale-result redraw-expected?) for kuro--refine-glyph-widths redraw dispatch.")
+
+(defmacro kuro-char-width-test--def-refine-redraw (test-name rescale redraw)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--refine-glyph-widths' rescale=%s → redraw=%s." rescale redraw)
+     (let (redraw-called)
+       (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                 ((symbol-function 'frame-char-width)  (lambda () 8))
+                 ((symbol-function 'frame-char-height) (lambda () 16))
+                 ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) ,rescale))
+                 ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
+         (kuro--refine-glyph-widths)
+         ,(if redraw '(should redraw-called) '(should-not redraw-called))))))
+
+(kuro-char-width-test--def-refine-redraw
+ test-kuro-refine-glyph-widths-calls-redraw-when-changed t t)
+(kuro-char-width-test--def-refine-redraw
+ test-kuro-refine-glyph-widths-no-redraw-when-unchanged nil nil)
+
+(ert-deftest kuro-char-width-test--all-refine-redraw-cases-correct ()
+  "Invariant: every refine-redraw table entry produces the expected redraw behavior."
+  (dolist (entry kuro-char-width-test--refine-redraw-table)
+    (pcase-let ((`(,_name ,rescale ,redraw) entry))
+      (let (redraw-called)
+        (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                  ((symbol-function 'frame-char-width)  (lambda () 8))
+                  ((symbol-function 'frame-char-height) (lambda () 16))
+                  ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) rescale))
+                  ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
+          (kuro--refine-glyph-widths)
+          (if redraw (should redraw-called) (should-not redraw-called)))))))
+
+(ert-deftest test-kuro-refine-glyph-widths-iterates-both-passes ()
+  "kuro--refine-glyph-widths calls kuro--rescale-font-for-glyph for both passes."
+  (let (called-chars)
     (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
               ((symbol-function 'frame-char-width) (lambda () 8))
-              ((symbol-function 'frame-char-height) (lambda () 0))
-              ((symbol-function 'kuro--rescale-font-for-glyph)
-               (lambda (&rest _) (setq probe-called t) nil)))
-      (kuro--refine-glyph-widths)
-      (should-not probe-called))))
-
-(ert-deftest kuro-char-width-test--refine-glyph-widths-noop-when-cell-width-nil ()
-  "kuro--refine-glyph-widths does nothing when frame-char-width returns nil."
-  (let (probe-called)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'frame-char-width) (lambda () nil))
               ((symbol-function 'frame-char-height) (lambda () 16))
               ((symbol-function 'kuro--rescale-font-for-glyph)
-               (lambda (&rest _) (setq probe-called t) nil)))
+               (lambda (probe-char _range _cw _ch)
+                 (push probe-char called-chars)
+                 nil))
+              ((symbol-function 'redraw-display) (lambda () nil)))
       (kuro--refine-glyph-widths)
-      (should-not probe-called))))
+      ;; Pass 1: one probe char per kuro--ea-range-probe-table entry
+      (dolist (entry kuro--ea-range-probe-table)
+        (should (memq (cdr entry) called-chars)))
+      ;; Pass 2: each char in kuro--glyph-extra-probes
+      (dolist (c kuro--glyph-extra-probes)
+        (should (memq c called-chars))))))
 
-;;; Group 33: kuro--rescale-font-for-glyph — height-driven rescale path
+;;; Group 24: kuro--rescale-font-for-glyph
 
-(ert-deftest kuro-char-width-test--rescale-font-height-driven-rescale ()
-  "kuro--rescale-font-for-glyph rescales when glyph height alone exceeds
-the 1.05x threshold (width is within cell but height is too tall)."
-  (let (set-fontset-called
-        (mock-font (font-spec :family "TallFont" :size 12)))
-    (cl-letf (((symbol-function 'kuro--probe-glyph-metrics)
-               ;; width = 8 (exact match), height = 20 vs cell-height 16 → ratio 1.25 > 1.05
-               (lambda (&rest _)
-                 (list :font mock-font :width 8 :height 20)))
-              ((symbol-function 'set-fontset-font)
-               (lambda (&rest _) (setq set-fontset-called t))))
-      (should (kuro--rescale-font-for-glyph ?a '(#x2580 . #x259F) 8 16))
-      (should set-fontset-called))))
+(ert-deftest test-kuro-rescale-font-nil-metrics-returns-nil ()
+  "kuro--rescale-font-for-glyph returns nil when kuro--probe-glyph-metrics returns nil."
+  (cl-letf (((symbol-function 'kuro--probe-glyph-metrics) (lambda (&rest _) nil)))
+    (should-not (kuro--rescale-font-for-glyph ?a '(#x2500 . #x257F) 8 16))))
 
-(ert-deftest kuro-char-width-test--rescale-font-nil-height-uses-width-ratio ()
-  "kuro--rescale-font-for-glyph falls back to width-only ratio when height is nil."
-  ;; glyph-height nil → height-ratio forced to 1.0; only width-ratio matters
-  (let (set-fontset-called
-        (mock-font (font-spec :family "WideFont" :size 12)))
+(ert-deftest test-kuro-rescale-font-exact-match-returns-nil ()
+  "kuro--rescale-font-for-glyph returns nil when glyph metrics match cell size."
+  ;; width-ratio = 8/8 = 1.0 <= 1.05 threshold, height within cell too
+  (let ((mock-font (font-spec :family "MockFont" :size 12)))
     (cl-letf (((symbol-function 'kuro--probe-glyph-metrics)
                (lambda (&rest _)
-                 (list :font mock-font :width 16 :height nil)))
-              ((symbol-function 'set-fontset-font)
-               (lambda (&rest _) (setq set-fontset-called t))))
-      ;; width 16 vs cell-width 8 → ratio 2.0 > 1.05 → must rescale
-      (should (kuro--rescale-font-for-glyph ?a '(#x2500 . #x257F) 8 16))
-      (should set-fontset-called))))
+                 (list :font mock-font :width 8 :height 14)))
+              ((symbol-function 'set-fontset-font) (lambda (&rest _) nil)))
+      (should-not (kuro--rescale-font-for-glyph ?a '(#x2500 . #x257F) 8 16)))))
 
-(ert-deftest kuro-char-width-test--rescale-font-symbol-family-converted-to-string ()
-  "kuro--rescale-font-for-glyph converts a symbol :family to a string for font-spec."
-  ;; font-get can return a symbol for :family; verify no error is signaled.
-  (let ((mock-font (font-spec :family "SymbolFamily" :size 12))
-        set-fontset-called)
-    ;; Patch font-get to return a symbol for :family
+(ert-deftest test-kuro-rescale-font-exceeds-threshold-calls-set-fontset ()
+  "kuro--rescale-font-for-glyph calls set-fontset-font and returns t when ratio > 1.05."
+  ;; glyph-width=16, cell-width=8 → width-ratio=2.0 >> 1.05
+  (let ((set-fontset-called 0)
+        (mock-font (font-spec :family "MockFont" :size 12)))
     (cl-letf (((symbol-function 'kuro--probe-glyph-metrics)
                (lambda (&rest _)
                  (list :font mock-font :width 16 :height 14)))
-              ((symbol-function 'font-get)
-               (lambda (font prop)
-                 (cond ((eq prop :family) 'SymbolFamily)
-                       ((eq prop :size)   12)
-                       (t nil))))
               ((symbol-function 'set-fontset-font)
-               (lambda (&rest _) (setq set-fontset-called t))))
-      (should-not (condition-case err
-                      (progn
-                        (kuro--rescale-font-for-glyph ?a '(#x2500 . #x257F) 8 16)
-                        nil)
-                    (error err))))))
+               (lambda (&rest _) (setq set-fontset-called (1+ set-fontset-called)))))
+      (should (kuro--rescale-font-for-glyph ?a '(#x2500 . #x257F) 8 16))
+      ;; Called twice: once for nil (current frame) and once for t (default fontset)
+      (should (= 2 set-fontset-called)))))
 
-;;; Group 34: kuro--glyph-extra-probes membership
-
-(ert-deftest kuro-char-width-test--glyph-extra-probes-contains-record-symbol ()
-  "kuro--glyph-extra-probes must contain U+23FA (RECORD symbol)."
-  (should (memq #x23FA kuro--glyph-extra-probes)))
-
-(ert-deftest kuro-char-width-test--glyph-extra-probes-contains-black-circle ()
-  "kuro--glyph-extra-probes must contain U+25CF (BLACK CIRCLE)."
-  (should (memq #x25CF kuro--glyph-extra-probes)))
-
-(ert-deftest kuro-char-width-test--glyph-extra-probes-contains-check-mark ()
-  "kuro--glyph-extra-probes must contain U+2714 (HEAVY CHECK MARK)."
-  (should (memq #x2714 kuro--glyph-extra-probes)))
-
-(ert-deftest kuro-char-width-test--glyph-extra-probes-contains-angle-ornament ()
-  "kuro--glyph-extra-probes must contain U+276F (HEAVY RIGHT-POINTING ANGLE ornament)."
-  (should (memq #x276F kuro--glyph-extra-probes)))
-
-(ert-deftest kuro-char-width-test--glyph-extra-probes-length ()
-  "kuro--glyph-extra-probes must have exactly 4 entries."
-  (should (= 4 (length kuro--glyph-extra-probes))))
-
-;;; Group 35: kuro--set-fontset-font-both macro (non-graphical stubs)
-
-(ert-deftest kuro-char-width-test--set-fontset-font-both-calls-nil-and-t ()
-  "kuro--set-fontset-font-both calls set-fontset-font for both nil and t fontsets."
-  (let ((calls nil))
-    (cl-letf (((symbol-function 'set-fontset-font)
-               (lambda (fontset range spec &optional frame add)
-                 (push (list fontset range spec add) calls))))
-      (kuro--set-fontset-font-both '(#x2500 . #x257F) "test-spec")
-      ;; Must produce exactly two calls
-      (should (= (length calls) 2))
-      ;; One call with nil fontset (current frame)
-      (should (cl-some (lambda (c) (null (car c))) calls))
-      ;; One call with t fontset (default template)
-      (should (cl-some (lambda (c) (eq t (car c))) calls)))))
-
-(ert-deftest kuro-char-width-test--set-fontset-font-both-passes-range ()
-  "kuro--set-fontset-font-both passes the given range to both set-fontset-font calls."
-  (let ((seen-ranges nil))
-    (cl-letf (((symbol-function 'set-fontset-font)
-               (lambda (_fontset range _spec &optional _frame _add)
-                 (push range seen-ranges))))
-      (kuro--set-fontset-font-both '(#xE000 . #xF8FF) "nerd-font")
-      (should (= (length seen-ranges) 2))
-      (should (cl-every (lambda (r) (equal r '(#xE000 . #xF8FF))) seen-ranges)))))
-
-(ert-deftest kuro-char-width-test--set-fontset-font-both-uses-prepend ()
-  "kuro--set-fontset-font-both always uses 'prepend so existing fonts serve as fallback."
-  (let ((add-args nil))
-    (cl-letf (((symbol-function 'set-fontset-font)
-               (lambda (_fontset _range _spec &optional _frame add)
-                 (push add add-args))))
-      (kuro--set-fontset-font-both '(#x2500 . #x257F) "mono")
-      (should (cl-every (lambda (a) (eq a 'prepend)) add-args)))))
 
 (provide 'kuro-char-width-test-2)
 

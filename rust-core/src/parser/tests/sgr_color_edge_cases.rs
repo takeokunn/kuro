@@ -272,3 +272,5 @@ proptest! {
         );
     }
 }
+
+include!("sgr_apply_attrs.rs");

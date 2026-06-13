@@ -62,7 +62,7 @@
 (require 'kuro-ffi)
 (require 'kuro-ffi-modes)
 
-;;; Helper macro
+;;; Helper macros
 
 (defmacro kuro-ffi-modes-test--with-stub (fn-name return-val &rest body)
   "Run BODY with FN-NAME temporarily returning RETURN-VAL.
@@ -72,17 +72,36 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
      (cl-letf (((symbol-function ,fn-name) (lambda (_id) ,return-val)))
        ,@body)))
 
+(defconst kuro-ffi-modes-test--boolean-getter-table
+  '((kuro--get-cursor-visible    kuro-core-get-cursor-visible)
+    (kuro--get-app-cursor-keys   kuro-core-get-app-cursor-keys)
+    (kuro--get-app-keypad        kuro-core-get-app-keypad)
+    (kuro--get-bracketed-paste   kuro-core-get-bracketed-paste)
+    (kuro--get-sync-output       kuro-core-get-sync-output)
+    (kuro--get-mouse-sgr         kuro-core-get-mouse-sgr)
+    (kuro--get-mouse-pixel       kuro-core-get-mouse-pixel)
+    (kuro--get-focus-events      kuro-core-get-focus-events))
+  "Boolean FFI mode getters: each returns t when active, nil when inactive or uninitialized.
+Used by `kuro-ffi-modes-test--def-bool-getter' and the comprehensive invariant test.")
+
+(defmacro kuro-ffi-modes-test--def-bool-getter (wrapper core-fn)
+  "Define t-when-active and nil-when-inactive tests for boolean WRAPPER."
+  (let* ((bare     (replace-regexp-in-string "^kuro--" "kuro-ffi-modes--" (symbol-name wrapper)))
+         (t-name   (intern (format "%s-returns-t-when-active" bare)))
+         (nil-name (intern (format "%s-returns-nil-when-inactive" bare))))
+    `(progn
+       (ert-deftest ,t-name ()
+         ,(format "%s returns t when the stub returns t." wrapper)
+         (kuro-ffi-modes-test--with-stub ',core-fn t
+           (should (eq t (,wrapper)))))
+       (ert-deftest ,nil-name ()
+         ,(format "%s returns nil when the stub returns nil." wrapper)
+         (kuro-ffi-modes-test--with-stub ',core-fn nil
+           (should (null (,wrapper))))))))
+
 ;;; Group 1: Cursor queries
 
-(ert-deftest kuro-ffi-modes--get-cursor-visible-returns-t-when-stub-returns-t ()
-  "kuro--get-cursor-visible returns t when the FFI stub returns t."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-visible t
-    (should (eq t (kuro--get-cursor-visible)))))
-
-(ert-deftest kuro-ffi-modes--get-cursor-visible-nil-when-stub-returns-nil ()
-  "kuro--get-cursor-visible returns nil when FFI returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-cursor-visible nil
-    (should (null (kuro--get-cursor-visible)))))
+(kuro-ffi-modes-test--def-bool-getter kuro--get-cursor-visible kuro-core-get-cursor-visible)
 
 (ert-deftest kuro-ffi-modes--get-cursor-shape-returns-integer ()
   "kuro--get-cursor-shape returns an integer (e.g. 2) when the stub does so."
@@ -102,45 +121,10 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
 
 ;;; Group 2: DEC mode queries
 
-(ert-deftest kuro-ffi-modes--get-app-cursor-keys-returns-t-when-active ()
-  "kuro--get-app-cursor-keys returns t when application cursor keys are enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-app-cursor-keys t
-    (should (eq t (kuro--get-app-cursor-keys)))))
-
-(ert-deftest kuro-ffi-modes--get-app-cursor-keys-returns-nil-when-inactive ()
-  "kuro--get-app-cursor-keys returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-app-cursor-keys nil
-    (should (null (kuro--get-app-cursor-keys)))))
-
-(ert-deftest kuro-ffi-modes--get-app-keypad-returns-t-when-active ()
-  "kuro--get-app-keypad returns t when application keypad mode is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-app-keypad t
-    (should (eq t (kuro--get-app-keypad)))))
-
-(ert-deftest kuro-ffi-modes--get-app-keypad-returns-nil-when-inactive ()
-  "kuro--get-app-keypad returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-app-keypad nil
-    (should (null (kuro--get-app-keypad)))))
-
-(ert-deftest kuro-ffi-modes--get-bracketed-paste-returns-t-when-active ()
-  "kuro--get-bracketed-paste returns t when bracketed paste mode is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-bracketed-paste t
-    (should (eq t (kuro--get-bracketed-paste)))))
-
-(ert-deftest kuro-ffi-modes--get-bracketed-paste-returns-nil-when-inactive ()
-  "kuro--get-bracketed-paste returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-bracketed-paste nil
-    (should (null (kuro--get-bracketed-paste)))))
-
-(ert-deftest kuro-ffi-modes--get-sync-output-returns-t-when-active ()
-  "kuro--get-sync-output returns t when synchronized output is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-sync-output t
-    (should (eq t (kuro--get-sync-output)))))
-
-(ert-deftest kuro-ffi-modes--get-sync-output-returns-nil-when-inactive ()
-  "kuro--get-sync-output returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-sync-output nil
-    (should (null (kuro--get-sync-output)))))
+(kuro-ffi-modes-test--def-bool-getter kuro--get-app-cursor-keys kuro-core-get-app-cursor-keys)
+(kuro-ffi-modes-test--def-bool-getter kuro--get-app-keypad      kuro-core-get-app-keypad)
+(kuro-ffi-modes-test--def-bool-getter kuro--get-bracketed-paste kuro-core-get-bracketed-paste)
+(kuro-ffi-modes-test--def-bool-getter kuro--get-sync-output     kuro-core-get-sync-output)
 
 ;;; Group 3: Mouse queries
 
@@ -161,25 +145,8 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-mode 1003
     (should (eq 1003 (kuro--get-mouse-mode)))))
 
-(ert-deftest kuro-ffi-modes--get-mouse-sgr-returns-t-when-active ()
-  "kuro--get-mouse-sgr returns t when SGR mouse mode is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-sgr t
-    (should (eq t (kuro--get-mouse-sgr)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-sgr-returns-nil-when-inactive ()
-  "kuro--get-mouse-sgr returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-sgr nil
-    (should (null (kuro--get-mouse-sgr)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-pixel-returns-t-when-active ()
-  "kuro--get-mouse-pixel returns t when pixel coordinate mode is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-pixel t
-    (should (eq t (kuro--get-mouse-pixel)))))
-
-(ert-deftest kuro-ffi-modes--get-mouse-pixel-returns-nil-when-inactive ()
-  "kuro--get-mouse-pixel returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-mouse-pixel nil
-    (should (null (kuro--get-mouse-pixel)))))
+(kuro-ffi-modes-test--def-bool-getter kuro--get-mouse-sgr   kuro-core-get-mouse-sgr)
+(kuro-ffi-modes-test--def-bool-getter kuro--get-mouse-pixel kuro-core-get-mouse-pixel)
 
 ;;; Group 4: Keyboard and focus queries
 
@@ -198,15 +165,16 @@ Binds `kuro--initialized' to t so the `kuro--call' guard is satisfied."
   (kuro-ffi-modes-test--with-stub 'kuro-core-get-keyboard-flags 31
     (should (eq 31 (kuro--get-keyboard-flags)))))
 
-(ert-deftest kuro-ffi-modes--get-focus-events-returns-t-when-active ()
-  "kuro--get-focus-events returns t when focus event reporting is enabled."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-focus-events t
-    (should (eq t (kuro--get-focus-events)))))
+(kuro-ffi-modes-test--def-bool-getter kuro--get-focus-events kuro-core-get-focus-events)
 
-(ert-deftest kuro-ffi-modes--get-focus-events-returns-nil-when-inactive ()
-  "kuro--get-focus-events returns nil when stub returns nil."
-  (kuro-ffi-modes-test--with-stub 'kuro-core-get-focus-events nil
-    (should (null (kuro--get-focus-events)))))
+(ert-deftest kuro-ffi-modes--all-boolean-getters-return-t-when-active ()
+  "Every boolean getter in `kuro-ffi-modes-test--boolean-getter-table' returns t when active."
+  (dolist (entry kuro-ffi-modes-test--boolean-getter-table)
+    (let ((wrapper (car entry))
+          (core-fn (cadr entry)))
+      (let ((kuro--initialized t))
+        (cl-letf (((symbol-function core-fn) (lambda (_id) t)))
+          (should (eq t (funcall wrapper))))))))
 
 ;;; Test helper macro
 
@@ -271,41 +239,53 @@ SYM must be a kuro-- prefixed symbol; the test is named by stripping that prefix
 
 (kuro-ffi-modes-test--uninit-nil kuro--get-terminal-modes)
 
-;;; Group 7: kuro--session-id passthrough
+;;; Groups 7+10: kuro--session-id passthrough (individual and consolidated getters)
 ;;
 ;; Each wrapper must pass kuro--session-id (not a hardcoded literal 0) to its
 ;; core function.  Tests bind kuro--session-id to a distinctive integer and
 ;; verify the first argument received by the stub matches.
 
-(ert-deftest kuro-ffi-modes--get-cursor-visible-forwards-session-id ()
-  "kuro--get-cursor-visible passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 42)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor-visible)
-               (lambda (sid) (setq captured-sid sid) t)))
-      (kuro--get-cursor-visible)
-      (should (= captured-sid 42)))))
+(defconst kuro-ffi-modes-test--session-id-forward-table
+  '((kuro-ffi-modes--get-cursor-visible-forwards-session-id
+     kuro--get-cursor-visible   kuro-core-get-cursor-visible    42  t)
+    (kuro-ffi-modes--get-mouse-mode-forwards-session-id
+     kuro--get-mouse-mode       kuro-core-get-mouse-mode        99  1000)
+    (kuro-ffi-modes--get-keyboard-flags-forwards-session-id
+     kuro--get-keyboard-flags   kuro-core-get-keyboard-flags     5  31)
+    (kuro-ffi-modes--get-cursor-state-forwards-session-id
+     kuro--get-cursor-state     kuro-core-get-cursor-state     123  (0 0 t 0))
+    (kuro-ffi-modes--get-terminal-modes-forwards-session-id
+     kuro--get-terminal-modes   kuro-core-get-terminal-modes   456  (nil nil 0 nil nil nil 0)))
+  "Table of (test-name wrapper-fn core-fn sid stub-return) for session-id forwarding.")
 
-(ert-deftest kuro-ffi-modes--get-mouse-mode-forwards-session-id ()
-  "kuro--get-mouse-mode passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 99)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-mouse-mode)
-               (lambda (sid) (setq captured-sid sid) 1000)))
-      (kuro--get-mouse-mode)
-      (should (= captured-sid 99)))))
+(defmacro kuro-ffi-modes-test--def-session-id-forward (test-name wrapper-fn core-fn sid stub-return)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' passes kuro--session-id to the FFI function." wrapper-fn)
+     (let ((kuro--initialized t)
+           (kuro--session-id ,sid)
+           (captured-sid nil))
+       (cl-letf (((symbol-function ',core-fn)
+                  (lambda (s) (setq captured-sid s) ,stub-return)))
+         (,wrapper-fn)
+         (should (= captured-sid ,sid))))))
 
-(ert-deftest kuro-ffi-modes--get-keyboard-flags-forwards-session-id ()
-  "kuro--get-keyboard-flags passes kuro--session-id to the FFI function."
-  (let ((kuro--initialized t)
-        (kuro--session-id 5)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-keyboard-flags)
-               (lambda (sid) (setq captured-sid sid) 31)))
-      (kuro--get-keyboard-flags)
-      (should (= captured-sid 5)))))
+(kuro-ffi-modes-test--def-session-id-forward kuro-ffi-modes--get-cursor-visible-forwards-session-id    kuro--get-cursor-visible   kuro-core-get-cursor-visible    42  t)
+(kuro-ffi-modes-test--def-session-id-forward kuro-ffi-modes--get-mouse-mode-forwards-session-id        kuro--get-mouse-mode       kuro-core-get-mouse-mode        99  1000)
+(kuro-ffi-modes-test--def-session-id-forward kuro-ffi-modes--get-keyboard-flags-forwards-session-id    kuro--get-keyboard-flags   kuro-core-get-keyboard-flags     5  31)
+(kuro-ffi-modes-test--def-session-id-forward kuro-ffi-modes--get-cursor-state-forwards-session-id      kuro--get-cursor-state     kuro-core-get-cursor-state     123  '(0 0 t 0))
+(kuro-ffi-modes-test--def-session-id-forward kuro-ffi-modes--get-terminal-modes-forwards-session-id    kuro--get-terminal-modes   kuro-core-get-terminal-modes   456  '(nil nil 0 nil nil nil 0))
+
+(ert-deftest kuro-ffi-modes-test--all-session-id-forwards-correct ()
+  "Every entry in `kuro-ffi-modes-test--session-id-forward-table' forwards session-id correctly."
+  (dolist (entry kuro-ffi-modes-test--session-id-forward-table)
+    (pcase-let ((`(,_name ,wrapper-fn ,core-fn ,sid ,stub-return) entry))
+      (let ((kuro--initialized t)
+            (kuro--session-id sid)
+            (captured-sid nil))
+        (cl-letf (((symbol-function core-fn)
+                   (lambda (s) (setq captured-sid s) stub-return)))
+          (funcall wrapper-fn)
+          (should (= captured-sid sid)))))))
 
 ;;; Group 8: kuro--define-ffi-getters macro — docstring accessibility
 
@@ -366,28 +346,6 @@ SYM must be a kuro-- prefixed symbol; the test is named by stripping that prefix
     (cl-letf (((symbol-function 'kuro-core-get-keyboard-flags)
                (lambda (_id) (error "FFI crash"))))
       (should (= 0 (kuro--get-keyboard-flags))))))
-
-;;; Group 10: kuro--session-id forwarding for consolidated queries
-
-(ert-deftest kuro-ffi-modes--get-cursor-state-forwards-session-id ()
-  "kuro--get-cursor-state passes kuro--session-id as first arg to the core fn."
-  (let ((kuro--initialized t)
-        (kuro--session-id 123)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-cursor-state)
-               (lambda (sid) (setq captured-sid sid) '(0 0 t 0))))
-      (kuro--get-cursor-state)
-      (should (= captured-sid 123)))))
-
-(ert-deftest kuro-ffi-modes--get-terminal-modes-forwards-session-id ()
-  "kuro--get-terminal-modes passes kuro--session-id as first arg to the core fn."
-  (let ((kuro--initialized t)
-        (kuro--session-id 456)
-        (captured-sid nil))
-    (cl-letf (((symbol-function 'kuro-core-get-terminal-modes)
-               (lambda (sid) (setq captured-sid sid) '(nil nil 0 nil nil nil 0))))
-      (kuro--get-terminal-modes)
-      (should (= captured-sid 456)))))
 
 ;;; Group 11: kuro--get-terminal-modes field layout
 ;;

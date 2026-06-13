@@ -252,6 +252,20 @@
           (should (null called))
           (should (string-match-p "blocked" msg)))))))
 
+;;; ── kuro--hyperlink-allowed-schemes invariants ───────────────────────────────
+
+(ert-deftest kuro-hyperlinks-allowed-schemes-includes-https ()
+  "`kuro--hyperlink-allowed-schemes' must include \"https\" as the primary scheme."
+  (should (member "https" kuro--hyperlink-allowed-schemes)))
+
+(ert-deftest kuro-hyperlinks-allowed-schemes-includes-http ()
+  "`kuro--hyperlink-allowed-schemes' includes \"http\" for legacy URLs."
+  (should (member "http" kuro--hyperlink-allowed-schemes)))
+
+(ert-deftest kuro-hyperlinks-allowed-schemes-excludes-file ()
+  "`kuro--hyperlink-allowed-schemes' must NOT include \"file\" (security: local path traversal)."
+  (should-not (member "file" kuro--hyperlink-allowed-schemes)))
+
 (provide 'kuro-hyperlinks-test)
 
 ;;; kuro-hyperlinks-test.el ends here

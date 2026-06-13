@@ -53,6 +53,18 @@
    (setq kuro--input-mode 'unknown-mode)
    (should (string= (kuro--input-mode-lighter) ""))))
 
+(ert-deftest kuro-input-mode-test-lighter-alist-covers-all-modes ()
+  "`kuro--input-mode-lighter-alist' contains entries for all three input modes."
+  (should (assq 'char      kuro--input-mode-lighter-alist))
+  (should (assq 'semi-char kuro--input-mode-lighter-alist))
+  (should (assq 'line      kuro--input-mode-lighter-alist)))
+
+(ert-deftest kuro-input-mode-test-lighter-alist-values-are-strings ()
+  "All lighter strings in the alist are non-empty strings."
+  (dolist (entry kuro--input-mode-lighter-alist)
+    (should (stringp (cdr entry)))
+    (should (> (length (cdr entry)) 0))))
+
 
 ;;; Group 3 — kuro--build-keymap builds both keymaps
 

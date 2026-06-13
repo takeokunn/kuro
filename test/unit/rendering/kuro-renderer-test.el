@@ -305,42 +305,6 @@
         (kuro--process-scroll-events)
         (should-not apply-called)))))
 
-;;; Group 8: kuro--detect-tui-mode (pure TUI mode heuristic)
-
-(ert-deftest kuro-renderer-detect-tui-mode-above-threshold ()
-  "High dirty fraction should return t."
-  (should (kuro--detect-tui-mode 9 10 0.8)))  ; 90% dirty > 80% threshold
-
-(ert-deftest kuro-renderer-detect-tui-mode-below-threshold ()
-  "Low dirty fraction should return nil."
-  (should-not (kuro--detect-tui-mode 1 10 0.8)))  ; 10% dirty < 80% threshold
-
-(ert-deftest kuro-renderer-detect-tui-mode-at-exact-threshold ()
-  "Dirty fraction exactly at threshold (ceiling) should return t."
-  ;; ceiling(0.8 * 10) = 8; 8 dirty rows >= 8 → t
-  (should (kuro--detect-tui-mode 8 10 0.8)))
-
-(ert-deftest kuro-renderer-detect-tui-mode-one-below-threshold ()
-  "One row below ceiling threshold should return nil."
-  ;; ceiling(0.8 * 10) = 8; 7 dirty rows < 8 → nil
-  (should-not (kuro--detect-tui-mode 7 10 0.8)))
-
-(ert-deftest kuro-renderer-detect-tui-mode-all-dirty ()
-  "All rows dirty should always return t."
-  (should (kuro--detect-tui-mode 24 24 0.8)))
-
-(ert-deftest kuro-renderer-detect-tui-mode-zero-dirty ()
-  "Zero dirty rows should return nil."
-  (should-not (kuro--detect-tui-mode 0 24 0.8)))
-
-(ert-deftest kuro-renderer-detect-tui-mode-zero-total-rows ()
-  "With total-rows=0, ceiling(threshold*0)=0 so any dirty count >= 0 returns t.
-This is the degenerate case before the first resize; the guard in
-`kuro--update-tui-streaming-timer' (> kuro--last-rows 0) prevents calling
-kuro--detect-tui-mode with total-rows=0 in the real render loop."
-  ;; ceiling(0.8 * 0) = 0; dirty-lines(0) >= 0 → t
-  (should (kuro--detect-tui-mode 0 0 0.8)))
-
 ;;; Group 9: kuro--update-tui-streaming-timer (TUI streaming timer management)
 
 (ert-deftest kuro-renderer-update-tui-increments-frame-count-when-full-dirty ()

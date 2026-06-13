@@ -8,17 +8,26 @@
 
 ;;; Group 15: kuro--positive-integer-p additional edge cases
 
-(ert-deftest test-kuro-positive-integer-p-float-one-point-five ()
-  "1.5 is a float, not an integer — returns nil."
-  (should-not (kuro--positive-integer-p 1.5)))
+(defconst kuro-config-test--positive-integer-p-rejects-table
+  '((test-kuro-positive-integer-p-float-one-point-five 1.5)
+    (test-kuro-positive-integer-p-symbol               foo)
+    (test-kuro-positive-integer-p-list                 (1)))
+  "Table of (test-name value) for non-integer inputs rejected by `kuro--positive-integer-p'.")
 
-(ert-deftest test-kuro-positive-integer-p-symbol ()
-  "A symbol is not an integer — returns nil."
-  (should-not (kuro--positive-integer-p 'foo)))
+(defmacro kuro-config-test--def-positive-integer-p-rejects (test-name value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--positive-integer-p' rejects %s." value)
+     (should-not (kuro--positive-integer-p ',value))))
 
-(ert-deftest test-kuro-positive-integer-p-list ()
-  "A list is not an integer — returns nil."
-  (should-not (kuro--positive-integer-p '(1))))
+(kuro-config-test--def-positive-integer-p-rejects test-kuro-positive-integer-p-float-one-point-five 1.5)
+(kuro-config-test--def-positive-integer-p-rejects test-kuro-positive-integer-p-symbol               foo)
+(kuro-config-test--def-positive-integer-p-rejects test-kuro-positive-integer-p-list                 (1))
+
+(ert-deftest kuro-config-test--all-positive-integer-p-rejects-correct ()
+  "All entries in `kuro-config-test--positive-integer-p-rejects-table' are rejected."
+  (dolist (entry kuro-config-test--positive-integer-p-rejects-table)
+    (pcase-let ((`(,_name ,value) entry))
+      (should-not (kuro--positive-integer-p value)))))
 
 ;;; Group 16: kuro--check-positive-integer edge cases
 
@@ -88,29 +97,32 @@
 
 ;;; Group 19: kuro--validate-config — color string edge cases
 
-(ert-deftest test-kuro-validate-config-color-no-hash-prefix ()
-  "A hex color without the # prefix is rejected."
-  (let ((kuro-color-green "00ff00"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-green" e)) errors)))))
+(defconst kuro-config-test--invalid-color-table
+  '((test-kuro-validate-config-color-no-hash-prefix kuro-color-green   "00ff00")
+    (test-kuro-validate-config-color-too-short       kuro-color-yellow  "#abcde")
+    (test-kuro-validate-config-color-too-long        kuro-color-cyan    "#aabbccdd")
+    (test-kuro-validate-config-color-nil-rejected    kuro-color-magenta nil))
+  "Table of (test-name color-var invalid-value) for invalid color rejection in kuro--validate-config.")
 
-(ert-deftest test-kuro-validate-config-color-too-short ()
-  "A 5-digit hex color is rejected."
-  (let ((kuro-color-yellow "#abcde"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-yellow" e)) errors)))))
+(defmacro kuro-config-test--def-invalid-color (test-name color-var invalid-value)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--validate-config rejects `%s' set to %S." color-var invalid-value)
+     (let ((,color-var ,invalid-value))
+       (let ((errors (kuro--validate-config)))
+         (should (cl-some (lambda (e) (string-match-p ,(symbol-name color-var) e)) errors))))))
 
-(ert-deftest test-kuro-validate-config-color-too-long ()
-  "An 8-digit hex color (RGBA) is rejected — must be exactly 6 digits."
-  (let ((kuro-color-cyan "#aabbccdd"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-cyan" e)) errors)))))
+(kuro-config-test--def-invalid-color test-kuro-validate-config-color-no-hash-prefix kuro-color-green   "00ff00")
+(kuro-config-test--def-invalid-color test-kuro-validate-config-color-too-short       kuro-color-yellow  "#abcde")
+(kuro-config-test--def-invalid-color test-kuro-validate-config-color-too-long        kuro-color-cyan    "#aabbccdd")
+(kuro-config-test--def-invalid-color test-kuro-validate-config-color-nil-rejected    kuro-color-magenta nil)
 
-(ert-deftest test-kuro-validate-config-color-nil-rejected ()
-  "nil as a color value is rejected."
-  (let ((kuro-color-magenta nil))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-magenta" e)) errors)))))
+(ert-deftest kuro-config-test--all-invalid-colors-rejected ()
+  "Every entry in `kuro-config-test--invalid-color-table' produces a validation error."
+  (dolist (entry kuro-config-test--invalid-color-table)
+    (pcase-let ((`(,_name ,var ,val) entry))
+      (cl-progv (list var) (list val)
+        (let ((errors (kuro--validate-config)))
+          (should (cl-some (lambda (e) (string-match-p (symbol-name var) e)) errors)))))))
 
 (ert-deftest test-kuro-validate-config-shell-empty-string-is-valid ()
   "An empty string kuro-shell is valid (no shell error)."
@@ -148,29 +160,36 @@
 
 ;;; Group 21: defcustom default values and constants
 
-(ert-deftest test-kuro-default-rows-constant ()
-  "kuro--default-rows is 24."
-  (should (= kuro--default-rows 24)))
+(defconst kuro-config-test--constant-value-table
+  '((test-kuro-default-rows-constant    const     kuro--default-rows    24)
+    (test-kuro-default-cols-constant    const     kuro--default-cols    80)
+    (test-kuro-scrollback-size-default  defcustom kuro-scrollback-size  10000)
+    (test-kuro-frame-rate-default       defcustom kuro-frame-rate       120)
+    (test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   5)
+    (test-kuro-input-echo-delay-default defcustom kuro-input-echo-delay 0.01))
+  "Table of (test-name type var-sym expected) for constant and defcustom default value checks.")
 
-(ert-deftest test-kuro-default-cols-constant ()
-  "kuro--default-cols is 80."
-  (should (= kuro--default-cols 80)))
+(defmacro kuro-config-test--def-constant (test-name type var-sym expected)
+  `(ert-deftest ,test-name ()
+     ,(format "%s `%s' equals %S." (if (eq type 'defcustom) "Default of" "Constant") var-sym expected)
+     ,(if (eq type 'defcustom)
+          `(should (equal (default-value ',var-sym) ,expected))
+        `(should (equal ,var-sym ,expected)))))
 
-(ert-deftest test-kuro-scrollback-size-default ()
-  "kuro-scrollback-size defaults to 10000."
-  (should (= (default-value 'kuro-scrollback-size) 10000)))
+(kuro-config-test--def-constant test-kuro-default-rows-constant    const     kuro--default-rows    24)
+(kuro-config-test--def-constant test-kuro-default-cols-constant    const     kuro--default-cols    80)
+(kuro-config-test--def-constant test-kuro-scrollback-size-default  defcustom kuro-scrollback-size  10000)
+(kuro-config-test--def-constant test-kuro-frame-rate-default       defcustom kuro-frame-rate       120)
+(kuro-config-test--def-constant test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   5)
+(kuro-config-test--def-constant test-kuro-input-echo-delay-default defcustom kuro-input-echo-delay 0.01)
 
-(ert-deftest test-kuro-frame-rate-default ()
-  "kuro-frame-rate defaults to 120."
-  (should (= (default-value 'kuro-frame-rate) 120)))
-
-(ert-deftest test-kuro-tui-frame-rate-default ()
-  "kuro-tui-frame-rate defaults to 5."
-  (should (= (default-value 'kuro-tui-frame-rate) 5)))
-
-(ert-deftest test-kuro-input-echo-delay-default ()
-  "kuro-input-echo-delay defaults to 0.01."
-  (should (= (default-value 'kuro-input-echo-delay) 0.01)))
+(ert-deftest kuro-config-test--all-constant-values-correct ()
+  "Every entry in `kuro-config-test--constant-value-table' has the expected value."
+  (dolist (entry kuro-config-test--constant-value-table)
+    (pcase-let ((`(,_name ,type ,var-sym ,expected) entry))
+      (if (eq type 'defcustom)
+          (should (equal (default-value var-sym) expected))
+        (should (equal (symbol-value var-sym) expected))))))
 
 ;;; Group 22: kuro--check-positive-integer — nil and multi-accumulation
 
@@ -214,27 +233,34 @@
     (kuro--check-hex-color 'kuro-color-black errors)
     (should (null errors))))
 
-(ert-deftest test-kuro-check-hex-color-invalid-short ()
-  "kuro--check-hex-color rejects a 3-digit hex string."
-  (let ((errors nil)
-        (kuro-color-red "#fff"))
-    (kuro--check-hex-color 'kuro-color-red errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-color-red" (car errors)))))
+(defconst kuro-config-test--check-hex-color-invalid-table
+  '((test-kuro-check-hex-color-invalid-short      kuro-color-red   "#fff")
+    (test-kuro-check-hex-color-invalid-no-hash    kuro-color-green "00ff00")
+    (test-kuro-check-hex-color-invalid-non-string kuro-color-blue  42))
+  "Table of (test-name var-sym bad-value) for `kuro--check-hex-color' rejection cases.")
 
-(ert-deftest test-kuro-check-hex-color-invalid-no-hash ()
-  "kuro--check-hex-color rejects a hex string without the # prefix."
-  (let ((errors nil)
-        (kuro-color-green "00ff00"))
-    (kuro--check-hex-color 'kuro-color-green errors)
-    (should (consp errors))))
+(defmacro kuro-config-test--def-check-hex-color-invalid (test-name var-sym bad-value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--check-hex-color' rejects %s = %s." var-sym bad-value)
+     (let ((errors nil)
+           (,var-sym ,bad-value))
+       (kuro--check-hex-color ',var-sym errors)
+       (should (consp errors))
+       (should (string-match-p ,(symbol-name var-sym) (car errors))))))
 
-(ert-deftest test-kuro-check-hex-color-invalid-non-string ()
-  "kuro--check-hex-color rejects a non-string value."
-  (let ((errors nil)
-        (kuro-color-blue 42))
-    (kuro--check-hex-color 'kuro-color-blue errors)
-    (should (consp errors))))
+(kuro-config-test--def-check-hex-color-invalid test-kuro-check-hex-color-invalid-short      kuro-color-red   "#fff")
+(kuro-config-test--def-check-hex-color-invalid test-kuro-check-hex-color-invalid-no-hash    kuro-color-green "00ff00")
+(kuro-config-test--def-check-hex-color-invalid test-kuro-check-hex-color-invalid-non-string kuro-color-blue  42)
+
+(ert-deftest kuro-config-test--all-check-hex-color-invalid-correct ()
+  "All entries in `kuro-config-test--check-hex-color-invalid-table' are rejected with name in error."
+  (dolist (entry kuro-config-test--check-hex-color-invalid-table)
+    (pcase-let ((`(,_name ,var-sym ,bad-value) entry))
+      (let ((errors nil))
+        (cl-letf (((symbol-value var-sym) bad-value))
+          (kuro--check-hex-color var-sym errors)
+          (should (consp errors))
+          (should (string-match-p (symbol-name var-sym) (car errors))))))))
 
 (ert-deftest test-kuro-check-hex-color-accumulates-errors ()
   "kuro--check-hex-color pushes onto an existing error list."
@@ -260,13 +286,24 @@
   (dolist (v kuro--color-defcustom-vars)
     (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" (symbol-value v)))))
 
-(ert-deftest test-kuro-color-defcustom-vars-contains-black ()
-  "kuro--color-defcustom-vars includes kuro-color-black."
-  (should (memq 'kuro-color-black kuro--color-defcustom-vars)))
+(defconst kuro-config-test--color-defcustom-membership-table
+  '((test-kuro-color-defcustom-vars-contains-black        kuro-color-black)
+    (test-kuro-color-defcustom-vars-contains-bright-white kuro-color-bright-white))
+  "Table of (test-name color-sym) for kuro--color-defcustom-vars membership checks.")
 
-(ert-deftest test-kuro-color-defcustom-vars-contains-bright-white ()
-  "kuro--color-defcustom-vars includes kuro-color-bright-white."
-  (should (memq 'kuro-color-bright-white kuro--color-defcustom-vars)))
+(defmacro kuro-config-test--def-color-membership (test-name color-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--color-defcustom-vars' contains `%s'." color-sym)
+     (should (memq ',color-sym kuro--color-defcustom-vars))))
+
+(kuro-config-test--def-color-membership test-kuro-color-defcustom-vars-contains-black        kuro-color-black)
+(kuro-config-test--def-color-membership test-kuro-color-defcustom-vars-contains-bright-white kuro-color-bright-white)
+
+(ert-deftest kuro-config-test--all-color-memberships-present ()
+  "Every entry in `kuro-config-test--color-defcustom-membership-table' is in the list."
+  (dolist (entry kuro-config-test--color-defcustom-membership-table)
+    (pcase-let ((`(,_name ,color-sym) entry))
+      (should (memq color-sym kuro--color-defcustom-vars)))))
 
 ;;; Group 25: kuro--set-keymap-exceptions
 

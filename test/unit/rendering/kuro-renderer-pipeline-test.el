@@ -426,5 +426,22 @@ At 30fps, half-frame = 16.7ms; 5ms < 16.7ms so the call is coalesced."
         (should (= tui-calls 1))))))
 
 
+;;; ── Constant invariants ───────────────────────────────────────────────────────
+
+(ert-deftest kuro-renderer-pipeline-const-col-to-buf-evict-factor-positive ()
+  "`kuro--col-to-buf-evict-factor' is a positive integer (triggers eviction at 2× last-rows)."
+  (should (and (integerp kuro--col-to-buf-evict-factor)
+               (> kuro--col-to-buf-evict-factor 0))))
+
+(ert-deftest kuro-renderer-pipeline-const-frame-duration-ring-size-matches-ring ()
+  "`kuro--frame-duration-ring-size' equals the length of `kuro--frame-duration-ring'."
+  (should (= kuro--frame-duration-ring-size
+             (length kuro--frame-duration-ring))))
+
+(ert-deftest kuro-renderer-pipeline-const-title-sanitize-regexp-is-string ()
+  "`kuro--title-sanitize-regexp' is a non-empty regexp string (Emacs regexps are strings)."
+  (should (and (stringp kuro--title-sanitize-regexp)
+               (> (length kuro--title-sanitize-regexp) 0))))
+
 (provide 'kuro-renderer-pipeline-test)
 ;;; kuro-renderer-pipeline-test.el ends here

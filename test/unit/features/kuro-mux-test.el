@@ -209,38 +209,52 @@ Returns the buffer."
 
 ;;; Group 5 — Mode-line lighter
 
-(ert-deftest kuro-mux-test-lighter-returns-name-in-braces ()
-  "`kuro-mux--name-lighter' returns \" {name}\" when name is set."
-  (kuro-mux-test--with-registry
-   (let ((buf (kuro-mux-test--make-session "*mux-lt1*")))
-     (with-current-buffer buf
-       (setq kuro-mux--name "dev")
-       (should (string= (kuro-mux--name-lighter) " {dev}")))
-     (kill-buffer buf))))
+(defconst kuro-mux-test--name-lighter-table
+  '((kuro-mux-test-lighter-returns-name-in-braces "*mux-lt1*" "dev" " {dev}")
+    (kuro-mux-test-lighter-empty-when-no-name     "*mux-lt2*" nil  ""))
+  "Table of (test-name buf-name name-val expected) for `kuro-mux--name-lighter'.")
 
-(ert-deftest kuro-mux-test-lighter-empty-when-no-name ()
-  "`kuro-mux--name-lighter' returns empty string when no name is set."
-  (kuro-mux-test--with-registry
-   (let ((buf (kuro-mux-test--make-session "*mux-lt2*")))
-     (with-current-buffer buf
-       (setq kuro-mux--name nil)
-       (should (string= (kuro-mux--name-lighter) "")))
-     (kill-buffer buf))))
+(defmacro kuro-mux-test--def-name-lighter (test-name buf-name name-val expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux--name-lighter': name=%S → %S." name-val expected)
+     (kuro-mux-test--with-registry
+       (let ((buf (kuro-mux-test--make-session ,buf-name)))
+         (with-current-buffer buf
+           (setq kuro-mux--name ,name-val)
+           (should (string= (kuro-mux--name-lighter) ,expected)))
+         (kill-buffer buf)))))
+
+(kuro-mux-test--def-name-lighter kuro-mux-test-lighter-returns-name-in-braces "*mux-lt1*" "dev" " {dev}")
+(kuro-mux-test--def-name-lighter kuro-mux-test-lighter-empty-when-no-name     "*mux-lt2*" nil  "")
+
+(ert-deftest kuro-mux-test--all-name-lighter-cases-correct ()
+  "Invariant: kuro-mux--name-lighter returns the expected string for each name-val."
+  (dolist (entry kuro-mux-test--name-lighter-table)
+    (pcase-let ((`(,_name ,buf-name ,name-val ,expected) entry))
+      (kuro-mux-test--with-registry
+        (let ((buf (kuro-mux-test--make-session buf-name)))
+          (with-current-buffer buf
+            (setq kuro-mux--name name-val)
+            (should (string= (kuro-mux--name-lighter) expected)))
+          (kill-buffer buf))))))
 
 
 ;;; Group 6 — Session spec for layout
 
-(ert-deftest kuro-mux-test-session-spec-includes-name ()
-  "`kuro-mux--session-spec' includes `:name' in the plist."
-  (kuro-mux-test--check-spec "*mux-sp1*" (setq kuro-mux--name "test-session") :name "test-session"))
+(defconst kuro-mux-test--session-spec-table
+  '((kuro-mux-test-session-spec-includes-name      "*mux-sp1*" kuro-mux--name      :name      "test-session")
+    (kuro-mux-test-session-spec-includes-command   "*mux-sp2*" kuro-mux--command   :command   "fish")
+    (kuro-mux-test-session-spec-includes-directory "*mux-sp3*" kuro-mux--directory :directory "/tmp"))
+  "Table of (test-name buf-name var key expected) for `kuro-mux--session-spec' field assertions.")
 
-(ert-deftest kuro-mux-test-session-spec-includes-command ()
-  "`kuro-mux--session-spec' includes `:command' in the plist."
-  (kuro-mux-test--check-spec "*mux-sp2*" (setq kuro-mux--command "fish") :command "fish"))
+(defmacro kuro-mux-test--def-session-spec (test-name buf-name var key expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux--session-spec' includes `%s' in the plist." key)
+     (kuro-mux-test--check-spec ,buf-name (setq ,var ,expected) ,key ,expected)))
 
-(ert-deftest kuro-mux-test-session-spec-includes-directory ()
-  "`kuro-mux--session-spec' includes `:directory' in the plist."
-  (kuro-mux-test--check-spec "*mux-sp3*" (setq kuro-mux--directory "/tmp") :directory "/tmp"))
+(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-name      "*mux-sp1*" kuro-mux--name      :name      "test-session")
+(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-command   "*mux-sp2*" kuro-mux--command   :command   "fish")
+(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-directory "*mux-sp3*" kuro-mux--directory :directory "/tmp")
 
 (ert-deftest kuro-mux-test-session-spec-nil-for-dead-buffer ()
   "`kuro-mux--session-spec' returns nil for a dead buffer."
@@ -410,85 +424,57 @@ Returns the buffer."
   "`kuro-mux-prefix-map' is a keymap."
   (should (keymapp kuro-mux-prefix-map)))
 
-(ert-deftest kuro-mux-test-prefix-map-binds-next ()
-  "`kuro-mux-prefix-map' binds n to kuro-mux-next."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "n")) #'kuro-mux-next)))
+(defconst kuro-mux-test--prefix-map-bindings
+  '((kuro-mux-test-prefix-map-binds-next           "n"   kuro-mux-next)
+    (kuro-mux-test-prefix-map-binds-prev           "p"   kuro-mux-prev)
+    (kuro-mux-test-prefix-map-binds-switch         "s"   kuro-mux-switch-by-name)
+    (kuro-mux-test-prefix-map-binds-split-right    "%"   kuro-mux-split-right)
+    (kuro-mux-test-prefix-map-binds-split-below    "\""  kuro-mux-split-below)
+    (kuro-mux-test-prefix-map-binds-create         "c"   kuro-mux-create)
+    (kuro-mux-test-prefix-map-binds-rename         ","   kuro-mux-rename)
+    (kuro-mux-test-prefix-map-binds-save-layout    "S"   kuro-mux-save-layout)
+    (kuro-mux-test-prefix-map-binds-restore-layout "R"   kuro-mux-restore-layout)
+    (kuro-mux-test-prefix-map-binds-copy-mode      "["   kuro-copy-mode)
+    (kuro-mux-test-prefix-map-binds-search-forward "/"   kuro-search-forward)
+    (kuro-mux-test-prefix-map-binds-rename-dollar  "$"   kuro-mux-rename)
+    (kuro-mux-test-prefix-map-binds-help           "?"   kuro-mux-help)
+    (kuro-mux-test-prefix-map-binds-detach         "d"   kuro-mux-detach)
+    (kuro-mux-test-prefix-map-binds-zoom           "z"   kuro-mux-zoom)
+    (kuro-mux-test-prefix-map-binds-kill           "&"   kuro-mux-kill))
+  "Table of (test-name key fn) for `kuro-mux-prefix-map' binding assertions.")
 
-(ert-deftest kuro-mux-test-prefix-map-binds-prev ()
-  "`kuro-mux-prefix-map' binds p to kuro-mux-prev."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "p")) #'kuro-mux-prev)))
+(defmacro kuro-mux-test--def-prefix-binding (test-name key fn)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-prefix-map' binds %S to `%s'." key fn)
+     (should (eq (lookup-key kuro-mux-prefix-map (kbd ,key)) #',fn))))
 
-(ert-deftest kuro-mux-test-prefix-map-binds-switch ()
-  "`kuro-mux-prefix-map' binds s to kuro-mux-switch-by-name."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "s"))
-              #'kuro-mux-switch-by-name)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-split-right ()
-  "`kuro-mux-prefix-map' binds % to kuro-mux-split-right."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "%"))
-              #'kuro-mux-split-right)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-split-below ()
-  "`kuro-mux-prefix-map' binds \" to kuro-mux-split-below."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "\""))
-              #'kuro-mux-split-below)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-create ()
-  "`kuro-mux-prefix-map' binds c to kuro-mux-create."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "c")) #'kuro-mux-create)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-rename ()
-  "`kuro-mux-prefix-map' binds , to kuro-mux-rename."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd ",")) #'kuro-mux-rename)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-save-layout ()
-  "`kuro-mux-prefix-map' binds S to kuro-mux-save-layout."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "S"))
-              #'kuro-mux-save-layout)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-restore-layout ()
-  "`kuro-mux-prefix-map' binds R to kuro-mux-restore-layout."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "R"))
-              #'kuro-mux-restore-layout)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-copy-mode ()
-  "`kuro-mux-prefix-map' binds [ to kuro-copy-mode."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "["))
-              #'kuro-copy-mode)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-search-forward ()
-  "`kuro-mux-prefix-map' binds / to kuro-search-forward."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "/"))
-              #'kuro-search-forward)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-rename-dollar ()
-  "`kuro-mux-prefix-map' binds $ to kuro-mux-rename (tmux muscle memory)."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "$"))
-              #'kuro-mux-rename)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-help ()
-  "`kuro-mux-prefix-map' binds ? to kuro-mux-help."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "?"))
-              #'kuro-mux-help)))
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-next           "n"   kuro-mux-next)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-prev           "p"   kuro-mux-prev)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-switch         "s"   kuro-mux-switch-by-name)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-split-right    "%"   kuro-mux-split-right)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-split-below    "\""  kuro-mux-split-below)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-create         "c"   kuro-mux-create)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-rename         ","   kuro-mux-rename)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-save-layout    "S"   kuro-mux-save-layout)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-restore-layout "R"   kuro-mux-restore-layout)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-copy-mode      "["   kuro-copy-mode)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-search-forward "/"   kuro-search-forward)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-rename-dollar  "$"   kuro-mux-rename)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-help           "?"   kuro-mux-help)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-detach         "d"   kuro-mux-detach)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-zoom           "z"   kuro-mux-zoom)
+(kuro-mux-test--def-prefix-binding kuro-mux-test-prefix-map-binds-kill           "&"   kuro-mux-kill)
 
 (ert-deftest kuro-mux-test-help-is-interactive ()
   "`kuro-mux-help' is an interactive command."
   (should (commandp #'kuro-mux-help)))
 
-(ert-deftest kuro-mux-test-prefix-map-binds-detach ()
-  "`kuro-mux-prefix-map' binds d to kuro-mux-detach."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "d"))
-              #'kuro-mux-detach)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-zoom ()
-  "`kuro-mux-prefix-map' binds z to kuro-mux-zoom."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "z"))
-              #'kuro-mux-zoom)))
-
-(ert-deftest kuro-mux-test-prefix-map-binds-kill ()
-  "`kuro-mux-prefix-map' binds & to kuro-mux-kill."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "&"))
-              #'kuro-mux-kill)))
+(ert-deftest kuro-mux-test--all-prefix-map-bindings-present ()
+  "Every entry in `kuro-mux-test--prefix-map-bindings' is bound in `kuro-mux-prefix-map'."
+  (dolist (entry kuro-mux-test--prefix-map-bindings)
+    (let ((key (cadr entry))
+          (fn  (caddr entry)))
+      (should (eq (lookup-key kuro-mux-prefix-map (kbd key)) fn)))))
 
 (provide 'kuro-mux-test)
 ;;; kuro-mux-test.el ends here

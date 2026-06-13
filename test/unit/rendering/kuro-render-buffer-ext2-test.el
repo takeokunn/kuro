@@ -181,27 +181,20 @@
                   (goto-char (point-min))
                   (search-forward "line2" nil t)))))
 
-(ert-deftest kuro-render-buffer-apply-buffer-scroll-delegates-up ()
-  "kuro--apply-buffer-scroll with up>0 delegates to kuro--scroll-lines \\='up."
-  (kuro-render-buffer-test--with-buffer
-    (insert "line0\nline1\nline2\n")
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--scroll-lines)
-                 (lambda (dir n lr) (push (list dir n lr) calls))))
-        (kuro--apply-buffer-scroll 2 0)
-        (should (= (length calls) 1))
-        (should (equal (car calls) (list 'up 2 kuro--last-rows)))))))
+(defmacro kuro-render-buffer-test--def-apply-scroll-delegate (test-name up-n down-n expected-dir expected-n)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--apply-buffer-scroll' (up=%d down=%d) delegates with dir=%s n=%d." up-n down-n expected-dir expected-n)
+     (kuro-render-buffer-test--with-buffer
+       (insert "line0\nline1\nline2\n")
+       (let ((calls nil))
+         (cl-letf (((symbol-function 'kuro--scroll-lines)
+                    (lambda (dir n lr) (push (list dir n lr) calls))))
+           (kuro--apply-buffer-scroll ,up-n ,down-n)
+           (should (= (length calls) 1))
+           (should (equal (car calls) (list ',expected-dir ,expected-n kuro--last-rows))))))))
 
-(ert-deftest kuro-render-buffer-apply-buffer-scroll-delegates-down ()
-  "kuro--apply-buffer-scroll with down>0 delegates to kuro--scroll-lines \\='down."
-  (kuro-render-buffer-test--with-buffer
-    (insert "line0\nline1\nline2\n")
-    (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--scroll-lines)
-                 (lambda (dir n lr) (push (list dir n lr) calls))))
-        (kuro--apply-buffer-scroll 0 2)
-        (should (= (length calls) 1))
-        (should (equal (car calls) (list 'down 2 kuro--last-rows)))))))
+(kuro-render-buffer-test--def-apply-scroll-delegate kuro-render-buffer-apply-buffer-scroll-delegates-up   2 0 up   2)
+(kuro-render-buffer-test--def-apply-scroll-delegate kuro-render-buffer-apply-buffer-scroll-delegates-down 0 2 down 2)
 
 (ert-deftest kuro-render-buffer-apply-buffer-scroll-zero-skips-scroll-lines ()
   "kuro--apply-buffer-scroll with up=0 down=0 never calls kuro--scroll-lines."
@@ -288,37 +281,26 @@
 
 ;;; Group 14: kuro--with-buffer-edit (from updates file)
 
-(ert-deftest kuro-render-buffer-with-buffer-edit-sets-inhibit-read-only ()
-  "`kuro--with-buffer-edit' binds `inhibit-read-only' to t inside its body."
-  (kuro-render-buffer-test--with-buffer
-    (let (captured)
-      (kuro--with-buffer-edit
-        (setq captured inhibit-read-only))
-      (should (eq captured t)))))
+(defmacro kuro-render-buffer-test--def-buffer-edit-sets (test-name var)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--with-buffer-edit' binds `%s' to t inside its body." var)
+     (kuro-render-buffer-test--with-buffer
+       (let (captured)
+         (kuro--with-buffer-edit (setq captured ,var))
+         (should (eq captured t))))))
 
-(ert-deftest kuro-render-buffer-with-buffer-edit-sets-inhibit-modification-hooks ()
-  "`kuro--with-buffer-edit' binds `inhibit-modification-hooks' to t inside its body."
-  (kuro-render-buffer-test--with-buffer
-    (let (captured)
-      (kuro--with-buffer-edit
-        (setq captured inhibit-modification-hooks))
-      (should (eq captured t)))))
+(defmacro kuro-render-buffer-test--def-buffer-edit-restores (test-name var)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--with-buffer-edit' restores `%s' to its prior value on exit." var)
+     (kuro-render-buffer-test--with-buffer
+       (let ((,var nil))
+         (kuro--with-buffer-edit (ignore))
+         (should (eq ,var nil))))))
 
-(ert-deftest kuro-render-buffer-with-buffer-edit-restores-inhibit-read-only ()
-  "`kuro--with-buffer-edit' restores `inhibit-read-only' to its prior value on exit."
-  (kuro-render-buffer-test--with-buffer
-    (let ((inhibit-read-only nil))
-      (kuro--with-buffer-edit
-        (ignore))
-      (should (eq inhibit-read-only nil)))))
-
-(ert-deftest kuro-render-buffer-with-buffer-edit-restores-inhibit-modification-hooks ()
-  "`kuro--with-buffer-edit' restores `inhibit-modification-hooks' to its prior value on exit."
-  (kuro-render-buffer-test--with-buffer
-    (let ((inhibit-modification-hooks nil))
-      (kuro--with-buffer-edit
-        (ignore))
-      (should (eq inhibit-modification-hooks nil)))))
+(kuro-render-buffer-test--def-buffer-edit-sets     kuro-render-buffer-with-buffer-edit-sets-inhibit-read-only               inhibit-read-only)
+(kuro-render-buffer-test--def-buffer-edit-sets     kuro-render-buffer-with-buffer-edit-sets-inhibit-modification-hooks      inhibit-modification-hooks)
+(kuro-render-buffer-test--def-buffer-edit-restores kuro-render-buffer-with-buffer-edit-restores-inhibit-read-only            inhibit-read-only)
+(kuro-render-buffer-test--def-buffer-edit-restores kuro-render-buffer-with-buffer-edit-restores-inhibit-modification-hooks  inhibit-modification-hooks)
 
 (ert-deftest kuro-render-buffer-with-buffer-edit-restores-point ()
   "`kuro--with-buffer-edit' restores point to its pre-body value on exit."
@@ -398,6 +380,73 @@
     (cl-letf (((symbol-function 'kuro--grid-col-to-buffer-pos)
                (lambda (_r _c) 7)))
       (should (= (kuro--cursor-fallback-pos 0 2) 7)))))
+
+;;; Group 30 — kuro--grid-col-to-buffer-pos
+
+(ert-deftest kuro-render-buffer-grid-col-ascii-no-mapping-slow-path ()
+  "`kuro--grid-col-to-buffer-pos' returns (row-start + col) for ASCII with no col-to-buf entry."
+  (kuro-render-buffer-test--with-buffer
+    (insert "hello\nworld\n")
+    ;; No col-to-buf entry → identity mapping; no row-positions → slow path
+    (setq kuro--row-positions nil)
+    ;; Row 0, col 3 → position 4 (1-based: "hell" → pos 4 = after 'l')
+    (should (= (kuro--grid-col-to-buffer-pos 0 3) 4))))
+
+(ert-deftest kuro-render-buffer-grid-col-ascii-second-row-slow-path ()
+  "`kuro--grid-col-to-buffer-pos' navigates to the correct row via forward-line."
+  (kuro-render-buffer-test--with-buffer
+    (insert "hello\nworld\n")
+    (setq kuro--row-positions nil)
+    ;; Row 1, col 2 → "wo" on second line → position 9 (point-min=1, "hello\n"=6 chars, "wo"=2)
+    (should (= (kuro--grid-col-to-buffer-pos 1 2) 9))))
+
+(ert-deftest kuro-render-buffer-grid-col-ascii-fast-path-matches-slow ()
+  "`kuro--grid-col-to-buffer-pos' fast and slow paths give the same result."
+  (kuro-render-buffer-test--with-buffer
+    (insert "hello\nworld\n")
+    (let ((slow-result (progn (setq kuro--row-positions nil)
+                              (kuro--grid-col-to-buffer-pos 1 2))))
+      ;; Enable fast path: row-positions vector with row 1 pointing to start of "world"
+      (setq kuro--row-positions (make-vector 2 nil))
+      (aset kuro--row-positions 0 1)    ; row 0 starts at position 1
+      (aset kuro--row-positions 1 7)    ; row 1 starts at position 7 ("hello\n" = 6 chars)
+      (should (= (kuro--grid-col-to-buffer-pos 1 2) slow-result)))))
+
+(ert-deftest kuro-render-buffer-grid-col-with-mapping-uses-offset ()
+  "`kuro--grid-col-to-buffer-pos' uses the col-to-buf mapping when available."
+  (kuro-render-buffer-test--with-buffer
+    ;; Simulate a line with a CJK wide char: "Aあ" — 'A' is col 0, 'あ' occupies cols 1+2
+    ;; but only 2 buffer chars. col-to-buf: col 0 → offset 0, col 1 → offset 1, col 2 → offset 1
+    (insert "Aあ\n")  ; 'A' + 'あ' (wide)
+    (setq kuro--row-positions nil)
+    (let ((row-map (make-vector 3 0)))
+      (aset row-map 0 0)  ; col 0 → buf offset 0 ('A')
+      (aset row-map 1 1)  ; col 1 → buf offset 1 ('あ')
+      (aset row-map 2 1)  ; col 2 → buf offset 1 (wide placeholder → same char)
+      (puthash 0 row-map kuro--col-to-buf-map))
+    ;; col 2 → offset 1, row 0 starts at position 1 → buffer pos 2
+    (should (= (kuro--grid-col-to-buffer-pos 0 2) 2))))
+
+(ert-deftest kuro-render-buffer-grid-col-mapping-too-short-falls-back ()
+  "`kuro--grid-col-to-buffer-pos' falls back to col when col exceeds the mapping length."
+  (kuro-render-buffer-test--with-buffer
+    (insert "hello\n")
+    (setq kuro--row-positions nil)
+    ;; Mapping only covers cols 0-2, col 4 is beyond it → identity (col=4)
+    (let ((row-map (make-vector 3 0)))
+      (aset row-map 0 0) (aset row-map 1 1) (aset row-map 2 2)
+      (puthash 0 row-map kuro--col-to-buf-map))
+    ;; col 4 → identity buf-offset 4; row 0 starts at pos 1 → buf pos 5
+    (should (= (kuro--grid-col-to-buffer-pos 0 4) 5))))
+
+(ert-deftest kuro-render-buffer-grid-col-row-beyond-end-returns-max ()
+  "`kuro--grid-col-to-buffer-pos' returns point-max when row exceeds buffer lines."
+  (kuro-render-buffer-test--with-buffer
+    (insert "only-one-line\n")
+    (setq kuro--row-positions nil)
+    ;; Row 5 doesn't exist — forward-line returns >0, goto-char point-max
+    (let ((pos (kuro--grid-col-to-buffer-pos 5 0)))
+      (should (<= pos (point-max))))))
 
 (provide 'kuro-render-buffer-ext2-test)
 

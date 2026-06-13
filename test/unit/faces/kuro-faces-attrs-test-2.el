@@ -14,17 +14,34 @@
        (should (equal (plist-get result :color) ,color))
        (should (eq (plist-get result :style) ',style-sym)))))
 
-;;; Group 11: kuro--underline-style-to-face-prop — style-0 ignores color arg
+;;; Group 11: kuro--underline-style-to-face-prop — style-0 and unknown styles
 
-(ert-deftest kuro-faces-attrs--underline-style0-with-color-still-nil ()
-  "Style 0 returns nil even when underline-color is non-nil."
-  (should-not (kuro--underline-style-to-face-prop 0 "#ff0000"))
-  (should-not (kuro--underline-style-to-face-prop 0 "#ffffff")))
+(defconst kuro-faces-attrs-test--ul-style-edge-table
+  '((kuro-faces-attrs--underline-style0-color-ff-is-nil    0  "#ff0000" nil)
+    (kuro-faces-attrs--underline-style0-color-white-is-nil  0  "#ffffff" nil)
+    (kuro-faces-attrs--underline-style42-unknown-is-t      42 "#aabbcc" t)
+    (kuro-faces-attrs--underline-style6-unknown-is-t        6  "#123456" t))
+  "Table of (test-name style color expected-t-p) for underline style edge cases.")
 
-(ert-deftest kuro-faces-attrs--underline-style-unknown-with-color-is-t ()
-  "Unknown style value with color still returns t (plain fallback; color ignored)."
-  (should (eq t (kuro--underline-style-to-face-prop 42 "#aabbcc")))
-  (should (eq t (kuro--underline-style-to-face-prop 6 "#123456"))))
+(defmacro kuro-faces-attrs-test--def-ul-style-edge (test-name style color expected-t-p)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--underline-style-to-face-prop' style=%s color=%s => %s." style color expected-t-p)
+     ,(if expected-t-p
+          `(should (eq t (kuro--underline-style-to-face-prop ,style ,color)))
+        `(should-not (kuro--underline-style-to-face-prop ,style ,color)))))
+
+(kuro-faces-attrs-test--def-ul-style-edge kuro-faces-attrs--underline-style0-color-ff-is-nil    0  "#ff0000" nil)
+(kuro-faces-attrs-test--def-ul-style-edge kuro-faces-attrs--underline-style0-color-white-is-nil  0  "#ffffff" nil)
+(kuro-faces-attrs-test--def-ul-style-edge kuro-faces-attrs--underline-style42-unknown-is-t      42 "#aabbcc" t)
+(kuro-faces-attrs-test--def-ul-style-edge kuro-faces-attrs--underline-style6-unknown-is-t        6  "#123456" t)
+
+(ert-deftest kuro-faces-attrs--ul-style-edge-all-table-entries-correct ()
+  "All entries in `kuro-faces-attrs-test--ul-style-edge-table' match actual behavior."
+  (dolist (entry kuro-faces-attrs-test--ul-style-edge-table)
+    (pcase-let ((`(,_name ,style ,color ,expected-t-p) entry))
+      (if expected-t-p
+          (should (eq t (kuro--underline-style-to-face-prop style color)))
+        (should-not (kuro--underline-style-to-face-prop style color))))))
 
 (kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dashed-color-preserves-style 5 "#001122" dashes "Style 5 with color has :style dashes (not line or wave).")
 (kuro-faces-attrs-test--ul-with-color kuro-faces-attrs--underline-style-dotted-color-preserves-style 4 "#334455" dots   "Style 4 with color has :style dots (not line).")
@@ -37,27 +54,36 @@
   (let ((props (kuro--attrs-to-face-props :default :default #x03 nil)))
     (should (eq (plist-get props :weight) 'bold))))
 
-(ert-deftest kuro-faces-attrs--attrs-to-face-props-named-fg-resolves ()
-  "Named foreground color is resolved to a hex string via kuro--named-colors."
-  ;; 'red' should be in kuro--named-colors as a hex string.
-  (let ((props (kuro--attrs-to-face-props '(named . "red") :default 0 nil)))
-    (let ((fg (plist-get props :foreground)))
-      (should (stringp fg))
-      (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" fg)))))
+(defconst kuro-faces-attrs-test--color-resolves-table
+  '((kuro-faces-attrs--attrs-to-face-props-named-fg-resolves   (named   . "red")  :foreground)
+    (kuro-faces-attrs--attrs-to-face-props-named-bg-resolves   (named   . "blue") :background)
+    (kuro-faces-attrs--attrs-to-face-props-indexed-fg-resolves (indexed . 196)    :foreground))
+  "Table of (test-name color-spec plist-key) for color-resolution paths.")
 
-(ert-deftest kuro-faces-attrs--attrs-to-face-props-named-bg-resolves ()
-  "Named background color is resolved to a hex string via kuro--named-colors."
-  (let ((props (kuro--attrs-to-face-props :default '(named . "blue") 0 nil)))
-    (let ((bg (plist-get props :background)))
-      (should (stringp bg))
-      (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" bg)))))
+(defmacro kuro-faces-attrs-test--def-color-resolves (test-name color-spec plist-key)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--attrs-to-face-props' resolves %s to hex in %s." color-spec plist-key)
+     (let* ((props ,(if (eq plist-key :foreground)
+                        `(kuro--attrs-to-face-props ',color-spec :default 0 nil)
+                      `(kuro--attrs-to-face-props :default ',color-spec 0 nil)))
+            (val (plist-get props ,plist-key)))
+       (should (stringp val))
+       (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val)))))
 
-(ert-deftest kuro-faces-attrs--attrs-to-face-props-indexed-fg-resolves ()
-  "Indexed foreground color (cube range) resolves to a hex string."
-  (let ((props (kuro--attrs-to-face-props '(indexed . 196) :default 0 nil)))
-    (let ((fg (plist-get props :foreground)))
-      (should (stringp fg))
-      (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" fg)))))
+(kuro-faces-attrs-test--def-color-resolves kuro-faces-attrs--attrs-to-face-props-named-fg-resolves   (named   . "red")  :foreground)
+(kuro-faces-attrs-test--def-color-resolves kuro-faces-attrs--attrs-to-face-props-named-bg-resolves   (named   . "blue") :background)
+(kuro-faces-attrs-test--def-color-resolves kuro-faces-attrs--attrs-to-face-props-indexed-fg-resolves (indexed . 196)    :foreground)
+
+(ert-deftest kuro-faces-attrs--color-resolves-all-table-entries-correct ()
+  "All entries in `kuro-faces-attrs-test--color-resolves-table' produce hex strings."
+  (dolist (entry kuro-faces-attrs-test--color-resolves-table)
+    (pcase-let ((`(,_name ,color-spec ,plist-key) entry))
+      (let* ((props (if (eq plist-key :foreground)
+                        (kuro--attrs-to-face-props color-spec :default 0 nil)
+                      (kuro--attrs-to-face-props :default color-spec 0 nil)))
+             (val (plist-get props plist-key)))
+        (should (stringp val))
+        (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val))))))
 
 (ert-deftest kuro-faces-attrs--attrs-to-face-props-all-visual-attrs ()
   "All visual attrs combined: bold+italic+underline+strikethrough+inverse+RGB fg+bg."
@@ -96,14 +122,30 @@
 (ert-deftest kuro-faces-attrs--underline-style-face-symbols-length ()
   (should (= 6 (length kuro--underline-style-face-symbols))))
 
-(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-0-nil ()
-  (should-not (aref kuro--underline-style-face-symbols 0)))
+(defconst kuro-faces-attrs-test--ul-style-symbol-index-table
+  '((kuro-faces-attrs--underline-style-face-symbols-index-0-nil         0 nil)
+    (kuro-faces-attrs--underline-style-face-symbols-index-1-line        1 line)
+    (kuro-faces-attrs--underline-style-face-symbols-index-2-double-line 2 double-line))
+  "Table of (test-name index expected-sym) for `kuro--underline-style-face-symbols'.")
 
-(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-1-line ()
-  (should (eq 'line (aref kuro--underline-style-face-symbols 1))))
+(defmacro kuro-faces-attrs-test--def-ul-style-symbol-index (test-name index expected-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--underline-style-face-symbols'[%d] => %s." index expected-sym)
+     ,(if expected-sym
+          `(should (eq ',expected-sym (aref kuro--underline-style-face-symbols ,index)))
+        `(should-not (aref kuro--underline-style-face-symbols ,index)))))
 
-(ert-deftest kuro-faces-attrs--underline-style-face-symbols-index-2-double-line ()
-  (should (eq 'double-line (aref kuro--underline-style-face-symbols 2))))
+(kuro-faces-attrs-test--def-ul-style-symbol-index kuro-faces-attrs--underline-style-face-symbols-index-0-nil         0 nil)
+(kuro-faces-attrs-test--def-ul-style-symbol-index kuro-faces-attrs--underline-style-face-symbols-index-1-line        1 line)
+(kuro-faces-attrs-test--def-ul-style-symbol-index kuro-faces-attrs--underline-style-face-symbols-index-2-double-line 2 double-line)
+
+(ert-deftest kuro-faces-attrs--ul-style-symbol-index-all-correct ()
+  "All entries in `kuro-faces-attrs-test--ul-style-symbol-index-table' match actual vector."
+  (dolist (entry kuro-faces-attrs-test--ul-style-symbol-index-table)
+    (pcase-let ((`(,_name ,index ,expected-sym) entry))
+      (if expected-sym
+          (should (eq expected-sym (aref kuro--underline-style-face-symbols index)))
+        (should-not (aref kuro--underline-style-face-symbols index))))))
 
 (ert-deftest kuro-faces-attrs--underline-style-face-symbols-all-styles-no-color ()
   (should-not (kuro--underline-style-to-face-prop 0 nil))
@@ -114,6 +156,32 @@
                 (should (consp result))
                 (should (symbolp sym))
                 (should sym))))
+
+;;; ── SGR flag / underline-style constant invariants ───────────────────────────
+
+(ert-deftest kuro-faces-attrs-sgr-flags-are-power-of-two ()
+  "Every SGR single-bit flag is a power of two (non-zero, exactly one bit set)."
+  (dolist (flag (list kuro--sgr-flag-inverse
+                      kuro--sgr-flag-overline
+                      kuro--sgr-flag-superscript
+                      kuro--sgr-flag-subscript))
+    (should (and (integerp flag) (> flag 0) (= 0 (logand flag (1- flag)))))))
+
+(ert-deftest kuro-faces-attrs-sgr-flags-are-distinct ()
+  "kuro--sgr-flag-inverse, -overline, -superscript, -subscript occupy non-overlapping bits."
+  (let ((flags (list kuro--sgr-flag-inverse kuro--sgr-flag-overline
+                     kuro--sgr-flag-superscript kuro--sgr-flag-subscript)))
+    (should (= (length flags) (length (delete-dups (copy-sequence flags)))))
+    (let ((combined 0))
+      (dolist (f flags)
+        (should (= 0 (logand combined f)))
+        (setq combined (logior combined f))))))
+
+(ert-deftest kuro-faces-attrs-underline-style-mask-covers-shift ()
+  "`kuro--sgr-underline-style-mask' shifted by `kuro--sgr-underline-style-shift' gives a small positive integer."
+  (let ((extracted (ash (logand #x1F kuro--sgr-underline-style-mask)
+                        (- kuro--sgr-underline-style-shift))))
+    (should (>= extracted 0))))
 
 (provide 'kuro-faces-attrs-test-2)
 

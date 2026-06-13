@@ -95,13 +95,41 @@
    (kuro--line-abort)
    (should (null kuro--line-undo-stack))))
 
-(ert-deftest kuro-input-mode-test-undo-keymap-bindings ()
-  "Line keymap binds C-/ and C-_ to `kuro--line-undo'."
+(defconst kuro-input-mode-readline-test--line-keymap-bindings-table
+  '(;; Group 26 — undo
+    (kuro-input-mode-test-keymap-C-slash-undo         "C-/"  kuro--line-undo)
+    (kuro-input-mode-test-keymap-C-underscore-undo    "C-_"  kuro--line-undo)
+    ;; Group 27 — history search
+    (kuro-input-mode-test-keymap-C-r-history-search   "C-r"  kuro--line-history-search)
+    ;; Group 31 — iter-28 readline commands
+    (kuro-input-mode-test-keymap-C-w-unix-word-rubout "C-w"  kuro--line-unix-word-rubout)
+    (kuro-input-mode-test-keymap-M-u-upcase-word      "M-u"  kuro--line-upcase-word)
+    (kuro-input-mode-test-keymap-M-l-downcase-word    "M-l"  kuro--line-downcase-word)
+    (kuro-input-mode-test-keymap-M-c-capitalize-word  "M-c"  kuro--line-capitalize-word)
+    (kuro-input-mode-test-keymap-C-p-history-prev     "C-p"  kuro--line-history-prev)
+    (kuro-input-mode-test-keymap-C-n-history-next     "C-n"  kuro--line-history-next)
+    (kuro-input-mode-test-keymap-M-t-transpose-words  "M-t"  kuro--line-transpose-words))
+  "Table of (test-name key-str fn-symbol) for kuro--line-mode-keymap bindings.")
+
+(defmacro kuro-input-mode-readline-test--def-line-keymap (test-name key-str fn-symbol)
+  `(ert-deftest ,test-name ()
+     ,(format "Line keymap binds %S to `%s'." key-str fn-symbol)
+     (kuro-input-mode-test--with-buffer
+      (kuro--build-keymap)
+      (kuro--build-line-mode-keymap)
+      (should (eq (lookup-key kuro--line-mode-keymap (kbd ,key-str)) #',fn-symbol)))))
+
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-slash-undo         "C-/"  kuro--line-undo)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-underscore-undo    "C-_"  kuro--line-undo)
+
+(ert-deftest kuro-input-mode-test-undo-all-keymap-bindings-correct ()
+  "Every entry in `kuro-input-mode-readline-test--line-keymap-bindings-table' binds correctly."
   (kuro-input-mode-test--with-buffer
    (kuro--build-keymap)
    (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-/")) #'kuro--line-undo))
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-_")) #'kuro--line-undo))))
+   (dolist (entry kuro-input-mode-readline-test--line-keymap-bindings-table)
+     (pcase-let ((`(,_name ,key-str ,fn-sym) entry))
+       (should (eq (lookup-key kuro--line-mode-keymap (kbd key-str)) fn-sym))))))
 
 ;;; Group 27 — kuro--line-history-search
 
@@ -185,13 +213,7 @@
        (kuro--line-history-search)
        (should (string= captured-initial "git"))))))
 
-(ert-deftest kuro-input-mode-test-history-search-bound-in-line-keymap ()
-  "Line keymap binds C-r to `kuro--line-history-search'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-r"))
-               #'kuro--line-history-search))))
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-r-history-search "C-r" kuro--line-history-search)
 
 ;;; Group 28 — kuro--line-unix-word-rubout (C-w)
 
@@ -321,43 +343,13 @@
 
 ;;; Group 31 — keymap bindings for iter-28 commands
 
-(ert-deftest kuro-input-mode-test-keymap-binds-c-w-unix-word-rubout ()
-  "Line keymap binds C-w to `kuro--line-unix-word-rubout'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-w"))
-               #'kuro--line-unix-word-rubout))))
-
-(ert-deftest kuro-input-mode-test-keymap-binds-word-case-ops ()
-  "Line keymap binds M-u/M-l/M-c to word-case commands."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-u"))
-               #'kuro--line-upcase-word))
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-l"))
-               #'kuro--line-downcase-word))
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-c"))
-               #'kuro--line-capitalize-word))))
-
-(ert-deftest kuro-input-mode-test-keymap-binds-c-p-c-n-history-aliases ()
-  "Line keymap binds C-p/C-n as aliases for history prev/next."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-p"))
-               #'kuro--line-history-prev))
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-n"))
-               #'kuro--line-history-next))))
-
-(ert-deftest kuro-input-mode-test-keymap-binds-m-t-transpose-words ()
-  "Line keymap binds M-t to `kuro--line-transpose-words'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-t"))
-               #'kuro--line-transpose-words))))
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-w-unix-word-rubout "C-w"  kuro--line-unix-word-rubout)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-u-upcase-word      "M-u"  kuro--line-upcase-word)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-l-downcase-word    "M-l"  kuro--line-downcase-word)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-c-capitalize-word  "M-c"  kuro--line-capitalize-word)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-p-history-prev     "C-p"  kuro--line-history-prev)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-n-history-next     "C-n"  kuro--line-history-next)
+(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-t-transpose-words  "M-t"  kuro--line-transpose-words)
 
 (provide 'kuro-input-mode-readline-test-2)
 

@@ -11,67 +11,40 @@
 (require 'cl-lib)
 (require 'kuro-char-width)
 
-;;; Group 13: EA-Ambiguous char-width (kuro--char-width-overrides)
+;;; Group 13: EA-Ambiguous char-width — kuro--setup-char-width-table spot checks
 
-(ert-deftest kuro-faces-test--char-width-table-box-drawing-start ()
-  "U+2500 (BOX DRAWINGS LIGHT HORIZONTAL) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2500)))))
+(defconst kuro-char-width-test--setup-width-table
+  '((kuro-faces-test--char-width-table-box-drawing-start    #x2500 1)
+    (kuro-faces-test--char-width-table-box-drawing-end      #x257F 1)
+    (kuro-faces-test--char-width-table-block-elements-start #x2580 1)
+    (kuro-faces-test--char-width-table-block-elements-end   #x259F 1)
+    (kuro-faces-test--char-width-table-arrows-start         #x2190 1)
+    (kuro-faces-test--char-width-table-arrows-end           #x21FF 1)
+    (kuro-faces-test--char-width-table-math-operators       #x2200 1)
+    (kuro-faces-test--char-width-table-geometric-shapes     #x25A0 1)
+    (kuro-faces-test--char-width-table-braille-start        #x2800 1)
+    (kuro-faces-test--char-width-table-braille-end          #x28FF 1))
+  "Table of (test-name codepoint expected-width) for char-width spot checks after
+`kuro--setup-char-width-table'.  Add new EA-Ambiguous boundary codepoints here.")
 
-(ert-deftest kuro-faces-test--char-width-table-box-drawing-end ()
-  "U+257F (BOX DRAWINGS LIGHT UP) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x257F)))))
+(defmacro kuro-char-width-test--def-setup-width (test-name char expected)
+  "Define a test asserting CHAR has char-width EXPECTED after `kuro--setup-char-width-table'."
+  `(ert-deftest ,test-name ()
+     ,(format "U+%04X has char-width %d after kuro--setup-char-width-table." char expected)
+     (with-temp-buffer
+       (kuro--setup-char-width-table)
+       (should (= ,expected (char-width ,char))))))
 
-(ert-deftest kuro-faces-test--char-width-table-block-elements-start ()
-  "U+2580 (UPPER HALF BLOCK) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2580)))))
-
-(ert-deftest kuro-faces-test--char-width-table-block-elements-end ()
-  "U+259F (QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x259F)))))
-
-(ert-deftest kuro-faces-test--char-width-table-arrows-start ()
-  "U+2190 (LEFTWARDS ARROW) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2190)))))
-
-(ert-deftest kuro-faces-test--char-width-table-arrows-end ()
-  "U+21FF (last arrow in U+21xx block) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x21FF)))))
-
-(ert-deftest kuro-faces-test--char-width-table-math-operators ()
-  "U+2200 (FOR ALL) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2200)))))
-
-(ert-deftest kuro-faces-test--char-width-table-geometric-shapes ()
-  "U+25A0 (BLACK SQUARE) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x25A0)))))
-
-(ert-deftest kuro-faces-test--char-width-table-braille-start ()
-  "U+2800 (BRAILLE PATTERN BLANK) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x2800)))))
-
-(ert-deftest kuro-faces-test--char-width-table-braille-end ()
-  "U+28FF (last Braille pattern) is width 1 after setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #x28FF)))))
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-box-drawing-start    #x2500 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-box-drawing-end      #x257F 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-block-elements-start #x2580 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-block-elements-end   #x259F 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-arrows-start         #x2190 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-arrows-end           #x21FF 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-math-operators       #x2200 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-geometric-shapes     #x25A0 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-braille-start        #x2800 1)
+(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-braille-end          #x28FF 1)
 
 (ert-deftest kuro-faces-test--char-width-table-misc-symbols ()
   "U+2600 (BLACK SUN WITH RAYS) is width 1 after setup.
@@ -81,11 +54,25 @@ kuro--char-width-1-ranges (EA-Ambiguous); the width-1 pass must win."
     (kuro--setup-char-width-table)
     (should (= 1 (char-width #x2600)))))
 
+(ert-deftest kuro-test-detect-nerd-font-nil ()
+  "kuro--detect-nerd-font returns nil or a string without error."
+  (let ((result (kuro--detect-nerd-font)))
+    (should (or (null result) (stringp result)))))
+
 (ert-deftest kuro-faces-test--char-width-table-is-buffer-local ()
   "kuro--setup-char-width-table makes char-width-table buffer-local."
   (with-temp-buffer
     (kuro--setup-char-width-table)
     (should (local-variable-p 'char-width-table))))
+
+(ert-deftest kuro-faces-test--all-setup-widths-correct ()
+  "Every entry in `kuro-char-width-test--setup-width-table' has the expected char-width."
+  (with-temp-buffer
+    (kuro--setup-char-width-table)
+    (dolist (entry kuro-char-width-test--setup-width-table)
+      (let ((char     (nth 1 entry))
+            (expected (nth 2 entry)))
+        (should (= expected (char-width char)))))))
 
 (ert-deftest kuro-faces-test--char-width-table-cjk-override ()
   "In Japanese language environment, EA-Ambiguous chars must still be width 1."
@@ -144,37 +131,38 @@ kuro--char-width-1-ranges (EA-Ambiguous); the width-1 pass must win."
 
 ;;; Group 14: kuro--apply-char-width-overrides
 
-(ert-deftest kuro-faces-test--apply-overrides-sets-box-drawing-width ()
-  "kuro--apply-char-width-overrides forces box-drawing range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2500 . #x257F))))))
+(defconst kuro-char-width-test--override-range-table
+  '((kuro-faces-test--apply-overrides-arrows           "Arrows"           (#x2190 . #x21FF))
+    (kuro-faces-test--apply-overrides-math-operators   "Math Operators"   (#x2200 . #x22FF))
+    (kuro-faces-test--apply-overrides-misc-technical   "Misc Technical"   (#x2300 . #x23FF))
+    (kuro-faces-test--apply-overrides-box-drawing      "Box Drawings"     (#x2500 . #x257F))
+    (kuro-faces-test--apply-overrides-block-elements   "Block Elements"   (#x2580 . #x259F))
+    (kuro-faces-test--apply-overrides-geometric-shapes "Geometric Shapes" (#x25A0 . #x25FF))
+    (kuro-faces-test--apply-overrides-misc-symbols     "Misc Symbols"     (#x2600 . #x26FF))
+    (kuro-faces-test--apply-overrides-dingbats         "Dingbats"         (#x2700 . #x27BF))
+    (kuro-faces-test--apply-overrides-braille          "Braille"          (#x2800 . #x28FF)))
+  "Table of (test-name description range) for `kuro--apply-char-width-overrides'.
+Mirrors the 9 entries in `kuro--ea-range-probe-table'.  All ranges must map to width 1.")
 
-(ert-deftest kuro-faces-test--apply-overrides-sets-block-elements-width ()
-  "kuro--apply-char-width-overrides forces block-elements range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2580 . #x259F))))))
+(defmacro kuro-char-width-test--def-override-range (test-name desc range)
+  "Define a test that `kuro--apply-char-width-overrides' sets RANGE to width 1."
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--apply-char-width-overrides sets %s to width 1." desc)
+     (with-temp-buffer
+       (make-local-variable 'char-width-table)
+       (setq char-width-table (copy-sequence char-width-table))
+       (kuro--apply-char-width-overrides)
+       (should (= 1 (char-table-range char-width-table ',range))))))
 
-(ert-deftest kuro-faces-test--apply-overrides-sets-arrows-width ()
-  "kuro--apply-char-width-overrides forces arrows range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2190 . #x21FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-sets-braille-width ()
-  "kuro--apply-char-width-overrides forces braille range to width 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2800 . #x28FF))))))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-arrows           "Arrows"           (#x2190 . #x21FF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-math-operators   "Math Operators"   (#x2200 . #x22FF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-misc-technical   "Misc Technical"   (#x2300 . #x23FF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-box-drawing      "Box Drawings"     (#x2500 . #x257F))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-block-elements   "Block Elements"   (#x2580 . #x259F))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-geometric-shapes "Geometric Shapes" (#x25A0 . #x25FF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-misc-symbols     "Misc Symbols"     (#x2600 . #x26FF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-dingbats         "Dingbats"         (#x2700 . #x27BF))
+(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-braille          "Braille"          (#x2800 . #x28FF))
 
 (ert-deftest kuro-faces-test--apply-overrides-all-ranges-covered ()
   "kuro--apply-char-width-overrides sets every entry in kuro--char-width-overrides to 1."
@@ -185,15 +173,28 @@ kuro--char-width-1-ranges (EA-Ambiguous); the width-1 pass must win."
     (dolist (range kuro--char-width-overrides)
       (should (= 1 (char-table-range char-width-table range))))))
 
-;;; Group 15: Font glyph-width fix structure
+;;; Group 15: Font glyph-width fix structure — noop-in-batch cross-group table
 
-(ert-deftest kuro-faces-test--assign-mono-fonts-noop-in-batch ()
-  "kuro--assign-mono-fonts is a no-op when display-graphic-p is nil (batch mode)."
-  (should-not (kuro--assign-mono-fonts)))
+(defconst kuro-char-width-test--noop-in-batch-table
+  '((kuro-faces-test--assign-mono-fonts-noop-in-batch    kuro--assign-mono-fonts)
+    (kuro-faces-test--refine-glyph-widths-noop-in-batch  kuro--refine-glyph-widths)
+    (kuro-faces-test--setup-fontset-noop-in-batch        kuro--setup-fontset)
+    (kuro-faces-test--detect-nerd-font-nil-in-batch      kuro--detect-nerd-font))
+  "Table of (test-name fn-sym): functions that must return nil in non-graphical (batch) Emacs.")
 
-(ert-deftest kuro-faces-test--refine-glyph-widths-noop-in-batch ()
-  "kuro--refine-glyph-widths is a no-op when display-graphic-p is nil (batch mode)."
-  (should-not (kuro--refine-glyph-widths)))
+(defmacro kuro-char-width-test--def-noop-in-batch (test-name fn-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' is a no-op (returns nil) when `display-graphic-p' is nil." fn-sym)
+     (should-not (,fn-sym))))
+
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--assign-mono-fonts-noop-in-batch   kuro--assign-mono-fonts)
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--refine-glyph-widths-noop-in-batch kuro--refine-glyph-widths)
+
+(ert-deftest kuro-char-width-test--all-noop-in-batch-correct ()
+  "Invariant: all listed functions return nil when display-graphic-p is nil (batch mode)."
+  (dolist (entry kuro-char-width-test--noop-in-batch-table)
+    (pcase-let ((`(,_name ,fn-sym) entry))
+      (should-not (funcall fn-sym)))))
 
 (ert-deftest kuro-faces-test--ea-range-probe-table-structure ()
   "kuro--ea-range-probe-table has 9 entries, each with a range cons and probe char."
@@ -239,61 +240,11 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
     (should (= 1 (char-width #x2800)))   ; ⠀ Braille
     ;; Emoji: must be 2
     (should (= 2 (char-width ?\U0001F525)))  ; 🔥
-    (should (= 2 (char-width ?\u65E5)))      ; 日 CJK
+    (should (= 2 (char-width ?日)))      ; 日 CJK
     ;; Nerd Font PUA: must be 1
     (should (= 1 (char-width ?\xE0B0)))      ; Powerline arrow
     ;; Variation Selector: must be 0
     (should (= 0 (char-width #xFE00)))))
-
-;;; Group 18: kuro--apply-char-width-overrides — each range individually
-
-(ert-deftest kuro-faces-test--apply-overrides-arrows-range ()
-  "kuro--apply-char-width-overrides sets Arrows range (#x2190-#x21FF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2190 . #x21FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-math-operators-range ()
-  "kuro--apply-char-width-overrides sets Math Operators (#x2200-#x22FF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2200 . #x22FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-misc-technical-range ()
-  "kuro--apply-char-width-overrides sets Misc Technical (#x2300-#x23FF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2300 . #x23FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-geometric-shapes-range ()
-  "kuro--apply-char-width-overrides sets Geometric Shapes (#x25A0-#x25FF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x25A0 . #x25FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-misc-symbols-range ()
-  "kuro--apply-char-width-overrides sets Misc Symbols (#x2600-#x26FF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2600 . #x26FF))))))
-
-(ert-deftest kuro-faces-test--apply-overrides-dingbats-range ()
-  "kuro--apply-char-width-overrides sets Dingbats (#x2700-#x27BF) to 1."
-  (with-temp-buffer
-    (make-local-variable 'char-width-table)
-    (setq char-width-table (copy-sequence char-width-table))
-    (kuro--apply-char-width-overrides)
-    (should (= 1 (char-table-range char-width-table '(#x2700 . #x27BF))))))
 
 ;;; Group 19: kuro--reapply-char-width-in-all-buffers
 
@@ -338,14 +289,8 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
 
 ;;; Group 21: kuro--setup-fontset nerd-font fallback
 
-(ert-deftest kuro-faces-test--setup-fontset-noop-in-batch ()
-  "kuro--setup-fontset is a no-op in non-graphical Emacs (batch mode)."
-  ;; display-graphic-p returns nil in batch — entire body must be skipped.
-  (should-not (kuro--setup-fontset)))
-
-(ert-deftest kuro-faces-test--detect-nerd-font-nil-in-batch ()
-  "kuro--detect-nerd-font returns nil in non-graphical Emacs (batch mode)."
-  (should-not (kuro--detect-nerd-font)))
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--setup-fontset-noop-in-batch   kuro--setup-fontset)
+(kuro-char-width-test--def-noop-in-batch kuro-faces-test--detect-nerd-font-nil-in-batch kuro--detect-nerd-font)
 
 (ert-deftest kuro-faces-test--setup-fontset-no-nerd-font-no-error ()
   "kuro--setup-fontset does not error when no Nerd Font is available."
@@ -357,62 +302,90 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
                     (progn (kuro--setup-fontset) nil)
                   (error err)))))
 
-(ert-deftest kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono ()
-  "kuro--detect-nerd-font returns \"Symbols Nerd Font Mono\" when it is available."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda ()
-               '("DejaVu Sans Mono"
-                 "Symbols Nerd Font Mono"
-                 "SomeOther Nerd Font"))))
-    (should (equal (kuro--detect-nerd-font) "Symbols Nerd Font Mono"))))
+(defconst kuro-char-width-test--detect-nerd-font-table
+  '((kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
+     ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
+     "Symbols Nerd Font Mono")
+    (kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
+     ("DejaVu Sans Mono" "Hack Nerd Font Mono")
+     "Hack Nerd Font Mono")
+    (kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
+     ("DejaVu Sans Mono" "Hack Nerd Font")
+     "Hack Nerd Font")
+    (kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
+     ("DejaVu Sans Mono" "Consolas" "Courier New")
+     nil))
+  "Table: (test-name fonts expected) for kuro--detect-nerd-font priority dispatch.")
 
-(ert-deftest kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono ()
-  "kuro--detect-nerd-font falls back to any 'Nerd Font Mono' when preferred is absent."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda ()
-               '("DejaVu Sans Mono"
-                 "Hack Nerd Font Mono"))))
-    (should (equal (kuro--detect-nerd-font) "Hack Nerd Font Mono"))))
+(defmacro kuro-char-width-test--def-detect-nerd-font (test-name fonts expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--detect-nerd-font' with fonts %S → %S." fonts expected)
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+               ((symbol-function 'font-family-list) (lambda () ',fonts)))
+       ,(if expected
+            `(should (equal (kuro--detect-nerd-font) ,expected))
+          `(should-not (kuro--detect-nerd-font))))))
 
-(ert-deftest kuro-faces-test--detect-nerd-font-fallback-to-nerd-font ()
-  "kuro--detect-nerd-font falls back to 'Nerd Font' (no Mono suffix) as last resort."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda ()
-               '("DejaVu Sans Mono"
-                 "Hack Nerd Font"))))
-    (should (equal (kuro--detect-nerd-font) "Hack Nerd Font"))))
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
+ ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
+ "Symbols Nerd Font Mono")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
+ ("DejaVu Sans Mono" "Hack Nerd Font Mono")
+ "Hack Nerd Font Mono")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
+ ("DejaVu Sans Mono" "Hack Nerd Font")
+ "Hack Nerd Font")
+(kuro-char-width-test--def-detect-nerd-font
+ kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
+ ("DejaVu Sans Mono" "Consolas" "Courier New")
+ nil)
 
-(ert-deftest kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts ()
-  "kuro--detect-nerd-font returns nil when no Nerd Font family is present."
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-            ((symbol-function 'font-family-list)
-             (lambda () '("DejaVu Sans Mono" "Consolas" "Courier New"))))
-    (should-not (kuro--detect-nerd-font))))
+(ert-deftest kuro-char-width-test--all-detect-nerd-font-cases-correct ()
+  "Invariant: every detect-nerd-font table entry returns the expected result."
+  (dolist (entry kuro-char-width-test--detect-nerd-font-table)
+    (pcase-let ((`(,_name ,fonts ,expected) entry))
+      (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                ((symbol-function 'font-family-list) (lambda () fonts)))
+        (if expected
+            (should (equal (kuro--detect-nerd-font) expected))
+          (should-not (kuro--detect-nerd-font)))))))
 
 ;;; Group 22: char-width-table data integrity
 
-(ert-deftest kuro-faces-test--variation-selector-is-width-0 ()
-  "Variation Selectors (#xFE00-#xFE0F) must be width 0 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 0 (char-width #xFE00)))
-    (should (= 0 (char-width #xFE0F)))))
+(defconst kuro-char-width-test--width-invariant-table
+  '(;; Variation Selectors (FE00-FE0F): zero width
+    (kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
+    (kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
+    ;; Nerd Font PUA (E000-F8FF): width 1
+    (kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
+    (kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
+    ;; Supplementary Nerd Font PUA (F0000): width 1
+    (kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1))
+  "Table of (test-name codepoint expected-width) for kuro--setup-char-width-table invariants.")
 
-(ert-deftest kuro-faces-test--pua-nerd-font-is-width-1 ()
-  "Nerd Font PUA range (#xE000-#xF8FF) must be width 1 after table setup."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= 1 (char-width #xE000)))
-    (should (= 1 (char-width #xF8FF)))))
+(defmacro kuro-char-width-test--def-width-invariant (test-name codepoint expected-width)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--setup-char-width-table: char-width #x%X => %d." codepoint expected-width)
+     (with-temp-buffer
+       (kuro--setup-char-width-table)
+       (should (= ,expected-width (char-width ,codepoint))))))
 
-(ert-deftest kuro-faces-test--supplementary-pua-is-width-1 ()
-  "Supplementary Nerd Font PUA (#xF0000) must be width 1 after table setup."
+(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
+(kuro-char-width-test--def-width-invariant kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1)
+
+(ert-deftest kuro-char-width-test--all-width-invariants-correct ()
+  "Every entry in `kuro-char-width-test--width-invariant-table' has the expected char-width."
   (with-temp-buffer
     (kuro--setup-char-width-table)
-    (should (= 1 (char-width #xF0000)))))
+    (dolist (entry kuro-char-width-test--width-invariant-table)
+      (pcase-let ((`(,_name ,cp ,expected) entry))
+        (should (= expected (char-width cp)))))))
 
 ;;; Group 23: kuro--refine-glyph-widths
 
@@ -436,27 +409,40 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
       (kuro--refine-glyph-widths)
       (should-not probe-called))))
 
-(ert-deftest test-kuro-refine-glyph-widths-calls-redraw-when-changed ()
-  "kuro--refine-glyph-widths calls redraw-display when any rescale returns t."
-  (let (redraw-called)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'frame-char-width) (lambda () 8))
-              ((symbol-function 'frame-char-height) (lambda () 16))
-              ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) t))
-              ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
-      (kuro--refine-glyph-widths)
-      (should redraw-called))))
+(defconst kuro-char-width-test--refine-redraw-table
+  '((test-kuro-refine-glyph-widths-calls-redraw-when-changed  t   t)
+    (test-kuro-refine-glyph-widths-no-redraw-when-unchanged   nil nil))
+  "Table: (test-name rescale-result redraw-expected?) for kuro--refine-glyph-widths redraw dispatch.")
 
-(ert-deftest test-kuro-refine-glyph-widths-no-redraw-when-unchanged ()
-  "kuro--refine-glyph-widths does NOT call redraw-display when no rescale was needed."
-  (let (redraw-called)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'frame-char-width) (lambda () 8))
-              ((symbol-function 'frame-char-height) (lambda () 16))
-              ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) nil))
-              ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
-      (kuro--refine-glyph-widths)
-      (should-not redraw-called))))
+(defmacro kuro-char-width-test--def-refine-redraw (test-name rescale redraw)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--refine-glyph-widths' rescale=%s → redraw=%s." rescale redraw)
+     (let (redraw-called)
+       (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                 ((symbol-function 'frame-char-width)  (lambda () 8))
+                 ((symbol-function 'frame-char-height) (lambda () 16))
+                 ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) ,rescale))
+                 ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
+         (kuro--refine-glyph-widths)
+         ,(if redraw '(should redraw-called) '(should-not redraw-called))))))
+
+(kuro-char-width-test--def-refine-redraw
+ test-kuro-refine-glyph-widths-calls-redraw-when-changed t t)
+(kuro-char-width-test--def-refine-redraw
+ test-kuro-refine-glyph-widths-no-redraw-when-unchanged nil nil)
+
+(ert-deftest kuro-char-width-test--all-refine-redraw-cases-correct ()
+  "Invariant: every refine-redraw table entry produces the expected redraw behavior."
+  (dolist (entry kuro-char-width-test--refine-redraw-table)
+    (pcase-let ((`(,_name ,rescale ,redraw) entry))
+      (let (redraw-called)
+        (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+                  ((symbol-function 'frame-char-width)  (lambda () 8))
+                  ((symbol-function 'frame-char-height) (lambda () 16))
+                  ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) rescale))
+                  ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
+          (kuro--refine-glyph-widths)
+          (if redraw (should redraw-called) (should-not redraw-called)))))))
 
 (ert-deftest test-kuro-refine-glyph-widths-iterates-both-passes ()
   "kuro--refine-glyph-widths calls kuro--rescale-font-for-glyph for both passes."

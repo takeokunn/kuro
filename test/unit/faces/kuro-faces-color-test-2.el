@@ -36,63 +36,82 @@
 
 ;;; Group 9: kuro--rgb-to-emacs — asymmetric and low-byte values
 
-(ert-deftest kuro-faces-color--rgb-to-emacs-asymmetric ()
-  "kuro--rgb-to-emacs correctly extracts non-equal R/G/B channels."
-  (should (equal (kuro--rgb-to-emacs #xAB1234) "#ab1234"))
-  (should (equal (kuro--rgb-to-emacs #x010203) "#010203"))
-  (should (equal (kuro--rgb-to-emacs #xFE0080) "#fe0080")))
+(defconst kuro-faces-color-test--rgb-to-emacs-extended-table
+  ;;  test-name                                           input       expected
+  '((kuro-faces-color--rgb-to-emacs-asymmetric-ab1234    #xAB1234    "#ab1234")
+    (kuro-faces-color--rgb-to-emacs-asymmetric-010203    #x010203    "#010203")
+    (kuro-faces-color--rgb-to-emacs-asymmetric-fe0080    #xFE0080    "#fe0080")
+    (kuro-faces-color--rgb-to-emacs-red-full             #xFF0000    "#ff0000")
+    (kuro-faces-color--rgb-to-emacs-red-low              #x010000    "#010000")
+    (kuro-faces-color--rgb-to-emacs-green-full           #x00FF00    "#00ff00")
+    (kuro-faces-color--rgb-to-emacs-green-low            #x000100    "#000100")
+    (kuro-faces-color--rgb-to-emacs-blue-full            #x0000FF    "#0000ff")
+    (kuro-faces-color--rgb-to-emacs-blue-low             #x000001    "#000001"))
+  "Table of (test-name rgb-int expected-hex) for extended `kuro--rgb-to-emacs' coverage.")
 
-(ert-deftest kuro-faces-color--rgb-to-emacs-single-red-channel ()
-  "kuro--rgb-to-emacs isolates the red channel correctly."
-  (should (equal (kuro--rgb-to-emacs #xFF0000) "#ff0000"))
-  (should (equal (kuro--rgb-to-emacs #x010000) "#010000")))
+(defmacro kuro-faces-color-test--def-rgb-to-emacs-ext (test-name input expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--rgb-to-emacs' #x%X → %S." input expected)
+     (should (equal (kuro--rgb-to-emacs ,input) ,expected))))
 
-(ert-deftest kuro-faces-color--rgb-to-emacs-single-green-channel ()
-  "kuro--rgb-to-emacs isolates the green channel correctly."
-  (should (equal (kuro--rgb-to-emacs #x00FF00) "#00ff00"))
-  (should (equal (kuro--rgb-to-emacs #x000100) "#000100")))
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-asymmetric-ab1234 #xAB1234 "#ab1234")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-asymmetric-010203 #x010203 "#010203")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-asymmetric-fe0080 #xFE0080 "#fe0080")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-red-full          #xFF0000 "#ff0000")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-red-low           #x010000 "#010000")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-green-full        #x00FF00 "#00ff00")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-green-low         #x000100 "#000100")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-blue-full         #x0000FF "#0000ff")
+(kuro-faces-color-test--def-rgb-to-emacs-ext kuro-faces-color--rgb-to-emacs-blue-low          #x000001 "#000001")
 
-(ert-deftest kuro-faces-color--rgb-to-emacs-single-blue-channel ()
-  "kuro--rgb-to-emacs isolates the blue channel correctly."
-  (should (equal (kuro--rgb-to-emacs #x0000FF) "#0000ff"))
-  (should (equal (kuro--rgb-to-emacs #x000001) "#000001")))
+(ert-deftest kuro-faces-color-test--all-rgb-to-emacs-ext-correct ()
+  "All kuro-faces-color-test--rgb-to-emacs-extended-table entries produce the expected hex."
+  (dolist (entry kuro-faces-color-test--rgb-to-emacs-extended-table)
+    (pcase-let ((`(,_name ,input ,expected) entry))
+      (should (equal (kuro--rgb-to-emacs input) expected)))))
 
-;;; Group 10: kuro--decode-ffi-color — named indices 1-7
+;;; Groups 10+13: kuro--decode-ffi-color — cons-result cases
 
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-1 ()
-  "Named color at index 1 decodes to (named . \"red\")."
-  (let ((result (kuro--decode-ffi-color (logior #x80000000 1))))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "red"))))
+(defconst kuro-faces-color-test--decode-ffi-color-cons-table
+  `((kuro-faces-color--decode-ffi-color-named-index-1          ,(logior #x80000000  1)  named   "red")
+    (kuro-faces-color--decode-ffi-color-named-index-5          ,(logior #x80000000  5)  named   "magenta")
+    (kuro-faces-color--decode-ffi-color-named-index-7          ,(logior #x80000000  7)  named   "white")
+    (kuro-faces-color--decode-ffi-color-named-index-8          ,(logior #x80000000  8)  named   "bright-black")
+    (kuro-faces-color--decode-ffi-color-named-index-14         ,(logior #x80000000 14)  named   "bright-cyan")
+    (kuro-faces-color--decode-ffi-color-indexed-mid            ,(logior #x40000000 128) indexed 128)
+    (kuro-faces-color--decode-ffi-color-indexed-named-boundary ,(logior #x40000000  15) indexed 15)
+    (kuro-faces-color--decode-ffi-color-rgb-mid                #x007F3F1F               rgb     #x7F3F1F)
+    (kuro-faces-color--decode-ffi-color-rgb-max-value          #x00FFFFFF               rgb     #xFFFFFF)
+    (kuro-faces-color--decode-ffi-color-rgb-single-byte        1                        rgb     1))
+  "Table of (test-name enc type value) for `kuro--decode-ffi-color' cons-result cases.")
 
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-7 ()
-  "Named color at index 7 decodes to (named . \"white\")."
-  (let ((result (kuro--decode-ffi-color (logior #x80000000 7))))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "white"))))
+(defmacro kuro-faces-color-test--def-decode-ffi-color-cons (test-name enc type value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--decode-ffi-color' → (%s . %S)." type value)
+     (let ((result (kuro--decode-ffi-color ,enc)))
+       (should (consp result))
+       (should (eq    (car result) ',type))
+       (should (equal (cdr result) ,value)))))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-8 ()
-  "Named color at index 8 decodes to (named . \"bright-black\")."
-  (let ((result (kuro--decode-ffi-color (logior #x80000000 8))))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "bright-black"))))
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-1          (logior #x80000000  1)  named   "red")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-5          (logior #x80000000  5)  named   "magenta")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-7          (logior #x80000000  7)  named   "white")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-8          (logior #x80000000  8)  named   "bright-black")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-14         (logior #x80000000 14)  named   "bright-cyan")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-indexed-mid            (logior #x40000000 128) indexed 128)
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-indexed-named-boundary (logior #x40000000  15) indexed 15)
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-rgb-mid                #x007F3F1F               rgb     #x7F3F1F)
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-rgb-max-value          #x00FFFFFF               rgb     #xFFFFFF)
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-rgb-single-byte        1                        rgb     1)
 
-(ert-deftest kuro-faces-color--decode-ffi-color-indexed-mid ()
-  "Indexed color at index 128 decodes to (indexed . 128)."
-  (let ((result (kuro--decode-ffi-color (logior #x40000000 128))))
-    (should (consp result))
-    (should (eq (car result) 'indexed))
-    (should (= (cdr result) 128))))
-
-(ert-deftest kuro-faces-color--decode-ffi-color-rgb-mid ()
-  "0x007F3F1F decodes to (rgb . #x7F3F1F)."
-  (let ((result (kuro--decode-ffi-color #x007F3F1F)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) #x7F3F1F))))
+(ert-deftest kuro-faces-color--decode-ffi-color-cons-table-all-correct ()
+  "Every entry in `kuro-faces-color-test--decode-ffi-color-cons-table' returns the expected cons."
+  (dolist (entry kuro-faces-color-test--decode-ffi-color-cons-table)
+    (pcase-let ((`(,_name ,enc ,type ,value) entry))
+      (let ((result (kuro--decode-ffi-color enc)))
+        (should (consp result))
+        (should (eq    (car result) type))
+        (should (equal (cdr result) value))))))
 
 ;;; Group 11: kuro--get-cached-face-raw — ul-enc normalization and cache eviction
 ;;
@@ -218,46 +237,10 @@ The sentinel check precedes the tag-bit check in kuro--decode-ffi-color."
   ;; #xFF000000 has bit 31 set (named tag), but the sentinel check fires first.
   (should (eq (kuro--decode-ffi-color #xFF000000) :default)))
 
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-5 ()
-  "Named color at index 5 decodes to (named . \"magenta\")."
-  (let ((result (kuro--decode-ffi-color (logior #x80000000 5))))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "magenta"))))
-
-(ert-deftest kuro-faces-color--decode-ffi-color-named-index-14 ()
-  "Named color at index 14 decodes to (named . \"bright-cyan\")."
-  (let ((result (kuro--decode-ffi-color (logior #x80000000 14))))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (string= (cdr result) "bright-cyan"))))
-
 (ert-deftest kuro-faces-color--decode-ffi-color-named-index-17-out-of-range ()
   "Named tag with index 17 (beyond 0-15) returns nil."
   (let ((result (kuro--decode-ffi-color (logior #x80000000 17))))
     (should (null result))))
-
-(ert-deftest kuro-faces-color--decode-ffi-color-indexed-named-boundary ()
-  "Indexed color at index 15 (named ANSI range boundary) decodes to (indexed . 15)."
-  ;; kuro--decode-ffi-color bit-30 path does NOT delegate; returns (indexed . N).
-  (let ((result (kuro--decode-ffi-color (logior #x40000000 15))))
-    (should (consp result))
-    (should (eq (car result) 'indexed))
-    (should (= (cdr result) 15))))
-
-(ert-deftest kuro-faces-color--decode-ffi-color-rgb-max-value ()
-  "0x00FFFFFF decodes to (rgb . #xFFFFFF) — max RGB value."
-  (let ((result (kuro--decode-ffi-color #x00FFFFFF)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) #xFFFFFF))))
-
-(ert-deftest kuro-faces-color--decode-ffi-color-rgb-single-byte ()
-  "0x00000001 decodes to (rgb . 1) — single low-byte RGB value."
-  (let ((result (kuro--decode-ffi-color 1)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) 1))))
 
 (ert-deftest kuro-faces-color--color-to-emacs-indexed-255 ()
   "kuro--color-to-emacs (indexed . 255) returns grayscale entry #eeeeee."
@@ -277,34 +260,15 @@ The sentinel check precedes the tag-bit check in kuro--decode-ffi-color."
 ;;; Group 14: named color full-range, cube/grayscale boundary verification,
 ;;;           and kuro--color-to-emacs default fg/bg handling
 
-;; Macro: iterate named-color indices and verify decoded name
-(defmacro kuro-faces-color-test--assert-named-color (index expected-name)
-  "Assert that FFI encoding of named color at INDEX decodes to EXPECTED-NAME."
-  `(let ((result (kuro--decode-ffi-color (logior kuro--color-tag-named ,index))))
-     (should (consp result))
-     (should (eq (car result) 'named))
-     (should (string= (cdr result) ,expected-name))))
-
-(ert-deftest kuro-faces-color--named-colors-indices-2-and-3 ()
-  "Named color indices 2 (green) and 3 (yellow) decode correctly."
-  (kuro-faces-color-test--assert-named-color 2 "green")
-  (kuro-faces-color-test--assert-named-color 3 "yellow"))
-
-(ert-deftest kuro-faces-color--named-colors-indices-4-and-6 ()
-  "Named color indices 4 (blue) and 6 (cyan) decode correctly."
-  (kuro-faces-color-test--assert-named-color 4 "blue")
-  (kuro-faces-color-test--assert-named-color 6 "cyan"))
-
-(ert-deftest kuro-faces-color--named-colors-indices-9-10-11 ()
-  "Named color indices 9/10/11 decode to bright-red/bright-green/bright-yellow."
-  (kuro-faces-color-test--assert-named-color 9  "bright-red")
-  (kuro-faces-color-test--assert-named-color 10 "bright-green")
-  (kuro-faces-color-test--assert-named-color 11 "bright-yellow"))
-
-(ert-deftest kuro-faces-color--named-colors-indices-12-13 ()
-  "Named color indices 12/13 decode to bright-blue/bright-magenta."
-  (kuro-faces-color-test--assert-named-color 12 "bright-blue")
-  (kuro-faces-color-test--assert-named-color 13 "bright-magenta"))
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-2  (logior kuro--color-tag-named  2) named "green")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-3  (logior kuro--color-tag-named  3) named "yellow")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-4  (logior kuro--color-tag-named  4) named "blue")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-6  (logior kuro--color-tag-named  6) named "cyan")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-9  (logior kuro--color-tag-named  9) named "bright-red")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-10 (logior kuro--color-tag-named 10) named "bright-green")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-11 (logior kuro--color-tag-named 11) named "bright-yellow")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-12 (logior kuro--color-tag-named 12) named "bright-blue")
+(kuro-faces-color-test--def-decode-ffi-color-cons kuro-faces-color--decode-ffi-color-named-index-13 (logior kuro--color-tag-named 13) named "bright-magenta")
 
 (ert-deftest kuro-faces-color--color-cube-table-entry-16-exact ()
   "Index 16 (cube offset 0): r=0,g=0,b=0 → #000000."
@@ -352,6 +316,41 @@ This models the no-color fast-path where both fg and bg use terminal default."
 (ert-deftest kuro-faces-color--grayscale-table-entry-23-exact ()
   "kuro--grayscale-table entry 23 (index 255): val=23*10+8=238=0xee → #eeeeee."
   (should (equal (aref kuro--grayscale-table 23) "#eeeeee")))
+
+;;; Group 15: kuro--color-type-handlers invariants + kuro--color-named-to-emacs ─
+
+(ert-deftest kuro-faces-color--color-type-handlers-is-alist ()
+  "`kuro--color-type-handlers' is a non-empty alist."
+  (should (consp kuro--color-type-handlers))
+  (should (listp kuro--color-type-handlers)))
+
+(ert-deftest kuro-faces-color--color-type-handlers-has-three-entries ()
+  "`kuro--color-type-handlers' has exactly three entries (named, indexed, rgb)."
+  (should (= 3 (length kuro--color-type-handlers))))
+
+(ert-deftest kuro-faces-color--color-type-handlers-all-keys-present ()
+  "`kuro--color-type-handlers' has keys for all three Rust Color variants."
+  (should (assq 'named   kuro--color-type-handlers))
+  (should (assq 'indexed kuro--color-type-handlers))
+  (should (assq 'rgb     kuro--color-type-handlers)))
+
+(ert-deftest kuro-faces-color--color-type-handlers-all-values-fbound ()
+  "Every value in `kuro--color-type-handlers' is a bound function symbol."
+  (dolist (entry kuro--color-type-handlers)
+    (should (fboundp (cdr entry)))))
+
+(ert-deftest kuro-faces-color--color-named-to-emacs-known-name ()
+  "`kuro--color-named-to-emacs' returns Emacs color string for a known name."
+  (let ((result (kuro--color-named-to-emacs "red")))
+    (should (stringp result))))
+
+(ert-deftest kuro-faces-color--color-named-to-emacs-unknown-name-passthrough ()
+  "`kuro--color-named-to-emacs' returns the name itself when not in hash table."
+  (should (equal (kuro--color-named-to-emacs "not-a-real-color") "not-a-real-color")))
+
+(ert-deftest kuro-faces-color--color-to-emacs-unknown-type-nil ()
+  "`kuro--color-to-emacs' returns nil for a cons cell with an unknown type tag."
+  (should (null (kuro--color-to-emacs '(unknown-type . 42)))))
 
 (provide 'kuro-faces-color-test-2)
 

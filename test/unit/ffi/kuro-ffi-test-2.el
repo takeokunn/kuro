@@ -97,34 +97,57 @@ variable survives `kill-all-local-variables' (called on major-mode activation)."
 
 ;;; Group 19: kuro--defvar-permanent-local — buffer-locality and default value
 
-(ert-deftest kuro-ffi-defvar-permanent-local-var-is-buffer-local ()
-  "kuro--defvar-permanent-local creates a buffer-local variable."
-  ;; Variables defined by the macro must be buffer-local so that each
-  ;; kuro buffer tracks its own state independently.
-  (should (local-variable-if-set-p 'kuro--initialized))
-  (should (local-variable-if-set-p 'kuro--session-id))
-  (should (local-variable-if-set-p 'kuro--col-to-buf-map))
-  (should (local-variable-if-set-p 'kuro--resize-pending)))
+(defconst kuro-ffi-test--permanent-local-vars-table
+  '((kuro-ffi-defvar-permanent-local-initialized-is-local    kuro--initialized)
+    (kuro-ffi-defvar-permanent-local-session-id-is-local     kuro--session-id)
+    (kuro-ffi-defvar-permanent-local-col-to-buf-map-is-local kuro--col-to-buf-map)
+    (kuro-ffi-defvar-permanent-local-resize-pending-is-local kuro--resize-pending))
+  "Table of (test-name var-sym) for kuro--defvar-permanent-local buffer-locality checks.")
+
+(defmacro kuro-ffi-test--def-permanent-local (test-name var-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' is a buffer-local variable (kuro--defvar-permanent-local)." var-sym)
+     (should (local-variable-if-set-p ',var-sym))))
+
+(kuro-ffi-test--def-permanent-local kuro-ffi-defvar-permanent-local-initialized-is-local    kuro--initialized)
+(kuro-ffi-test--def-permanent-local kuro-ffi-defvar-permanent-local-session-id-is-local     kuro--session-id)
+(kuro-ffi-test--def-permanent-local kuro-ffi-defvar-permanent-local-col-to-buf-map-is-local kuro--col-to-buf-map)
+(kuro-ffi-test--def-permanent-local kuro-ffi-defvar-permanent-local-resize-pending-is-local kuro--resize-pending)
+
+(ert-deftest kuro-ffi-defvar-permanent-local-all-vars-are-buffer-local ()
+  "Every entry in `kuro-ffi-test--permanent-local-vars-table' is buffer-local."
+  (dolist (entry kuro-ffi-test--permanent-local-vars-table)
+    (pcase-let ((`(,_name ,var-sym) entry))
+      (should (local-variable-if-set-p var-sym)))))
 
 (ert-deftest kuro-ffi-defvar-permanent-local-session-id-default-zero ()
   "kuro--session-id has a default value of 0 in a fresh buffer."
   (with-temp-buffer
     (should (= kuro--session-id 0))))
 
-(ert-deftest kuro-ffi-defvar-permanent-local-initialized-default-nil ()
-  "kuro--initialized has a default value of nil in a fresh buffer."
-  (with-temp-buffer
-    (should-not kuro--initialized)))
+(defconst kuro-ffi-test--nil-default-vars-table
+  '((kuro-ffi-defvar-permanent-local-initialized-default-nil    kuro--initialized)
+    (kuro-ffi-defvar-permanent-local-resize-pending-default-nil kuro--resize-pending))
+  "Table of (test-name var-sym): permanent-local vars that default to nil in fresh buffers.")
+
+(defmacro kuro-ffi-test--def-nil-default (test-name var-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' defaults to nil in a fresh buffer." var-sym)
+     (with-temp-buffer (should-not ,var-sym))))
+
+(kuro-ffi-test--def-nil-default kuro-ffi-defvar-permanent-local-initialized-default-nil    kuro--initialized)
+(kuro-ffi-test--def-nil-default kuro-ffi-defvar-permanent-local-resize-pending-default-nil kuro--resize-pending)
 
 (ert-deftest kuro-ffi-defvar-permanent-local-col-to-buf-map-is-hash-table ()
   "kuro--col-to-buf-map default value is a hash table."
   (with-temp-buffer
     (should (hash-table-p kuro--col-to-buf-map))))
 
-(ert-deftest kuro-ffi-defvar-permanent-local-resize-pending-default-nil ()
-  "kuro--resize-pending has a default value of nil in a fresh buffer."
-  (with-temp-buffer
-    (should-not kuro--resize-pending)))
+(ert-deftest kuro-ffi-test--all-nil-default-vars-correct ()
+  "Invariant: all listed permanent-local vars default to nil in fresh buffers."
+  (dolist (entry kuro-ffi-test--nil-default-vars-table)
+    (pcase-let ((`(,_name ,var-sym) entry))
+      (with-temp-buffer (should-not (symbol-value var-sym))))))
 
 ;;; Group 20: kuro--def-ffi-unary — error fallback and uninitialized guard
 
@@ -193,20 +216,30 @@ before it means initialized is still t."
 
 ;;; Group 22: kuro--when-divisible — cadence-gating primitive
 
-(ert-deftest kuro-ffi-when-divisible-fires-at-zero ()
-  (let ((ran nil))
-    (kuro--when-divisible 0 5 (setq ran t))
-    (should ran)))
+(defconst kuro-ffi-test--when-divisible-table
+  '((kuro-ffi-when-divisible-fires-at-zero       0 5 t)
+    (kuro-ffi-when-divisible-fires-at-multiple  10 5 t)
+    (kuro-ffi-when-divisible-skips-non-multiple  7 5 nil))
+  "Table of (test-name counter divisor expectedp) for kuro--when-divisible fire/skip.")
 
-(ert-deftest kuro-ffi-when-divisible-fires-at-multiple ()
-  (let ((ran nil))
-    (kuro--when-divisible 10 5 (setq ran t))
-    (should ran)))
+(defmacro kuro-ffi-test--def-when-divisible (test-name counter divisor expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--when-divisible' %d mod %d => %s." counter divisor (if expectedp "fires" "skips"))
+     (let ((ran nil))
+       (kuro--when-divisible ,counter ,divisor (setq ran t))
+       ,(if expectedp `(should ran) `(should-not ran)))))
 
-(ert-deftest kuro-ffi-when-divisible-skips-non-multiple ()
-  (let ((ran nil))
-    (kuro--when-divisible 7 5 (setq ran t))
-    (should-not ran)))
+(kuro-ffi-test--def-when-divisible kuro-ffi-when-divisible-fires-at-zero       0 5 t)
+(kuro-ffi-test--def-when-divisible kuro-ffi-when-divisible-fires-at-multiple  10 5 t)
+(kuro-ffi-test--def-when-divisible kuro-ffi-when-divisible-skips-non-multiple  7 5 nil)
+
+(ert-deftest kuro-ffi-when-divisible-all-cases-correct ()
+  "Every entry in `kuro-ffi-test--when-divisible-table' fires or skips as expected."
+  (dolist (entry kuro-ffi-test--when-divisible-table)
+    (pcase-let ((`(,_name ,counter ,divisor ,expectedp) entry))
+      (let ((ran nil))
+        (kuro--when-divisible counter divisor (setq ran t))
+        (if expectedp (should ran) (should-not ran))))))
 
 (ert-deftest kuro-ffi-when-divisible-returns-nil-when-skipped ()
   (should-not (kuro--when-divisible 7 5 t)))
@@ -348,89 +381,56 @@ before it means initialized is still t."
 
 ;;; Group 25: kuro--log buffer truncation
 
+(cl-defmacro kuro-ffi-test--with-log-buf (buf-sym (&rest setup) &rest body)
+  "Create *kuro-log*, run SETUP forms under inhibit-read-only, run BODY, then cleanup."
+  (declare (indent 2))
+  `(let ((kuro-log-errors t))
+     (when (get-buffer kuro--log-buffer-name)
+       (kill-buffer kuro--log-buffer-name))
+     (unwind-protect
+         (let ((,buf-sym (get-buffer-create kuro--log-buffer-name)))
+           (with-current-buffer ,buf-sym
+             (unless (derived-mode-p 'special-mode) (special-mode))
+             (let ((inhibit-read-only t)) ,@setup))
+           ,@body)
+       (when (get-buffer kuro--log-buffer-name)
+         (kill-buffer kuro--log-buffer-name)))))
+
 (ert-deftest kuro-ffi-ext-log-truncation-removes-oldest-content ()
   "After truncation, the oldest content (inserted before overflow) is gone."
-  (let ((kuro-log-errors t))
-    (when (get-buffer kuro--log-buffer-name)
-      (kill-buffer kuro--log-buffer-name))
-    (unwind-protect
-        (let ((buf (get-buffer-create kuro--log-buffer-name)))
-          (with-current-buffer buf
-            (unless (derived-mode-p 'special-mode) (special-mode))
-            (let ((inhibit-read-only t))
-              ;; Insert a sentinel string at the very beginning, then pad the
-              ;; buffer past kuro--log-max-size so the next kuro--log call
-              ;; triggers deletion of the oldest half.
-              (insert "OLDEST-SENTINEL\n")
-              (insert (make-string kuro--log-max-size ?x))
-              (insert "\n")))
-          ;; One more log call should trigger truncation.
-          (kuro--log '(error "truncation-trigger"))
-          (let ((content (with-current-buffer buf (buffer-string))))
-            (should-not (string-match-p "OLDEST-SENTINEL" content))))
-      (when (get-buffer kuro--log-buffer-name)
-        (kill-buffer kuro--log-buffer-name)))))
+  (kuro-ffi-test--with-log-buf buf
+      ((insert "OLDEST-SENTINEL\n")
+       (insert (make-string kuro--log-max-size ?x))
+       (insert "\n"))
+    (kuro--log '(error "truncation-trigger"))
+    (should-not (string-match-p "OLDEST-SENTINEL"
+                                (with-current-buffer buf (buffer-string))))))
 
 (ert-deftest kuro-ffi-ext-log-truncation-preserves-newest-content ()
   "After truncation, the entry that triggered truncation is still present."
-  (let ((kuro-log-errors t))
-    (when (get-buffer kuro--log-buffer-name)
-      (kill-buffer kuro--log-buffer-name))
-    (unwind-protect
-        (let ((buf (get-buffer-create kuro--log-buffer-name)))
-          (with-current-buffer buf
-            (unless (derived-mode-p 'special-mode) (special-mode))
-            (let ((inhibit-read-only t))
-              (insert (make-string (1+ kuro--log-max-size) ?y))
-              (insert "\n")))
-          (kuro--log '(error "NEWEST-SENTINEL"))
-          (let ((content (with-current-buffer buf (buffer-string))))
-            (should (string-match-p "NEWEST-SENTINEL" content))))
-      (when (get-buffer kuro--log-buffer-name)
-        (kill-buffer kuro--log-buffer-name)))))
+  (kuro-ffi-test--with-log-buf buf
+      ((insert (make-string (1+ kuro--log-max-size) ?y))
+       (insert "\n"))
+    (kuro--log '(error "NEWEST-SENTINEL"))
+    (should (string-match-p "NEWEST-SENTINEL"
+                            (with-current-buffer buf (buffer-string))))))
 
 (ert-deftest kuro-ffi-ext-log-truncation-reduces-size-below-max ()
   "After truncation the buffer size is at most kuro--log-max-size bytes."
-  (let ((kuro-log-errors t))
-    (when (get-buffer kuro--log-buffer-name)
-      (kill-buffer kuro--log-buffer-name))
-    (unwind-protect
-        (let ((buf (get-buffer-create kuro--log-buffer-name)))
-          (with-current-buffer buf
-            (unless (derived-mode-p 'special-mode) (special-mode))
-            (let ((inhibit-read-only t))
-              ;; Fill to exactly twice the max so the post-truncation size is
-              ;; kuro--log-max-size/2 + the new entry (a short line), still
-              ;; well under kuro--log-max-size.
-              (insert (make-string (* 2 kuro--log-max-size) ?z))
-              (insert "\n")))
-          (kuro--log '(error "size-check"))
-          (should (< (with-current-buffer buf (buffer-size))
-                     kuro--log-max-size)))
-      (when (get-buffer kuro--log-buffer-name)
-        (kill-buffer kuro--log-buffer-name)))))
+  (kuro-ffi-test--with-log-buf buf
+      ((insert (make-string (* 2 kuro--log-max-size) ?z))
+       (insert "\n"))
+    (kuro--log '(error "size-check"))
+    (should (< (with-current-buffer buf (buffer-size)) kuro--log-max-size))))
 
 (ert-deftest kuro-ffi-ext-log-truncation-fires-at-threshold ()
   "Truncation fires when buffer size is just over kuro--log-max-size."
-  (let ((kuro-log-errors t))
-    (when (get-buffer kuro--log-buffer-name)
-      (kill-buffer kuro--log-buffer-name))
-    (unwind-protect
-        (let ((buf (get-buffer-create kuro--log-buffer-name)))
-          (with-current-buffer buf
-            (unless (derived-mode-p 'special-mode) (special-mode))
-            (let ((inhibit-read-only t))
-              ;; Fill to exactly kuro--log-max-size; the new kuro--log entry
-              ;; will push it just over the threshold.
-              (insert "AT-THRESHOLD-MARKER\n")
-              (insert (make-string kuro--log-max-size ?t))))
-          ;; This call should push size over max and trigger truncation.
-          (kuro--log '(error "threshold-entry"))
-          ;; The old sentinel written before the pad should be gone.
-          (let ((content (with-current-buffer buf (buffer-string))))
-            (should-not (string-match-p "AT-THRESHOLD-MARKER" content))))
-      (when (get-buffer kuro--log-buffer-name)
-        (kill-buffer kuro--log-buffer-name)))))
+  (kuro-ffi-test--with-log-buf buf
+      ((insert "AT-THRESHOLD-MARKER\n")
+       (insert (make-string kuro--log-max-size ?t)))
+    (kuro--log '(error "threshold-entry"))
+    (should-not (string-match-p "AT-THRESHOLD-MARKER"
+                                (with-current-buffer buf (buffer-string))))))
 
 (provide 'kuro-ffi-test-2)
 

@@ -179,16 +179,33 @@ has not been loaded yet."
 ;; kuro--get-scroll-offset is tested in kuro-ffi-osc-test.el.
 ;; kuro--get-keyboard-flags is tested in kuro-ffi-modes-test.el.
 
+(defconst kuro-ffi-test--nil-when-not-initialized-table
+  '((kuro-ffi-get-cursor-nil-when-not-initialized               kuro--get-cursor)
+    (kuro-ffi-clear-scrollback-returns-nil-when-not-initialized kuro--clear-scrollback)
+    (kuro-ffi-poll-updates-with-faces-nil-when-not-initialized  kuro--poll-updates-with-faces)
+    (kuro-ffi-is-process-alive-nil-when-not-initialized         kuro--is-process-alive))
+  "Table of (test-name fn-sym) for zero-arity FFI wrappers that return nil when not initialized.")
+
+(defmacro kuro-ffi-test--def-nil-when-not-init (test-name fn-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' returns nil when `kuro--initialized' is nil." fn-sym)
+     (let ((kuro--initialized nil))
+       (should-not (,fn-sym)))))
+
+(ert-deftest kuro-ffi-test--all-nil-when-not-initialized-correct ()
+  "Every entry in `kuro-ffi-test--nil-when-not-initialized-table' returns nil when uninitialized."
+  (dolist (entry kuro-ffi-test--nil-when-not-initialized-table)
+    (pcase-let ((`(,_name ,fn-sym) entry))
+      (let ((kuro--initialized nil))
+        (should-not (funcall fn-sym))))))
+
 (ert-deftest kuro-ffi-get-cursor-returns-pair ()
   "kuro--get-cursor returns a (row . col) pair from the stub."
   (kuro-ffi-test--with-stub kuro-core-get-cursor (lambda (_id) '(3 . 7))
     (let ((pos (kuro--get-cursor)))
       (should (equal pos '(3 . 7))))))
 
-(ert-deftest kuro-ffi-get-cursor-nil-when-not-initialized ()
-  "kuro--get-cursor returns nil when not initialized (not the fallback, since kuro--call uses `when')."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--get-cursor))))
+(kuro-ffi-test--def-nil-when-not-init kuro-ffi-get-cursor-nil-when-not-initialized kuro--get-cursor)
 
 ;;; Group 6: Poll functions
 
@@ -203,10 +220,7 @@ has not been loaded yet."
 
 ;;; Group 7: Scrollback
 
-(ert-deftest kuro-ffi-clear-scrollback-returns-nil-when-not-initialized ()
-  "kuro--clear-scrollback returns nil when not initialized."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--clear-scrollback))))
+(kuro-ffi-test--def-nil-when-not-init kuro-ffi-clear-scrollback-returns-nil-when-not-initialized kuro--clear-scrollback)
 
 (ert-deftest kuro-ffi-clear-scrollback-calls-core-when-initialized ()
   "kuro--clear-scrollback calls kuro-core-clear-scrollback when initialized."
@@ -218,10 +232,7 @@ has not been loaded yet."
 
 ;;; Group 8: Remaining FFI wrappers (poll-updates-with-faces, resize, is-process-alive)
 
-(ert-deftest kuro-ffi-poll-updates-with-faces-nil-when-not-initialized ()
-  "kuro--poll-updates-with-faces returns nil when not initialized."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--poll-updates-with-faces))))
+(kuro-ffi-test--def-nil-when-not-init kuro-ffi-poll-updates-with-faces-nil-when-not-initialized kuro--poll-updates-with-faces)
 
 (ert-deftest kuro-ffi-poll-updates-with-faces-calls-core-when-initialized ()
   "kuro--poll-updates-with-faces calls kuro-core-poll-updates-with-faces."
@@ -251,12 +262,7 @@ has not been loaded yet."
       (should (= received-rows 30))
       (should (= received-cols 120)))))
 
-(ert-deftest kuro-ffi-is-process-alive-nil-when-not-initialized ()
-  "kuro--is-process-alive returns nil when not initialized.
-Note: the fallback in kuro--call t is NOT reached when uninitialized;
-`when' short-circuits and returns nil regardless of the fallback value."
-  (let ((kuro--initialized nil))
-    (should-not (kuro--is-process-alive))))
+(kuro-ffi-test--def-nil-when-not-init kuro-ffi-is-process-alive-nil-when-not-initialized kuro--is-process-alive)
 
 (ert-deftest kuro-ffi-is-process-alive-returns-core-value-when-initialized ()
   "kuro--is-process-alive returns the value from kuro-core-is-process-alive."

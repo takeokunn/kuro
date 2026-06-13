@@ -68,18 +68,14 @@
 
 (ert-deftest kuro-input-mode-test-line-self-insert-increments-point ()
   "`kuro--line-self-insert' increments `kuro--line-point' after inserting."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
+  (kuro-input-mode-test--with-line "" 0
    (setq last-command-event ?a)
    (kuro--line-self-insert)
    (should (= kuro--line-point 1))))
 
 (ert-deftest kuro-input-mode-test-line-insert-at-middle-inserts-correctly ()
   "Inserting with point in the middle inserts at the correct position."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "ac")
-   (setq kuro--line-point 1)
+  (kuro-input-mode-test--with-line "ac" 1
    (setq last-command-event ?b)
    (kuro--line-self-insert)
    (should (string= kuro--line-buffer "abc"))
@@ -87,141 +83,96 @@
 
 (ert-deftest kuro-input-mode-test-line-delete-decrements-point ()
   "`kuro--line-delete' decrements `kuro--line-point' after removing a char."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "hi")
-   (setq kuro--line-point 2)
+  (kuro-input-mode-test--with-line "hi" 2
    (kuro--line-delete)
    (should (string= kuro--line-buffer "h"))
    (should (= kuro--line-point 1))))
 
 (ert-deftest kuro-input-mode-test-line-forward-char-moves-right ()
   "`kuro--line-forward-char' increments `kuro--line-point'."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "abc" 0
    (kuro--line-forward-char)
    (should (= kuro--line-point 1))))
 
 (ert-deftest kuro-input-mode-test-line-forward-char-clamps-at-eol ()
   "`kuro--line-forward-char' at EOL stays at EOL."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 3)
+  (kuro-input-mode-test--with-line "abc" 3
    (kuro--line-forward-char)
    (should (= kuro--line-point 3))))
 
 (ert-deftest kuro-input-mode-test-line-backward-char-moves-left ()
   "`kuro--line-backward-char' decrements `kuro--line-point'."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 3)
+  (kuro-input-mode-test--with-line "abc" 3
    (kuro--line-backward-char)
    (should (= kuro--line-point 2))))
 
 (ert-deftest kuro-input-mode-test-line-backward-char-clamps-at-bol ()
   "`kuro--line-backward-char' at BOL stays at 0."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "abc" 0
    (kuro--line-backward-char)
    (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-line-beginning-of-line-moves-to-bol ()
   "`kuro--line-beginning-of-line' sets `kuro--line-point' to 0."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "hello")
-   (setq kuro--line-point 5)
+  (kuro-input-mode-test--with-line "hello" 5
    (kuro--line-beginning-of-line)
    (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-line-end-of-line-moves-to-eol ()
   "`kuro--line-end-of-line' sets `kuro--line-point' to (length buffer)."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "hello")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "hello" 0
    (kuro--line-end-of-line)
    (should (= kuro--line-point 5))))
 
 (ert-deftest kuro-input-mode-test-line-forward-word-skips-word ()
   "`kuro--line-forward-word' moves past the next word."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git status")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "git status" 0
    (kuro--line-forward-word)
    (should (= kuro--line-point 3))))
 
 (ert-deftest kuro-input-mode-test-line-backward-word-skips-word ()
   "`kuro--line-backward-word' moves to start of previous word."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git status")
-   (setq kuro--line-point 10)
+  (kuro-input-mode-test--with-line "git status" 10
    (kuro--line-backward-word)
    (should (= kuro--line-point 4))))
 
 (ert-deftest kuro-input-mode-test-line-kill-word-kills-forward ()
   "`kuro--line-kill-word' kills from point to end of next word."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git status")
-   (setq kuro--line-point 4)
+  (kuro-input-mode-test--with-line "git status" 4
    (kuro--line-kill-word)
    (should (string= kuro--line-buffer "git "))
    (should (= kuro--line-point 4))))
 
 (ert-deftest kuro-input-mode-test-line-backward-kill-word-kills-backward ()
   "`kuro--line-backward-kill-word' kills from start of previous word to point."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git status")
-   (setq kuro--line-point 10)
+  (kuro-input-mode-test--with-line "git status" 10
    (kuro--line-backward-kill-word)
    (should (string= kuro--line-buffer "git "))
    (should (= kuro--line-point 4))))
 
 (ert-deftest kuro-input-mode-test-line-delete-char-deletes-at-point ()
   "`kuro--line-delete-char' removes the character at `kuro--line-point'."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 1)
+  (kuro-input-mode-test--with-line "abc" 1
    (kuro--line-delete-char)
    (should (string= kuro--line-buffer "ac"))
    (should (= kuro--line-point 1))))
 
 (ert-deftest kuro-input-mode-test-line-delete-char-noop-at-eol ()
   "`kuro--line-delete-char' is a no-op when point is at EOL."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 3)
+  (kuro-input-mode-test--with-line "abc" 3
    (kuro--line-delete-char)
    (should (string= kuro--line-buffer "abc"))))
 
 (ert-deftest kuro-input-mode-test-line-kill-to-bol-kills-backward ()
   "`kuro--line-kill-to-bol' kills from BOL to point."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git status")
-   (setq kuro--line-point 4)
+  (kuro-input-mode-test--with-line "git status" 4
    (kuro--line-kill-to-bol)
    (should (string= kuro--line-buffer "status"))
    (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-line-transpose-chars ()
   "`kuro--line-transpose-chars' swaps the char before and at point."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abcd")
-   (setq kuro--line-point 2)
+  (kuro-input-mode-test--with-line "abcd" 2
    (kuro--line-transpose-chars)
    (should (string= kuro--line-buffer "acbd"))))
 
@@ -246,40 +197,28 @@
 
 (ert-deftest kuro-input-mode-test-line-yank-inserts-kill-at-point ()
   "`kuro--line-yank' inserts the current kill at `kuro--line-point'."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "ac")
-   (setq kuro--line-point 1)
+  (kuro-input-mode-test--with-line "ac" 1
    (let ((kill-ring '("b")))
      (kuro--line-yank)
      (should (string= kuro--line-buffer "abc")))))
 
 (ert-deftest kuro-input-mode-test-line-yank-advances-point ()
   "`kuro--line-yank' advances `kuro--line-point' past the inserted text."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "" 0
    (let ((kill-ring '("hello")))
      (kuro--line-yank)
      (should (= kuro--line-point 5)))))
 
 (ert-deftest kuro-input-mode-test-line-yank-sets-yank-length ()
   "`kuro--line-yank' sets `kuro--line-yank-length' to the kill length."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "" 0
    (let ((kill-ring '("world")))
      (kuro--line-yank)
      (should (= kuro--line-yank-length 5)))))
 
 (ert-deftest kuro-input-mode-test-line-yank-noop-on-empty-kill-ring ()
   "`kuro--line-yank' is a no-op when the kill ring is empty."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "abc")
-   (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-line "abc" 0
    (let ((kill-ring nil))
      (kuro--line-yank)
      (should (string= kuro--line-buffer "abc"))
@@ -287,10 +226,7 @@
 
 (ert-deftest kuro-input-mode-test-line-yank-at-eol ()
   "`kuro--line-yank' at EOL appends to the buffer."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "git ")
-   (setq kuro--line-point 4)
+  (kuro-input-mode-test--with-line "git " 4
    (let ((kill-ring '("status")))
      (kuro--line-yank)
      (should (string= kuro--line-buffer "git status"))
@@ -298,10 +234,7 @@
 
 (ert-deftest kuro-input-mode-test-line-yank-pop-replaces-last-yank ()
   "`kuro--line-yank-pop' replaces the most recently yanked text."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (setq kuro--line-buffer "hello")
-   (setq kuro--line-point 5)
+  (kuro-input-mode-test--with-line "hello" 5
    (setq kuro--line-yank-length 5)
    (let ((kill-ring '("hello" "world"))
          (kill-ring-yank-pointer nil))
@@ -313,8 +246,7 @@
 
 (ert-deftest kuro-input-mode-test-line-yank-pop-errors-without-prior-yank ()
   "`kuro--line-yank-pop' signals user-error when previous command was not a yank."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
+  (kuro-input-mode-test--with-line "" 0
    (let ((last-command 'self-insert-command))
      (should-error (kuro--line-yank-pop) :type 'user-error))))
 

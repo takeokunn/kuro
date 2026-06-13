@@ -50,6 +50,7 @@
                kuro-core-attach
                kuro-core-list-sessions
                kuro-core-poll-eval-commands
+               kuro-core-poll-hyperlink-ranges
                kuro-core-get-cwd-host
                kuro-core-get-mouse-tracking-mode
                kuro-core-is-alt-screen-active

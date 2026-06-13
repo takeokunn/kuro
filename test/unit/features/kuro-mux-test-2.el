@@ -6,6 +6,40 @@
 (require 'kuro-config)
 (require 'kuro-mux)
 
+;;; Shared tables — commandp and prefix-map bindings
+
+(defconst kuro-mux-test--commandp-table
+  '((kuro-mux-test-clock-is-interactive          kuro-mux-clock)
+    (kuro-mux-test-send-to-session-is-interactive kuro-mux-send-to-session)
+    (kuro-mux-test-select-by-index-is-interactive kuro-mux-select-by-index)
+    (kuro-mux-test-broadcast-toggle-is-interactive kuro-mux-broadcast-toggle)
+    (kuro-mux-test-resize-pane-is-interactive     kuro-mux-resize-pane)
+    (kuro-mux-test-swap-pane-forward-is-interactive kuro-mux-swap-pane-forward)
+    (kuro-mux-test-swap-pane-backward-is-interactive kuro-mux-swap-pane-backward)
+    (kuro-mux-test-other-window-is-interactive    kuro-mux-other-window)
+    (kuro-mux-test-last-is-interactive            kuro-mux-last))
+  "Table of (test-name fn-sym) for kuro-mux commandp assertions.")
+
+(defmacro kuro-mux-test--def-commandp (test-name fn-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' is an interactive command." fn-sym)
+     (should (commandp #',fn-sym))))
+
+(defconst kuro-mux-test--prefix-map-binding-table
+  '((kuro-mux-test-clock-bound-in-prefix-map            "t" kuro-mux-clock)
+    (kuro-mux-test-send-to-session-bound-in-prefix-map  "x" kuro-mux-send-to-session)
+    (kuro-mux-test-broadcast-B-bound-in-prefix-map      "B" kuro-mux-broadcast-toggle)
+    (kuro-mux-test-swap-forward-bound-in-prefix-map     "}" kuro-mux-swap-pane-forward)
+    (kuro-mux-test-swap-backward-bound-in-prefix-map    "{" kuro-mux-swap-pane-backward)
+    (kuro-mux-test-other-window-bound-in-prefix-map     "o" kuro-mux-other-window)
+    (kuro-mux-test-last-bound-in-prefix-map             "L" kuro-mux-last))
+  "Table of (test-name key-str fn-sym) for kuro-mux-prefix-map exact binding assertions.")
+
+(defmacro kuro-mux-test--def-prefix-map-binding (test-name key-str fn-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-prefix-map' binds %S to `%s'." key-str fn-sym)
+     (should (eq (lookup-key kuro-mux-prefix-map (kbd ,key-str)) #',fn-sym))))
+
 ;;; Group 15 — kuro-mux-detach / kuro-mux-zoom / kuro-mux-kill behaviour
 
 (ert-deftest kuro-mux-test-detach-errors-outside-kuro-mode ()
@@ -76,19 +110,12 @@
 
 ;;; Group 16 — kuro-mux-clock
 
-(ert-deftest kuro-mux-test-clock-is-interactive ()
-  "`kuro-mux-clock' is an interactive command."
-  (should (commandp #'kuro-mux-clock)))
-
-(ert-deftest kuro-mux-test-clock-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds t to kuro-mux-clock."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "t")) #'kuro-mux-clock)))
+(kuro-mux-test--def-commandp         kuro-mux-test-clock-is-interactive   kuro-mux-clock)
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-clock-bound-in-prefix-map "t" kuro-mux-clock)
 
 ;;; Group 17 — kuro-mux-send-to-session
 
-(ert-deftest kuro-mux-test-send-to-session-is-interactive ()
-  "`kuro-mux-send-to-session' is an interactive command."
-  (should (commandp #'kuro-mux-send-to-session)))
+(kuro-mux-test--def-commandp kuro-mux-test-send-to-session-is-interactive kuro-mux-send-to-session)
 
 (ert-deftest kuro-mux-test-send-to-session-errors-on-unknown-name ()
   "`kuro-mux-send-to-session' signals user-error for an unknown session name."
@@ -111,45 +138,56 @@
           (should (equal sent-text "hello\n")))
       (kill-buffer target-buf))))
 
-(ert-deftest kuro-mux-test-send-to-session-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds x to kuro-mux-send-to-session."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "x")) #'kuro-mux-send-to-session)))
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-send-to-session-bound-in-prefix-map "x" kuro-mux-send-to-session)
 
 ;;; Group 18 — kuro-mux-select-by-index
 
-(ert-deftest kuro-mux-test-select-by-index-is-interactive ()
-  "`kuro-mux-select-by-index' is an interactive command."
-  (should (commandp #'kuro-mux-select-by-index)))
+(kuro-mux-test--def-commandp kuro-mux-test-select-by-index-is-interactive kuro-mux-select-by-index)
 
-(ert-deftest kuro-mux-test-select-by-index-switches-to-first-session ()
-  "`kuro-mux-select-by-index' index 1 switches to the oldest session."
-  (let ((buf-a (generate-new-buffer "*kuro-idx-test-a*"))
-        (buf-b (generate-new-buffer "*kuro-idx-test-b*"))
-        (switched-to nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro-mux--live-sessions)
-                   (lambda () (list buf-a buf-b)))
-                  ((symbol-function 'switch-to-buffer)
-                   (lambda (buf) (setq switched-to buf))))
-          (kuro-mux-select-by-index 1)
-          (should (eq switched-to buf-a)))
-      (kill-buffer buf-a)
-      (kill-buffer buf-b))))
+(defconst kuro-mux-test--select-by-index-table
+  '((kuro-mux-test-select-by-index-switches-to-first-session  1)
+    (kuro-mux-test-select-by-index-switches-to-second-session 2))
+  "Table of (test-name idx) for `kuro-mux-select-by-index' session switching.")
 
-(ert-deftest kuro-mux-test-select-by-index-switches-to-second-session ()
-  "`kuro-mux-select-by-index' index 2 switches to the second session."
-  (let ((buf-a (generate-new-buffer "*kuro-idx2-test-a*"))
-        (buf-b (generate-new-buffer "*kuro-idx2-test-b*"))
-        (switched-to nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro-mux--live-sessions)
-                   (lambda () (list buf-a buf-b)))
-                  ((symbol-function 'switch-to-buffer)
-                   (lambda (buf) (setq switched-to buf))))
-          (kuro-mux-select-by-index 2)
-          (should (eq switched-to buf-b)))
-      (kill-buffer buf-a)
-      (kill-buffer buf-b))))
+(defmacro kuro-mux-test--def-select-by-index (test-name idx)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-select-by-index' index %d switches to the %s session."
+              idx (if (= idx 1) "first" "second"))
+     (let ((buf-a (generate-new-buffer "*kuro-idx-test-a*"))
+           (buf-b (generate-new-buffer "*kuro-idx-test-b*"))
+           (switched-to nil))
+       (unwind-protect
+           (cl-letf (((symbol-function 'kuro-mux--live-sessions)
+                      (lambda () (list buf-a buf-b)))
+                     ((symbol-function 'switch-to-buffer)
+                      (lambda (buf) (setq switched-to buf))))
+             (kuro-mux-select-by-index ,idx)
+             ,(if (= idx 1)
+                  `(should (eq switched-to buf-a))
+                `(should (eq switched-to buf-b))))
+         (kill-buffer buf-a)
+         (kill-buffer buf-b)))))
+
+(kuro-mux-test--def-select-by-index kuro-mux-test-select-by-index-switches-to-first-session  1)
+(kuro-mux-test--def-select-by-index kuro-mux-test-select-by-index-switches-to-second-session 2)
+
+(ert-deftest kuro-mux-test--all-select-by-index-correct ()
+  "All entries in `kuro-mux-test--select-by-index-table' switch to the correct session."
+  (dolist (entry kuro-mux-test--select-by-index-table)
+    (pcase-let ((`(,_name ,idx) entry))
+      (let ((buf-a (generate-new-buffer "*kuro-idx-inv-a*"))
+            (buf-b (generate-new-buffer "*kuro-idx-inv-b*"))
+            (switched-to nil))
+        (unwind-protect
+            (cl-letf (((symbol-function 'kuro-mux--live-sessions)
+                       (lambda () (list buf-a buf-b)))
+                      ((symbol-function 'switch-to-buffer)
+                       (lambda (buf) (setq switched-to buf))))
+              (kuro-mux-select-by-index idx)
+              (let ((expected (if (= idx 1) buf-a buf-b)))
+                (should (eq switched-to expected))))
+          (kill-buffer buf-a)
+          (kill-buffer buf-b))))))
 
 (ert-deftest kuro-mux-test-select-by-index-errors-when-out-of-range ()
   "`kuro-mux-select-by-index' signals user-error for an out-of-range index."
@@ -157,35 +195,71 @@
              (lambda () (list (current-buffer)))))
     (should-error (kuro-mux-select-by-index 5) :type 'user-error)))
 
-(ert-deftest kuro-mux-test-select-by-index-1-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds key 1 to a command (lambda for index 1)."
-  (should (commandp (lookup-key kuro-mux-prefix-map (kbd "1")))))
+(defconst kuro-mux-test--select-index-key-table
+  '((kuro-mux-test-select-by-index-1-bound "1")
+    (kuro-mux-test-select-by-index-2-bound "2")
+    (kuro-mux-test-select-by-index-3-bound "3")
+    (kuro-mux-test-select-by-index-4-bound "4")
+    (kuro-mux-test-select-by-index-5-bound "5")
+    (kuro-mux-test-select-by-index-6-bound "6")
+    (kuro-mux-test-select-by-index-7-bound "7")
+    (kuro-mux-test-select-by-index-8-bound "8")
+    (kuro-mux-test-select-by-index-9-bound "9"))
+  "Table of (test-name key-str) verifying all 9 index keys are bound in `kuro-mux-prefix-map'.")
 
-(ert-deftest kuro-mux-test-select-by-index-9-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds key 9 to a command (lambda for index 9)."
-  (should (commandp (lookup-key kuro-mux-prefix-map (kbd "9")))))
+(defmacro kuro-mux-test--def-select-index-key (test-name key-str)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-prefix-map' binds key %S to a command." key-str)
+     (should (commandp (lookup-key kuro-mux-prefix-map (kbd ,key-str))))))
+
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-1-bound "1")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-2-bound "2")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-3-bound "3")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-4-bound "4")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-5-bound "5")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-6-bound "6")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-7-bound "7")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-8-bound "8")
+(kuro-mux-test--def-select-index-key kuro-mux-test-select-by-index-9-bound "9")
+
+(ert-deftest kuro-mux-test-select-by-index--all-keys-bound ()
+  "All 9 digit keys in `kuro-mux-prefix-map' map to commands."
+  (dolist (entry kuro-mux-test--select-index-key-table)
+    (pcase-let ((`(,_name ,key-str) entry))
+      (should (commandp (lookup-key kuro-mux-prefix-map (kbd key-str)))))))
 
 ;;; Group 19 — kuro-mux-broadcast-mode
 
-(ert-deftest kuro-mux-test-broadcast-toggle-is-interactive ()
-  "`kuro-mux-broadcast-toggle' is an interactive command."
-  (should (commandp #'kuro-mux-broadcast-toggle)))
+(kuro-mux-test--def-commandp kuro-mux-test-broadcast-toggle-is-interactive kuro-mux-broadcast-toggle)
 
 (ert-deftest kuro-mux-test-broadcast-mode-off-by-default ()
   "`kuro-mux--broadcast-mode' defaults to nil."
   (should (null (default-value 'kuro-mux--broadcast-mode))))
 
-(ert-deftest kuro-mux-test-broadcast-toggle-enables-mode ()
-  "`kuro-mux-broadcast-toggle' sets kuro-mux--broadcast-mode to non-nil."
-  (let ((kuro-mux--broadcast-mode nil))
-    (kuro-mux-broadcast-toggle)
-    (should kuro-mux--broadcast-mode)))
+(defconst kuro-mux-test--broadcast-toggle-table
+  '((kuro-mux-test-broadcast-toggle-enables-mode  nil t)
+    (kuro-mux-test-broadcast-toggle-disables-mode t   nil))
+  "Table of (test-name init-val expectedp) for `kuro-mux-broadcast-toggle' state toggle.")
 
-(ert-deftest kuro-mux-test-broadcast-toggle-disables-mode ()
-  "`kuro-mux-broadcast-toggle' clears kuro-mux--broadcast-mode when already set."
-  (let ((kuro-mux--broadcast-mode t))
-    (kuro-mux-broadcast-toggle)
-    (should-not kuro-mux--broadcast-mode)))
+(defmacro kuro-mux-test--def-broadcast-toggle (test-name init-val expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-broadcast-toggle' %s mode." (if expectedp "enables" "disables"))
+     (let ((kuro-mux--broadcast-mode ,init-val))
+       (kuro-mux-broadcast-toggle)
+       ,(if expectedp `(should kuro-mux--broadcast-mode) `(should-not kuro-mux--broadcast-mode)))))
+
+(kuro-mux-test--def-broadcast-toggle kuro-mux-test-broadcast-toggle-enables-mode  nil t)
+(kuro-mux-test--def-broadcast-toggle kuro-mux-test-broadcast-toggle-disables-mode t   nil)
+
+(ert-deftest kuro-mux-test--all-broadcast-toggles-correct ()
+  "All entries in `kuro-mux-test--broadcast-toggle-table' toggle correctly."
+  (dolist (entry kuro-mux-test--broadcast-toggle-table)
+    (pcase-let ((`(,_name ,init-val ,expectedp) entry))
+      (let ((kuro-mux--broadcast-mode init-val))
+        (kuro-mux-broadcast-toggle)
+        (if expectedp
+            (should kuro-mux--broadcast-mode)
+          (should-not kuro-mux--broadcast-mode))))))
 
 (ert-deftest kuro-mux-test-broadcast-send-noop-when-mode-off ()
   "`kuro-mux--broadcast-send' does not call kuro--send-paste-or-raw when mode is off."
@@ -215,45 +289,40 @@
           (should (equal (cdar sent-to) "test-input")))
       (kill-buffer buf-b))))
 
-(ert-deftest kuro-mux-test-broadcast-B-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds B to kuro-mux-broadcast-toggle."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "B")) #'kuro-mux-broadcast-toggle)))
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-broadcast-B-bound-in-prefix-map "B" kuro-mux-broadcast-toggle)
 
 ;;; Group 20 — kuro-mux-resize-pane + session index + mode-line segment
 
-(ert-deftest kuro-mux-test-resize-pane-is-interactive ()
-  "`kuro-mux-resize-pane' is an interactive command."
-  (should (commandp #'kuro-mux-resize-pane)))
+(kuro-mux-test--def-commandp kuro-mux-test-resize-pane-is-interactive kuro-mux-resize-pane)
 
-(ert-deftest kuro-mux-test-resize-pane-up-calls-enlarge-window ()
-  "`kuro-mux-resize-pane' up calls enlarge-window with the given delta."
-  (let ((called-n nil))
-    (cl-letf (((symbol-function 'enlarge-window) (lambda (n) (setq called-n n))))
-      (kuro-mux-resize-pane 'up 3)
-      (should (= called-n 3)))))
+(defconst kuro-mux-test--resize-pane-table
+  '((kuro-mux-test-resize-pane-up-calls-enlarge-window                 up    enlarge-window                3)
+    (kuro-mux-test-resize-pane-down-calls-shrink-window                down  shrink-window                 2)
+    (kuro-mux-test-resize-pane-left-calls-shrink-window-horizontally   left  shrink-window-horizontally    5)
+    (kuro-mux-test-resize-pane-right-calls-enlarge-window-horizontally right enlarge-window-horizontally   4))
+  "Table of (test-name dir fn delta) for `kuro-mux-resize-pane' direction dispatch.")
 
-(ert-deftest kuro-mux-test-resize-pane-down-calls-shrink-window ()
-  "`kuro-mux-resize-pane' down calls shrink-window with the given delta."
-  (let ((called-n nil))
-    (cl-letf (((symbol-function 'shrink-window) (lambda (n) (setq called-n n))))
-      (kuro-mux-resize-pane 'down 2)
-      (should (= called-n 2)))))
+(defmacro kuro-mux-test--def-resize-pane (test-name dir fn delta)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-resize-pane' %s calls `%s' with the given delta." dir fn)
+     (let ((called-n nil))
+       (cl-letf (((symbol-function ',fn) (lambda (n) (setq called-n n))))
+         (kuro-mux-resize-pane ',dir ,delta)
+         (should (= called-n ,delta))))))
 
-(ert-deftest kuro-mux-test-resize-pane-left-calls-shrink-window-horizontally ()
-  "`kuro-mux-resize-pane' left calls shrink-window-horizontally."
-  (let ((called-n nil))
-    (cl-letf (((symbol-function 'shrink-window-horizontally)
-               (lambda (n) (setq called-n n))))
-      (kuro-mux-resize-pane 'left 5)
-      (should (= called-n 5)))))
+(kuro-mux-test--def-resize-pane kuro-mux-test-resize-pane-up-calls-enlarge-window                 up    enlarge-window                3)
+(kuro-mux-test--def-resize-pane kuro-mux-test-resize-pane-down-calls-shrink-window                down  shrink-window                 2)
+(kuro-mux-test--def-resize-pane kuro-mux-test-resize-pane-left-calls-shrink-window-horizontally   left  shrink-window-horizontally    5)
+(kuro-mux-test--def-resize-pane kuro-mux-test-resize-pane-right-calls-enlarge-window-horizontally right enlarge-window-horizontally   4)
 
-(ert-deftest kuro-mux-test-resize-pane-right-calls-enlarge-window-horizontally ()
-  "`kuro-mux-resize-pane' right calls enlarge-window-horizontally."
-  (let ((called-n nil))
-    (cl-letf (((symbol-function 'enlarge-window-horizontally)
-               (lambda (n) (setq called-n n))))
-      (kuro-mux-resize-pane 'right 4)
-      (should (= called-n 4)))))
+(ert-deftest kuro-mux-test--all-resize-pane-directions-correct ()
+  "All entries in `kuro-mux-test--resize-pane-table' dispatch to the correct window fn."
+  (dolist (entry kuro-mux-test--resize-pane-table)
+    (pcase-let ((`(,_name ,dir ,fn ,delta) entry))
+      (let ((called-n nil))
+        (cl-letf (((symbol-function fn) (lambda (n) (setq called-n n))))
+          (kuro-mux-resize-pane dir delta)
+          (should (= called-n delta)))))))
 
 (ert-deftest kuro-mux-test-resize-pane-errors-on-invalid-direction ()
   "`kuro-mux-resize-pane' signals user-error for an unknown direction."
@@ -299,59 +368,68 @@
 
 ;;; Group 21 — kuro-mux-swap-pane + mode-line segment installation
 
-(ert-deftest kuro-mux-test-swap-pane-forward-is-interactive ()
-  "`kuro-mux-swap-pane-forward' is an interactive command."
-  (should (commandp #'kuro-mux-swap-pane-forward)))
+(kuro-mux-test--def-commandp kuro-mux-test-swap-pane-forward-is-interactive  kuro-mux-swap-pane-forward)
+(kuro-mux-test--def-commandp kuro-mux-test-swap-pane-backward-is-interactive kuro-mux-swap-pane-backward)
 
-(ert-deftest kuro-mux-test-swap-pane-backward-is-interactive ()
-  "`kuro-mux-swap-pane-backward' is an interactive command."
-  (should (commandp #'kuro-mux-swap-pane-backward)))
+(defconst kuro-mux-test--swap-pane-error-table
+  '((kuro-mux-test-swap-pane-forward-errors-single-window  kuro-mux-swap-pane-forward  next-window)
+    (kuro-mux-test-swap-pane-backward-errors-single-window kuro-mux-swap-pane-backward previous-window))
+  "Table of (test-name fn-sym nav-fn) for swap-pane single-window user-error cases.")
 
-(ert-deftest kuro-mux-test-swap-pane-forward-errors-single-window ()
-  "`kuro-mux-swap-pane-forward' signals user-error when only one window is visible."
-  (cl-letf (((symbol-function 'next-window)
-             (lambda (&rest _) (selected-window))))
-    (should-error (kuro-mux-swap-pane-forward) :type 'user-error)))
+(defmacro kuro-mux-test--def-swap-pane-error (test-name fn-sym nav-fn)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' signals user-error when there is only one window." fn-sym)
+     (cl-letf (((symbol-function ',nav-fn)
+                (lambda (&rest _) (selected-window))))
+       (should-error (,fn-sym) :type 'user-error))))
 
-(ert-deftest kuro-mux-test-swap-pane-backward-errors-single-window ()
-  "`kuro-mux-swap-pane-backward' signals user-error when only one window is visible."
-  (cl-letf (((symbol-function 'previous-window)
-             (lambda (&rest _) (selected-window))))
-    (should-error (kuro-mux-swap-pane-backward) :type 'user-error)))
+(kuro-mux-test--def-swap-pane-error kuro-mux-test-swap-pane-forward-errors-single-window  kuro-mux-swap-pane-forward  next-window)
+(kuro-mux-test--def-swap-pane-error kuro-mux-test-swap-pane-backward-errors-single-window kuro-mux-swap-pane-backward previous-window)
 
-(ert-deftest kuro-mux-test-swap-pane-forward-calls-window-swap-states ()
-  "`kuro-mux-swap-pane-forward' passes (selected . next) to `window-swap-states'."
-  (let* ((win-a (selected-window))
-         (win-b (list 'window 'fake))
-         swapped-a swapped-b)
-    (cl-letf (((symbol-function 'next-window) (lambda (&rest _) win-b))
-              ((symbol-function 'window-swap-states)
-               (lambda (a b) (setq swapped-a a swapped-b b))))
-      (kuro-mux-swap-pane-forward)
-      (should (eq swapped-a win-a))
-      (should (eq swapped-b win-b)))))
+(ert-deftest kuro-mux-test--all-swap-pane-error-single-window ()
+  "Both swap-pane commands signal user-error when only one window is visible."
+  (dolist (entry kuro-mux-test--swap-pane-error-table)
+    (pcase-let ((`(,_name ,fn-sym ,nav-fn) entry))
+      (cl-letf (((symbol-function nav-fn) (lambda (&rest _) (selected-window))))
+        (should-error (funcall fn-sym) :type 'user-error)))))
 
-(ert-deftest kuro-mux-test-swap-pane-backward-calls-window-swap-states ()
-  "`kuro-mux-swap-pane-backward' passes (selected . prev) to `window-swap-states'."
-  (let* ((win-a (selected-window))
-         (win-b (list 'window 'fake))
-         swapped-a swapped-b)
-    (cl-letf (((symbol-function 'previous-window) (lambda (&rest _) win-b))
-              ((symbol-function 'window-swap-states)
-               (lambda (a b) (setq swapped-a a swapped-b b))))
-      (kuro-mux-swap-pane-backward)
-      (should (eq swapped-a win-a))
-      (should (eq swapped-b win-b)))))
+(defconst kuro-mux-test--swap-pane-call-table
+  '((kuro-mux-test-swap-pane-forward-calls-window-swap-states  kuro-mux-swap-pane-forward  next-window)
+    (kuro-mux-test-swap-pane-backward-calls-window-swap-states kuro-mux-swap-pane-backward previous-window))
+  "Table of (test-name fn-sym nav-fn) for swap-pane window-swap-states call assertions.")
 
-(ert-deftest kuro-mux-test-swap-forward-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds \"}\" to `kuro-mux-swap-pane-forward'."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "}"))
-              #'kuro-mux-swap-pane-forward)))
+(defmacro kuro-mux-test--def-swap-pane-call (test-name fn-sym nav-fn)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' passes (selected . %s-result) to `window-swap-states'." fn-sym nav-fn)
+     (let* ((win-a (selected-window))
+            (win-b (list 'window 'fake))
+            swapped-a swapped-b)
+       (cl-letf (((symbol-function ',nav-fn) (lambda (&rest _) win-b))
+                 ((symbol-function 'window-swap-states)
+                  (lambda (a b) (setq swapped-a a swapped-b b))))
+         (,fn-sym)
+         (should (eq swapped-a win-a))
+         (should (eq swapped-b win-b))))))
 
-(ert-deftest kuro-mux-test-swap-backward-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds \"{\" to `kuro-mux-swap-pane-backward'."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "{"))
-              #'kuro-mux-swap-pane-backward)))
+(kuro-mux-test--def-swap-pane-call kuro-mux-test-swap-pane-forward-calls-window-swap-states  kuro-mux-swap-pane-forward  next-window)
+(kuro-mux-test--def-swap-pane-call kuro-mux-test-swap-pane-backward-calls-window-swap-states kuro-mux-swap-pane-backward previous-window)
+
+(ert-deftest kuro-mux-test--all-swap-pane-calls-window-swap-states ()
+  "Both swap-pane commands route (selected . nav-result) to window-swap-states."
+  (dolist (entry kuro-mux-test--swap-pane-call-table)
+    (pcase-let ((`(,_name ,fn-sym ,nav-fn) entry))
+      (let* ((win-a (selected-window))
+             (win-b (list 'window 'fake))
+             swapped-a swapped-b)
+        (cl-letf (((symbol-function nav-fn) (lambda (&rest _) win-b))
+                  ((symbol-function 'window-swap-states)
+                   (lambda (a b) (setq swapped-a a swapped-b b))))
+          (funcall fn-sym)
+          (should (eq swapped-a win-a))
+          (should (eq swapped-b win-b)))))))
+
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-swap-forward-bound-in-prefix-map  "}" kuro-mux-swap-pane-forward)
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-swap-backward-bound-in-prefix-map "{" kuro-mux-swap-pane-backward)
 
 (ert-deftest kuro-mux-test-mode-line-segment-defcustom-default-t ()
   "`kuro-mux-mode-line-segment' defcustom defaults to t."
@@ -374,33 +452,44 @@
 
 ;;; Group 22 — kuro-mux-other-window + kuro-mux-last + last-session tracking
 
-(ert-deftest kuro-mux-test-other-window-is-interactive ()
-  "`kuro-mux-other-window' is an interactive command."
-  (should (commandp #'kuro-mux-other-window)))
+(kuro-mux-test--def-commandp kuro-mux-test-other-window-is-interactive kuro-mux-other-window)
 
-(ert-deftest kuro-mux-test-other-window-errors-no-kuro-panes ()
-  "`kuro-mux-other-window' signals user-error when no window shows a kuro buffer."
-  (cl-letf (((symbol-function 'window-list) (lambda () (list (selected-window))))
-            ((symbol-function 'window-buffer) (lambda (_) (current-buffer)))
-            ((symbol-function 'derived-mode-p) (lambda (&rest _) nil)))
-    (should-error (kuro-mux-other-window) :type 'user-error)))
+(defconst kuro-mux-test--other-window-error-table
+  '((kuro-mux-test-other-window-errors-no-kuro-panes  nil)
+    (kuro-mux-test-other-window-errors-single-pane    singleton))
+  "Table of (test-name windows-type) for `kuro-mux-other-window' error conditions.")
 
-(ert-deftest kuro-mux-test-other-window-errors-single-pane ()
-  "`kuro-mux-other-window' signals user-error when only one kuro window is visible."
-  (cl-letf (((symbol-function 'window-list) (lambda () (list (selected-window))))
-            ((symbol-function 'window-buffer) (lambda (_) (current-buffer)))
-            ((symbol-function 'derived-mode-p) (lambda (&rest _) t)))
-    (should-error (kuro-mux-other-window) :type 'user-error)))
+(defmacro kuro-mux-test--def-other-window-error (test-name windows-type)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-mux-other-window' errors when windows=%s." windows-type)
+     (cl-letf (((symbol-function 'kuro-mux--visible-windows)
+                ,(if (eq windows-type 'singleton)
+                     `(lambda () (list (selected-window)))
+                   `(lambda () nil))))
+       (should-error (kuro-mux-other-window) :type 'user-error))))
+
+(kuro-mux-test--def-other-window-error kuro-mux-test-other-window-errors-no-kuro-panes  nil)
+(kuro-mux-test--def-other-window-error kuro-mux-test-other-window-errors-single-pane    singleton)
+
+(ert-deftest kuro-mux-test--all-other-window-errors-correct ()
+  "All entries in `kuro-mux-test--other-window-error-table' produce user-errors."
+  (dolist (entry kuro-mux-test--other-window-error-table)
+    (pcase-let ((`(,_name ,windows-type) entry))
+      (cl-letf (((symbol-function 'kuro-mux--visible-windows)
+                 (if (eq windows-type 'singleton)
+                     (lambda () (list (selected-window)))
+                   (lambda () nil))))
+        (should-error (kuro-mux-other-window) :type 'user-error)))))
 
 (ert-deftest kuro-mux-test-other-window-selects-next-pane ()
   "`kuro-mux-other-window' selects the next window in the kuro-win list."
   (let* ((win-a (selected-window))
          (win-b (list 'window 'b))
          selected-win)
-    (cl-letf (((symbol-function 'window-list)   (lambda () (list win-a win-b)))
-              ((symbol-function 'window-buffer)  (lambda (_) (current-buffer)))
-              ((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'select-window)  (lambda (w) (setq selected-win w))))
+    (cl-letf (((symbol-function 'kuro-mux--visible-windows)
+               (lambda () (list win-a win-b)))
+              ((symbol-function 'select-window)
+               (lambda (w) (setq selected-win w))))
       (kuro-mux-other-window)
       (should (eq selected-win win-b)))))
 
@@ -409,21 +498,16 @@
   (let* ((win-a (list 'window 'a))
          (win-b (selected-window))
          selected-win)
-    (cl-letf (((symbol-function 'window-list)   (lambda () (list win-a win-b)))
-              ((symbol-function 'window-buffer)  (lambda (_) (current-buffer)))
-              ((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-              ((symbol-function 'select-window)  (lambda (w) (setq selected-win w))))
+    (cl-letf (((symbol-function 'kuro-mux--visible-windows)
+               (lambda () (list win-a win-b)))
+              ((symbol-function 'select-window)
+               (lambda (w) (setq selected-win w))))
       (kuro-mux-other-window)
       (should (eq selected-win win-a)))))
 
-(ert-deftest kuro-mux-test-other-window-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds \"o\" to `kuro-mux-other-window'."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "o"))
-              #'kuro-mux-other-window)))
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-other-window-bound-in-prefix-map "o" kuro-mux-other-window)
 
-(ert-deftest kuro-mux-test-last-is-interactive ()
-  "`kuro-mux-last' is an interactive command."
-  (should (commandp #'kuro-mux-last)))
+(kuro-mux-test--def-commandp kuro-mux-test-last-is-interactive kuro-mux-last)
 
 (ert-deftest kuro-mux-test-last-errors-when-no-previous ()
   "`kuro-mux-last' signals user-error when kuro-mux--last-session is nil."
@@ -449,10 +533,7 @@
           (should (eq switched-to target)))
       (kill-buffer target))))
 
-(ert-deftest kuro-mux-test-last-bound-in-prefix-map ()
-  "`kuro-mux-prefix-map' binds \"L\" to `kuro-mux-last'."
-  (should (eq (lookup-key kuro-mux-prefix-map (kbd "L"))
-              #'kuro-mux-last)))
+(kuro-mux-test--def-prefix-map-binding kuro-mux-test-last-bound-in-prefix-map "L" kuro-mux-last)
 
 (ert-deftest kuro-mux-test-track-installed-by-install-hooks ()
   "`kuro-mux--install-hooks' adds tracker to `window-selection-change-functions'."
@@ -472,6 +553,20 @@
     (kuro-mux--uninstall-hooks)
     (should-not (memq #'kuro-mux--track-window-change
                       window-selection-change-functions))))
+
+;;; Cross-group invariant dolist tests
+
+(ert-deftest kuro-mux-test--all-commands-are-interactive ()
+  "All kuro-mux-test--commandp-table entries are interactive commands."
+  (dolist (entry kuro-mux-test--commandp-table)
+    (pcase-let ((`(,_name ,fn-sym) entry))
+      (should (commandp fn-sym)))))
+
+(ert-deftest kuro-mux-test--all-prefix-map-bindings-correct ()
+  "All kuro-mux-test--prefix-map-binding-table entries bind the correct function."
+  (dolist (entry kuro-mux-test--prefix-map-binding-table)
+    (pcase-let ((`(,_name ,key-str ,fn-sym) entry))
+      (should (eq (lookup-key kuro-mux-prefix-map (kbd key-str)) fn-sym)))))
 
 (provide 'kuro-mux-test-2)
 ;;; kuro-mux-test-2.el ends here

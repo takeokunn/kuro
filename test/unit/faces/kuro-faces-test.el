@@ -90,25 +90,30 @@
 
 ;;; Group 3: kuro--rgb-to-emacs
 
-(ert-deftest kuro-faces-rgb-to-emacs-red ()
-  "0xFF0000 → #ff0000."
-  (should (equal (kuro--rgb-to-emacs #xFF0000) "#ff0000")))
+(defconst kuro-faces-test--rgb-to-emacs-table
+  '((kuro-faces-rgb-to-emacs-red   #xFF0000 "#ff0000")
+    (kuro-faces-rgb-to-emacs-green #x00FF00 "#00ff00")
+    (kuro-faces-rgb-to-emacs-blue  #x0000FF "#0000ff")
+    (kuro-faces-rgb-to-emacs-white #xFFFFFF "#ffffff")
+    (kuro-faces-rgb-to-emacs-black 0        "#000000"))
+  "Table of (test-name rgb-int expected-hex) for `kuro--rgb-to-emacs'.")
 
-(ert-deftest kuro-faces-rgb-to-emacs-green ()
-  "0x00FF00 → #00ff00."
-  (should (equal (kuro--rgb-to-emacs #x00FF00) "#00ff00")))
+(defmacro kuro-faces-test--def-rgb-to-emacs (test-name input expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--rgb-to-emacs' #x%X → %S." input expected)
+     (should (equal (kuro--rgb-to-emacs ,input) ,expected))))
 
-(ert-deftest kuro-faces-rgb-to-emacs-blue ()
-  "0x0000FF → #0000ff."
-  (should (equal (kuro--rgb-to-emacs #x0000FF) "#0000ff")))
+(kuro-faces-test--def-rgb-to-emacs kuro-faces-rgb-to-emacs-red   #xFF0000 "#ff0000")
+(kuro-faces-test--def-rgb-to-emacs kuro-faces-rgb-to-emacs-green #x00FF00 "#00ff00")
+(kuro-faces-test--def-rgb-to-emacs kuro-faces-rgb-to-emacs-blue  #x0000FF "#0000ff")
+(kuro-faces-test--def-rgb-to-emacs kuro-faces-rgb-to-emacs-white #xFFFFFF "#ffffff")
+(kuro-faces-test--def-rgb-to-emacs kuro-faces-rgb-to-emacs-black 0        "#000000")
 
-(ert-deftest kuro-faces-rgb-to-emacs-white ()
-  "0xFFFFFF → #ffffff."
-  (should (equal (kuro--rgb-to-emacs #xFFFFFF) "#ffffff")))
-
-(ert-deftest kuro-faces-rgb-to-emacs-black ()
-  "0x000000 → #000000."
-  (should (equal (kuro--rgb-to-emacs 0) "#000000")))
+(ert-deftest kuro-faces-test--all-rgb-to-emacs-produce-hex ()
+  "All kuro-faces-test--rgb-to-emacs-table entries produce the expected hex string."
+  (dolist (entry kuro-faces-test--rgb-to-emacs-table)
+    (pcase-let ((`(,_name ,input ,expected) entry))
+      (should (equal (kuro--rgb-to-emacs input) expected)))))
 
 ;;; Group 4: kuro--decode-ffi-color
 
@@ -116,12 +121,25 @@
   "#xFF000000 (sentinel) → :default."
   (should (eq (kuro--decode-ffi-color #xFF000000) :default)))
 
-(ert-deftest kuro-faces-decode-ffi-color-named-black ()
-  "Bit 31 set + index 0 → (named . \"black\")."
-  (let ((result (kuro--decode-ffi-color #x80000000)))
-    (should (consp result))
-    (should (eq (car result) 'named))
-    (should (equal (cdr result) "black"))))
+(defconst kuro-faces-test--decode-ffi-color-cons-table
+  '((kuro-faces-decode-ffi-color-named-black    #x80000000 named   "black")
+    (kuro-faces-decode-ffi-color-indexed         #x40000042 indexed #x42)
+    (kuro-faces-decode-ffi-color-rgb-true-black  0          rgb     0)
+    (kuro-faces-decode-ffi-color-rgb-red         #x00FF0000 rgb     #xFF0000))
+  "Table of (test-name enc type value) for `kuro--decode-ffi-color' cons results.")
+
+(defmacro kuro-faces-test--def-decode-ffi-color-cons (test-name enc type value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--decode-ffi-color' → (%s . %S)." type value)
+     (let ((result (kuro--decode-ffi-color ,enc)))
+       (should (consp result))
+       (should (eq  (car result) ',type))
+       (should (equal (cdr result) ,value)))))
+
+(kuro-faces-test--def-decode-ffi-color-cons kuro-faces-decode-ffi-color-named-black    #x80000000 named   "black")
+(kuro-faces-test--def-decode-ffi-color-cons kuro-faces-decode-ffi-color-indexed         #x40000042 indexed #x42)
+(kuro-faces-test--def-decode-ffi-color-cons kuro-faces-decode-ffi-color-rgb-true-black  0          rgb     0)
+(kuro-faces-test--def-decode-ffi-color-cons kuro-faces-decode-ffi-color-rgb-red         #x00FF0000 rgb     #xFF0000)
 
 (ert-deftest kuro-faces-decode-ffi-color-named-all-16 ()
   "Named color encoding for all 16 base colors (bit 31 + low byte)."
@@ -136,26 +154,14 @@
         (should (eq (car result) 'named))
         (should (equal (cdr result) (aref names i)))))))
 
-(ert-deftest kuro-faces-decode-ffi-color-indexed ()
-  "Bit 30 set + low byte → (indexed . N)."
-  (let ((result (kuro--decode-ffi-color #x40000042)))
-    (should (consp result))
-    (should (eq (car result) 'indexed))
-    (should (= (cdr result) #x42))))
-
-(ert-deftest kuro-faces-decode-ffi-color-rgb-true-black ()
-  "0x00000000 (true black) → (rgb . 0)."
-  (let ((result (kuro--decode-ffi-color 0)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) 0))))
-
-(ert-deftest kuro-faces-decode-ffi-color-rgb-red ()
-  "0x00FF0000 → (rgb . #xFF0000)."
-  (let ((result (kuro--decode-ffi-color #x00FF0000)))
-    (should (consp result))
-    (should (eq (car result) 'rgb))
-    (should (= (cdr result) #xFF0000))))
+(ert-deftest kuro-faces-decode-ffi-color-cons-table-all-correct ()
+  "Every entry in `kuro-faces-test--decode-ffi-color-cons-table' returns the expected cons."
+  (dolist (entry kuro-faces-test--decode-ffi-color-cons-table)
+    (pcase-let ((`(,_name ,enc ,type ,value) entry))
+      (let ((result (kuro--decode-ffi-color enc)))
+        (should (consp result))
+        (should (eq  (car result) type))
+        (should (equal (cdr result) value))))))
 
 ;;; Group 5: kuro--decode-attrs
 
@@ -173,54 +179,45 @@
     (should-not (plist-get decoded :strike-through))
     (should (= (plist-get decoded :underline-style) 0))))
 
-(ert-deftest kuro-faces-decode-attrs-bold ()
-  "Bit 0 (0x01) → :bold t."
-  (let ((decoded (kuro--decode-attrs #x01)))
-    (should (plist-get decoded :bold))
-    (should-not (plist-get decoded :italic))))
+(defconst kuro-faces-test--decode-attrs-flag-table
+  ;;  test-name                             flags  key             not-key
+  '((kuro-faces-decode-attrs-bold           #x001  :bold           :italic)
+    (kuro-faces-decode-attrs-dim            #x002  :dim            :bold)
+    (kuro-faces-decode-attrs-italic         #x004  :italic         nil)
+    (kuro-faces-decode-attrs-underline      #x008  :underline      nil)
+    (kuro-faces-decode-attrs-blink-slow     #x010  :blink-slow     :blink-fast)
+    (kuro-faces-decode-attrs-blink-fast     #x020  :blink-fast     :blink-slow)
+    (kuro-faces-decode-attrs-inverse        #x040  :inverse        nil)
+    (kuro-faces-decode-attrs-hidden         #x080  :hidden         nil)
+    (kuro-faces-decode-attrs-strikethrough  #x100  :strike-through nil))
+  "Table of (test-name flags key not-key) for single-bit `kuro--decode-attrs' checks.")
 
-(ert-deftest kuro-faces-decode-attrs-dim ()
-  "Bit 1 (0x02) → :dim t."
-  (let ((decoded (kuro--decode-attrs #x02)))
-    (should (plist-get decoded :dim))
-    (should-not (plist-get decoded :bold))))
+(defmacro kuro-faces-test--def-decode-attrs-flag (test-name flags key not-key)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--decode-attrs' #x%X → %s truthy%s."
+              flags key (if not-key (format ", %s nil" not-key) ""))
+     (let ((decoded (kuro--decode-attrs ,flags)))
+       (should (plist-get decoded ,key))
+       ,@(when not-key `((should-not (plist-get decoded ,not-key)))))))
 
-(ert-deftest kuro-faces-decode-attrs-italic ()
-  "Bit 2 (0x04) → :italic t."
-  (let ((decoded (kuro--decode-attrs #x04)))
-    (should (plist-get decoded :italic))))
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-bold          #x001  :bold           :italic)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-dim           #x002  :dim            :bold)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-italic        #x004  :italic         nil)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-underline     #x008  :underline      nil)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-blink-slow    #x010  :blink-slow     :blink-fast)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-blink-fast    #x020  :blink-fast     :blink-slow)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-inverse       #x040  :inverse        nil)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-hidden        #x080  :hidden         nil)
+(kuro-faces-test--def-decode-attrs-flag kuro-faces-decode-attrs-strikethrough #x100  :strike-through nil)
 
-(ert-deftest kuro-faces-decode-attrs-underline ()
-  "Bit 3 (0x08) → :underline t."
-  (let ((decoded (kuro--decode-attrs #x08)))
-    (should (plist-get decoded :underline))))
-
-(ert-deftest kuro-faces-decode-attrs-blink-slow ()
-  "Bit 4 (0x10) → :blink-slow t."
-  (let ((decoded (kuro--decode-attrs #x10)))
-    (should (plist-get decoded :blink-slow))
-    (should-not (plist-get decoded :blink-fast))))
-
-(ert-deftest kuro-faces-decode-attrs-blink-fast ()
-  "Bit 5 (0x20) → :blink-fast t."
-  (let ((decoded (kuro--decode-attrs #x20)))
-    (should (plist-get decoded :blink-fast))
-    (should-not (plist-get decoded :blink-slow))))
-
-(ert-deftest kuro-faces-decode-attrs-inverse ()
-  "Bit 6 (0x40) → :inverse t."
-  (let ((decoded (kuro--decode-attrs #x40)))
-    (should (plist-get decoded :inverse))))
-
-(ert-deftest kuro-faces-decode-attrs-hidden ()
-  "Bit 7 (0x80) → :hidden t."
-  (let ((decoded (kuro--decode-attrs #x80)))
-    (should (plist-get decoded :hidden))))
-
-(ert-deftest kuro-faces-decode-attrs-strikethrough ()
-  "Bit 8 (0x100) → :strike-through t."
-  (let ((decoded (kuro--decode-attrs #x100)))
-    (should (plist-get decoded :strike-through))))
+(ert-deftest kuro-faces-test--all-single-bit-attrs-set-key ()
+  "Each single-bit flag in decode-attrs-flag-table sets its key and clears not-key."
+  (dolist (entry kuro-faces-test--decode-attrs-flag-table)
+    (pcase-let ((`(,_name ,flags ,key ,not-key) entry))
+      (let ((decoded (kuro--decode-attrs flags)))
+        (should (plist-get decoded key))
+        (when not-key
+          (should-not (plist-get decoded not-key)))))))
 
 (ert-deftest kuro-faces-decode-attrs-underline-style-curly ()
   "Bits 9-11 encoding 3 → :underline-style 3 (curly/wave)."

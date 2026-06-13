@@ -62,29 +62,37 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
 
 ;;; Group 2: kuro--stream-min-interval lazy initialization
 
-(ert-deftest kuro-stream--min-interval-lazy-init-at-60fps ()
-  "kuro--stream-min-interval is computed lazily as (/ 1.0 kuro-frame-rate)."
-  (kuro-stream-test--with-buffer
-    (let ((kuro-frame-rate 60))
-      (setq kuro--stream-min-interval nil)
-      ;; Simulate the lazy init: (or val (setq val (/ 1.0 rate)))
-      (let ((result (or kuro--stream-min-interval
-                        (setq kuro--stream-min-interval
-                              (/ 1.0 kuro-frame-rate)))))
-        (should (floatp result))
-        (should (< (abs (- result (/ 1.0 60))) 1e-10))
-        ;; Side effect: variable is now populated
-        (should (floatp kuro--stream-min-interval))))))
+(defconst kuro-stream-test--min-interval-lazy-init-table
+  '((kuro-stream--min-interval-lazy-init-at-60fps 60)
+    (kuro-stream--min-interval-lazy-init-at-30fps 30))
+  "Table of (test-name frame-rate) for lazy kuro--stream-min-interval init tests.")
 
-(ert-deftest kuro-stream--min-interval-lazy-init-at-30fps ()
-  "Lazy init computes the correct interval for 30fps."
-  (kuro-stream-test--with-buffer
-    (let ((kuro-frame-rate 30))
-      (setq kuro--stream-min-interval nil)
-      (let ((result (or kuro--stream-min-interval
-                        (setq kuro--stream-min-interval
-                              (/ 1.0 kuro-frame-rate)))))
-        (should (< (abs (- result (/ 1.0 30))) 1e-10))))))
+(defmacro kuro-stream-test--def-min-interval-lazy-init (test-name frame-rate)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--stream-min-interval lazy init computes correct interval for %dfps." frame-rate)
+     (kuro-stream-test--with-buffer
+       (let ((kuro-frame-rate ,frame-rate))
+         (setq kuro--stream-min-interval nil)
+         (let ((result (or kuro--stream-min-interval
+                           (setq kuro--stream-min-interval
+                                 (/ 1.0 kuro-frame-rate)))))
+           (should (floatp result))
+           (should (< (abs (- result (/ 1.0 ,frame-rate))) 1e-10))
+           (should (floatp kuro--stream-min-interval)))))))
+
+(kuro-stream-test--def-min-interval-lazy-init kuro-stream--min-interval-lazy-init-at-60fps 60)
+(kuro-stream-test--def-min-interval-lazy-init kuro-stream--min-interval-lazy-init-at-30fps 30)
+
+(ert-deftest kuro-stream-test--min-interval-lazy-init-all-rates-correct ()
+  "Invariant: lazy init computes correct interval for all listed frame rates."
+  (dolist (entry kuro-stream-test--min-interval-lazy-init-table)
+    (pcase-let ((`(,_name ,frame-rate) entry))
+      (kuro-stream-test--with-buffer
+        (let ((kuro-frame-rate frame-rate))
+          (setq kuro--stream-min-interval nil)
+          (let ((result (or kuro--stream-min-interval
+                            (setq kuro--stream-min-interval (/ 1.0 kuro-frame-rate)))))
+            (should (< (abs (- result (/ 1.0 frame-rate))) 1e-10))))))))
 
 (ert-deftest kuro-stream--min-interval-not-recomputed-if-set ()
   "Once kuro--stream-min-interval is set, (or ...) returns the cached value."
@@ -133,21 +141,38 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
 
 ;;; Group 4: stop resets all three state variables
 
-(ert-deftest kuro-stream--stop-resets-last-render-time ()
-  "kuro--stop-stream-idle-timer resets kuro--stream-last-render-time to 0.0."
-  (kuro-stream-test--with-buffer
-    (setq kuro--stream-last-render-time (float-time))
-    ;; Simulate the reset that kuro--stop-stream-idle-timer performs
-    (setq kuro--stream-last-render-time 0.0)
-    (should (= kuro--stream-last-render-time 0.0))))
+(defconst kuro-stream-test--stop-reset-sim-table
+  '((kuro-stream--stop-resets-last-render-time kuro--stream-last-render-time 0.0)
+    (kuro-stream--stop-resets-min-interval     kuro--stream-min-interval     nil))
+  "Table: (test-name var-sym expected-after-reset) for simulated stop reset tests.")
 
-(ert-deftest kuro-stream--stop-resets-min-interval ()
-  "kuro--stop-stream-idle-timer resets kuro--stream-min-interval to nil."
-  (kuro-stream-test--with-buffer
-    (setq kuro--stream-min-interval (/ 1.0 60))
-    ;; Simulate the reset
-    (setq kuro--stream-min-interval nil)
-    (should (null kuro--stream-min-interval))))
+(defmacro kuro-stream-test--def-stop-reset-sim (test-name var-sym expected)
+  `(ert-deftest ,test-name ()
+     ,(format "Simulated stop resets `%s' to %S." var-sym expected)
+     (kuro-stream-test--with-buffer
+       ,(cond ((null expected)    `(setq ,var-sym (/ 1.0 60)))
+              ((zerop expected)   `(setq ,var-sym (float-time)))
+              (t                  `(setq ,var-sym t)))
+       (setq ,var-sym ,expected)
+       ,(if (null expected)
+            `(should (null ,var-sym))
+          `(should (= ,var-sym ,expected))))))
+
+(kuro-stream-test--def-stop-reset-sim
+ kuro-stream--stop-resets-last-render-time kuro--stream-last-render-time 0.0)
+(kuro-stream-test--def-stop-reset-sim
+ kuro-stream--stop-resets-min-interval kuro--stream-min-interval nil)
+
+(ert-deftest kuro-stream-test--all-stop-resets-sim-correct ()
+  "Invariant: simulated stop resets each state variable to its initial value."
+  (dolist (entry kuro-stream-test--stop-reset-sim-table)
+    (pcase-let ((`(,_name ,var-sym ,expected) entry))
+      (kuro-stream-test--with-buffer
+        (set var-sym (if expected (float-time) (/ 1.0 60)))
+        (set var-sym expected)
+        (if expected
+            (should (= (symbol-value var-sym) expected))
+          (should (null (symbol-value var-sym))))))))
 
 (ert-deftest kuro-stream--stop-resets-idle-timer-to-nil ()
   "kuro--stop-stream-idle-timer sets kuro--stream-idle-timer to nil."
@@ -223,60 +248,61 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
          (progn (kuro--stream-idle-tick dead-buf) nil)
        (error t)))))
 
-(ert-deftest kuro-stream--idle-tick-latency-mode-nil-no-render ()
-  "kuro--stream-idle-tick must not call kuro--render-cycle when latency mode is off."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode nil)
-          (render-called nil))
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t))))
-        (kuro--stream-idle-tick (current-buffer))
-        (should-not render-called)))))
+(defconst kuro-stream-test--idle-tick-guard-table
+  '((kuro-stream--idle-tick-latency-mode-nil-no-render  nil t   t   t   nil)
+    (kuro-stream--idle-tick-uninitialized-no-render     t   nil t   t   nil)
+    (kuro-stream--idle-tick-no-pending-output-no-render t   t   nil t   nil)
+    (kuro-stream--idle-tick-rate-limit-blocks           t   t   t   nil nil)
+    (kuro-stream--idle-tick-triggers-render-when-ready  t   t   t   t   t))
+  "Table: (test-name latency init pending elapsed? render?) for idle-tick guard tests.
+`elapsed?' t means last-render-time=0.0 (long ago); nil means just-now (rate-limit fires).")
 
-(ert-deftest kuro-stream--idle-tick-uninitialized-no-render ()
-  "kuro--stream-idle-tick must not call kuro--render-cycle when buffer is uninitialized."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode t)
-          (render-called nil))
-      (setq-local kuro--initialized nil)
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t)))
-                ((symbol-function 'kuro--has-pending-output)
-                 (lambda () t)))
-        (kuro--stream-idle-tick (current-buffer))
-        (should-not render-called)))))
+(defmacro kuro-stream-test--def-idle-tick-guard (test-name latency init pending elapsed render)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--stream-idle-tick' latency=%s init=%s pending=%s elapsed=%s → render=%s."
+              latency init pending elapsed render)
+     (kuro-stream-test--idle-tick-with-buffer
+       (let ((kuro-streaming-latency-mode ,latency)
+             (kuro-frame-rate 60)
+             (render-called nil))
+         (setq-local kuro--initialized ,init
+                     kuro--stream-last-render-time ,(if elapsed '0.0 '(float-time))
+                     kuro--stream-min-interval ,(if elapsed 'nil '(/ 1.0 60)))
+         (cl-letf (((symbol-function 'kuro--render-cycle)
+                    (lambda () (setq render-called t)))
+                   ((symbol-function 'kuro--has-pending-output)
+                    (lambda () ,pending)))
+           (kuro--stream-idle-tick (current-buffer))
+           ,(if render '(should render-called) '(should-not render-called)))))))
 
-(ert-deftest kuro-stream--idle-tick-no-pending-output-no-render ()
-  "kuro--stream-idle-tick must not render when kuro--has-pending-output returns nil."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode t)
-          (kuro-frame-rate 60)
-          (render-called nil))
-      (setq-local kuro--initialized t
-                  kuro--stream-last-render-time 0.0)
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t)))
-                ((symbol-function 'kuro--has-pending-output)
-                 (lambda () nil)))
-        (kuro--stream-idle-tick (current-buffer))
-        (should-not render-called)))))
+(kuro-stream-test--def-idle-tick-guard
+ kuro-stream--idle-tick-latency-mode-nil-no-render nil t t t nil)
+(kuro-stream-test--def-idle-tick-guard
+ kuro-stream--idle-tick-uninitialized-no-render t nil t t nil)
+(kuro-stream-test--def-idle-tick-guard
+ kuro-stream--idle-tick-no-pending-output-no-render t t nil t nil)
+(kuro-stream-test--def-idle-tick-guard
+ kuro-stream--idle-tick-rate-limit-blocks t t t nil nil)
+(kuro-stream-test--def-idle-tick-guard
+ kuro-stream--idle-tick-triggers-render-when-ready t t t t t)
 
-(ert-deftest kuro-stream--idle-tick-triggers-render-when-ready ()
-  "kuro--stream-idle-tick calls kuro--render-cycle when all conditions are met."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode t)
-          (kuro-frame-rate 60)
-          (render-called nil))
-      ;; initialized=t, output pending, rate-limit elapsed (last render was long ago)
-      (setq-local kuro--initialized t
-                  kuro--stream-last-render-time 0.0
-                  kuro--stream-min-interval nil)
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t)))
-                ((symbol-function 'kuro--has-pending-output)
-                 (lambda () t)))
-        (kuro--stream-idle-tick (current-buffer))
-        (should render-called)))))
+(ert-deftest kuro-stream-test--all-idle-tick-guards-correct ()
+  "Invariant: every entry in the idle-tick guard table fires or skips render as expected."
+  (dolist (entry kuro-stream-test--idle-tick-guard-table)
+    (pcase-let ((`(,_name ,latency ,init ,pending ,elapsed ,render) entry))
+      (kuro-stream-test--idle-tick-with-buffer
+        (let ((kuro-streaming-latency-mode latency)
+              (kuro-frame-rate 60)
+              (render-called nil))
+          (setq-local kuro--initialized init
+                      kuro--stream-last-render-time (if elapsed 0.0 (float-time))
+                      kuro--stream-min-interval (if elapsed nil (/ 1.0 60)))
+          (cl-letf (((symbol-function 'kuro--render-cycle)
+                     (lambda () (setq render-called t)))
+                    ((symbol-function 'kuro--has-pending-output)
+                     (lambda () pending)))
+            (kuro--stream-idle-tick (current-buffer))
+            (if render (should render-called) (should-not render-called))))))))
 
 (ert-deftest kuro-stream--idle-tick-updates-last-render-time ()
   "kuro--stream-idle-tick updates kuro--stream-last-render-time after rendering."
@@ -290,45 +316,7 @@ This ensures that a changed kuro-frame-rate is picked up on the next lazy init."
                 ((symbol-function 'kuro--has-pending-output)
                  (lambda () t)))
         (kuro--stream-idle-tick (current-buffer))
-        ;; After a successful render tick, last-render-time should be non-zero
         (should (> kuro--stream-last-render-time 0.0))))))
-
-(ert-deftest kuro-stream--idle-tick-rate-limit-blocks-render-when-too-soon ()
-  "kuro--stream-idle-tick skips render when last-render-time is too recent.
-The rate-limit guard compares (float-time) against kuro--stream-last-render-time;
-setting last-render-time to (float-time) simulates a render that just happened."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode t)
-          (kuro-frame-rate 60)
-          (render-called nil))
-      (setq-local kuro--initialized t
-                  ;; Pretend last render happened right now — too soon to render again
-                  kuro--stream-last-render-time (float-time)
-                  ;; Pre-set the interval so lazy init does not trigger
-                  kuro--stream-min-interval (/ 1.0 kuro-frame-rate))
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t)))
-                ((symbol-function 'kuro--has-pending-output)
-                 (lambda () t)))
-        (kuro--stream-idle-tick (current-buffer))
-        (should-not render-called)))))
-
-(ert-deftest kuro-stream--idle-tick-has-pending-output-nil-no-render ()
-  "kuro--stream-idle-tick does not render when kuro--has-pending-output returns nil.
-Verifies the pending-output guard independently of initialization and rate-limit."
-  (kuro-stream-test--idle-tick-with-buffer
-    (let ((kuro-streaming-latency-mode t)
-          (kuro-frame-rate 60)
-          (render-called nil))
-      (setq-local kuro--initialized t
-                  kuro--stream-last-render-time 0.0
-                  kuro--stream-min-interval nil)
-      (cl-letf (((symbol-function 'kuro--render-cycle)
-                 (lambda () (setq render-called t)))
-                ((symbol-function 'kuro--has-pending-output)
-                 (lambda () nil)))        ; no pending output
-        (kuro--stream-idle-tick (current-buffer))
-        (should-not render-called)))))
 
 ;;; Group 7: kuro--start-stream-idle-timer / kuro--stop-stream-idle-timer
 ;;
@@ -375,23 +363,42 @@ Verifies the pending-output guard independently of initialization and rate-limit
       (kuro--start-stream-idle-timer)
       (should-not kuro--stream-idle-timer))))
 
-(ert-deftest kuro-stream-stop-resets-last-render-time-via-fn ()
-  "kuro--stop-stream-idle-timer resets kuro--stream-last-render-time to 0.0."
-  (kuro-stream-test--with-state ()
-    (let ((kuro-streaming-latency-mode t))
-      (kuro--start-stream-idle-timer)
-      (setq kuro--stream-last-render-time (float-time))
-      (kuro--stop-stream-idle-timer)
-      (should (= kuro--stream-last-render-time 0.0)))))
+(defconst kuro-stream-test--stop-reset-via-fn-table
+  '((kuro-stream-stop-resets-last-render-time-via-fn kuro--stream-last-render-time 0.0)
+    (kuro-stream-stop-resets-min-interval-via-fn     kuro--stream-min-interval     nil))
+  "Table: (test-name var-sym expected-after-reset) for stop-via-function reset tests.")
 
-(ert-deftest kuro-stream-stop-resets-min-interval-via-fn ()
-  "kuro--stop-stream-idle-timer resets kuro--stream-min-interval to nil."
-  (kuro-stream-test--with-state ()
-    (let ((kuro-streaming-latency-mode t))
-      (kuro--start-stream-idle-timer)
-      (setq kuro--stream-min-interval (/ 1.0 60))
-      (kuro--stop-stream-idle-timer)
-      (should (null kuro--stream-min-interval)))))
+(defmacro kuro-stream-test--def-stop-reset-via-fn (test-name var-sym expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--stop-stream-idle-timer' resets `%s' to %S." var-sym expected)
+     (kuro-stream-test--with-state ()
+       (let ((kuro-streaming-latency-mode t))
+         (kuro--start-stream-idle-timer)
+         ,(cond ((null expected)   `(setq ,var-sym (/ 1.0 60)))
+                ((zerop expected)  `(setq ,var-sym (float-time)))
+                (t                 `(setq ,var-sym t)))
+         (kuro--stop-stream-idle-timer)
+         ,(if (null expected)
+              `(should (null ,var-sym))
+            `(should (= ,var-sym ,expected)))))))
+
+(kuro-stream-test--def-stop-reset-via-fn
+ kuro-stream-stop-resets-last-render-time-via-fn kuro--stream-last-render-time 0.0)
+(kuro-stream-test--def-stop-reset-via-fn
+ kuro-stream-stop-resets-min-interval-via-fn kuro--stream-min-interval nil)
+
+(ert-deftest kuro-stream-test--all-stop-resets-via-fn-correct ()
+  "Invariant: `kuro--stop-stream-idle-timer' resets each state variable to its initial value."
+  (dolist (entry kuro-stream-test--stop-reset-via-fn-table)
+    (pcase-let ((`(,_name ,var-sym ,expected) entry))
+      (kuro-stream-test--with-state ()
+        (let ((kuro-streaming-latency-mode t))
+          (kuro--start-stream-idle-timer)
+          (set var-sym (if expected (float-time) (/ 1.0 60)))
+          (kuro--stop-stream-idle-timer)
+          (if expected
+              (should (= (symbol-value var-sym) expected))
+            (should (null (symbol-value var-sym)))))))))
 
 (ert-deftest kuro-stream-start-cancels-existing-timer ()
   "kuro--start-stream-idle-timer cancels and replaces an already-running timer."

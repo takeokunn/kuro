@@ -106,8 +106,14 @@
         (should (equal result "\e[<0;301;301M"))))))
 
 ;;; Group 20: kuro--def-mouse-cmd generated handlers — unknown event type
-;;  kuro--mouse-press and kuro--mouse-release use pcase over event-basic-type;
+;;  kuro--mouse-press and kuro--mouse-release use alist-get over event-basic-type;
 ;;  an unrecognised type produces nil btn, which must be a no-op.
+
+(ert-deftest kuro-input-mouse-button-alist-covers-all-three-buttons ()
+  "`kuro--mouse-button-alist' maps mouse-1/2/3 to button indices 0/1/2."
+  (should (= (alist-get 'mouse-1 kuro--mouse-button-alist) 0))
+  (should (= (alist-get 'mouse-2 kuro--mouse-button-alist) 1))
+  (should (= (alist-get 'mouse-3 kuro--mouse-button-alist) 2)))
 
 (ert-deftest kuro-input-mouse-press-unknown-event-type-is-noop ()
   "kuro--mouse-press sends nothing when event-basic-type returns an unknown symbol."

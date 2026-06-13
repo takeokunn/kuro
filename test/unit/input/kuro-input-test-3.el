@@ -247,8 +247,8 @@
       (kuro--send-char ?€)
       (should (equal sent "€")))))
 
-(ert-deftest kuro-input-def-special-key-macro-generates-command ()
-  "kuro--def-special-key generates an interactive command that calls kuro--send-special."
+(ert-deftest kuro-input-def-kkp-key-macro-generates-commands ()
+  "`kuro--def-kkp-key' generates interactive commands for RET, TAB, and DEL."
   (should (fboundp 'kuro--RET))
   (should (fboundp 'kuro--TAB))
   (should (fboundp 'kuro--DEL))

@@ -62,19 +62,34 @@
   "kuro--prompt-status-indicator returns nil when exit-code is nil."
   (should (null (kuro--prompt-status-indicator nil))))
 
-(ert-deftest kuro-prompt-status--indicator-success-for-zero ()
-  "kuro--prompt-status-indicator returns a propertized success string for exit 0."
-  (let ((result (kuro--prompt-status-indicator 0)))
-    (should (stringp result))
-    (should (string= (substring-no-properties result) "✓"))
-    (should (eq (get-text-property 0 'face result) 'kuro-prompt-success))))
+(defconst kuro-prompt-status-test--indicator-result-table
+  '((kuro-prompt-status--indicator-success-for-zero     0 "✓" kuro-prompt-success)
+    (kuro-prompt-status--indicator-failure-for-nonzero  1 "✗" kuro-prompt-failure))
+  "Table of (test-name exit-code expected-text expected-face) for exit-code indicator.")
 
-(ert-deftest kuro-prompt-status--indicator-failure-for-nonzero ()
-  "kuro--prompt-status-indicator returns a propertized failure string for non-zero exit."
-  (let ((result (kuro--prompt-status-indicator 1)))
-    (should (stringp result))
-    (should (string= (substring-no-properties result) "✗"))
-    (should (eq (get-text-property 0 'face result) 'kuro-prompt-failure))))
+(defmacro kuro-prompt-status-test--def-indicator-result
+    (test-name exit-code expected-text expected-face)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--prompt-status-indicator' exit=%d → %S face=%s."
+              exit-code expected-text expected-face)
+     (let ((result (kuro--prompt-status-indicator ,exit-code)))
+       (should (stringp result))
+       (should (string= (substring-no-properties result) ,expected-text))
+       (should (eq (get-text-property 0 'face result) ',expected-face)))))
+
+(kuro-prompt-status-test--def-indicator-result
+ kuro-prompt-status--indicator-success-for-zero    0 "✓" kuro-prompt-success)
+(kuro-prompt-status-test--def-indicator-result
+ kuro-prompt-status--indicator-failure-for-nonzero 1 "✗" kuro-prompt-failure)
+
+(ert-deftest kuro-prompt-status--indicator-all-exit-codes-correct ()
+  "Invariant: indicator returns correct text+face for both success and failure exit codes."
+  (dolist (entry kuro-prompt-status-test--indicator-result-table)
+    (pcase-let ((`(,_name ,exit-code ,expected-text ,expected-face) entry))
+      (let ((result (kuro--prompt-status-indicator exit-code)))
+        (should (stringp result))
+        (should (string= (substring-no-properties result) expected-text))
+        (should (eq (get-text-property 0 'face result) expected-face))))))
 
 ;;; Group 2: kuro--apply-prompt-status-overlay — overlay creation
 
@@ -237,29 +252,32 @@
 
 ;;; Group 4c: kuro--format-prompt-duration — band boundary values
 
-(ert-deftest kuro-prompt-status--format-duration-0ms ()
-  "Lower edge of <1000 ms band: 0 renders as \"0ms\"."
-  (should (equal (kuro--format-prompt-duration 0) "0ms")))
+(defconst kuro-prompt-status-test--format-duration-table
+  '((kuro-prompt-status--format-duration-0ms       0       "0ms")
+    (kuro-prompt-status--format-duration-999ms     999     "999ms")
+    (kuro-prompt-status--format-duration-1000ms    1000    "1.0s")
+    (kuro-prompt-status--format-duration-59999ms   59999   "60.0s")
+    (kuro-prompt-status--format-duration-60000ms   60000   "1m00s")
+    (kuro-prompt-status--format-duration-3600000ms 3600000 "60m00s"))
+  "Table of (test-name ms expected) for `kuro--format-prompt-duration' band boundaries.")
 
-(ert-deftest kuro-prompt-status--format-duration-999ms ()
-  "Upper edge of <1000 ms band: 999 renders as \"999ms\"."
-  (should (equal (kuro--format-prompt-duration 999) "999ms")))
+(defmacro kuro-prompt-status-test--def-format-duration (test-name ms expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--format-prompt-duration' %d ms → %S." ms expected)
+     (should (equal (kuro--format-prompt-duration ,ms) ,expected))))
 
-(ert-deftest kuro-prompt-status--format-duration-1000ms ()
-  "Lower edge of <60000 ms band: 1000 renders as \"1.0s\"."
-  (should (equal (kuro--format-prompt-duration 1000) "1.0s")))
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-0ms       0       "0ms")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-999ms     999     "999ms")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-1000ms    1000    "1.0s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-59999ms   59999   "60.0s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-60000ms   60000   "1m00s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-3600000ms 3600000 "60m00s")
 
-(ert-deftest kuro-prompt-status--format-duration-59999ms ()
-  "Upper edge of <60000 ms band: 59999 rounds via %.1f to \"60.0s\"."
-  (should (equal (kuro--format-prompt-duration 59999) "60.0s")))
-
-(ert-deftest kuro-prompt-status--format-duration-60000ms ()
-  "Lower edge of MmSSs band: 60000 renders as \"1m00s\"."
-  (should (equal (kuro--format-prompt-duration 60000) "1m00s")))
-
-(ert-deftest kuro-prompt-status--format-duration-3600000ms ()
-  "Hour mark in MmSSs band: 3,600,000 renders as \"60m00s\" (no hour rollover)."
-  (should (equal (kuro--format-prompt-duration 3600000) "60m00s")))
+(ert-deftest kuro-prompt-status--format-duration-all-bands-correct ()
+  "Every entry in `kuro-prompt-status-test--format-duration-table' formats correctly."
+  (dolist (entry kuro-prompt-status-test--format-duration-table)
+    (pcase-let ((`(,_name ,ms ,expected) entry))
+      (should (equal (kuro--format-prompt-duration ms) expected)))))
 
 ;;; Group 5: kuro--ensure-left-margin — margin setup
 
@@ -273,13 +291,24 @@
 
 ;;; Group 6: faces and defcustom defaults
 
-(ert-deftest kuro-prompt-status--success-face-exists ()
-  "kuro-prompt-success face is defined."
-  (should (facep 'kuro-prompt-success)))
+(defconst kuro-prompt-status-test--face-exists-table
+  '((kuro-prompt-status--success-face-exists kuro-prompt-success)
+    (kuro-prompt-status--failure-face-exists kuro-prompt-failure))
+  "Table of (test-name face-sym) for prompt-status face existence checks.")
 
-(ert-deftest kuro-prompt-status--failure-face-exists ()
-  "kuro-prompt-failure face is defined."
-  (should (facep 'kuro-prompt-failure)))
+(defmacro kuro-prompt-status-test--def-face-exists (test-name face-sym)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' face is defined." face-sym)
+     (should (facep ',face-sym))))
+
+(kuro-prompt-status-test--def-face-exists kuro-prompt-status--success-face-exists kuro-prompt-success)
+(kuro-prompt-status-test--def-face-exists kuro-prompt-status--failure-face-exists kuro-prompt-failure)
+
+(ert-deftest kuro-prompt-status--all-faces-defined ()
+  "Invariant: all prompt-status faces are defined."
+  (dolist (entry kuro-prompt-status-test--face-exists-table)
+    (pcase-let ((`(,_name ,face-sym) entry))
+      (should (facep face-sym)))))
 
 (ert-deftest kuro-prompt-status--defcustom-annotations-default-t ()
   "kuro-prompt-status-annotations defaults to t."
@@ -386,22 +415,38 @@
       (kuro--apply-prompt-extras-overlay 0 nil nil nil)
       (should (null kuro--prompt-status-overlays)))))
 
-(ert-deftest kuro-prompt-status-apply-extras-overlay-with-aid-creates-overlay ()
-  "`kuro--apply-prompt-extras-overlay' creates an overlay when AID is non-empty."
-  (with-temp-buffer
-    (insert "line0\n")
-    (let ((kuro--prompt-status-overlays nil))
-      (kuro--apply-prompt-extras-overlay 0 "abc123" nil nil)
-      (should (= (length kuro--prompt-status-overlays) 1))
-      (should (overlay-get (car kuro--prompt-status-overlays) 'kuro-prompt-extras)))))
+(defconst kuro-prompt-status-test--extras-creates-table
+  '((kuro-prompt-status-apply-extras-overlay-with-aid-creates-overlay      "abc123" nil  nil)
+    (kuro-prompt-status-apply-extras-overlay-with-duration-creates-overlay nil     1500 nil))
+  "Table of (test-name aid duration-ms err-path) that each produce 1 extras overlay.")
 
-(ert-deftest kuro-prompt-status-apply-extras-overlay-with-duration-creates-overlay ()
-  "`kuro--apply-prompt-extras-overlay' creates an overlay for duration-ms only."
-  (with-temp-buffer
-    (insert "row\n")
-    (let ((kuro--prompt-status-overlays nil))
-      (kuro--apply-prompt-extras-overlay 0 nil 1500 nil)
-      (should (= (length kuro--prompt-status-overlays) 1)))))
+(defmacro kuro-prompt-status-test--def-extras-creates
+    (test-name aid duration-ms err-path)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--apply-prompt-extras-overlay' aid=%S duration=%S → 1 overlay."
+              aid duration-ms)
+     (with-temp-buffer
+       (insert "line0\n")
+       (let ((kuro--prompt-status-overlays nil))
+         (kuro--apply-prompt-extras-overlay 0 ,aid ,duration-ms ,err-path)
+         (should (= (length kuro--prompt-status-overlays) 1))
+         (should (overlay-get (car kuro--prompt-status-overlays) 'kuro-prompt-extras))))))
+
+(kuro-prompt-status-test--def-extras-creates
+ kuro-prompt-status-apply-extras-overlay-with-aid-creates-overlay      "abc123" nil  nil)
+(kuro-prompt-status-test--def-extras-creates
+ kuro-prompt-status-apply-extras-overlay-with-duration-creates-overlay nil     1500 nil)
+
+(ert-deftest kuro-prompt-status--extras-creates-all-variants ()
+  "Invariant: apply-extras-overlay creates 1 kuro-prompt-extras overlay for each non-nil input."
+  (dolist (entry kuro-prompt-status-test--extras-creates-table)
+    (pcase-let ((`(,_name ,aid ,duration-ms ,err-path) entry))
+      (with-temp-buffer
+        (insert "line0\n")
+        (let ((kuro--prompt-status-overlays nil))
+          (kuro--apply-prompt-extras-overlay 0 aid duration-ms err-path)
+          (should (= (length kuro--prompt-status-overlays) 1))
+          (should (overlay-get (car kuro--prompt-status-overlays) 'kuro-prompt-extras)))))))
 
 (ert-deftest kuro-prompt-status-apply-extras-overlay-beyond-buffer-is-noop ()
   "`kuro--apply-prompt-extras-overlay' does nothing when ROW is past buffer end."

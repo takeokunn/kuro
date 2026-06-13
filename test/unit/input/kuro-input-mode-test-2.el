@@ -6,6 +6,17 @@
 
 ;;; Group 7 — Mode switching commands
 
+(defmacro kuro-input-mode-test--def-mode-clears-buffer (test-name mode-fn)
+  "Define a test that MODE-FN clears `kuro--line-buffer' on entry."
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' clears any accumulated line buffer on entry." mode-fn)
+     (kuro-input-mode-test--with-buffer
+      (setq kuro--line-buffer "leftover")
+      (,mode-fn)
+      (should (string= kuro--line-buffer "")))))
+
+
+
 (ert-deftest kuro-input-mode-test-kuro-char-mode-sets-mode ()
   "`kuro-char-mode' sets `kuro--input-mode' to `char'."
   (kuro-input-mode-test--with-buffer
@@ -25,60 +36,62 @@
    (kuro-line-mode)
    (should (eq kuro--input-mode 'line))))
 
-(ert-deftest kuro-input-mode-test-kuro-char-mode-clears-line-buffer ()
-  "`kuro-char-mode' clears any accumulated line buffer."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--line-buffer "leftover")
-   (kuro-char-mode)
-   (should (string= kuro--line-buffer ""))))
+(kuro-input-mode-test--def-mode-clears-buffer kuro-input-mode-test-kuro-char-mode-clears-line-buffer      kuro-char-mode)
+(kuro-input-mode-test--def-mode-clears-buffer kuro-input-mode-test-kuro-semi-char-mode-clears-line-buffer kuro-semi-char-mode)
+(kuro-input-mode-test--def-mode-clears-buffer kuro-input-mode-test-kuro-line-mode-clears-line-buffer      kuro-line-mode)
 
-(ert-deftest kuro-input-mode-test-kuro-semi-char-mode-clears-line-buffer ()
-  "`kuro-semi-char-mode' clears any accumulated line buffer."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--line-buffer "leftover")
-   (kuro-semi-char-mode)
-   (should (string= kuro--line-buffer ""))))
+(defconst kuro-input-mode-test--fails-outside-kuro-table
+  '((kuro-input-mode-test-kuro-char-mode-fails-outside-kuro      kuro-char-mode)
+    (kuro-input-mode-test-kuro-line-mode-fails-outside-kuro      kuro-line-mode)
+    (kuro-input-mode-test-kuro-semi-char-mode-fails-outside-kuro kuro-semi-char-mode))
+  "Table of (test-name mode-fn): mode functions that must signal user-error outside kuro-mode.")
 
-(ert-deftest kuro-input-mode-test-kuro-line-mode-clears-line-buffer ()
-  "`kuro-line-mode' resets the line buffer on entry."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--line-buffer "stale")
-   (kuro-line-mode)
-   (should (string= kuro--line-buffer ""))))
+(defmacro kuro-input-mode-test--def-fails-outside-kuro (test-name mode-fn)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' signals `user-error' when called outside a kuro-mode buffer." mode-fn)
+     (with-temp-buffer
+       (should-error (,mode-fn) :type 'user-error))))
 
-(ert-deftest kuro-input-mode-test-kuro-char-mode-fails-outside-kuro ()
-  "`kuro-char-mode' signals `user-error' outside a kuro-mode buffer."
-  (with-temp-buffer
-   (should-error (kuro-char-mode) :type 'user-error)))
+(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-char-mode-fails-outside-kuro      kuro-char-mode)
+(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-line-mode-fails-outside-kuro      kuro-line-mode)
+(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-semi-char-mode-fails-outside-kuro kuro-semi-char-mode)
 
-(ert-deftest kuro-input-mode-test-kuro-line-mode-fails-outside-kuro ()
-  "`kuro-line-mode' signals `user-error' outside a kuro-mode buffer."
-  (with-temp-buffer
-   (should-error (kuro-line-mode) :type 'user-error)))
+(ert-deftest kuro-input-mode-test--all-mode-fns-fail-outside-kuro ()
+  "Invariant: all mode functions signal user-error outside a kuro-mode buffer."
+  (dolist (entry kuro-input-mode-test--fails-outside-kuro-table)
+    (pcase-let ((`(,_name ,mode-fn) entry))
+      (with-temp-buffer
+        (should-error (funcall mode-fn) :type 'user-error)))))
 
 
 ;;; Group 8 — kuro-cycle-input-mode
 
-(ert-deftest kuro-input-mode-test-cycle-semi-char-to-char ()
-  "Cycling from semi-char mode moves to char mode."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'semi-char)
-   (kuro-cycle-input-mode)
-   (should (eq kuro--input-mode 'char))))
+(defconst kuro-input-mode-test--cycle-table
+  '((kuro-input-mode-test-cycle-semi-char-to-char semi-char char)
+    (kuro-input-mode-test-cycle-char-to-line       char      line)
+    (kuro-input-mode-test-cycle-line-to-semi-char  line      semi-char))
+  "Table of (test-name initial-mode next-mode) for `kuro-cycle-input-mode' ring transitions.")
 
-(ert-deftest kuro-input-mode-test-cycle-char-to-line ()
-  "Cycling from char mode moves to line mode."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'char)
-   (kuro-cycle-input-mode)
-   (should (eq kuro--input-mode 'line))))
+(defmacro kuro-input-mode-test--def-cycle (test-name initial-mode next-mode)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-cycle-input-mode' transitions %s → %s." initial-mode next-mode)
+     (kuro-input-mode-test--with-buffer
+       (setq kuro--input-mode ',initial-mode)
+       (kuro-cycle-input-mode)
+       (should (eq kuro--input-mode ',next-mode)))))
 
-(ert-deftest kuro-input-mode-test-cycle-line-to-semi-char ()
-  "Cycling from line mode returns to semi-char mode."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--input-mode 'line)
-   (kuro-cycle-input-mode)
-   (should (eq kuro--input-mode 'semi-char))))
+(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-semi-char-to-char semi-char char)
+(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-char-to-line       char      line)
+(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-line-to-semi-char  line      semi-char)
+
+(ert-deftest kuro-input-mode-test-cycle--all-transitions-correct ()
+  "Every transition in `kuro-input-mode-test--cycle-table' is verified."
+  (dolist (entry kuro-input-mode-test--cycle-table)
+    (pcase-let ((`(,_name ,initial-mode ,next-mode) entry))
+      (kuro-input-mode-test--with-buffer
+        (setq kuro--input-mode initial-mode)
+        (kuro-cycle-input-mode)
+        (should (eq kuro--input-mode next-mode))))))
 
 (ert-deftest kuro-input-mode-test-cycle-full-round-trip ()
   "Three full cycles returns to the original mode."
@@ -97,54 +110,30 @@
 
 ;;; Group 9 — Line mode keymap shape
 
-(ert-deftest kuro-input-mode-test-line-keymap-binds-commit ()
-  "`kuro--line-mode-keymap' binds [return] to `kuro--line-commit'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap [return])
-               #'kuro--line-commit))))
+(defconst kuro-input-mode-test--line-keymap-bindings
+  '((kuro-input-mode-test-line-keymap-binds-commit          [return]                    kuro--line-commit)
+    (kuro-input-mode-test-line-keymap-binds-delete          [backspace]                 kuro--line-delete)
+    (kuro-input-mode-test-line-keymap-binds-abort           (kbd "C-g")                 kuro--line-abort)
+    (kuro-input-mode-test-line-keymap-binds-kill-line       (kbd "C-k")                 kuro--line-kill-line)
+    (kuro-input-mode-test-line-keymap-remaps-self-insert    [remap self-insert-command] kuro--line-self-insert)
+    (kuro-input-mode-test-line-keymap-binds-minibuffer-send (kbd "C-c C-r")             kuro-line-minibuffer-send))
+  "Table of (test-name key fn) for `kuro--line-mode-keymap' binding assertions.")
 
-(ert-deftest kuro-input-mode-test-line-keymap-binds-delete ()
-  "`kuro--line-mode-keymap' binds [backspace] to `kuro--line-delete'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap [backspace])
-               #'kuro--line-delete))))
+(defmacro kuro-input-mode-test--def-line-keymap-binding (test-name key fn)
+  "Define a test asserting `kuro--line-mode-keymap' binds KEY to FN."
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--line-mode-keymap' binds %S to `%s'." key fn)
+     (kuro-input-mode-test--with-buffer
+      (kuro--build-keymap)
+      (kuro--build-line-mode-keymap)
+      (should (eq (lookup-key kuro--line-mode-keymap ,key) #',fn)))))
 
-(ert-deftest kuro-input-mode-test-line-keymap-binds-abort ()
-  "`kuro--line-mode-keymap' binds C-g to `kuro--line-abort'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-g"))
-               #'kuro--line-abort))))
-
-(ert-deftest kuro-input-mode-test-line-keymap-binds-kill-line ()
-  "`kuro--line-mode-keymap' binds C-k to `kuro--line-kill-line'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-k"))
-               #'kuro--line-kill-line))))
-
-(ert-deftest kuro-input-mode-test-line-keymap-remaps-self-insert ()
-  "`kuro--line-mode-keymap' remaps `self-insert-command' to `kuro--line-self-insert'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap
-                           [remap self-insert-command])
-               #'kuro--line-self-insert))))
-
-(ert-deftest kuro-input-mode-test-line-keymap-binds-minibuffer-send ()
-  "`kuro--line-mode-keymap' binds C-c C-r to `kuro-line-minibuffer-send'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-c C-r"))
-               #'kuro-line-minibuffer-send))))
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-commit          [return]                    kuro--line-commit)
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-delete          [backspace]                 kuro--line-delete)
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-abort           (kbd "C-g")                 kuro--line-abort)
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-kill-line       (kbd "C-k")                 kuro--line-kill-line)
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-remaps-self-insert    [remap self-insert-command] kuro--line-self-insert)
+(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-minibuffer-send (kbd "C-c C-r")             kuro-line-minibuffer-send)
 
 
 ;;; Group 10 — Minibuffer path (IME support)
@@ -404,6 +393,105 @@
      (should (eq (lookup-key kuro--line-mode-keymap (kbd (car b)))
                  (cdr b))))))
 
+
+;;; Group 17 — kuro--apply-input-mode keymap dispatch
+
+(ert-deftest kuro-input-mode-test-apply-char-mode-uses-char-keymap ()
+  "`kuro--apply-input-mode' sets `kuro--char-keymap' as the parent and activates kuro-mode-map in char mode."
+  (kuro-input-mode-test--with-buffer
+   (let ((parent-set-to nil)
+         (local-map-set-to nil))
+     (cl-letf (((symbol-function 'set-keymap-parent)
+                (lambda (_map parent) (setq parent-set-to parent)))
+               ((symbol-function 'use-local-map)
+                (lambda (m) (setq local-map-set-to m)))
+               ((symbol-function 'force-mode-line-update) #'ignore))
+       (setq kuro--input-mode 'char)
+       (kuro--apply-input-mode)
+       (should (eq parent-set-to kuro--char-keymap))
+       (should (eq local-map-set-to kuro-mode-map))))))
+
+(ert-deftest kuro-input-mode-test-apply-semi-char-mode-uses-base-keymap ()
+  "`kuro--apply-input-mode' sets `kuro--keymap' as the parent in semi-char mode."
+  (kuro-input-mode-test--with-buffer
+   (let ((parent-set-to nil))
+     (cl-letf (((symbol-function 'set-keymap-parent)
+                (lambda (_map parent) (setq parent-set-to parent)))
+               ((symbol-function 'use-local-map) #'ignore)
+               ((symbol-function 'force-mode-line-update) #'ignore))
+       (setq kuro--input-mode 'semi-char)
+       (kuro--apply-input-mode)
+       (should (eq parent-set-to kuro--keymap))))))
+
+(ert-deftest kuro-input-mode-test-apply-line-mode-builds-keymap ()
+  "`kuro--apply-input-mode' calls `kuro--build-line-mode-keymap' in line mode."
+  (kuro-input-mode-test--with-buffer
+   (let ((build-called nil))
+     (cl-letf (((symbol-function 'kuro--build-line-mode-keymap)
+                (lambda () (setq build-called t)))
+               ((symbol-function 'use-local-map) #'ignore)
+               ((symbol-function 'make-composed-keymap) (lambda (&rest _) (make-sparse-keymap)))
+               ((symbol-function 'force-mode-line-update) #'ignore))
+       (setq kuro--input-mode 'line)
+       (kuro--apply-input-mode)
+       (should build-called)))))
+
+(ert-deftest kuro-input-mode-test-apply-always-calls-force-mode-line-update ()
+  "`kuro--apply-input-mode' always calls `force-mode-line-update' regardless of mode."
+  (kuro-input-mode-test--with-buffer
+   (let ((update-called nil))
+     (cl-letf (((symbol-function 'set-keymap-parent) #'ignore)
+               ((symbol-function 'use-local-map) #'ignore)
+               ((symbol-function 'force-mode-line-update)
+                (lambda () (setq update-called t))))
+       (setq kuro--input-mode 'char)
+       (kuro--apply-input-mode)
+       (should update-called)))))
+
+;;; Group 18 — kuro--input-mode-cycle-table + kuro-cycle-input-mode coverage gaps
+
+(ert-deftest kuro-input-mode-test-cycle-is-interactive ()
+  "`kuro-cycle-input-mode' is an interactive command."
+  (should (commandp #'kuro-cycle-input-mode)))
+
+(ert-deftest kuro-input-mode-test-cycle-errors-outside-kuro ()
+  "`kuro-cycle-input-mode' signals user-error when not in a kuro buffer."
+  (with-temp-buffer
+    (should-error (kuro-cycle-input-mode) :type 'user-error)))
+
+(ert-deftest kuro-input-mode-test-cycle-unknown-falls-back-to-semi-char ()
+  "`kuro-cycle-input-mode' falls back to `kuro-semi-char-mode' for an unknown mode."
+  (kuro-input-mode-test--with-buffer
+   (setq kuro--input-mode 'nonexistent)
+   (let (called)
+     (cl-letf (((symbol-function 'kuro-semi-char-mode) (lambda () (setq called t))))
+       (kuro-cycle-input-mode)
+       (should called)))))
+
+(ert-deftest kuro-input-mode-test-cycle-table-covers-all-modes ()
+  "`kuro--input-mode-cycle-table' has entries for all three standard input modes."
+  (should (assq 'semi-char kuro--input-mode-cycle-table))
+  (should (assq 'char      kuro--input-mode-cycle-table))
+  (should (assq 'line      kuro--input-mode-cycle-table)))
+
+;;; Group 19 — kuro--input-mode-keymaps invariants
+
+(ert-deftest kuro-input-mode-test-keymaps-has-char-entry ()
+  "`kuro--input-mode-keymaps' has an entry for `char' mode."
+  (should (assq 'char kuro--input-mode-keymaps)))
+
+(ert-deftest kuro-input-mode-test-keymaps-has-semi-char-entry ()
+  "`kuro--input-mode-keymaps' has an entry for `semi-char' mode."
+  (should (assq 'semi-char kuro--input-mode-keymaps)))
+
+(ert-deftest kuro-input-mode-test-keymaps-excludes-line ()
+  "`kuro--input-mode-keymaps' has no entry for `line' mode (uses composed keymap)."
+  (should-not (assq 'line kuro--input-mode-keymaps)))
+
+(ert-deftest kuro-input-mode-test-keymaps-values-are-bound ()
+  "Every value in `kuro--input-mode-keymaps' is a bound variable."
+  (dolist (entry kuro--input-mode-keymaps)
+    (should (boundp (cdr entry)))))
 
 (provide 'kuro-input-mode-test-2)
 

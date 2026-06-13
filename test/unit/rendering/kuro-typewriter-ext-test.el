@@ -280,35 +280,6 @@ Verify that the lambda closed over `buf' is the buffer in which start was called
             ;; The closure should have switched to outer-buf
             (should (eq tick-buf outer-buf))))))))
 
-(ert-deftest kuro-typewriter-start-timer-callback-skips-dead-buffer ()
-  "The timer callback is a no-op when the captured buffer is dead.
-If the buffer is killed between timer creation and the tick, the
-`buffer-live-p' guard must prevent kuro--typewriter-tick from being called."
-  (let ((captured-fn nil)
-        (tick-called nil))
-    (let ((buf (generate-new-buffer "*kuro-tw-dead-test*")))
-      (unwind-protect
-          (with-current-buffer buf
-            (let ((kuro-typewriter-effect t)
-                  (kuro-typewriter-chars-per-second 60)
-                  (kuro--initialized t)
-                  kuro--typewriter-queue
-                  kuro--typewriter-timer
-                  kuro--typewriter-current-row
-                  kuro--typewriter-current-text
-                  (kuro--typewriter-written-len 0))
-              (cl-letf (((symbol-function 'run-with-timer)
-                         (lambda (_delay _repeat fn)
-                           (setq captured-fn fn)
-                           'fake-timer)))
-                (kuro--start-typewriter-timer))))
-        ;; Kill the buffer before firing the callback
-        (kill-buffer buf)))
-    ;; Now fire the callback — buffer is dead
-    (cl-letf (((symbol-function 'kuro--typewriter-tick)
-               (lambda () (setq tick-called t))))
-      (when captured-fn (funcall captured-fn)))
-    (should-not tick-called)))
 
 (ert-deftest kuro-typewriter-start-timer-one-cps-interval-is-one-second ()
   "At 1 CPS, interval = 1.0/max(1,1) = 1.0 exactly."
@@ -343,59 +314,53 @@ If the buffer is killed between timer creation and the tick, the
 
 ;;; Group 16 — special key byte sequences (RET, TAB, DEL, Ctrl codes)
 
-(ert-deftest kuro-typewriter-ret-sends-carriage-return ()
-  "kuro--RET sends the carriage-return byte \\x0d (ASCII 13)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--RET)
-    (should (equal (car sent) (string ?\r)))))
+(defconst kuro-typewriter-test--send-named-key-table
+  '((kuro-typewriter-ret-sends-carriage-return kuro--RET "\r")
+    (kuro-typewriter-tab-sends-horizontal-tab  kuro--TAB "\t")
+    (kuro-typewriter-del-sends-rubout-byte     kuro--DEL "\x7f"))
+  "Table of (test-name fn-sym expected-bytes) for named-key send functions.")
 
-(ert-deftest kuro-typewriter-tab-sends-horizontal-tab ()
-  "kuro--TAB sends the horizontal-tab byte \\x09 (ASCII 9)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--TAB)
-    (should (equal (car sent) (string ?\t)))))
+(defmacro kuro-typewriter-test--def-send-named-key (test-name fn-sym expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' sends %S to the PTY." fn-sym expected)
+     (kuro-typewriter-test--with-key-capture sent
+       (,fn-sym)
+       (should (equal (car sent) ,expected)))))
 
-(ert-deftest kuro-typewriter-del-sends-rubout-byte ()
-  "kuro--DEL sends the DEL byte \\x7f (ASCII 127), the modern backspace."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--DEL)
-    (should (equal (car sent) (string ?\x7f)))))
+(kuro-typewriter-test--def-send-named-key kuro-typewriter-ret-sends-carriage-return kuro--RET "\r")
+(kuro-typewriter-test--def-send-named-key kuro-typewriter-tab-sends-horizontal-tab  kuro--TAB "\t")
+(kuro-typewriter-test--def-send-named-key kuro-typewriter-del-sends-rubout-byte     kuro--DEL "\x7f")
 
-(ert-deftest kuro-typewriter-send-special-ctrl-a ()
-  "kuro--send-special 1 sends \\x01 (Ctrl+A / SOH)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 1)
-    (should (equal (car sent) (string 1)))))
+(ert-deftest kuro-typewriter-test--all-named-keys-send-correct-bytes ()
+  "Invariant: each named-key function sends exactly the expected single byte."
+  (dolist (entry kuro-typewriter-test--send-named-key-table)
+    (pcase-let ((`(,_name ,fn-sym ,expected) entry))
+      (kuro-typewriter-test--with-key-capture sent
+        (funcall fn-sym)
+        (should (equal (car sent) expected))))))
 
-(ert-deftest kuro-typewriter-send-special-ctrl-c ()
-  "kuro--send-special 3 sends \\x03 (Ctrl+C / ETX)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 3)
-    (should (equal (car sent) (string 3)))))
+(defconst kuro-typewriter-test--send-special-table
+  '((kuro-typewriter-send-special-ctrl-a               1)
+    (kuro-typewriter-send-special-ctrl-c               3)
+    (kuro-typewriter-send-special-ctrl-z              26)
+    (kuro-typewriter-send-special-ctrl-bracket        27)
+    (kuro-typewriter-send-special-ctrl-backslash      28)
+    (kuro-typewriter-send-special-ctrl-right-bracket  29))
+  "Table of (test-name byte) for `kuro--send-special' byte dispatch.")
 
-(ert-deftest kuro-typewriter-send-special-ctrl-z ()
-  "kuro--send-special 26 sends \\x1a (Ctrl+Z / SUB)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 26)
-    (should (equal (car sent) (string 26)))))
+(defmacro kuro-typewriter-test--def-send-special (test-name byte)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--send-special' %d sends (string %d) to the PTY." byte byte)
+     (kuro-typewriter-test--with-key-capture sent
+       (kuro--send-special ,byte)
+       (should (equal (car sent) (string ,byte))))))
 
-(ert-deftest kuro-typewriter-send-special-ctrl-bracket ()
-  "kuro--send-special 27 sends \\x1b (ESC / Ctrl+[)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 27)
-    (should (equal (car sent) (string 27)))))
-
-(ert-deftest kuro-typewriter-send-special-ctrl-backslash ()
-  "kuro--send-special 28 sends \\x1c (Ctrl+\\\\)."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 28)
-    (should (equal (car sent) (string 28)))))
-
-(ert-deftest kuro-typewriter-send-special-ctrl-right-bracket ()
-  "kuro--send-special 29 sends \\x1d (Ctrl+])."
-  (kuro-typewriter-test--with-key-capture sent
-    (kuro--send-special 29)
-    (should (equal (car sent) (string 29)))))
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-a               1)
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-c               3)
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-z              26)
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-bracket        27)
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-backslash      28)
+(kuro-typewriter-test--def-send-special kuro-typewriter-send-special-ctrl-right-bracket  29)
 
 (ert-deftest kuro-typewriter-send-special-sends-exactly-one-byte-string ()
   "kuro--send-special always sends a single-byte string to the PTY."
@@ -407,62 +372,44 @@ If the buffer is killed between timer creation and the tick, the
 
 ;;; Group 17 — kuro--typewriter-tick: dead buffer after enqueue
 
+(defmacro kuro-typewriter-test--with-dead-buf-closure (captured-fn-sym &rest body)
+  "Allocate a buffer with typewriter state, enqueue \"hello\", capture the timer closure, kill buffer, run BODY."
+  (declare (indent 1))
+  `(let ((,captured-fn-sym nil))
+     (let ((buf (generate-new-buffer "*kuro-tw-dead-test*")))
+       (unwind-protect
+           (with-current-buffer buf
+             (let ((kuro-typewriter-effect t)
+                   (kuro-typewriter-chars-per-second 60)
+                   (kuro--initialized t)
+                   kuro--typewriter-queue kuro--typewriter-timer
+                   kuro--typewriter-current-row kuro--typewriter-current-text
+                   (kuro--typewriter-written-len 0))
+               (kuro--typewriter-enqueue 0 "hello")
+               (cl-letf (((symbol-function 'run-with-timer)
+                          (lambda (_delay _repeat fn)
+                            (setq ,captured-fn-sym fn)
+                            'fake-timer)))
+                 (kuro--start-typewriter-timer))))
+         (kill-buffer buf)))
+     ,@body))
+
 (ert-deftest kuro-typewriter-ext-tick-handles-dead-buffer-after-enqueue ()
-  "The timer closure is a no-op and signals no error when the buffer is dead.
-Enqueue text, kill the buffer, then fire the captured timer lambda directly.
-The `buffer-live-p' guard in the closure must prevent any error."
-  (let ((captured-fn nil))
-    (let ((buf (generate-new-buffer "*kuro-tw-dead-enqueue-test*")))
-      (unwind-protect
-          (with-current-buffer buf
-            (let ((kuro-typewriter-effect t)
-                  (kuro-typewriter-chars-per-second 60)
-                  (kuro--initialized t)
-                  kuro--typewriter-queue
-                  kuro--typewriter-timer
-                  kuro--typewriter-current-row
-                  kuro--typewriter-current-text
-                  (kuro--typewriter-written-len 0))
-              (kuro--typewriter-enqueue 0 "hello")
-              (cl-letf (((symbol-function 'run-with-timer)
-                         (lambda (_delay _repeat fn)
-                           (setq captured-fn fn)
-                           'fake-timer)))
-                (kuro--start-typewriter-timer))))
-        (kill-buffer buf)))
-    ;; Buffer is now dead; fire the closure — must not error
+  "The timer closure is a no-op and signals no error when the buffer is dead."
+  (kuro-typewriter-test--with-dead-buf-closure captured-fn
     (should-not
      (condition-case err
          (progn (when captured-fn (funcall captured-fn)) nil)
        (error err)))))
 
 (ert-deftest kuro-typewriter-ext-tick-dead-buffer-does-not-render ()
-  "kuro--typewriter-tick is never called when the captured buffer is dead.
-After kill-buffer, the closure's buffer-live-p guard must suppress the tick."
-  (let ((captured-fn nil)
-        (tick-called nil))
-    (let ((buf (generate-new-buffer "*kuro-tw-dead-render-test*")))
-      (unwind-protect
-          (with-current-buffer buf
-            (let ((kuro-typewriter-effect t)
-                  (kuro-typewriter-chars-per-second 60)
-                  (kuro--initialized t)
-                  kuro--typewriter-queue
-                  kuro--typewriter-timer
-                  kuro--typewriter-current-row
-                  kuro--typewriter-current-text
-                  (kuro--typewriter-written-len 0))
-              (kuro--typewriter-enqueue 0 "hello")
-              (cl-letf (((symbol-function 'run-with-timer)
-                         (lambda (_delay _repeat fn)
-                           (setq captured-fn fn)
-                           'fake-timer)))
-                (kuro--start-typewriter-timer))))
-        (kill-buffer buf)))
-    (cl-letf (((symbol-function 'kuro--typewriter-tick)
-               (lambda () (setq tick-called t))))
-      (when captured-fn (funcall captured-fn)))
-    (should-not tick-called)))
+  "kuro--typewriter-tick is never called when the captured buffer is dead."
+  (kuro-typewriter-test--with-dead-buf-closure captured-fn
+    (let ((tick-called nil))
+      (cl-letf (((symbol-function 'kuro--typewriter-tick)
+                 (lambda () (setq tick-called t))))
+        (when captured-fn (funcall captured-fn)))
+      (should-not tick-called))))
 
 (ert-deftest kuro-typewriter-ext-tick-state-cleared-after-dead-buffer ()
   "kuro--typewriter-tick resets state vars to nil/0 when queue is drained."
@@ -480,11 +427,6 @@ After kill-buffer, the closure's buffer-live-p guard must suppress the tick."
         (should (null kuro--typewriter-current-row))
         (should (null kuro--typewriter-current-text))
         (should (= kuro--typewriter-written-len 0))))))
-
-(provide 'kuro-typewriter-test)
-
-;;; kuro-typewriter-test.el ends here
-
 
 (provide 'kuro-typewriter-ext-test)
 

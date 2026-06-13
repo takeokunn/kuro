@@ -397,5 +397,52 @@ kuro--shutdown must NOT be called."
      (kuro--install-and-load-module #'ignore "bad-install")
      :type 'error)))
 
+;;; ── kuro--session-setup-fns invariants ───────────────────────────────────────
+
+(ert-deftest kuro-lifecycle--session-setup-fns-is-non-empty-list ()
+  "`kuro--session-setup-fns' is a non-empty list of function symbols."
+  (should (and (listp kuro--session-setup-fns)
+               (not (null kuro--session-setup-fns)))))
+
+(ert-deftest kuro-lifecycle--session-setup-fns-all-bound ()
+  "Every entry in `kuro--session-setup-fns' is a bound function symbol."
+  (dolist (fn kuro--session-setup-fns)
+    (should (fboundp fn))))
+
+(ert-deftest kuro-lifecycle--session-setup-fns-excludes-reset-cursor-cache ()
+  "`kuro--reset-cursor-cache' must NOT be in `kuro--session-setup-fns' (it is a macro)."
+  (should-not (memq 'kuro--reset-cursor-cache kuro--session-setup-fns)))
+
+;;; ── kuro--module-install-methods invariants ──────────────────────────────────
+
+(ert-deftest kuro-lifecycle--module-install-methods-non-empty ()
+  "`kuro--module-install-methods' is a non-empty list."
+  (should (and (listp kuro--module-install-methods)
+               (not (null kuro--module-install-methods)))))
+
+(ert-deftest kuro-lifecycle--module-install-methods-has-prebuilt ()
+  "`kuro--module-install-methods' has a `prebuilt' entry."
+  (should (assq 'prebuilt kuro--module-install-methods)))
+
+(ert-deftest kuro-lifecycle--module-install-methods-has-cargo ()
+  "`kuro--module-install-methods' has a `cargo' entry."
+  (should (assq 'cargo kuro--module-install-methods)))
+
+(ert-deftest kuro-lifecycle--module-install-methods-all-fns-bound ()
+  "Every install function in `kuro--module-install-methods' is a bound symbol."
+  (dolist (entry kuro--module-install-methods)
+    (should (fboundp (nth 2 entry)))))
+
+(ert-deftest kuro-lifecycle--module-install-methods-all-have-display-names ()
+  "Every entry in `kuro--module-install-methods' has a non-empty display name."
+  (dolist (entry kuro--module-install-methods)
+    (let ((display-name (nth 3 entry)))
+      (should (and (stringp display-name) (not (string-empty-p display-name)))))))
+
+(ert-deftest kuro-lifecycle--module-install-methods-all-have-key-chars ()
+  "Every entry in `kuro--module-install-methods' has an integer key character."
+  (dolist (entry kuro--module-install-methods)
+    (should (characterp (nth 1 entry)))))
+
 (provide 'kuro-lifecycle-test)
 ;;; kuro-lifecycle-test.el ends here

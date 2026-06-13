@@ -305,6 +305,44 @@ Also confirms the copy turns rectangle-mark-mode back off on exit."
   "`kuro-search-backward' is an interactive command (macro-generated)."
   (should (commandp #'kuro-search-backward)))
 
+;;; ── Group 26: kuro--copy-find-prompt ─────────────────────────────────────────
+
+(ert-deftest kuro-copy-test-find-prompt-fwd-returns-next-position ()
+  "`kuro--copy-find-prompt' with :fwd returns the first position strictly > point."
+  (with-temp-buffer
+    (insert (make-string 10 ?x))
+    (goto-char 5)
+    (cl-letf (((symbol-function 'kuro--prompt-overlay-positions)
+               (lambda () '(2 7 12))))
+      (should (= (kuro--copy-find-prompt :fwd) 7)))))
+
+(ert-deftest kuro-copy-test-find-prompt-fwd-returns-nil-when-no-forward ()
+  "`kuro--copy-find-prompt' with :fwd returns nil when point is past all prompts."
+  (with-temp-buffer
+    (insert (make-string 10 ?x))
+    (goto-char 9)
+    (cl-letf (((symbol-function 'kuro--prompt-overlay-positions)
+               (lambda () '(2 5))))
+      (should-not (kuro--copy-find-prompt :fwd)))))
+
+(ert-deftest kuro-copy-test-find-prompt-bwd-returns-prev-position ()
+  "`kuro--copy-find-prompt' with :bwd returns the last position strictly < point."
+  (with-temp-buffer
+    (insert (make-string 10 ?x))
+    (goto-char 8)
+    (cl-letf (((symbol-function 'kuro--prompt-overlay-positions)
+               (lambda () '(3 6 10))))
+      (should (= (kuro--copy-find-prompt :bwd) 6)))))
+
+(ert-deftest kuro-copy-test-find-prompt-bwd-returns-nil-when-no-backward ()
+  "`kuro--copy-find-prompt' with :bwd returns nil when point is before all prompts."
+  (with-temp-buffer
+    (insert (make-string 10 ?x))
+    (goto-char 1)
+    (cl-letf (((symbol-function 'kuro--prompt-overlay-positions)
+               (lambda () '(5 9))))
+      (should-not (kuro--copy-find-prompt :bwd)))))
+
 (provide 'kuro-test)
 
 (provide 'kuro-copy-mode-adv-test)

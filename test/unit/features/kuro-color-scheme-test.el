@@ -295,6 +295,29 @@ the behavior so we notice if the contract changes."
     ;; The second (most recently pushed) call's FFI invocation returns nil.
     (should-not (car returns))))
 
+;;; ── Group (H): kuro--color-scheme-uninstall-hook ─────────────────────────────
+
+(ert-deftest kuro-color-scheme-uninstall-hook-removes-theme-hook ()
+  "`kuro--color-scheme-uninstall-hook' removes `kuro--color-scheme-schedule' from
+`enable-theme-functions' when the variable is bound (Emacs 29.1+)."
+  (let ((enable-theme-functions nil))
+    (add-hook 'enable-theme-functions #'kuro--color-scheme-schedule)
+    (kuro--color-scheme-uninstall-hook)
+    (should-not (memq #'kuro--color-scheme-schedule enable-theme-functions))))
+
+(ert-deftest kuro-color-scheme-uninstall-hook-cancels-debounce-timer ()
+  "`kuro--color-scheme-uninstall-hook' cancels and clears any pending debounce timer."
+  (let ((kuro--color-scheme-debounce-timer (run-at-time 1 nil #'ignore)))
+    (kuro--color-scheme-uninstall-hook)
+    (should (null kuro--color-scheme-debounce-timer))))
+
+(ert-deftest kuro-color-scheme-uninstall-hook-noop-when-no-timer ()
+  "`kuro--color-scheme-uninstall-hook' is a noop when `kuro--color-scheme-debounce-timer' is nil."
+  (let ((kuro--color-scheme-debounce-timer nil)
+        (enable-theme-functions nil))
+    (kuro--color-scheme-uninstall-hook)
+    (should (null kuro--color-scheme-debounce-timer))))
+
 (provide 'kuro-color-scheme-test)
 
 ;;; kuro-color-scheme-test.el ends here

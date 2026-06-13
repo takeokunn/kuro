@@ -27,5 +27,14 @@ Each `forward-line N' places point at line N+1, cur-line = N."
      (setq-local kuro--prompt-positions ,positions)
      ,@body))
 
+(defmacro kuro-nav-test--with-content (content positions &rest body)
+  "Run BODY in a temp buffer holding CONTENT with `kuro--prompt-positions' = POSITIONS."
+  (declare (indent 2))
+  `(with-temp-buffer
+     (insert ,content)
+     (goto-char (point-min))
+     (setq-local kuro--prompt-positions ,positions)
+     ,@body))
+
 (provide 'kuro-navigation-test-support)
 ;;; kuro-navigation-test-support.el ends here

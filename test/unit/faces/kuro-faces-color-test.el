@@ -237,5 +237,38 @@ ALIST is a list of (name . hex-string) pairs."
   (kuro-faces-color-test--with-named-colors '()
     (should (equal (kuro--color-to-emacs '(rgb . #xFFFFFF)) "#ffffff"))))
 
+;;; ── Color constant structural invariants ─────────────────────────────────────
+
+(ert-deftest kuro-faces-color-cube-range-is-consistent ()
+  "`kuro--color-cube-start' + 6^3 - 1 = `kuro--color-cube-end' (216 indexed colors)."
+  (should (= kuro--color-cube-end
+             (+ kuro--color-cube-start
+                (* kuro--color-cube-size kuro--color-cube-size kuro--color-cube-size)
+                -1))))
+
+(ert-deftest kuro-faces-color-gray-start-follows-cube-end ()
+  "`kuro--color-gray-start' is one past `kuro--color-cube-end' (no gap in 256-palette)."
+  (should (= kuro--color-gray-start (1+ kuro--color-cube-end))))
+
+(ert-deftest kuro-faces-color-rgb-mask-is-24-bits ()
+  "`kuro--color-rgb-mask' is exactly 24 bits wide (#xFFFFFF)."
+  (should (= kuro--color-rgb-mask #xFFFFFF)))
+
+(ert-deftest kuro-faces-color-tag-bits-dont-overlap-rgb ()
+  "`kuro--color-tag-indexed' has no overlap with `kuro--color-rgb-mask'."
+  (should (= 0 (logand kuro--color-tag-indexed kuro--color-rgb-mask))))
+
+(ert-deftest kuro-faces-color-named-color-conses-has-16-entries ()
+  "`kuro--named-color-conses' has exactly 16 entries (ANSI colors 0–15)."
+  (should (= 16 (length kuro--named-color-conses))))
+
+(ert-deftest kuro-faces-color-indexed-color-conses-has-256-entries ()
+  "`kuro--indexed-color-conses' has exactly 256 entries (full 8-bit palette)."
+  (should (= 256 (length kuro--indexed-color-conses))))
+
+(ert-deftest kuro-faces-color-rgb-string-cache-is-hash-table ()
+  "`kuro--rgb-string-cache' is an `eql'-keyed hash table for memoizing RGB strings."
+  (should (hash-table-p kuro--rgb-string-cache)))
+
 (provide 'kuro-faces-color-test)
 ;;; kuro-faces-color-test.el ends here

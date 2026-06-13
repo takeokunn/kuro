@@ -6,21 +6,34 @@
 
 ;;; Group 9: kuro--blink-visible and kuro--toggle-blink-state
 
-(ert-deftest kuro-overlays-blink-visible-returns-slow-state ()
-  "kuro--blink-visible 'slow returns kuro--blink-visible-slow."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t
-          kuro--blink-visible-fast nil)
-    (should (eq t   (kuro--blink-visible 'slow)))
-    (should (eq nil (kuro--blink-visible 'fast)))))
+(defconst kuro-overlays-test--blink-visible-table
+  '((kuro-overlays-blink-visible-slow t   nil t   nil)
+    (kuro-overlays-blink-visible-fast nil t   nil t))
+  "Table of (test-name slow-init fast-init slow-expected fast-expected).")
 
-(ert-deftest kuro-overlays-blink-visible-returns-fast-state ()
-  "kuro--blink-visible 'fast returns kuro--blink-visible-fast."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow nil
-          kuro--blink-visible-fast t)
-    (should (eq nil (kuro--blink-visible 'slow)))
-    (should (eq t   (kuro--blink-visible 'fast)))))
+(defmacro kuro-overlays-test--def-blink-visible
+    (test-name slow-init fast-init slow-expected fast-expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--blink-visible' slow=%s,fast=%s: slow→%s fast→%s."
+              slow-init fast-init slow-expected fast-expected)
+     (kuro-overlays-test--with-buffer
+       (setq kuro--blink-visible-slow ,slow-init
+             kuro--blink-visible-fast ,fast-init)
+       (should (eq ,slow-expected (kuro--blink-visible 'slow)))
+       (should (eq ,fast-expected (kuro--blink-visible 'fast))))))
+
+(kuro-overlays-test--def-blink-visible kuro-overlays-blink-visible-slow t   nil t   nil)
+(kuro-overlays-test--def-blink-visible kuro-overlays-blink-visible-fast nil t   nil t)
+
+(ert-deftest kuro-overlays-test--blink-visible-both-variants ()
+  "Invariant: blink-visible dispatches correctly for both slow and fast variants."
+  (dolist (entry kuro-overlays-test--blink-visible-table)
+    (pcase-let ((`(,_name ,slow-init ,fast-init ,slow-exp ,fast-exp) entry))
+      (kuro-overlays-test--with-buffer
+        (setq kuro--blink-visible-slow slow-init
+              kuro--blink-visible-fast fast-init)
+        (should (eq slow-exp (kuro--blink-visible 'slow)))
+        (should (eq fast-exp (kuro--blink-visible 'fast)))))))
 
 (ert-deftest kuro-overlays-toggle-blink-state-flips-slow ()
   "kuro--toggle-blink-state 'slow toggles kuro--blink-visible-slow."
@@ -289,35 +302,49 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
 
 ;;; Group 18: kuro--register-blink-overlay macro + kuro--decode-png-image
 
-(ert-deftest kuro-overlays-register-blink-overlay-slow-adds-to-all-structures ()
-  "`kuro--register-blink-overlay' with \\='slow adds OV to all 3 tracking structures."
-  (kuro-overlays-test--with-buffer
-    (insert "hello\n")
-    (let ((ov (make-overlay 1 3))
-          (kuro--blink-overlays nil)
-          (kuro--blink-overlays-slow nil)
-          (kuro--blink-overlays-fast nil)
-          (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
-      (kuro--register-blink-overlay ov 'slow 0)
-      (should (memq ov kuro--blink-overlays))
-      (should (memq ov kuro--blink-overlays-slow))
-      (should-not (memq ov kuro--blink-overlays-fast))
-      (should (memq ov (gethash 0 kuro--blink-overlays-by-row))))))
+(defconst kuro-overlays-test--register-blink-overlay-table
+  '((kuro-overlays-register-blink-overlay-slow slow 0 kuro--blink-overlays-slow kuro--blink-overlays-fast)
+    (kuro-overlays-register-blink-overlay-fast fast 1 kuro--blink-overlays-fast kuro--blink-overlays-slow))
+  "Table of (test-name type row own-list-sym other-list-sym).")
 
-(ert-deftest kuro-overlays-register-blink-overlay-fast-adds-to-fast-list ()
-  "`kuro--register-blink-overlay' with \\='fast adds OV to fast sub-list only."
-  (kuro-overlays-test--with-buffer
-    (insert "hello\n")
-    (let ((ov (make-overlay 1 3))
-          (kuro--blink-overlays nil)
-          (kuro--blink-overlays-slow nil)
-          (kuro--blink-overlays-fast nil)
-          (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
-      (kuro--register-blink-overlay ov 'fast 1)
-      (should (memq ov kuro--blink-overlays))
-      (should (memq ov kuro--blink-overlays-fast))
-      (should-not (memq ov kuro--blink-overlays-slow))
-      (should (memq ov (gethash 1 kuro--blink-overlays-by-row))))))
+(defmacro kuro-overlays-test--def-register-blink-overlay
+    (test-name type row own-list other-list)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--register-blink-overlay' type=%s row=%d: in own list, absent from other." type row)
+     (kuro-overlays-test--with-buffer
+       (insert "hello\n")
+       (let ((ov (make-overlay 1 3))
+             (kuro--blink-overlays nil)
+             (kuro--blink-overlays-slow nil)
+             (kuro--blink-overlays-fast nil)
+             (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
+         (kuro--register-blink-overlay ov ',type ,row)
+         (should     (memq ov kuro--blink-overlays))
+         (should     (memq ov ,own-list))
+         (should-not (memq ov ,other-list))
+         (should     (memq ov (gethash ,row kuro--blink-overlays-by-row)))))))
+
+(kuro-overlays-test--def-register-blink-overlay
+ kuro-overlays-register-blink-overlay-slow slow 0 kuro--blink-overlays-slow kuro--blink-overlays-fast)
+(kuro-overlays-test--def-register-blink-overlay
+ kuro-overlays-register-blink-overlay-fast fast 1 kuro--blink-overlays-fast kuro--blink-overlays-slow)
+
+(ert-deftest kuro-overlays-test--register-blink-overlay-both-types ()
+  "Invariant: register-blink-overlay adds to own list and excludes from other for both types."
+  (dolist (entry kuro-overlays-test--register-blink-overlay-table)
+    (pcase-let ((`(,_name ,type ,row ,own-sym ,other-sym) entry))
+      (kuro-overlays-test--with-buffer
+        (insert "hello\n")
+        (let ((ov (make-overlay 1 3))
+              (kuro--blink-overlays nil)
+              (kuro--blink-overlays-slow nil)
+              (kuro--blink-overlays-fast nil)
+              (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
+          (kuro--register-blink-overlay ov type row)
+          (should     (memq ov kuro--blink-overlays))
+          (should     (memq ov (symbol-value own-sym)))
+          (should-not (memq ov (symbol-value other-sym)))
+          (should     (memq ov (gethash row kuro--blink-overlays-by-row))))))))
 
 (ert-deftest kuro-overlays-register-blink-overlay-appends-to-row-hash ()
   "`kuro--register-blink-overlay' prepends OV to existing row hash entries."
@@ -381,86 +408,113 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
 
 ;;; Group 19: kuro--ffi-face-default-p — pure predicate coverage
 
-(ert-deftest kuro-overlays-ffi-face-default-p-all-defaults ()
-  "`kuro--ffi-face-default-p' returns t when all args are the \"default\" sentinel."
-  (should (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 0 0)))
+(defmacro kuro-overlays-test--def-ffi-face-default (test-name fg bg flags ul expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--ffi-face-default-p' (fg=%s bg=%s flags=%s ul=%s) => %s." fg bg flags ul expectedp)
+     ,(if expectedp
+          `(should     (kuro--ffi-face-default-p ,fg ,bg ,flags ,ul))
+        `(should-not (kuro--ffi-face-default-p ,fg ,bg ,flags ,ul)))))
 
-(ert-deftest kuro-overlays-ffi-face-default-p-non-default-fg ()
-  "`kuro--ffi-face-default-p' returns nil when fg differs from the sentinel."
-  (should-not (kuro--ffi-face-default-p #x00FF0000 kuro--ffi-color-default 0 0)))
-
-(ert-deftest kuro-overlays-ffi-face-default-p-non-default-bg ()
-  "`kuro--ffi-face-default-p' returns nil when bg differs from the sentinel."
-  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default #x000000FF 0 0)))
-
-(ert-deftest kuro-overlays-ffi-face-default-p-non-zero-flags ()
-  "`kuro--ffi-face-default-p' returns nil when flags is non-zero (logior short-circuit)."
-  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 1 0)))
-
-(ert-deftest kuro-overlays-ffi-face-default-p-non-zero-ul-color ()
-  "`kuro--ffi-face-default-p' returns nil when ul-color-enc is non-zero."
-  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 0 #x00FF0000)))
-
-(ert-deftest kuro-overlays-ffi-face-default-p-flags-and-ul-both-nonzero ()
-  "`kuro--ffi-face-default-p' returns nil when both flags and ul-color-enc are non-zero."
-  (should-not (kuro--ffi-face-default-p kuro--ffi-color-default kuro--ffi-color-default 3 5)))
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-all-defaults              kuro--ffi-color-default kuro--ffi-color-default  0          0           t)
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-non-default-fg             #x00FF0000              kuro--ffi-color-default  0          0           nil)
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-non-default-bg             kuro--ffi-color-default #x000000FF               0          0           nil)
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-non-zero-flags             kuro--ffi-color-default kuro--ffi-color-default  1          0           nil)
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-non-zero-ul-color          kuro--ffi-color-default kuro--ffi-color-default  0          #x00FF0000  nil)
+(kuro-overlays-test--def-ffi-face-default kuro-overlays-ffi-face-default-p-flags-and-ul-both-nonzero  kuro--ffi-color-default kuro--ffi-color-default  3          5           nil)
 
 ;;; Group 20: kuro--ffi-face-has-visual-effects-p — blink/hidden flags
 
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-zero-flags ()
-  "`kuro--ffi-face-has-visual-effects-p' returns nil for flags = 0."
-  (should-not (kuro--ffi-face-has-visual-effects-p 0)))
+(defmacro kuro-overlays-test--def-has-visual-effects (test-name flags expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--ffi-face-has-visual-effects-p' flags=%s => %s." flags expectedp)
+     ,(if expectedp
+          `(should     (kuro--ffi-face-has-visual-effects-p ,flags))
+        `(should-not (kuro--ffi-face-has-visual-effects-p ,flags)))))
 
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-blink-slow ()
-  "`kuro--ffi-face-has-visual-effects-p' detects slow-blink flag."
-  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-blink-slow)))
-
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-blink-fast ()
-  "`kuro--ffi-face-has-visual-effects-p' detects fast-blink flag."
-  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-blink-fast)))
-
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-hidden ()
-  "`kuro--ffi-face-has-visual-effects-p' detects hidden (invisible) flag."
-  (should (kuro--ffi-face-has-visual-effects-p kuro--sgr-flag-hidden)))
-
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-bold-only-is-false ()
-  "`kuro--ffi-face-has-visual-effects-p' returns nil for bold-only (no blink/hidden)."
-  (should-not (kuro--ffi-face-has-visual-effects-p #x01)))
-
-(ert-deftest kuro-overlays-ffi-face-has-visual-effects-p-combined ()
-  "`kuro--ffi-face-has-visual-effects-p' detects blink when combined with other flags."
-  (should (kuro--ffi-face-has-visual-effects-p (logior #x01 kuro--sgr-flag-blink-slow))))
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-zero-flags         0                                      nil)
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-blink-slow         kuro--sgr-flag-blink-slow               t)
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-blink-fast         kuro--sgr-flag-blink-fast               t)
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-hidden             kuro--sgr-flag-hidden                   t)
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-bold-only-is-false #x01                                    nil)
+(kuro-overlays-test--def-has-visual-effects kuro-overlays-ffi-face-has-visual-effects-p-combined           (logior #x01 kuro--sgr-flag-blink-slow) t)
 
 ;;; Group 21: kuro--apply-ffi-face-effects — blink and hidden text-property dispatch
 
-(ert-deftest kuro-overlays-ffi-face-effects-hidden-flag-adds-invisible ()
-  "`kuro--apply-ffi-face-effects' adds invisible property when hidden flag is set."
-  (kuro-overlays-test--with-buffer
+(defconst kuro-overlays-test--ffi-face-invisible-table
+  '((kuro-overlays-ffi-face-effects-hidden-flag-adds-invisible  kuro--sgr-flag-hidden t)
+    (kuro-overlays-ffi-face-effects-no-hidden-no-invisible      0                     nil))
+  "Table of (test-name flags expectedp) for invisible text property from ffi-face-effects.")
+
+(defmacro kuro-overlays-test--def-ffi-face-invisible (test-name flags expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--apply-ffi-face-effects' invisible %s when flags=%s." expectedp flags)
+     (kuro-overlays-test--with-buffer
+       (insert "hello")
+       (kuro--apply-ffi-face-effects (point-min) (point-max) ,flags)
+       ,(if expectedp
+            `(should (get-text-property (point-min) 'invisible))
+          `(should-not (get-text-property (point-min) 'invisible))))))
+
+(kuro-overlays-test--def-ffi-face-invisible kuro-overlays-ffi-face-effects-hidden-flag-adds-invisible  kuro--sgr-flag-hidden t)
+(kuro-overlays-test--def-ffi-face-invisible kuro-overlays-ffi-face-effects-no-hidden-no-invisible      0                     nil)
+
+(ert-deftest kuro-overlays-ffi-face-invisible-all-table-entries-correct ()
+  "All entries in `kuro-overlays-test--ffi-face-invisible-table' match actual behavior."
+  (dolist (entry kuro-overlays-test--ffi-face-invisible-table)
+    (pcase-let ((`(,_name ,flags ,expectedp) entry))
+      (kuro-overlays-test--with-buffer
+        (insert "hello")
+        (kuro--apply-ffi-face-effects (point-min) (point-max)
+                                      (if (symbolp flags) (symbol-value flags) flags))
+        (if expectedp
+            (should (get-text-property (point-min) 'invisible))
+          (should-not (get-text-property (point-min) 'invisible)))))))
+
+(defconst kuro-overlays-test--ffi-face-blink-table
+  '((kuro-overlays-ffi-face-effects-blink-fast-creates-overlay kuro--sgr-flag-blink-fast)
+    (kuro-overlays-ffi-face-effects-blink-slow-creates-overlay kuro--sgr-flag-blink-slow))
+  "Table of (test-name flag) for blink overlay creation from ffi-face-effects.")
+
+(defmacro kuro-overlays-test--def-ffi-face-blink (test-name flag)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--apply-ffi-face-effects' creates blink overlay for %s." flag)
+     (kuro-overlays-test--with-buffer
+       (insert "xx")
+       (kuro--apply-ffi-face-effects (point-min) (point-max) ,flag)
+       (should kuro--blink-overlays))))
+
+(kuro-overlays-test--def-ffi-face-blink kuro-overlays-ffi-face-effects-blink-fast-creates-overlay kuro--sgr-flag-blink-fast)
+(kuro-overlays-test--def-ffi-face-blink kuro-overlays-ffi-face-effects-blink-slow-creates-overlay kuro--sgr-flag-blink-slow)
+
+(ert-deftest kuro-overlays-ffi-face-blink-all-table-entries-correct ()
+  "All entries in `kuro-overlays-test--ffi-face-blink-table' create blink overlays."
+  (dolist (entry kuro-overlays-test--ffi-face-blink-table)
+    (pcase-let ((`(,_name ,flag) entry))
+      (kuro-overlays-test--with-buffer
+        (insert "xx")
+        (kuro--apply-ffi-face-effects (point-min) (point-max) (symbol-value flag))
+        (should kuro--blink-overlays)))))
+
+;;; ── Group 22: kuro--apply-ffi-face-text-properties + constant invariants ─────
+
+(ert-deftest kuro-overlays-apply-ffi-face-text-properties-sets-face ()
+  "`kuro--apply-ffi-face-text-properties' applies the face spec to the region."
+  (with-temp-buffer
     (insert "hello")
-    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-hidden)
-    (should (get-text-property (point-min) 'invisible))))
+    (kuro--apply-ffi-face-text-properties (point-min) (point-max) 'bold)
+    (let ((face-val (get-text-property 1 'face)))
+      (should (or (eq face-val 'bold)
+                  (and (listp face-val) (memq 'bold face-val)))))))
 
-(ert-deftest kuro-overlays-ffi-face-effects-no-hidden-no-invisible ()
-  "`kuro--apply-ffi-face-effects' does not add invisible when hidden flag absent."
-  (kuro-overlays-test--with-buffer
-    (insert "hello")
-    (kuro--apply-ffi-face-effects (point-min) (point-max) 0)
-    (should-not (get-text-property (point-min) 'invisible))))
+(ert-deftest kuro-overlays-sgr-visual-flags-mask-is-nonzero ()
+  "`kuro--sgr-visual-flags-mask' is a non-zero integer covering blink+hidden bits."
+  (should (and (integerp kuro--sgr-visual-flags-mask)
+               (/= 0 kuro--sgr-visual-flags-mask))))
 
-(ert-deftest kuro-overlays-ffi-face-effects-blink-fast-creates-overlay ()
-  "`kuro--apply-ffi-face-effects' registers a fast-blink overlay for the region."
-  (kuro-overlays-test--with-buffer
-    (insert "xx")
-    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-blink-fast)
-    ;; The overlay list for 'fast must be non-nil
-    (should kuro--blink-overlays)))
-
-(ert-deftest kuro-overlays-ffi-face-effects-blink-slow-creates-overlay ()
-  "`kuro--apply-ffi-face-effects' registers a slow-blink overlay for the region."
-  (kuro-overlays-test--with-buffer
-    (insert "xx")
-    (kuro--apply-ffi-face-effects (point-min) (point-max) kuro--sgr-flag-blink-slow)
-    (should kuro--blink-overlays)))
+(ert-deftest kuro-overlays-blink-frames-cached-are-positive-integers ()
+  "`kuro--blink-fast-frames-cached' and `kuro--blink-slow-frames-cached' are positive integers."
+  (should (and (integerp kuro--blink-fast-frames-cached) (> kuro--blink-fast-frames-cached 0)))
+  (should (and (integerp kuro--blink-slow-frames-cached) (> kuro--blink-slow-frames-cached 0))))
 
 (provide 'kuro-overlays-test-2)
 

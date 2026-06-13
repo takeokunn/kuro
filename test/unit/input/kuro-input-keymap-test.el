@@ -84,25 +84,30 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
   (should-not (assoc "C-c" kuro--ctrl-key-table))
   (should-not (rassq 3 kuro--ctrl-key-table)))
 
-(ert-deftest kuro-input-keymap-ctrl-table-spot-check-c-a ()
-  "C-a maps to control byte 1 in kuro--ctrl-key-table."
-  (should (= (cdr (assoc "C-a" kuro--ctrl-key-table)) 1)))
+(defconst kuro-input-keymap-test--ctrl-key-spot-table
+  '((kuro-input-keymap-ctrl-table-spot-check-c-a          "C-a"  1)
+    (kuro-input-keymap-ctrl-table-spot-check-c-z          "C-z"  26)
+    (kuro-input-keymap-ctrl-table-spot-check-c-backslash  "C-\\" 28)
+    (kuro-input-keymap-ctrl-table-spot-check-c-bracket    "C-]"  29)
+    (kuro-input-keymap-ctrl-table-spot-check-c-underscore "C-_"  31))
+  "Table of (test-name key-str byte) for kuro--ctrl-key-table spot checks.")
 
-(ert-deftest kuro-input-keymap-ctrl-table-spot-check-c-z ()
-  "C-z maps to control byte 26 in kuro--ctrl-key-table."
-  (should (= (cdr (assoc "C-z" kuro--ctrl-key-table)) 26)))
+(defmacro kuro-input-keymap-test--def-ctrl-key-spot (test-name key-str byte)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--ctrl-key-table: %S → byte %d." key-str byte)
+     (should (= (cdr (assoc ,key-str kuro--ctrl-key-table)) ,byte))))
 
-(ert-deftest kuro-input-keymap-ctrl-table-spot-check-c-backslash ()
-  "C-\\ maps to control byte 28 in kuro--ctrl-key-table."
-  (should (= (cdr (assoc "C-\\" kuro--ctrl-key-table)) 28)))
+(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-a          "C-a"  1)
+(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-z          "C-z"  26)
+(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-backslash  "C-\\" 28)
+(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-bracket    "C-]"  29)
+(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-underscore "C-_"  31)
 
-(ert-deftest kuro-input-keymap-ctrl-table-spot-check-c-bracket ()
-  "C-] maps to control byte 29 in kuro--ctrl-key-table."
-  (should (= (cdr (assoc "C-]" kuro--ctrl-key-table)) 29)))
-
-(ert-deftest kuro-input-keymap-ctrl-table-spot-check-c-underscore ()
-  "C-_ maps to control byte 31 in kuro--ctrl-key-table."
-  (should (= (cdr (assoc "C-_" kuro--ctrl-key-table)) 31)))
+(ert-deftest kuro-input-keymap-test--all-ctrl-key-spots-correct ()
+  "All kuro-input-keymap-test--ctrl-key-spot-table entries map to the correct byte."
+  (dolist (entry kuro-input-keymap-test--ctrl-key-spot-table)
+    (pcase-let ((`(,_name ,key-str ,byte) entry))
+      (should (= (cdr (assoc key-str kuro--ctrl-key-table)) byte)))))
 
 (ert-deftest kuro-input-keymap-ctrl-table-no-duplicate-bytes ()
   "kuro--ctrl-key-table has no duplicate control-byte values."
@@ -116,17 +121,26 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
   "kuro--xterm-modifier-codes contains exactly 3 entries: S, M, C."
   (should (= (length kuro--xterm-modifier-codes) 3)))
 
-(ert-deftest kuro-input-keymap-modifier-codes-shift-is-2 ()
-  "Shift modifier code is 2 in kuro--xterm-modifier-codes."
-  (should (= (cdr (assq 'S kuro--xterm-modifier-codes)) 2)))
+(defconst kuro-input-keymap-test--modifier-codes-table
+  '((kuro-input-keymap-modifier-codes-shift-is-2 S 2)
+    (kuro-input-keymap-modifier-codes-meta-is-3  M 3)
+    (kuro-input-keymap-modifier-codes-ctrl-is-5  C 5))
+  "Table of (test-name modifier-sym xterm-code) for kuro--xterm-modifier-codes.")
 
-(ert-deftest kuro-input-keymap-modifier-codes-meta-is-3 ()
-  "Meta/Alt modifier code is 3 in kuro--xterm-modifier-codes."
-  (should (= (cdr (assq 'M kuro--xterm-modifier-codes)) 3)))
+(defmacro kuro-input-keymap-test--def-modifier-code (test-name sym code)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--xterm-modifier-codes: %s → %d." sym code)
+     (should (= (cdr (assq ',sym kuro--xterm-modifier-codes)) ,code))))
 
-(ert-deftest kuro-input-keymap-modifier-codes-ctrl-is-5 ()
-  "Ctrl modifier code is 5 in kuro--xterm-modifier-codes."
-  (should (= (cdr (assq 'C kuro--xterm-modifier-codes)) 5)))
+(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-shift-is-2 S 2)
+(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-meta-is-3  M 3)
+(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-ctrl-is-5  C 5)
+
+(ert-deftest kuro-input-keymap-test--all-modifier-codes-correct ()
+  "All kuro-input-keymap-test--modifier-codes-table entries match kuro--xterm-modifier-codes."
+  (dolist (entry kuro-input-keymap-test--modifier-codes-table)
+    (pcase-let ((`(,_name ,sym ,code) entry))
+      (should (= (cdr (assq sym kuro--xterm-modifier-codes)) code)))))
 
 
 ;;; Group 3: kuro--xterm-arrow-codes table
@@ -135,12 +149,28 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
   "kuro--xterm-arrow-codes contains exactly 4 entries: up, down, right, left."
   (should (= (length kuro--xterm-arrow-codes) 4)))
 
-(ert-deftest kuro-input-keymap-arrow-codes-spot-check ()
-  "Arrow code final bytes are A=up, B=down, C=right, D=left (VT100 CUU/CUD/CUF/CUB)."
-  (should (= (cdr (assq 'up    kuro--xterm-arrow-codes)) ?A))
-  (should (= (cdr (assq 'down  kuro--xterm-arrow-codes)) ?B))
-  (should (= (cdr (assq 'right kuro--xterm-arrow-codes)) ?C))
-  (should (= (cdr (assq 'left  kuro--xterm-arrow-codes)) ?D)))
+(defconst kuro-input-keymap-test--arrow-codes-table
+  '((kuro-input-keymap-arrow-code-up    up    ?A)
+    (kuro-input-keymap-arrow-code-down  down  ?B)
+    (kuro-input-keymap-arrow-code-right right ?C)
+    (kuro-input-keymap-arrow-code-left  left  ?D))
+  "Table of (test-name arrow-sym final-byte) for `kuro--xterm-arrow-codes'.")
+
+(defmacro kuro-input-keymap-test--def-arrow-code (test-name sym byte)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--xterm-arrow-codes: %s → ?%c." sym byte)
+     (should (= (cdr (assq ',sym kuro--xterm-arrow-codes)) ,byte))))
+
+(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-up    up    ?A)
+(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-down  down  ?B)
+(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-right right ?C)
+(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-left  left  ?D)
+
+(ert-deftest kuro-input-keymap-arrow-codes-all-correct ()
+  "Every entry in `kuro-input-keymap-test--arrow-codes-table' maps to the correct final byte."
+  (dolist (entry kuro-input-keymap-test--arrow-codes-table)
+    (pcase-let ((`(,_name ,sym ,byte) entry))
+      (should (= (cdr (assq sym kuro--xterm-arrow-codes)) byte)))))
 
 
 ;;; Group 4: kuro--build-keymap result
@@ -193,21 +223,37 @@ Saves and restores `kuro--keymap' so global state is not corrupted."
   (let ((map (kuro-keymap-test--built-map)))
     (should (lookup-key map [escape]))))
 
-(ert-deftest kuro-input-keymap-build-has-arrow-bindings ()
-  "All four arrow keys are bound in the built keymap."
-  (let ((map (kuro-keymap-test--built-map)))
-    (should (lookup-key map [up]))
-    (should (lookup-key map [down]))
-    (should (lookup-key map [left]))
-    (should (lookup-key map [right]))))
+(defconst kuro-input-keymap-test--build-key-table
+  '((kuro-input-keymap-build-has-up           [up])
+    (kuro-input-keymap-build-has-down         [down])
+    (kuro-input-keymap-build-has-left         [left])
+    (kuro-input-keymap-build-has-right        [right])
+    (kuro-input-keymap-build-has-down-mouse-1 [down-mouse-1])
+    (kuro-input-keymap-build-has-mouse-1      [mouse-1])
+    (kuro-input-keymap-build-has-mouse-4      [mouse-4])
+    (kuro-input-keymap-build-has-mouse-5      [mouse-5]))
+  "Table of (test-name key) verifying key is bound in the built keymap.")
 
-(ert-deftest kuro-input-keymap-build-has-mouse-bindings ()
-  "Mouse press, release, and scroll events are bound in the built keymap."
+(defmacro kuro-input-keymap-test--def-build-has-key (test-name key)
+  `(ert-deftest ,test-name ()
+     ,(format "Built keymap has binding for %S." key)
+     (should (lookup-key (kuro-keymap-test--built-map) ,key))))
+
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-up           [up])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-down         [down])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-left         [left])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-right        [right])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-down-mouse-1 [down-mouse-1])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-1      [mouse-1])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-4      [mouse-4])
+(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-5      [mouse-5])
+
+(ert-deftest kuro-input-keymap-build-has-all-arrow-and-mouse-keys ()
+  "Every entry in `kuro-input-keymap-test--build-key-table' is bound in the built keymap."
   (let ((map (kuro-keymap-test--built-map)))
-    (should (lookup-key map [down-mouse-1]))
-    (should (lookup-key map [mouse-1]))
-    (should (lookup-key map [mouse-4]))
-    (should (lookup-key map [mouse-5]))))
+    (dolist (entry kuro-input-keymap-test--build-key-table)
+      (pcase-let ((`(,_name ,key) entry))
+        (should (lookup-key map key))))))
 
 
 ;;; Group 5: Modifier+arrow xterm CSI sequences
@@ -228,47 +274,68 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
        (funcall binding))
      (car sent)))
 
-(ert-deftest kuro-input-keymap-shift-up-sends-csi-1-2A ()
-  "S-up sends ESC[1;2A (xterm Shift+Up)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq S up) "\e[1;2A")))
+(defconst kuro-input-keymap-test--modifier-arrow-table
+  '((kuro-input-keymap-shift-up-sends-csi-1-2A   S up    "\e[1;2A")
+    (kuro-input-keymap-ctrl-right-sends-csi-1-5C C right "\e[1;5C")
+    (kuro-input-keymap-meta-down-sends-csi-1-3B  M down  "\e[1;3B")
+    (kuro-input-keymap-ctrl-left-sends-csi-1-5D  C left  "\e[1;5D")
+    (kuro-input-keymap-shift-down-sends-csi-1-2B S down  "\e[1;2B")
+    (kuro-input-keymap-meta-right-sends-csi-1-3C M right "\e[1;3C"))
+  "Table of (test-name modifier direction expected-csi) for modifier+arrow xterm sequences.")
 
-(ert-deftest kuro-input-keymap-ctrl-right-sends-csi-1-5C ()
-  "C-right sends ESC[1;5C (xterm Ctrl+Right)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq C right) "\e[1;5C")))
+(defmacro kuro-input-keymap-test--def-modifier-arrow (test-name mod dir expected)
+  `(ert-deftest ,test-name ()
+     ,(format "%s-%s sends %S." mod dir expected)
+     (should (equal (kuro-keymap-test--modifier-arrow-seq ,mod ,dir) ,expected))))
 
-(ert-deftest kuro-input-keymap-meta-down-sends-csi-1-3B ()
-  "M-down sends ESC[1;3B (xterm Alt+Down)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq M down) "\e[1;3B")))
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-shift-up-sends-csi-1-2A   S up    "\e[1;2A")
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-ctrl-right-sends-csi-1-5C C right "\e[1;5C")
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-meta-down-sends-csi-1-3B  M down  "\e[1;3B")
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-ctrl-left-sends-csi-1-5D  C left  "\e[1;5D")
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-shift-down-sends-csi-1-2B S down  "\e[1;2B")
+(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-meta-right-sends-csi-1-3C M right "\e[1;3C")
 
-(ert-deftest kuro-input-keymap-ctrl-left-sends-csi-1-5D ()
-  "C-left sends ESC[1;5D (xterm Ctrl+Left)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq C left) "\e[1;5D")))
-
-(ert-deftest kuro-input-keymap-shift-down-sends-csi-1-2B ()
-  "S-down sends ESC[1;2B (xterm Shift+Down)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq S down) "\e[1;2B")))
-
-(ert-deftest kuro-input-keymap-meta-right-sends-csi-1-3C ()
-  "M-right sends ESC[1;3C (xterm Alt+Right)."
-  (should (equal (kuro-keymap-test--modifier-arrow-seq M right) "\e[1;3C")))
+(ert-deftest kuro-input-keymap-test--all-modifier-arrows-send-correct-csi ()
+  "All kuro-input-keymap-test--modifier-arrow-table entries send the expected CSI sequence."
+  (dolist (entry kuro-input-keymap-test--modifier-arrow-table)
+    (pcase-let ((`(,_name ,mod ,dir ,expected) entry))
+      (let* ((map (kuro-keymap-test--built-map))
+             (event (intern (format "%s-%s" mod dir)))
+             (binding (lookup-key map (vector event)))
+             (sent nil))
+        (should (functionp binding))
+        (cl-letf (((symbol-function 'kuro--send-key)
+                   (lambda (s) (push s sent)))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () nil)))
+          (funcall binding))
+        (should (equal (car sent) expected))))))
 
 
 ;;; Group 6: Yank remaps
 
-(ert-deftest kuro-input-keymap-build-has-yank-remap ()
-  "The built keymap remaps yank to kuro--yank."
-  (let ((map (kuro-keymap-test--built-map)))
-    (should (eq (lookup-key map [remap yank]) #'kuro--yank))))
+(defconst kuro-input-keymap-test--yank-remap-table
+  '((kuro-input-keymap-build-has-yank-remap           yank           kuro--yank)
+    (kuro-input-keymap-build-has-yank-pop-remap       yank-pop       kuro--yank-pop)
+    (kuro-input-keymap-build-has-clipboard-yank-remap clipboard-yank kuro--yank))
+  "Table of (test-name orig-fn remap-fn) for yank-family remap assertions.")
 
-(ert-deftest kuro-input-keymap-build-has-yank-pop-remap ()
-  "The built keymap remaps yank-pop to kuro--yank-pop."
-  (let ((map (kuro-keymap-test--built-map)))
-    (should (eq (lookup-key map [remap yank-pop]) #'kuro--yank-pop))))
+(defmacro kuro-input-keymap-test--def-yank-remap (test-name orig-fn remap-fn)
+  `(ert-deftest ,test-name ()
+     ,(format "Built keymap remaps `%s' to `%s'." orig-fn remap-fn)
+     (let ((map (kuro-keymap-test--built-map)))
+       (should (eq (lookup-key map [remap ,orig-fn]) #',remap-fn)))))
 
-(ert-deftest kuro-input-keymap-build-has-clipboard-yank-remap ()
-  "The built keymap remaps clipboard-yank to kuro--yank (for Cmd+V on macOS)."
+(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-yank-remap           yank           kuro--yank)
+(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-yank-pop-remap       yank-pop       kuro--yank-pop)
+(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-clipboard-yank-remap clipboard-yank kuro--yank)
+
+(ert-deftest kuro-input-keymap-test--all-yank-remaps-correct ()
+  "All kuro-input-keymap-test--yank-remap-table entries are wired correctly."
   (let ((map (kuro-keymap-test--built-map)))
-    (should (eq (lookup-key map [remap clipboard-yank]) #'kuro--yank))))
+    (dolist (entry kuro-input-keymap-test--yank-remap-table)
+      (pcase-let ((`(,_name ,orig-fn ,remap-fn) entry))
+        (should (eq (lookup-key map (vector 'remap orig-fn)) remap-fn))))))
 
 (ert-deftest kuro-input-keymap-clipboard-yank-remap-sends-kill-ring-text ()
   "Invoking the [remap clipboard-yank] binding sends kill-ring text via kuro--send-key."
@@ -299,17 +366,26 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
     (should (stringp (car entry)))
     (should (integerp (cdr entry)))))
 
-(ert-deftest kuro-input-keymap-meta-punct-spot-check-dot ()
-  "\"M-.\" maps to ?. in kuro--meta-punct-bindings."
-  (should (= (cdr (assoc "M-." kuro--meta-punct-bindings)) ?.)))
+(defconst kuro-input-keymap-test--meta-punct-spot-table
+  '((kuro-input-keymap-meta-punct-spot-check-dot       "M-." ?.)
+    (kuro-input-keymap-meta-punct-spot-check-slash      "M-/" ?/)
+    (kuro-input-keymap-meta-punct-spot-check-underscore "M-_" ?_))
+  "Table of (test-name key-str char) for kuro--meta-punct-bindings spot checks.")
 
-(ert-deftest kuro-input-keymap-meta-punct-spot-check-slash ()
-  "\"M-/\" maps to ?/ in kuro--meta-punct-bindings."
-  (should (= (cdr (assoc "M-/" kuro--meta-punct-bindings)) ?/)))
+(defmacro kuro-input-keymap-test--def-meta-punct-spot (test-name key-str char)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--meta-punct-bindings: %S → ?%c." key-str char)
+     (should (= (cdr (assoc ,key-str kuro--meta-punct-bindings)) ,char))))
 
-(ert-deftest kuro-input-keymap-meta-punct-spot-check-underscore ()
-  "\"M-_\" maps to ?_ in kuro--meta-punct-bindings."
-  (should (= (cdr (assoc "M-_" kuro--meta-punct-bindings)) ?_)))
+(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-dot       "M-." ?.)
+(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-slash      "M-/" ?/)
+(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-underscore "M-_" ?_)
+
+(ert-deftest kuro-input-keymap-test--all-meta-punct-spots-correct ()
+  "All kuro-input-keymap-test--meta-punct-spot-table entries map to the expected char."
+  (dolist (entry kuro-input-keymap-test--meta-punct-spot-table)
+    (pcase-let ((`(,_name ,key-str ,char) entry))
+      (should (= (cdr (assoc key-str kuro--meta-punct-bindings)) char)))))
 
 (ert-deftest kuro-input-keymap-meta-punct-no-alphanumeric ()
   "kuro--meta-punct-bindings contains no alphabetic or digit character bindings."

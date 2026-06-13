@@ -433,5 +433,30 @@ by byte-compilation at the call site)."
   (should (commandp #'kuro-activity-list-delete-entry)))
 
 
+;;; Group 12 — kuro--activity-exit-code-status
+
+(defconst kuro-activity-test--exit-code-status-table
+  '((kuro-activity-exit-code-status-nil-is-empty    nil  "")
+    (kuro-activity-exit-code-status-zero-is-check   0    " ✓")
+    (kuro-activity-exit-code-status-one-is-cross     1    " ✗ (exit 1)")
+    (kuro-activity-exit-code-status-127-is-cross    127  " ✗ (exit 127)"))
+  "Table: (test-name exit-code expected-string) for `kuro--activity-exit-code-status'.")
+
+(defmacro kuro-activity-test--def-exit-code-status (test-name exit-code expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--activity-exit-code-status' exit-code=%S → %S." exit-code expected)
+     (should (equal (kuro--activity-exit-code-status ,exit-code) ,expected))))
+
+(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-nil-is-empty  nil "")
+(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-zero-is-check 0   " ✓")
+(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-one-is-cross  1   " ✗ (exit 1)")
+(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-127-is-cross 127  " ✗ (exit 127)")
+
+(ert-deftest kuro-activity-test--all-exit-code-statuses-correct ()
+  "Invariant: every entry in the exit-code-status table maps to the expected string."
+  (dolist (entry kuro-activity-test--exit-code-status-table)
+    (pcase-let ((`(,_name ,code ,expected) entry))
+      (should (equal (kuro--activity-exit-code-status code) expected)))))
+
 (provide 'kuro-activity-test)
 ;;; kuro-activity-test.el ends here

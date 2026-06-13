@@ -435,5 +435,27 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 ;;; Group 14: kuro--dispatch-mouse-event — SGR scroll events sent correctly
 
+;;; Group 15: kuro--mouse-button-alist invariants
+
+(ert-deftest kuro-input-mouse-button-alist-has-mouse-1 ()
+  "`kuro--mouse-button-alist' maps `mouse-1' to button index 0."
+  (should (= (alist-get 'mouse-1 kuro--mouse-button-alist) 0)))
+
+(ert-deftest kuro-input-mouse-button-alist-has-mouse-2 ()
+  "`kuro--mouse-button-alist' maps `mouse-2' to button index 1."
+  (should (= (alist-get 'mouse-2 kuro--mouse-button-alist) 1)))
+
+(ert-deftest kuro-input-mouse-button-alist-has-mouse-3 ()
+  "`kuro--mouse-button-alist' maps `mouse-3' to button index 2."
+  (should (= (alist-get 'mouse-3 kuro--mouse-button-alist) 2)))
+
+(ert-deftest kuro-input-mouse-button-alist-covers-three-buttons ()
+  "`kuro--mouse-button-alist' has exactly three entries."
+  (should (= (length kuro--mouse-button-alist) 3)))
+
+(ert-deftest kuro-input-mouse-button-alist-unknown-returns-nil ()
+  "Looking up an unknown event type in `kuro--mouse-button-alist' returns nil."
+  (should (null (alist-get 'mouse-4 kuro--mouse-button-alist))))
+
 (provide 'kuro-input-mouse-test)
 ;;; kuro-input-mouse-test.el ends here

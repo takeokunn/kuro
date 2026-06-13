@@ -352,5 +352,52 @@ These keys do not change between normal and application cursor mode."
   "kuro--encode-kitty-key with ctrl modifier encodes as ESC [ key ; 5 u."
   (should (equal (kuro--encode-kitty-key 65 4) "\e[65;5u")))
 
+;;; ── KKP flag constants and F-key codepoints ──────────────────────────────────
+
+(ert-deftest kuro-input-keys-kkp-flags-are-distinct-power-of-two ()
+  "KKP protocol flag constants are distinct powers of two (non-overlapping bits)."
+  (let ((flags (list kuro--kkp-disambiguate kuro--kkp-report-events kuro--kkp-all-escape)))
+    ;; Each flag is a power of two
+    (dolist (f flags)
+      (should (and (integerp f) (> f 0) (= 0 (logand f (1- f))))))
+    ;; No two flags share bits
+    (let ((combined 0))
+      (dolist (f flags)
+        (should (= 0 (logand combined f)))
+        (setq combined (logior combined f))))))
+
+(ert-deftest kuro-input-keys-kkp-f-key-codepoints-sequential ()
+  "kuro--kkp-cp-f2 through kuro--kkp-cp-f11 are consecutive (F1 baseline = 57364)."
+  (let ((base kuro--kkp-cp-f2))
+    (should (= kuro--kkp-cp-f3  (+ base 1)))
+    (should (= kuro--kkp-cp-f4  (+ base 2)))
+    (should (= kuro--kkp-cp-f5  (+ base 3)))
+    (should (= kuro--kkp-cp-f6  (+ base 4)))
+    (should (= kuro--kkp-cp-f7  (+ base 5)))
+    (should (= kuro--kkp-cp-f8  (+ base 6)))
+    (should (= kuro--kkp-cp-f9  (+ base 7)))
+    (should (= kuro--kkp-cp-f10 (+ base 8)))
+    (should (= kuro--kkp-cp-f11 (+ base 9)))))
+
+;;; ── kuro--send-kkp-functional dispatch ───────────────────────────────────────
+
+(ert-deftest kuro-input-keys-send-kkp-functional-uses-kkp-when-all-escape-set ()
+  "`kuro--send-kkp-functional' sends CSI CP;1u when ALL_ESCAPE flag is active."
+  (let ((sent nil)
+        (kuro--keyboard-flags kuro--kkp-all-escape))
+    (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s)))
+              ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+      (kuro--send-kkp-functional 57364 "\e[A" "\eOA"))
+    (should (equal sent "\e[57364;1u"))))
+
+(ert-deftest kuro-input-keys-send-kkp-functional-uses-legacy-when-flag-clear ()
+  "`kuro--send-kkp-functional' delegates to `kuro--send-key-sequence' when flag is clear."
+  (let ((seq-args nil)
+        (kuro--keyboard-flags 0))
+    (cl-letf (((symbol-function 'kuro--send-key-sequence)
+               (lambda (n a) (setq seq-args (list n a)))))
+      (kuro--send-kkp-functional 57364 "\e[A" "\eOA"))
+    (should (equal seq-args '("\e[A" "\eOA")))))
+
 (provide 'kuro-input-keys-test-2)
 ;;; kuro-input-keys-test-2.el ends here

@@ -132,5 +132,26 @@ all cond branches and produce nil."
     ;; max(0, 2 - 10) = max(0, -8) = 0
     (should (= kuro--scroll-offset 0))))
 
+;;; Group 23: kuro--do-pending-render — live vs. dead buffer dispatch
+
+(ert-deftest kuro-input-do-pending-render-calls-render-cycle-when-live ()
+  "`kuro--do-pending-render' calls `kuro--render-cycle' when the buffer is live."
+  (let ((render-called nil))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'kuro--render-cycle)
+                 (lambda () (setq render-called t))))
+        (kuro--do-pending-render (current-buffer))))
+    (should render-called)))
+
+(ert-deftest kuro-input-do-pending-render-noop-when-buffer-dead ()
+  "`kuro--do-pending-render' does nothing when the buffer has been killed."
+  (let ((dead-buf (generate-new-buffer " *kuro-dead-test*"))
+        (render-called nil))
+    (kill-buffer dead-buf)
+    (cl-letf (((symbol-function 'kuro--render-cycle)
+               (lambda () (setq render-called t))))
+      (kuro--do-pending-render dead-buf))
+    (should-not render-called)))
+
 (provide 'kuro-input-test-4)
 ;;; kuro-input-test-4.el ends here

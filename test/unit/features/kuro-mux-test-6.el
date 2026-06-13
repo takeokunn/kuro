@@ -87,5 +87,42 @@
         (kuro-mux-setup))
       (should-not installed))))
 
+;;; ── Group 15 — kuro--def-mux-nav / kuro--def-mux-swap macro invariants ──────
+
+(ert-deftest kuro-mux-test-def-mux-nav-generated-commands-are-interactive ()
+  "`kuro--def-mux-nav' generates interactive commands (kuro-mux-next and kuro-mux-prev)."
+  (should (commandp #'kuro-mux-next))
+  (should (commandp #'kuro-mux-prev)))
+
+(ert-deftest kuro-mux-test-def-mux-nav-no-sessions-messages ()
+  "`kuro-mux-next' messages when there are no active sessions."
+  (let (msgs)
+    (cl-letf (((symbol-function 'kuro-mux--live-sessions) (lambda () nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) msgs))))
+      (kuro-mux-next))
+    (should (cl-some (lambda (m) (string-match-p "no active" m)) msgs))))
+
+(ert-deftest kuro-mux-test-def-mux-nav-single-session-switches-directly ()
+  "`kuro-mux-next' calls `switch-to-buffer' directly when only one session exists."
+  (let ((switched-to nil))
+    (cl-letf (((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list 'only-buf)))
+              ((symbol-function 'switch-to-buffer)
+               (lambda (buf) (setq switched-to buf))))
+      (kuro-mux-next)
+      (should (eq switched-to 'only-buf)))))
+
+(ert-deftest kuro-mux-test-def-mux-swap-generated-commands-are-interactive ()
+  "`kuro--def-mux-swap' generates interactive commands."
+  (should (commandp #'kuro-mux-swap-pane-forward))
+  (should (commandp #'kuro-mux-swap-pane-backward)))
+
+(ert-deftest kuro-mux-test-def-mux-swap-errors-when-only-one-window ()
+  "`kuro-mux-swap-pane-forward' signals user-error when only one window is visible."
+  (cl-letf (((symbol-function 'next-window)
+             (lambda (win &rest _) win)))  ; returns same window = only one window
+    (should-error (kuro-mux-swap-pane-forward) :type 'user-error)))
+
 (provide 'kuro-mux-test-6)
 ;;; kuro-mux-test-6.el ends here

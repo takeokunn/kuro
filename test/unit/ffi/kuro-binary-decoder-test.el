@@ -36,39 +36,41 @@
   "Build an Emacs vector of byte integers from BYTES (integers 0-255)."
   (apply #'vector bytes))
 
-;;; Group 1: kuro--read-u32-le
+;;; Groups 1 + 6: kuro--read-u32-le
 
-(ert-deftest kuro-binary-decoder-read-u32-le-zero ()
-  "kuro--read-u32-le reads 0 from four zero bytes."
-  (let ((v (vector 0 0 0 0)))
-    (should (= (kuro--read-u32-le v 0) 0))))
+(defconst kuro-binary-decoder-test--read-u32-le-table
+  ;;  test-name                                        bytes-vector                            offset  expected
+  '((kuro-binary-decoder-read-u32-le-zero              [0 0 0 0]                               0       0)
+    (kuro-binary-decoder-read-u32-le-one               [1 0 0 0]                               0       1)
+    (kuro-binary-decoder-read-u32-le-max-u8            [255 0 0 0]                             0       255)
+    (kuro-binary-decoder-read-u32-le-multi-byte        [#x04 #x03 #x02 #x01]                  0       #x01020304)
+    (kuro-binary-decoder-read-u32-le-with-offset       [0 0 #x78 #x56 #x34 #x12]              2       #x12345678)
+    (kuro-binary-decoder-read-u32-le-known-value       [#x78 #x56 #x34 #x12]                  0       #x12345678)
+    (kuro-binary-decoder-read-u32-le-max-value         [#xFF #xFF #xFF #xFF]                   0       #xFFFFFFFF)
+    (kuro-binary-decoder-read-u32-le-exact-four-bytes  [42 0 0 0]                              0       42)
+    (kuro-binary-decoder-read-u32-le-mid-vector-offset [0 0 0 0 #x78 #x56 #x34 #x12 0 0 0 0] 4       #x12345678))
+  "Table of (test-name byte-vector offset expected) for `kuro--read-u32-le'.")
 
-(ert-deftest kuro-binary-decoder-read-u32-le-one ()
-  "kuro--read-u32-le reads 1 from LE bytes [1 0 0 0]."
-  (let ((v (vector 1 0 0 0)))
-    (should (= (kuro--read-u32-le v 0) 1))))
+(defmacro kuro-binary-decoder-test--def-read-u32-le (test-name bytes offset expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--read-u32-le' %S at offset %d → #x%X." bytes offset expected)
+     (should (= (kuro--read-u32-le ,bytes ,offset) ,expected))))
 
-(ert-deftest kuro-binary-decoder-read-u32-le-max-u8 ()
-  "kuro--read-u32-le reads 255 from bytes [255 0 0 0]."
-  (let ((v (vector 255 0 0 0)))
-    (should (= (kuro--read-u32-le v 0) 255))))
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-zero              [0 0 0 0]                               0 0)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-one               [1 0 0 0]                               0 1)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-max-u8            [255 0 0 0]                             0 255)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-multi-byte        [#x04 #x03 #x02 #x01]                  0 #x01020304)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-with-offset       [0 0 #x78 #x56 #x34 #x12]              2 #x12345678)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-known-value       [#x78 #x56 #x34 #x12]                  0 #x12345678)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-max-value         [#xFF #xFF #xFF #xFF]                   0 #xFFFFFFFF)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-exact-four-bytes  [42 0 0 0]                              0 42)
+(kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-mid-vector-offset [0 0 0 0 #x78 #x56 #x34 #x12 0 0 0 0] 4 #x12345678)
 
-(ert-deftest kuro-binary-decoder-read-u32-le-multi-byte ()
-  "kuro--read-u32-le decodes a multi-byte LE value correctly."
-  ;; 0x01020304 in LE is [04 03 02 01]
-  (let ((v (vector #x04 #x03 #x02 #x01)))
-    (should (= (kuro--read-u32-le v 0) #x01020304))))
-
-(ert-deftest kuro-binary-decoder-read-u32-le-with-offset ()
-  "kuro--read-u32-le reads from a non-zero offset."
-  ;; offset 2: bytes [#x78 #x56 #x34 #x12] → 0x12345678
-  (let ((v (vector 0 0 #x78 #x56 #x34 #x12)))
-    (should (= (kuro--read-u32-le v 2) #x12345678))))
-
-(ert-deftest kuro-binary-decoder-read-u32-le-known-value ()
-  "kuro--read-u32-le handles a known 32-bit value: 305419896 = 0x12345678."
-  (let ((v (vector #x78 #x56 #x34 #x12)))
-    (should (= (kuro--read-u32-le v 0) #x12345678))))
+(ert-deftest kuro-binary-decoder-test--all-read-u32-le-correct ()
+  "All kuro-binary-decoder-test--read-u32-le-table entries decode correctly."
+  (dolist (entry kuro-binary-decoder-test--read-u32-le-table)
+    (pcase-let ((`(,_name ,bytes ,offset ,expected) entry))
+      (should (= (kuro--read-u32-le bytes offset) expected)))))
 
 ;;; Group 5: kuro--decode-face-ranges, kuro--decode-col-to-buf
 
@@ -125,27 +127,6 @@
       (should (= (aref col-to-buf 1) 20))
       (should (= new-pos 12)))))
 
-;;; Group 6: kuro--read-u32-le — edge cases
-
-(ert-deftest kuro-binary-decoder-read-u32-le-max-value ()
-  "kuro--read-u32-le reads the maximum u32 value 0xFFFFFFFF."
-  (let ((v (vector #xFF #xFF #xFF #xFF)))
-    (should (= (kuro--read-u32-le v 0) #xFFFFFFFF))))
-
-(ert-deftest kuro-binary-decoder-read-u32-le-exact-four-bytes ()
-  "kuro--read-u32-le reads correctly from a vector of exactly 4 bytes."
-  (let ((v (apply #'vector (kuro-binary-decoder-test--make-u32-le 42))))
-    (should (= (kuro--read-u32-le v 0) 42))))
-
-(ert-deftest kuro-binary-decoder-read-u32-le-mid-vector-offset ()
-  "kuro--read-u32-le reads at an arbitrary middle offset."
-  ;; Vector: [0 0 0 0] [#x78 #x56 #x34 #x12] [0 0 0 0]
-  (let ((v (apply #'vector
-                  (append
-                   (kuro-binary-decoder-test--make-u32-le 0)
-                   (kuro-binary-decoder-test--make-u32-le #x12345678)
-                   (kuro-binary-decoder-test--make-u32-le 0)))))
-    (should (= (kuro--read-u32-le v 4) #x12345678))))
 
 ;;; Group 9: kuro--decode-face-ranges — additional cases
 
@@ -407,6 +388,20 @@ Row indices come from the binary data; text strings come from the vector."
         (should (= (length result) 1))
         ;; entry is a flat vector [row-index text face-ranges col-to-buf]
         (should (equal (aref entry 1) "decoded-row"))))))
+
+;;; ── Binary format version constants ──────────────────────────────────────────
+
+(ert-deftest kuro-binary-decoder-format-version-v1-is-1 ()
+  "`kuro--binary-format-version-v1' is 1 (wire encoding for v1 frames)."
+  (should (= kuro--binary-format-version-v1 1)))
+
+(ert-deftest kuro-binary-decoder-format-version-v2-is-2 ()
+  "`kuro--binary-format-version-v2' is 2 (wire encoding for v2 frames with ul-color)."
+  (should (= kuro--binary-format-version-v2 2)))
+
+(ert-deftest kuro-binary-decoder-format-versions-are-distinct ()
+  "`kuro--binary-format-version-v1' and `kuro--binary-format-version-v2' must differ."
+  (should (/= kuro--binary-format-version-v1 kuro--binary-format-version-v2)))
 
 (provide 'kuro-binary-decoder-test)
 

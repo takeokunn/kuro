@@ -14,48 +14,95 @@
 
 ;;; Group 16: kuro--enter-tui-mode / kuro--exit-tui-mode
 
-(ert-deftest kuro-renderer-pipeline-ext3-enter-tui-mode-stops-idle-timer ()
-  "kuro--enter-tui-mode stops the streaming idle timer."
-  (kuro-renderer-pipeline-test--with-buffer
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--enter-tui-mode)
-      (should stopped))))
+;; ── Timer side-effects ─────────────────────────────────────────────────────
 
-(ert-deftest kuro-renderer-pipeline-ext3-enter-tui-mode-switches-to-tui-rate ()
-  "kuro--enter-tui-mode switches the render timer to kuro-tui-frame-rate."
-  (kuro-renderer-pipeline-test--with-buffer
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--enter-tui-mode)
-      (should (= switched kuro-tui-frame-rate)))))
+(defconst kuro-renderer-pipeline-ext3-test--enter-exit-timer-table
+  '((kuro-renderer-pipeline-ext3-enter-tui-mode-stops-idle-timer   kuro--enter-tui-mode stopped t)
+    (kuro-renderer-pipeline-ext3-exit-tui-mode-restarts-idle-timer kuro--exit-tui-mode  started t))
+  "Table of (test-name fn check-sym expectedp) for enter/exit timer side-effects.")
 
-(ert-deftest kuro-renderer-pipeline-ext3-enter-tui-mode-sets-active-flag ()
-  "kuro--enter-tui-mode sets kuro--tui-mode-active to t."
-  (kuro-renderer-pipeline-test--with-buffer
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--enter-tui-mode)
-      (should kuro--tui-mode-active))))
+(defmacro kuro-renderer-pipeline-ext3-test--def-enter-exit-timer (test-name fn check-sym expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "Timer side-effect: `%s' — %s %s." fn check-sym
+              (if expectedp "fires" "does not fire"))
+     (kuro-renderer-pipeline-test--with-buffer
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (,fn)
+         ,(if expectedp `(should ,check-sym) `(should-not ,check-sym))))))
 
-(ert-deftest kuro-renderer-pipeline-ext3-exit-tui-mode-switches-to-normal-rate ()
-  "kuro--exit-tui-mode switches the render timer back to kuro-frame-rate."
-  (kuro-renderer-pipeline-test--with-buffer
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--exit-tui-mode)
-      (should (= switched kuro-frame-rate)))))
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-timer kuro-renderer-pipeline-ext3-enter-tui-mode-stops-idle-timer   kuro--enter-tui-mode stopped t)
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-timer kuro-renderer-pipeline-ext3-exit-tui-mode-restarts-idle-timer kuro--exit-tui-mode  started t)
 
-(ert-deftest kuro-renderer-pipeline-ext3-exit-tui-mode-clears-active-flag ()
-  "kuro--exit-tui-mode sets kuro--tui-mode-active to nil."
-  (kuro-renderer-pipeline-test--with-buffer
-    (setq kuro--tui-mode-active t)
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--exit-tui-mode)
-      (should-not kuro--tui-mode-active))))
+(ert-deftest kuro-renderer-pipeline-ext3-test--all-timer-side-effects-correct ()
+  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-timer-table' match behavior."
+  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-timer-table)
+    (pcase-let ((`(,_name ,fn ,check-sym ,expectedp) entry))
+      (kuro-renderer-pipeline-test--with-buffer
+        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+          (funcall fn)
+          (let ((val (if (eq check-sym 'stopped) stopped started)))
+            (if expectedp (should val) (should-not val))))))))
 
-(ert-deftest kuro-renderer-pipeline-ext3-exit-tui-mode-restarts-idle-timer ()
-  "kuro--exit-tui-mode restarts the streaming idle timer."
-  (kuro-renderer-pipeline-test--with-buffer
-    (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-      (kuro--exit-tui-mode)
-      (should started))))
+;; ── Rate-switch assertions ──────────────────────────────────────────────────
+
+(defconst kuro-renderer-pipeline-ext3-test--enter-exit-rate-table
+  '((kuro-renderer-pipeline-ext3-enter-tui-mode-switches-to-tui-rate   kuro--enter-tui-mode kuro-tui-frame-rate t)
+    (kuro-renderer-pipeline-ext3-exit-tui-mode-switches-to-normal-rate kuro--exit-tui-mode  kuro-frame-rate     t))
+  "Table of (test-name fn rate expectedp) for enter/exit rate-switch assertions.")
+
+(defmacro kuro-renderer-pipeline-ext3-test--def-enter-exit-rate (test-name fn rate expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "Rate-switch: `%s' switched to %s %s." fn rate
+              (if expectedp "as expected" "not expected"))
+     (kuro-renderer-pipeline-test--with-buffer
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (,fn)
+         ,(if expectedp `(should (= switched ,rate)) `(should-not (= switched ,rate)))))))
+
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-rate kuro-renderer-pipeline-ext3-enter-tui-mode-switches-to-tui-rate   kuro--enter-tui-mode kuro-tui-frame-rate t)
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-rate kuro-renderer-pipeline-ext3-exit-tui-mode-switches-to-normal-rate kuro--exit-tui-mode  kuro-frame-rate     t)
+
+(ert-deftest kuro-renderer-pipeline-ext3-test--all-rate-switches-correct ()
+  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-rate-table' match behavior."
+  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-rate-table)
+    (pcase-let ((`(,_name ,fn ,rate ,expectedp) entry))
+      (kuro-renderer-pipeline-test--with-buffer
+        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+          (funcall fn)
+          (if expectedp
+              (should (= switched (symbol-value rate)))
+            (should-not (= switched (symbol-value rate)))))))))
+
+;; ── Active-flag assertions ──────────────────────────────────────────────────
+
+(defconst kuro-renderer-pipeline-ext3-test--enter-exit-flag-table
+  '((kuro-renderer-pipeline-ext3-enter-tui-mode-sets-active-flag   kuro--enter-tui-mode nil t)
+    (kuro-renderer-pipeline-ext3-exit-tui-mode-clears-active-flag  kuro--exit-tui-mode  t   nil))
+  "Table of (test-name fn init-active expected-active) for enter/exit flag toggles.")
+
+(defmacro kuro-renderer-pipeline-ext3-test--def-enter-exit-flag (test-name fn init-val expected-val)
+  `(ert-deftest ,test-name ()
+     ,(format "Active flag: `%s' %s." fn (if expected-val "sets to t" "clears to nil"))
+     (kuro-renderer-pipeline-test--with-buffer
+       (setq kuro--tui-mode-active ,init-val)
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (,fn)
+         ,(if expected-val `(should kuro--tui-mode-active) `(should-not kuro--tui-mode-active))))))
+
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-flag kuro-renderer-pipeline-ext3-enter-tui-mode-sets-active-flag   kuro--enter-tui-mode nil t)
+(kuro-renderer-pipeline-ext3-test--def-enter-exit-flag kuro-renderer-pipeline-ext3-exit-tui-mode-clears-active-flag  kuro--exit-tui-mode  t   nil)
+
+(ert-deftest kuro-renderer-pipeline-ext3-test--all-flag-toggles-correct ()
+  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-flag-table' match behavior."
+  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-flag-table)
+    (pcase-let ((`(,_name ,fn ,init-val ,expected-val) entry))
+      (kuro-renderer-pipeline-test--with-buffer
+        (setq kuro--tui-mode-active init-val)
+        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+          (funcall fn)
+          (if expected-val
+              (should kuro--tui-mode-active)
+            (should-not kuro--tui-mode-active)))))))
 
 ;;; Group 18: kuro--finalize-dirty-updates
 
@@ -204,25 +251,36 @@
         ;; pending is drained even when not initialized
         (should-not kuro--resize-pending)))))
 
-(ert-deftest test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-rows ()
-  "kuro--handle-pending-resize does not call kuro--resize for (0 . 80)."
-  (kuro-renderer-pipeline-resize-test--with-buffer
-    (setq kuro--resize-pending '(0 . 80))
-    (let ((resize-called nil))
-      (cl-letf (((symbol-function 'kuro--resize)
-                 (lambda (_r _c) (setq resize-called t))))
-        (kuro--handle-pending-resize)
-        (should-not resize-called)))))
+(defconst kuro-renderer-pipeline-ext3-test--resize-skips-zero-table
+  '((test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-rows  (0  . 80))
+    (test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-cols  (24 . 0)))
+  "Table of (test-name pending-dims) where kuro--handle-pending-resize must NOT call resize.")
 
-(ert-deftest test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-cols ()
-  "kuro--handle-pending-resize does not call kuro--resize for (24 . 0)."
-  (kuro-renderer-pipeline-resize-test--with-buffer
-    (setq kuro--resize-pending '(24 . 0))
-    (let ((resize-called nil))
-      (cl-letf (((symbol-function 'kuro--resize)
-                 (lambda (_r _c) (setq resize-called t))))
-        (kuro--handle-pending-resize)
-        (should-not resize-called)))))
+(defmacro kuro-renderer-pipeline-ext3-test--def-resize-skips-zero (test-name pending-dims)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--handle-pending-resize' skips resize for pending=%s." pending-dims)
+     (kuro-renderer-pipeline-resize-test--with-buffer
+       (setq kuro--resize-pending ',pending-dims)
+       (let ((resize-called nil))
+         (cl-letf (((symbol-function 'kuro--resize)
+                    (lambda (_r _c) (setq resize-called t))))
+           (kuro--handle-pending-resize)
+           (should-not resize-called))))))
+
+(kuro-renderer-pipeline-ext3-test--def-resize-skips-zero test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-rows  (0  . 80))
+(kuro-renderer-pipeline-ext3-test--def-resize-skips-zero test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-cols  (24 . 0))
+
+(ert-deftest kuro-renderer-pipeline-ext3-test--all-resize-skips-zero-correct ()
+  "All entries in `kuro-renderer-pipeline-ext3-test--resize-skips-zero-table' skip resize."
+  (dolist (entry kuro-renderer-pipeline-ext3-test--resize-skips-zero-table)
+    (pcase-let ((`(,_name ,pending-dims) entry))
+      (kuro-renderer-pipeline-resize-test--with-buffer
+        (setq kuro--resize-pending pending-dims)
+        (let ((resize-called nil))
+          (cl-letf (((symbol-function 'kuro--resize)
+                     (lambda (_r _c) (setq resize-called t))))
+            (kuro--handle-pending-resize)
+            (should-not resize-called)))))))
 
 (ert-deftest test-kuro-pipeline-ext3-handle-pending-resize-adds-buffer-lines ()
   "Resizing from 10 to 15 rows inserts 5 newlines at end of buffer."
@@ -262,19 +320,36 @@
 
 ;;; Group 22: kuro--with-render-env macro
 
-(ert-deftest kuro-renderer-pipeline-ext3-with-render-env-sets-gc-threshold ()
-  "`kuro--with-render-env' binds gc-cons-threshold to kuro--render-gc-threshold."
-  (let (captured)
-    (kuro--with-render-env
-      (setq captured gc-cons-threshold))
-    (should (= captured kuro--render-gc-threshold))))
+(defconst kuro-renderer-pipeline-ext3-test--render-env-gc-table
+  '((kuro-renderer-pipeline-ext3-with-render-env-sets-gc-threshold
+     gc-cons-threshold  kuro--render-gc-threshold)
+    (kuro-renderer-pipeline-ext3-with-render-env-sets-gc-percentage
+     gc-cons-percentage kuro--render-gc-percentage))
+  "Table of (test-name gc-var expected-const) for `kuro--with-render-env' GC bindings.")
 
-(ert-deftest kuro-renderer-pipeline-ext3-with-render-env-sets-gc-percentage ()
-  "`kuro--with-render-env' binds gc-cons-percentage to kuro--render-gc-percentage."
-  (let (captured)
-    (kuro--with-render-env
-      (setq captured gc-cons-percentage))
-    (should (= captured kuro--render-gc-percentage))))
+(defmacro kuro-renderer-pipeline-ext3-test--def-render-env-gc (test-name gc-var expected-const)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--with-render-env' binds %s to %s." gc-var expected-const)
+     (let (captured)
+       (kuro--with-render-env
+         (setq captured ,gc-var))
+       (should (= captured ,expected-const)))))
+
+(kuro-renderer-pipeline-ext3-test--def-render-env-gc
+ kuro-renderer-pipeline-ext3-with-render-env-sets-gc-threshold
+ gc-cons-threshold  kuro--render-gc-threshold)
+(kuro-renderer-pipeline-ext3-test--def-render-env-gc
+ kuro-renderer-pipeline-ext3-with-render-env-sets-gc-percentage
+ gc-cons-percentage kuro--render-gc-percentage)
+
+(ert-deftest kuro-renderer-pipeline-ext3-test--all-render-env-gc-bindings-correct ()
+  "All entries in `kuro-renderer-pipeline-ext3-test--render-env-gc-table' bind correctly."
+  (dolist (entry kuro-renderer-pipeline-ext3-test--render-env-gc-table)
+    (pcase-let ((`(,_name ,gc-var ,expected-const) entry))
+      (let (captured)
+        (kuro--with-render-env
+          (setq captured (symbol-value gc-var)))
+        (should (= captured (symbol-value expected-const)))))))
 
 (ert-deftest kuro-renderer-pipeline-ext3-with-render-env-returns-body-value ()
   "`kuro--with-render-env' propagates the return value of BODY."

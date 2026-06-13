@@ -19,6 +19,23 @@
 (require 'kuro-config)
 (require 'kuro-module)
 
+;;; Helpers
+
+(defmacro kuro-module-test--with-kuro-path (path &rest body)
+  "Stub `getenv' so KURO_MODULE_PATH returns PATH; all other vars pass through."
+  `(cl-letf (((symbol-function 'getenv)
+              (lambda (var)
+                (if (equal var "KURO_MODULE_PATH") ,path
+                  (getenv var)))))
+     ,@body))
+
+(defmacro kuro-module-test--with-dev-stubs (&rest body)
+  "Stub `locate-library' and `file-exists-p' for tier-dev tests."
+  `(cl-letf (((symbol-function 'locate-library)
+              (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
+             ((symbol-function 'file-exists-p) (lambda (_) t)))
+     ,@body))
+
 ;;; Group 1: kuro-module--platform-extension
 
 (ert-deftest kuro-module-test--platform-extension-linux ()
@@ -89,10 +106,7 @@
     (write-region "" nil tmpfile)
     (unwind-protect
         (let ((kuro-module-binary-path nil))
-          (cl-letf (((symbol-function 'getenv)
-                     (lambda (var)
-                       (if (equal var "KURO_MODULE_PATH") tmpdir
-                         (getenv var)))))
+          (kuro-module-test--with-kuro-path tmpdir
             (let ((result (kuro-module--find-library)))
               (should (equal result tmpfile)))))
       (delete-directory tmpdir t))))
@@ -102,10 +116,7 @@
   (let* ((tmpdir (make-temp-file "kuro-env-empty-" t)))
     (unwind-protect
         (let ((kuro-module-binary-path nil))
-          (cl-letf (((symbol-function 'getenv)
-                     (lambda (var)
-                       (if (equal var "KURO_MODULE_PATH") tmpdir
-                         (getenv var)))))
+          (kuro-module-test--with-kuro-path tmpdir
             ;; No lib file in tmpdir — must fall through (no error, different path)
             (let ((result (kuro-module--find-library)))
               (should (stringp result))
@@ -126,11 +137,7 @@
   "Tier 4 dev path includes target/release in the resolved path."
   ;; Force tier 4 by providing nil custom path and ensuring env var is unset.
   (let ((kuro-module-binary-path nil))
-    (cl-letf (((symbol-function 'getenv)
-               (lambda (var)
-                 (if (equal var "KURO_MODULE_PATH") nil
-                   ;; preserve other env vars like HOME
-                   (getenv var)))))
+    (kuro-module-test--with-kuro-path nil
       ;; Only assert when XDG path does not exist (dev environment).
       (let* ((ext (kuro-module--platform-extension))
              (lib-name (format "libkuro_core.%s" ext))
@@ -170,19 +177,13 @@
          (tmpfile (expand-file-name lib-name tmpdir)))
     (write-region "" nil tmpfile)
     (unwind-protect
-        (cl-letf (((symbol-function 'getenv)
-                   (lambda (var)
-                     (if (equal var "KURO_MODULE_PATH") tmpdir
-                       (getenv var)))))
+        (kuro-module-test--with-kuro-path tmpdir
           (should (equal (kuro-module--tier-env) tmpfile)))
       (delete-directory tmpdir t))))
 
 (ert-deftest kuro-module-tier-env-returns-nil-when-env-unset ()
   "kuro-module--tier-env returns nil when KURO_MODULE_PATH is unset."
-  (cl-letf (((symbol-function 'getenv)
-             (lambda (var)
-               (if (equal var "KURO_MODULE_PATH") nil
-                 (getenv var)))))
+  (kuro-module-test--with-kuro-path nil
     (should-not (kuro-module--tier-env))))
 
 (ert-deftest kuro-module-search-tiers-is-defconst ()
@@ -277,25 +278,19 @@
 
 (ert-deftest kuro-module-tier-dev-returns-string ()
   "`kuro-module--tier-dev' returns a string when a dev binary path is accessible."
-  (cl-letf (((symbol-function 'locate-library)
-             (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
-            ((symbol-function 'file-exists-p) (lambda (_) t)))
+  (kuro-module-test--with-dev-stubs
     (should (stringp (kuro-module--tier-dev)))))
 
 (ert-deftest kuro-module-tier-dev-path-contains-target-release ()
   "`kuro-module--tier-dev' path contains \"target/release\"."
-  (cl-letf (((symbol-function 'locate-library)
-             (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
-            ((symbol-function 'file-exists-p) (lambda (_) t)))
+  (kuro-module-test--with-dev-stubs
     (should (string-match-p "target/release" (kuro-module--tier-dev)))))
 
 (ert-deftest kuro-module-tier-dev-path-contains-lib-name ()
   "`kuro-module--tier-dev' path contains the platform library filename."
   (let* ((ext (kuro-module--platform-extension))
          (lib-name (format "libkuro_core.%s" ext)))
-    (cl-letf (((symbol-function 'locate-library)
-               (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
-              ((symbol-function 'file-exists-p) (lambda (_) t)))
+    (kuro-module-test--with-dev-stubs
       (should (string-match-p (regexp-quote lib-name) (kuro-module--tier-dev))))))
 
 ;;; Group 10: kuro-module--search-tiers defconst

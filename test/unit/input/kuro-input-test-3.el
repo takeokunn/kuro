@@ -11,25 +11,10 @@
   (should (integerp kuro--scroll-to-bottom-sentinel))
   (should (> kuro--scroll-to-bottom-sentinel 10000)))
 
-(defmacro kuro-input-ext2-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
-                                             get-offset-fn &rest body)
-  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
-  (declare (indent 3))
-  `(with-temp-buffer
-     (setq-local kuro--initialized t
-                 kuro--scroll-offset 0)
-     (cl-letf (((symbol-function 'kuro--scroll-up)    ,scroll-up-fn)
-               ((symbol-function 'kuro--scroll-down)  ,scroll-down-fn)
-               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
-               ((symbol-function 'kuro--render-cycle) #'ignore))
-       ,@body)))
-
 (ert-deftest kuro-input-scroll-up-adopts-ffi-offset ()
   "kuro-scroll-up stores the value returned by kuro--get-scroll-offset (non-nil case)."
-  (kuro-input-ext2-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () 37)           ; FFI returns the actual offset
+  (kuro-input-test--with-scroll-stubs
+      #'ignore #'ignore (lambda () 37)
     (setq kuro--scroll-offset 0)
     (cl-letf (((symbol-function 'window-body-height) (lambda () 10)))
       (kuro-scroll-up))
@@ -38,10 +23,8 @@
 
 (ert-deftest kuro-input-scroll-down-adopts-ffi-offset ()
   "kuro-scroll-down stores the value returned by kuro--get-scroll-offset (non-nil case)."
-  (kuro-input-ext2-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () 5)            ; FFI returns the actual offset
+  (kuro-input-test--with-scroll-stubs
+      #'ignore #'ignore (lambda () 5)
     (setq kuro--scroll-offset 20)
     (cl-letf (((symbol-function 'window-body-height) (lambda () 10)))
       (kuro-scroll-down))
@@ -315,6 +298,80 @@
       (let ((kuro--keyboard-flags #x08))
         (kuro--DEL))
       (should (equal sent "\e[127;1u")))))
+
+;;; Group 31 — kuro--def-special-key / kuro--def-kkp-key structural tests
+
+(ert-deftest kuro-input-def-special-key-expands-to-defun ()
+  "`kuro--def-special-key' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-special-key kuro-test--special-key ?\e "Test special key."))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--special-key))))
+
+(ert-deftest kuro-input-def-special-key-expansion-has-interactive ()
+  "`kuro--def-special-key' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-special-key kuro-test--special-key2 ?\e "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-input-def-special-key-expansion-calls-send-special ()
+  "`kuro--def-special-key' expansion body calls `kuro--send-special' with the byte."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-special-key kuro-test--sk ?\a "doc")))
+         (body (cddr exp)))
+    (should (cl-find-if (lambda (form)
+                          (and (consp form)
+                               (eq (car form) 'kuro--send-special)
+                               (equal (cadr form) ?\a)))
+                        body))))
+
+(ert-deftest kuro-input-def-kkp-key-expands-to-defun ()
+  "`kuro--def-kkp-key' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-kkp-key kuro-test--kkp-key "\e[99;1u" ?c "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--kkp-key))))
+
+(ert-deftest kuro-input-def-kkp-key-expansion-has-interactive ()
+  "`kuro--def-kkp-key' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-kkp-key kuro-test--kkp-key2 "\e[9;1u" ?\t "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+;;; Group 32 — kuro--def-key-sender structural tests
+;;
+;; kuro--def-key-sender generates NON-interactive helper functions
+;; (no `(interactive)'), unlike kuro--def-special-key / kuro--def-kkp-key.
+;; The arglist is `(arg)' where ARG is the 3rd macro parameter.
+
+(ert-deftest kuro-input-def-key-sender-expands-to-defun ()
+  "`kuro--def-key-sender' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-key-sender kuro-test--key-sender
+                 (string byte) byte "Test sender."))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--key-sender))))
+
+(ert-deftest kuro-input-def-key-sender-generated-fn-is-not-interactive ()
+  "`kuro--def-key-sender' generates a NON-interactive function (no `(interactive)')."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-key-sender kuro-test--ks2
+                  (string byte) byte "doc")))
+         (body (cddr exp)))
+    (should-not (member '(interactive) body))))
+
+(ert-deftest kuro-input-def-key-sender-arglist-uses-arg-param ()
+  "`kuro--def-key-sender' sets the generated arglist to `(arg)' from the macro ARG."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-key-sender kuro-test--ks3
+                  (string my-arg) my-arg "doc")))
+         (arglist (caddr exp)))
+    (should (equal arglist '(my-arg)))))
+
+(ert-deftest kuro-input-def-key-sender-generated-send-ctrl-takes-one-arg ()
+  "`kuro--send-ctrl' (generated by `kuro--def-key-sender') takes exactly one argument."
+  (should (fboundp #'kuro--send-ctrl))
+  (should (= (car (func-arity #'kuro--send-ctrl)) 1)))
 
 (provide 'kuro-input-test)
 

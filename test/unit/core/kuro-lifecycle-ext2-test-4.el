@@ -140,6 +140,51 @@
         (kill-buffer buf)))))
 
 
+;;; ── Group 34: kuro--show-buffer-if-interactive / kuro--buffer-name-default / env set path ──
+
+(ert-deftest kuro-lifecycle--show-buffer-if-interactive-returns-buffer ()
+  "`kuro--show-buffer-if-interactive' returns the buffer in batch mode."
+  (let ((buf (get-buffer-create " *kuro-test-display*")))
+    (unwind-protect
+        (should (eq (kuro--show-buffer-if-interactive buf) buf))
+      (kill-buffer buf))))
+
+(ert-deftest kuro-lifecycle--show-buffer-if-interactive-no-switch-in-batch ()
+  "`kuro--show-buffer-if-interactive' does NOT call `switch-to-buffer' in batch mode."
+  (let ((switched nil)
+        (buf (get-buffer-create " *kuro-test-nosw*")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'switch-to-buffer) (lambda (_b) (setq switched t))))
+            (kuro--show-buffer-if-interactive buf))
+          (should-not switched))
+      (kill-buffer buf))))
+
+(ert-deftest kuro-lifecycle--show-buffer-if-interactive-calls-switch-when-interactive ()
+  "`kuro--show-buffer-if-interactive' calls `switch-to-buffer' when not in batch mode."
+  (let ((switched nil)
+        (buf (get-buffer-create " *kuro-test-sw*")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'switch-to-buffer) (lambda (_b) (setq switched t))))
+            (let ((noninteractive nil))
+              (kuro--show-buffer-if-interactive buf)))
+          (should switched))
+      (kill-buffer buf))))
+
+(ert-deftest kuro-lifecycle--buffer-name-default-is-kuro ()
+  "`kuro--buffer-name-default' is the string \"*kuro*\"."
+  (should (equal kuro--buffer-name-default "*kuro*")))
+
+(ert-deftest kuro-lifecycle--setup-shell-integration-env-sets-when-dir-found ()
+  "`kuro--setup-shell-integration-env' sets KURO_SHELL_INTEGRATION_DIR when a dir is found."
+  (let ((captured :not-set))
+    (cl-letf (((symbol-function 'kuro--shell-integration-dir) (lambda () "/test/shell"))
+              ((symbol-function 'setenv) (lambda (_var val) (setq captured val))))
+      (kuro--setup-shell-integration-env)
+      (should (equal captured "/test/shell")))))
+
+
 (provide 'kuro-lifecycle-ext2-test-4)
 
 ;;; kuro-lifecycle-ext2-test-4.el ends here

@@ -307,5 +307,44 @@ Row 0 has 2 ranges (12 elements) and row 1 has 3 ranges (18 elements) = 5 total.
       (kuro--pipeline-step-apply nil)
       (should (= 0 called)))))
 
+;;; kuro--reset-cursor-cache structural tests (Group 13 ext.)
+
+(ert-deftest kuro-renderer-reset-cursor-cache-expands-to-setq ()
+  "`kuro--reset-cursor-cache' single-step expands to a `setq' form."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (eq (car exp) 'setq))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-first-target-is-cursor-row ()
+  "`kuro--reset-cursor-cache' first assignment target is `kuro--last-cursor-row'."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (eq (cadr exp) 'kuro--last-cursor-row))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-clears-all-four-vars ()
+  "`kuro--reset-cursor-cache' expansion contains all four cache variable names."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (memq 'kuro--last-cursor-row     exp))
+    (should (memq 'kuro--last-cursor-col     exp))
+    (should (memq 'kuro--last-cursor-visible exp))
+    (should (memq 'kuro--last-cursor-shape   exp))))
+
+;;; kuro--timed structural tests (Group 25 ext.)
+
+(ert-deftest kuro-renderer-timed-expands-to-let ()
+  "`kuro--timed' single-step expands to a `let' form."
+  (let ((exp (macroexpand-1 '(kuro--timed ms (+ 1 2)))))
+    (should (eq (car exp) 'let))))
+
+(ert-deftest kuro-renderer-timed-binding-uses-private-name ()
+  "`kuro--timed' binds `--timed-start' to prevent BODY shadowing."
+  (let* ((exp (macroexpand-1 '(kuro--timed ms (ignore))))
+         (binding-name (car (caadr exp))))
+    (should (eq binding-name '--timed-start))))
+
+(ert-deftest kuro-renderer-timed-body-wrapped-in-prog1 ()
+  "`kuro--timed' wraps BODY in `prog1' to preserve the return value."
+  (let* ((exp (macroexpand-1 '(kuro--timed ms (+ 1 2))))
+         (body-form (caddr exp)))
+    (should (eq (car body-form) 'prog1))))
+
 (provide 'kuro-renderer-test-2)
 ;;; kuro-renderer-test-2.el ends here

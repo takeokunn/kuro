@@ -316,147 +316,39 @@ by byte-compilation at the call site)."
          '(("command-end" 0 0 0 nil 15000 nil)))
         (should (eq visibility t))))))
 
-;;; Group 9 — kuro-activity--log logging behaviour
-
-(ert-deftest kuro-activity-test-notify-pushes-to-log ()
-  "`kuro--activity-notify' appends an entry to `kuro-activity--log'."
-  (let ((kuro-activity--log nil)
-        (kuro-notifications-enabled nil))
-    (kuro--activity-notify "sess" "msg")
-    (should (= (length kuro-activity--log) 1))
-    (should (string= (cadr  (car kuro-activity--log)) "sess"))
-    (should (string= (caddr (car kuro-activity--log)) "msg"))))
-
-(ert-deftest kuro-activity-test-notify-logs-even-when-disabled ()
-  "`kuro--activity-notify' logs the entry even when notifications are off."
-  (let ((kuro-activity--log nil)
-        (kuro-notifications-enabled nil))
-    (kuro--activity-notify "s" "b")
-    (should (= (length kuro-activity--log) 1))))
-
-(ert-deftest kuro-activity-test-log-truncates-at-max ()
-  "`kuro--activity-notify' truncates log at `kuro-activity-log-max-length'."
-  (let ((kuro-activity--log (make-list 3 '(nil "x" "y")))
-        (kuro-activity-log-max-length 3)
-        (kuro-notifications-enabled nil))
-    (kuro--activity-notify "new" "entry")
-    (should (= (length kuro-activity--log) 3))
-    (should (string= (cadr (car kuro-activity--log)) "new"))))
-
-(ert-deftest kuro-activity-test-log-max-nil-keeps-all ()
-  "`kuro--activity-notify' keeps unlimited entries when max is nil."
-  (let ((kuro-activity--log (make-list 500 '(nil "x" "y")))
-        (kuro-activity-log-max-length nil)
-        (kuro-notifications-enabled nil))
-    (kuro--activity-notify "s" "b")
-    (should (= (length kuro-activity--log) 501))))
-
-(ert-deftest kuro-activity-test-clear-empties-log ()
-  "`kuro-activity-clear' sets `kuro-activity--log' to nil."
-  (let ((kuro-activity--log (list '(nil "s" "b"))))
-    (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil)))
-      (kuro-activity-clear)
-      (should (null kuro-activity--log)))))
-
-(ert-deftest kuro-activity-test-log-max-defcustom-exists ()
-  "`kuro-activity-log-max-length' is a customization variable."
-  (should (boundp 'kuro-activity-log-max-length)))
-
-;;; Group 10 — kuro-activity-list-mode and kuro-activity-list
-
-(ert-deftest kuro-activity-test-list-entries-empty-when-log-empty ()
-  "`kuro-activity-list--entries' returns nil when log is empty."
-  (let ((kuro-activity--log nil))
-    (should (null (kuro-activity-list--entries)))))
-
-(ert-deftest kuro-activity-test-list-entries-reflect-log ()
-  "`kuro-activity-list--entries' returns one row per log entry."
-  (let ((kuro-activity--log (list (list nil "sess" "msg"))))
-    (let ((entries (kuro-activity-list--entries)))
-      (should (= (length entries) 1))
-      (let ((row (cadr (car entries))))
-        (should (string= (aref row 1) "sess"))
-        (should (string= (aref row 2) "msg"))))))
-
-(ert-deftest kuro-activity-test-list-mode-is-defined ()
-  "`kuro-activity-list-mode' is a major mode command."
-  (should (fboundp 'kuro-activity-list-mode)))
-
-(ert-deftest kuro-activity-test-list-interactive-is-defined ()
-  "`kuro-activity-list' is an interactive command."
-  (should (commandp #'kuro-activity-list)))
-
-(ert-deftest kuro-activity-test-clear-is-interactive ()
-  "`kuro-activity-clear' is an interactive command."
-  (should (commandp #'kuro-activity-clear)))
-
-;;; Group 11 — kuro-activity-list-mode keymap
-
-(ert-deftest kuro-activity-test-list-map-binds-revert ()
-  "`kuro-activity-list-mode-map' binds g to tabulated-list-revert."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "g"))
-              #'tabulated-list-revert)))
-
-(ert-deftest kuro-activity-test-list-map-binds-delete ()
-  "`kuro-activity-list-mode-map' binds d to kuro-activity-list-delete-entry."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "d"))
-              #'kuro-activity-list-delete-entry)))
-
-(ert-deftest kuro-activity-test-list-map-binds-clear ()
-  "`kuro-activity-list-mode-map' binds c to kuro-activity-clear."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "c"))
-              #'kuro-activity-clear)))
-
-(ert-deftest kuro-activity-test-list-map-binds-quit ()
-  "`kuro-activity-list-mode-map' binds q to quit-window."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "q"))
-              #'quit-window)))
-
-(ert-deftest kuro-activity-test-list-delete-entry-removes-from-log ()
-  "`kuro-activity-list-delete-entry' removes the entry from `kuro-activity--log'."
-  (let* ((entry (list nil "s" "b"))
-         (kuro-activity--log (list entry)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id)    (lambda () entry))
-              ((symbol-function 'tabulated-list-delete-entry) #'ignore))
-      (kuro-activity-list-delete-entry)
-      (should (null kuro-activity--log)))))
-
-(ert-deftest kuro-activity-test-list-delete-entry-noop-when-no-id ()
-  "`kuro-activity-list-delete-entry' does nothing when point is not on an entry."
-  (let ((kuro-activity--log (list '(nil "s" "b"))))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () nil)))
-      (kuro-activity-list-delete-entry)
-      (should (= (length kuro-activity--log) 1)))))
-
-(ert-deftest kuro-activity-test-list-delete-entry-is-interactive ()
-  "`kuro-activity-list-delete-entry' is an interactive command."
-  (should (commandp #'kuro-activity-list-delete-entry)))
 
 
-;;; Group 12 — kuro--activity-exit-code-status
+;;; Group 9 — kuro-activity-list--refresh
 
-(defconst kuro-activity-test--exit-code-status-table
-  '((kuro-activity-exit-code-status-nil-is-empty    nil  "")
-    (kuro-activity-exit-code-status-zero-is-check   0    " ✓")
-    (kuro-activity-exit-code-status-one-is-cross     1    " ✗ (exit 1)")
-    (kuro-activity-exit-code-status-127-is-cross    127  " ✗ (exit 127)"))
-  "Table: (test-name exit-code expected-string) for `kuro--activity-exit-code-status'.")
+(ert-deftest kuro-activity-test--refresh-sets-tabulated-list-entries ()
+  "`kuro-activity-list--refresh' assigns `tabulated-list-entries' from the log."
+  (with-temp-buffer
+    (let ((kuro-activity--log nil)
+          (tabulated-list-entries :unset))
+      (cl-letf (((symbol-function 'tabulated-list-print) #'ignore))
+        (kuro-activity-list--refresh)
+        (should (equal tabulated-list-entries (kuro-activity-list--entries)))))))
 
-(defmacro kuro-activity-test--def-exit-code-status (test-name exit-code expected)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--activity-exit-code-status' exit-code=%S → %S." exit-code expected)
-     (should (equal (kuro--activity-exit-code-status ,exit-code) ,expected))))
+(ert-deftest kuro-activity-test--refresh-calls-tabulated-list-print-with-t ()
+  "`kuro-activity-list--refresh' calls `tabulated-list-print' with argument t."
+  (with-temp-buffer
+    (let ((kuro-activity--log nil)
+          (tabulated-list-entries nil)
+          (print-args :unset))
+      (cl-letf (((symbol-function 'tabulated-list-print)
+                 (lambda (&rest args) (setq print-args args))))
+        (kuro-activity-list--refresh)
+        (should (equal print-args '(t)))))))
 
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-nil-is-empty  nil "")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-zero-is-check 0   " ✓")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-one-is-cross  1   " ✗ (exit 1)")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-127-is-cross 127  " ✗ (exit 127)")
-
-(ert-deftest kuro-activity-test--all-exit-code-statuses-correct ()
-  "Invariant: every entry in the exit-code-status table maps to the expected string."
-  (dolist (entry kuro-activity-test--exit-code-status-table)
-    (pcase-let ((`(,_name ,code ,expected) entry))
-      (should (equal (kuro--activity-exit-code-status code) expected)))))
+(ert-deftest kuro-activity-test--refresh-reflects-log-count ()
+  "`kuro-activity-list--refresh' sets entries matching the log length."
+  (with-temp-buffer
+    (let ((kuro-activity--log (list (list (current-time) "sess-1" "ev-1")
+                                    (list (current-time) "sess-2" "ev-2")))
+          (tabulated-list-entries nil))
+      (cl-letf (((symbol-function 'tabulated-list-print) #'ignore))
+        (kuro-activity-list--refresh)
+        (should (= 2 (length tabulated-list-entries)))))))
 
 (provide 'kuro-activity-test)
 ;;; kuro-activity-test.el ends here

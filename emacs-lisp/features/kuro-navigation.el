@@ -93,25 +93,35 @@ Returns the closest matching entry to point, or nil when none is found."
         (car (last matches))
       (car matches))))
 
-(defun kuro--navigate-to-prompt (direction)
-  "Navigate to the nearest prompt-start in DIRECTION (`previous' or `next')."
-  (let ((target (kuro--find-mark-in-direction
-                 direction (lambda (e) (equal (car e) "prompt-start")))))
-    (if target
-        (kuro--goto-prompt-row (cadr target))
-      (message "kuro: no %s prompt" (symbol-name direction)))))
+(defmacro kuro--def-navigator (name type-pred on-found on-miss docstring)
+  "Define NAME as a directional navigator over `kuro--prompt-positions'.
+TYPE-PRED filters entries.  ON-FOUND runs with `target' bound to the entry,
+ON-MISS runs with `direction' still in scope when no match is found."
+  `(defun ,name (direction)
+     ,docstring
+     (let ((target (kuro--find-mark-in-direction direction ,type-pred)))
+       (if target
+           ,on-found
+         ,on-miss))))
+
+(kuro--def-navigator kuro--navigate-to-prompt
+  (lambda (e) (equal (car e) "prompt-start"))
+  (kuro--goto-prompt-row (cadr target))
+  (message "kuro: no %s prompt" (symbol-name direction))
+  "Navigate to the nearest prompt-start in DIRECTION (`previous' or `next').")
+
+(defmacro kuro--def-nav-cmd (name nav-fn direction docstring)
+  "Define an interactive navigation command NAME.
+Calls NAV-FN with DIRECTION (a quoted symbol) on invocation."
+  `(defun ,name () ,docstring (interactive) (,nav-fn ',direction)))
 
 ;;;###autoload
-(defun kuro-previous-prompt ()
-  "Jump to the previous shell prompt (OSC 133 mark)."
-  (interactive)
-  (kuro--navigate-to-prompt 'previous))
+(kuro--def-nav-cmd kuro-previous-prompt kuro--navigate-to-prompt previous
+  "Jump to the previous shell prompt (OSC 133 mark).")
 
 ;;;###autoload
-(defun kuro-next-prompt ()
-  "Jump to the next shell prompt (OSC 133 mark)."
-  (interactive)
-  (kuro--navigate-to-prompt 'next))
+(kuro--def-nav-cmd kuro-next-prompt kuro--navigate-to-prompt next
+  "Jump to the next shell prompt (OSC 133 mark).")
 
 (defun kuro--command-output-region ()
   "Return (BEG . END) buffer positions for the command output enclosing point.
@@ -214,34 +224,24 @@ messages and does nothing when no command history is available."
 
 ;;; Failed-command navigation (OSC 133 command-end exit codes)
 
-(defun kuro--navigate-to-failed-command (direction)
+(kuro--def-navigator kuro--navigate-to-failed-command
+  (lambda (e)
+    (and (equal (car e) "command-end")
+         (integerp (nth 3 e))
+         (/= (nth 3 e) 0)))
+  (progn (kuro--goto-prompt-row (cadr target))
+         (message "kuro: failed command (exit %d)" (nth 3 target)))
+  (message "kuro: no %s failed command" (symbol-name direction))
   "Move point to the nearest failed command in DIRECTION (`previous'/`next').
-A failed command is a `command-end' mark whose OSC 133 exit code (the 4th
-element of each `kuro--prompt-positions' entry) is a non-zero integer.
-Messages the exit code on success, or a \"no … failed command\" notice
-when none is found."
-  (let ((target (kuro--find-mark-in-direction
-                 direction (lambda (e)
-                             (and (equal (car e) "command-end")
-                                  (integerp (nth 3 e))
-                                  (/= (nth 3 e) 0))))))
-    (if target
-        (progn
-          (kuro--goto-prompt-row (cadr target))
-          (message "kuro: failed command (exit %d)" (nth 3 target)))
-      (message "kuro: no %s failed command" (symbol-name direction)))))
+A failed command is a `command-end' mark with a non-zero OSC 133 exit code.")
 
 ;;;###autoload
-(defun kuro-next-failed-command ()
-  "Jump to the next command that exited with a non-zero status (OSC 133)."
-  (interactive)
-  (kuro--navigate-to-failed-command 'next))
+(kuro--def-nav-cmd kuro-next-failed-command kuro--navigate-to-failed-command next
+  "Jump to the next command that exited with a non-zero status (OSC 133).")
 
 ;;;###autoload
-(defun kuro-previous-failed-command ()
-  "Jump to the previous command that exited with a non-zero status (OSC 133)."
-  (interactive)
-  (kuro--navigate-to-failed-command 'previous))
+(kuro--def-nav-cmd kuro-previous-failed-command kuro--navigate-to-failed-command previous
+  "Jump to the previous command that exited with a non-zero status (OSC 133).")
 
 ;;; Focus event handlers
 

@@ -1,4 +1,98 @@
-// ── New edge-case tests ───────────────────────────────────────────────────────
+// ── New edge-case tests + previously untested modes ──────────────────────────
+// `test_dec_mode_via_advance!` is defined in dec_private.rs (the grandparent).
+
+// ── DEC ?5 screen_reverse ────────────────────────────────────────────────────
+test_dec_mode_via_advance!(test_screen_reverse_set_and_clear,
+    b"\x1b[?5h", b"\x1b[?5l", screen_reverse);
+
+// ── DEC ?12 cursor-blink toggle ───────────────────────────────────────────────
+
+#[test]
+fn test_dec12_set_makes_cursor_blink_variant() {
+    // ?12h toggles the current cursor shape to its blinking counterpart.
+    // Default shape is BlinkingBlock, so set should keep it blinking.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Switch to steady block first via DECSCUSR 2
+    term.advance(b"\x1b[2 q");
+    assert_eq!(term.dec_modes.cursor_shape, crate::types::cursor::CursorShape::SteadyBlock);
+    // ?12h: steady → blinking
+    term.advance(b"\x1b[?12h");
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::BlinkingBlock,
+        "?12h on SteadyBlock must produce BlinkingBlock"
+    );
+}
+
+#[test]
+fn test_dec12_reset_makes_cursor_steady_variant() {
+    // ?12l toggles blinking → steady.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Default shape is BlinkingBlock; ?12l must switch to SteadyBlock.
+    term.advance(b"\x1b[?12l");
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::SteadyBlock,
+        "?12l on BlinkingBlock must produce SteadyBlock"
+    );
+}
+
+// ── DEC ?40/?45/?66/?80 simple boolean toggles ────────────────────────────────
+test_dec_mode_via_advance!(test_allow_deccolm_set_and_clear,
+    b"\x1b[?40h", b"\x1b[?40l", allow_deccolm);
+test_dec_mode_via_advance!(test_reverse_wraparound_set_and_clear,
+    b"\x1b[?45h", b"\x1b[?45l", reverse_wraparound);
+/// DEC ?66 DECNKM aliases `app_keypad`.
+test_dec_mode_via_advance!(test_decnkm_mode66_set_and_clear,
+    b"\x1b[?66h", b"\x1b[?66l", app_keypad);
+test_dec_mode_via_advance!(test_sixel_display_mode_set_and_clear,
+    b"\x1b[?80h", b"\x1b[?80l", sixel_display_mode);
+
+// ── ANSI IRM (CSI 4 h/l) + LNM (CSI 20 h/l) ─────────────────────────────────
+test_dec_mode_via_advance!(test_ansi_irm_insert_mode_set_and_clear,
+    b"\x1b[4h", b"\x1b[4l", insert_mode);
+test_dec_mode_via_advance!(test_ansi_lnm_newline_mode_set_and_clear,
+    b"\x1b[20h", b"\x1b[20l", newline_mode);
+
+#[test]
+fn test_ansi_decrqm_irm_reports_correct_status() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Query IRM (mode 4) when reset → status 2
+    term.advance(b"\x1b[4$p");
+    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r0, "\x1b[4;2$y", "IRM query (reset) must report status 2");
+    term.meta.pending_responses.clear();
+    // Set IRM then query → status 1
+    term.advance(b"\x1b[4h");
+    term.advance(b"\x1b[4$p");
+    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r1, "\x1b[4;1$y", "IRM query (set) must report status 1");
+}
+
+#[test]
+fn test_ansi_decrqm_lnm_reports_correct_status() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // LNM reset → status 2
+    term.advance(b"\x1b[20$p");
+    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r0, "\x1b[20;2$y", "LNM query (reset) must report status 2");
+    term.meta.pending_responses.clear();
+    // Set LNM, query → status 1
+    term.advance(b"\x1b[20h");
+    term.advance(b"\x1b[20$p");
+    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r1, "\x1b[20;1$y", "LNM query (set) must report status 1");
+}
+
+#[test]
+fn test_ansi_decrqm_unknown_mode_reports_zero() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[99$p"); // mode 99 is not implemented
+    let r = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r, "\x1b[99;0$y", "ANSI DECRQM for unknown mode must report status 0");
+}
+
+// ── Original edge cases ───────────────────────────────────────────────────────
 
 #[test]
 fn test_decom_cursor_moves_to_scroll_region_top_on_set() {
@@ -165,4 +259,38 @@ fn test_decrqm_alt_screen_1047_is_queryable() {
         "\x1b[?1047;2$y",
         "DECRQM 1047 must report reset (2), not unrecognised (0)"
     );
+}
+
+#[test]
+fn test_alt_screen_47_reset_noop_when_already_primary() {
+    // CSI ? 47 l when already on the primary screen must not panic or switch.
+    // The guard `47 | 1047 if term.dec_modes.alternate_screen` prevents the
+    // switch from firing when not in alternate screen.
+    let mut term = crate::TerminalCore::new(24, 80);
+    assert!(!term.dec_modes.alternate_screen, "precondition: primary screen");
+    term.advance(b"\x1b[?47l"); // reset 47 — no-op (guard not satisfied)
+    assert!(
+        !term.dec_modes.alternate_screen,
+        "alternate_screen must still be false after spurious ?47l"
+    );
+}
+
+#[test]
+fn test_alt_screen_1047_reset_noop_when_already_primary() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1047l"); // reset without being in alt screen
+    assert!(!term.dec_modes.alternate_screen);
+}
+
+#[test]
+fn test_sync_output_2026_reset_noop_when_not_active() {
+    // CSI ? 2026 l when synchronized_output is already false must not
+    // call mark_all_dirty (no observable effect) and must not panic.
+    let mut term = crate::TerminalCore::new(24, 80);
+    assert!(
+        !term.dec_modes.synchronized_output,
+        "precondition: synchronized_output is false"
+    );
+    term.advance(b"\x1b[?2026l"); // reset — guard `2026 if synchronized_output` not satisfied
+    assert!(!term.dec_modes.synchronized_output);
 }

@@ -64,6 +64,16 @@
      (with-current-buffer buf
        ,@body)))
 
+(defmacro kuro--with-mode (mode msg &rest body)
+  "Execute BODY only when `derived-mode-p' MODE, signaling user-error MSG otherwise."
+  `(if (derived-mode-p ',mode)
+       (progn ,@body)
+     (user-error ,msg)))
+
+(defmacro kuro--with-kuro-mode (&rest body)
+  "Execute BODY only in an active kuro-mode buffer, signaling user-error otherwise."
+  `(kuro--with-mode kuro-mode "Not in a kuro buffer" ,@body))
+
 (defmacro kuro--check-positive-integer (var errors)
   "Push an error string onto ERRORS if VAR is not a positive integer."
   `(unless (kuro--positive-integer-p ,var)

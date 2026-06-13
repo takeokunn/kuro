@@ -318,6 +318,26 @@ This tests the lightweight equality guard."
 ;; See kuro-render-buffer-ext-test.el
 
 
+;;; kuro--cache-cursor-state structural tests (Group 23 ext.)
+
+(ert-deftest kuro-render-buffer-cache-cursor-state-expands-to-setq ()
+  "`kuro--cache-cursor-state' single-step expands to a `setq' form."
+  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
+    (should (eq (car exp) 'setq))))
+
+(ert-deftest kuro-render-buffer-cache-cursor-state-first-target-is-cursor-row ()
+  "`kuro--cache-cursor-state' first assignment target is `kuro--last-cursor-row'."
+  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
+    (should (eq (cadr exp) 'kuro--last-cursor-row))))
+
+(ert-deftest kuro-render-buffer-cache-cursor-state-sets-all-four-vars ()
+  "`kuro--cache-cursor-state' expansion assigns all four cursor cache variables."
+  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
+    (should (memq 'kuro--last-cursor-row     exp))
+    (should (memq 'kuro--last-cursor-col     exp))
+    (should (memq 'kuro--last-cursor-visible exp))
+    (should (memq 'kuro--last-cursor-shape   exp))))
+
 (provide 'kuro-render-buffer-test-2)
 
 ;;; kuro-render-buffer-test-2.el ends here

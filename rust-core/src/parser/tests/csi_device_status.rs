@@ -146,3 +146,5 @@ fn test_sequential_cnl_then_cpl_returns_to_origin() {
     term.advance(b"\x1b[4F"); // CPL 4 → row 3, col 0
     assert_cursor!(term, 3, 0);
 }
+
+include!("csi_xtwinops.rs");

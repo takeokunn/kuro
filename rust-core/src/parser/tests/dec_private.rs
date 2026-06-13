@@ -273,4 +273,31 @@ fn test_get_mode_new_modes() {
     assert_eq!(modes.get_mode(2026), Some(true));
 }
 
+/// Assert that `TerminalCore::advance(set_seq)` sets `dec_modes.$field` and
+/// `advance(reset_seq)` clears it, starting from the default-false value.
+///
+/// Form: `test_dec_mode_via_advance!(fn_name, set_seq, reset_seq, field)`
+macro_rules! test_dec_mode_via_advance {
+    ($fn_name:ident, $set:literal, $reset:literal, $field:ident) => {
+        #[test]
+        fn $fn_name() {
+            let mut term = crate::TerminalCore::new(24, 80);
+            assert!(
+                !term.dec_modes.$field,
+                concat!(stringify!($field), " must default to false")
+            );
+            term.advance($set);
+            assert!(
+                term.dec_modes.$field,
+                concat!(stringify!($set), " must set ", stringify!($field))
+            );
+            term.advance($reset);
+            assert!(
+                !term.dec_modes.$field,
+                concat!(stringify!($reset), " must clear ", stringify!($field))
+            );
+        }
+    };
+}
+
 include!("dec_private_ext.rs");

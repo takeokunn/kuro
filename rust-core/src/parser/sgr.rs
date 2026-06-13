@@ -74,6 +74,12 @@ color_mapper!(bright_named_color_from_offset, [
 ///
 /// All other CSI sequences (cursor movement, erase, scroll) are handled
 /// by their dedicated modules (`parser::csi`, `parser::erase`, `parser::scroll`).
+///
+/// Collects `params` into a fixed-size stack array and delegates to
+/// `apply_sgr_attrs`, which owns the full dispatch table.  The two entry
+/// points exist because `apply_sgr_attrs` operates on a bare `SgrAttributes`
+/// (needed by DECCARA) while this function is called from the VTE parser
+/// with a `TerminalCore` borrow.
 pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
     // Collect all param groups into a fixed stack array for index-based cross-group consumption.
     // This handles both forms of extended color sequences:
@@ -86,105 +92,7 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
         group_buf[group_count] = group;
         group_count += 1;
     }
-    let groups = &group_buf[..group_count];
-
-    if groups.is_empty() {
-        term.current_attrs.reset();
-        return;
-    }
-
-    let mut i = 0;
-    while i < groups.len() {
-        let group = groups[i];
-        if group.is_empty() {
-            i += 1;
-            continue;
-        }
-        let param = group[0];
-        i += 1;
-
-        match param {
-            0 => term.current_attrs.reset(),
-            1 => term.current_attrs.flags.insert(SgrFlags::BOLD),
-            2 => term.current_attrs.flags.insert(SgrFlags::DIM),
-            3 => term.current_attrs.flags.insert(SgrFlags::ITALIC),
-            4 => {
-                // SGR 4 with no sub-params = straight underline; sub-params handled below
-                if group.len() > 1 {
-                    // 4:0 = none, 4:1 = straight, 4:2 = double, 4:3 = curly, 4:4 = dotted, 4:5 = dashed
-                    term.current_attrs.underline_style = match group[1] {
-                        0 => UnderlineStyle::None,
-                        2 => UnderlineStyle::Double,
-                        3 => UnderlineStyle::Curly,
-                        4 => UnderlineStyle::Dotted,
-                        5 => UnderlineStyle::Dashed,
-                        _ => UnderlineStyle::Straight,
-                    };
-                } else {
-                    term.current_attrs.underline_style = UnderlineStyle::Straight;
-                }
-            }
-            5 => term.current_attrs.flags.insert(SgrFlags::BLINK_SLOW),
-            6 => term.current_attrs.flags.insert(SgrFlags::BLINK_FAST),
-            7 => term.current_attrs.flags.insert(SgrFlags::INVERSE),
-            8 => term.current_attrs.flags.insert(SgrFlags::HIDDEN),
-            9 => term.current_attrs.flags.insert(SgrFlags::STRIKETHROUGH),
-            22 => {
-                term.current_attrs.flags.remove(SgrFlags::BOLD);
-                term.current_attrs.flags.remove(SgrFlags::DIM);
-            }
-            23 => term.current_attrs.flags.remove(SgrFlags::ITALIC),
-            24 => term.current_attrs.underline_style = UnderlineStyle::None,
-            25 => {
-                term.current_attrs.flags.remove(SgrFlags::BLINK_SLOW);
-                term.current_attrs.flags.remove(SgrFlags::BLINK_FAST);
-            }
-            21 => term.current_attrs.underline_style = UnderlineStyle::Double, // SGR 21: double underline
-            27 => term.current_attrs.flags.remove(SgrFlags::INVERSE),
-            28 => term.current_attrs.flags.remove(SgrFlags::HIDDEN),
-            29 => term.current_attrs.flags.remove(SgrFlags::STRIKETHROUGH),
-
-            // Foreground colors
-            30..=37 => {
-                term.current_attrs.foreground = named_color_from_offset(param - 30);
-            }
-            38 => parse_extended_color(term, groups, &mut i, group, true),
-            39 => term.current_attrs.foreground = Color::Default,
-
-            // Background colors
-            40..=47 => {
-                term.current_attrs.background = named_color_from_offset(param - 40);
-            }
-            48 => parse_extended_color(term, groups, &mut i, group, false),
-            49 => term.current_attrs.background = Color::Default,
-
-            // Overline (SGR 53/55)
-            53 => term.current_attrs.overline = true,
-            55 => term.current_attrs.overline = false,
-
-            // Superscript / subscript (SGR 73/74/75)
-            // 73 = superscript on, 74 = cancel both, 75 = subscript on
-            73 => { term.current_attrs.superscript = true;  term.current_attrs.subscript = false; }
-            74 => { term.current_attrs.superscript = false; term.current_attrs.subscript = false; }
-            75 => { term.current_attrs.subscript = true;    term.current_attrs.superscript = false; }
-
-            // Underline color (SGR 58/59)
-            58 => parse_underline_color(term, groups, &mut i, group),
-            59 => term.current_attrs.underline_color = Color::Default,
-
-            // Bright foreground (90-97)
-            90..=97 => {
-                term.current_attrs.foreground = bright_named_color_from_offset(param - 90);
-            }
-
-            // Bright background (100-107)
-            100..=107 => {
-                term.current_attrs.background = bright_named_color_from_offset(param - 100);
-            }
-
-            _ => {}
-        }
-    }
+    apply_sgr_attrs(&mut term.current_attrs, &group_buf[..group_count]);
 }
 
 /// Extract the next sub-parameter group's first byte, advancing `i`.
@@ -292,46 +200,12 @@ fn parse_color_from_subparams(
     }
 }
 
-/// Parse extended color (256-color or truecolor) from SGR 38/48 parameters.
-///
-/// `foreground` — `true` sets `current_attrs.foreground` (SGR 38),
-/// `false` sets `current_attrs.background` (SGR 48).
-#[inline]
-fn parse_extended_color(
-    term: &mut crate::TerminalCore,
-    groups: &[&[u16]],
-    i: &mut usize,
-    current_group: &[u16],
-    foreground: bool,
-) {
-    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
-        if foreground {
-            term.current_attrs.foreground = color;
-        } else {
-            term.current_attrs.background = color;
-        }
-    }
-}
-
-/// Parse underline color from SGR 58 parameters (same structure as extended color).
-#[inline]
-fn parse_underline_color(
-    term: &mut crate::TerminalCore,
-    groups: &[&[u16]],
-    i: &mut usize,
-    current_group: &[u16],
-) {
-    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
-        term.current_attrs.underline_color = color;
-    }
-}
-
 /// Apply pre-parsed SGR parameter groups directly to `attrs`.
 ///
-/// Same inner logic as [`handle_sgr`] but operates on a bare [`SgrAttributes`]
-/// instead of a full [`TerminalCore`].  Used by
-/// [`handle_deccara`][crate::parser::erase::handle_deccara] to apply SGR
-/// parameters to cells in a rectangular area without a `TerminalCore` borrow.
+/// This is the single authoritative SGR dispatch table, shared by both
+/// [`handle_sgr`] (VTE parser path, via `term.current_attrs`) and
+/// [`handle_deccara`][crate::parser::erase::handle_deccara] (rectangular-area
+/// attribute change, direct `SgrAttributes` borrow).
 ///
 /// `groups` is a slice of sub-parameter slices as produced by iterating
 /// [`vte::Params`] and collecting into a `[&[u16]; N]` array.

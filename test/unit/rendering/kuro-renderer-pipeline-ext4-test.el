@@ -321,6 +321,25 @@
     (should (null (kuro--evict-stale-col-to-buf-entries nil)))))
 
 
+;;; kuro--with-render-env structural tests (Group 22 ext.)
+
+(ert-deftest kuro-renderer-with-render-env-expands-to-let-star ()
+  "`kuro--with-render-env' single-step expands to a `let*' form."
+  (let ((exp (macroexpand-1 '(kuro--with-render-env (ignore)))))
+    (should (eq (car exp) 'let*))))
+
+(ert-deftest kuro-renderer-with-render-env-first-binding-is-gc-threshold ()
+  "`kuro--with-render-env' first binding rebinds `gc-cons-threshold'."
+  (let* ((exp (macroexpand-1 '(kuro--with-render-env (ignore))))
+         (first-binding-name (caar (cadr exp))))
+    (should (eq first-binding-name 'gc-cons-threshold))))
+
+(ert-deftest kuro-renderer-with-render-env-binds-inhibit-redisplay ()
+  "`kuro--with-render-env' binds `inhibit-redisplay' to prevent partial redraws."
+  (let* ((exp (macroexpand-1 '(kuro--with-render-env (ignore))))
+         (binding-names (mapcar #'car (cadr exp))))
+    (should (memq 'inhibit-redisplay binding-names))))
+
 (provide 'kuro-renderer-pipeline-ext4-test)
 
 ;;; kuro-renderer-pipeline-ext4-test.el ends here

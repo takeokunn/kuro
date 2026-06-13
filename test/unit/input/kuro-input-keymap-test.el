@@ -220,6 +220,58 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
       (pcase-let ((`(,_name ,key) entry))
         (should (lookup-key map key))))))
 
+
+;;; Group 5: kuro--build-full-keymap
+
+(ert-deftest kuro-input-keymap-full-keymap-returns-keymap ()
+  "kuro--build-full-keymap returns a value satisfying `keymapp'."
+  (should (keymapp (kuro--build-full-keymap))))
+
+(ert-deftest kuro-input-keymap-full-keymap-has-self-insert-remap ()
+  "kuro--build-full-keymap remaps `self-insert-command'."
+  (should (lookup-key (kuro--build-full-keymap) [remap self-insert-command])))
+
+(defconst kuro-input-keymap-test--full-key-table
+  '((kuro-input-keymap-full-has-return    [return])
+    (kuro-input-keymap-full-has-tab       [tab])
+    (kuro-input-keymap-full-has-backspace [backspace])
+    (kuro-input-keymap-full-has-escape    [escape])
+    (kuro-input-keymap-full-has-up        [up])
+    (kuro-input-keymap-full-has-down      [down])
+    (kuro-input-keymap-full-has-left      [left])
+    (kuro-input-keymap-full-has-right     [right])
+    (kuro-input-keymap-full-has-mouse-1   [mouse-1]))
+  "Key bindings that must be present in the full (no-exception) keymap.")
+
+(defmacro kuro-input-keymap-test--def-full-has-key (test-name key)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro--build-full-keymap has binding for %S." key)
+     (should (lookup-key (kuro--build-full-keymap) ,key))))
+
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-return    [return])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-tab       [tab])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-backspace [backspace])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-escape    [escape])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-up        [up])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-down      [down])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-left      [left])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-right     [right])
+(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-mouse-1   [mouse-1])
+
+(ert-deftest kuro-input-keymap-full-keymap-all-keys-invariant ()
+  "Every key in `kuro-input-keymap-test--full-key-table' is bound in full keymap."
+  (let ((map (kuro--build-full-keymap)))
+    (dolist (entry kuro-input-keymap-test--full-key-table)
+      (pcase-let ((`(,_name ,key) entry))
+        (should (lookup-key map key))))))
+
+(ert-deftest kuro-input-keymap-full-keymap-ignores-exceptions ()
+  "kuro--build-full-keymap is unaffected by `kuro-keymap-exceptions'."
+  (let ((kuro-keymap-exceptions '([up] [down])))
+    (let ((map (kuro--build-full-keymap)))
+      (should (lookup-key map [up]))
+      (should (lookup-key map [down])))))
+
 (provide 'kuro-input-keymap-test)
 
 ;;; kuro-input-keymap-test.el ends here

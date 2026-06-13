@@ -62,5 +62,14 @@
       (kuro--teardown-dnd)
       (should (equal dnd-protocol-alist '(("^http" . some-handler)))))))
 
+(ert-deftest kuro-dnd--teardown-without-setup-is-noop ()
+  "kuro--teardown-dnd is a no-op when dnd-protocol-alist was never made buffer-local."
+  (with-temp-buffer
+    (let ((dnd-protocol-alist '(("^http" . some-handler))))
+      ;; No kuro--setup-dnd call — local var not set.
+      (kuro--teardown-dnd)
+      ;; kill-local-variable on a non-local var is a safe no-op; global is unchanged.
+      (should (equal dnd-protocol-alist '(("^http" . some-handler)))))))
+
 (provide 'kuro-dnd-test)
 ;;; kuro-dnd-test.el ends here

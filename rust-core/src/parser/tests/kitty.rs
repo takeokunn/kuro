@@ -6,6 +6,20 @@
 use super::*;
 use proptest::prelude::*;
 
+/// Assert that `process_apc_payload` returns `None` for a given single-chunk payload.
+macro_rules! assert_apc_none {
+    ($payload:expr) => {{
+        let mut chunk_state = None;
+        let result = process_apc_payload($payload, &mut chunk_state);
+        assert!(result.is_none(), "expected None for payload {:?}", $payload);
+    }};
+    ($payload:expr, $msg:expr) => {{
+        let mut chunk_state = None;
+        let result = process_apc_payload($payload, &mut chunk_state);
+        assert!(result.is_none(), $msg);
+    }};
+}
+
 #[test]
 fn test_parse_params_basic() {
     let params = KittyParams::parse(b"a=t,f=100,i=1,m=0");
@@ -64,17 +78,13 @@ fn test_process_chunk_accumulation() {
 
 #[test]
 fn test_malformed_base64_returns_none() {
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=t,f=32;not!valid!base64!!!", &mut chunk_state);
-    assert!(result.is_none());
+    assert_apc_none!(b"a=t,f=32;not!valid!base64!!!");
 }
 
 #[test]
 fn test_unsupported_transmission_returns_none() {
-    let mut chunk_state = None;
     // t=f means file transfer, which we don't support
-    let result = process_apc_payload(b"a=t,t=f,i=1;", &mut chunk_state);
-    assert!(result.is_none());
+    assert_apc_none!(b"a=t,t=f,i=1;");
 }
 
 #[test]
@@ -267,9 +277,7 @@ fn test_place_command_with_image_id() {
 #[test]
 fn test_place_command_missing_image_id_returns_none() {
     // a=p without i= — image_id is required for Place; must return None
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=p", &mut chunk_state);
-    assert!(result.is_none(), "Place without image_id must return None");
+    assert_apc_none!(b"a=p", "Place without image_id must return None");
 }
 
 // ── TransmitAndDisplay (a=T) ──────────────────────────────────────────────────
@@ -307,10 +315,8 @@ fn test_transmit_and_display_command() {
 #[test]
 fn test_transmit_zero_width_returns_none() {
     // f=32 (raw RGBA) with s=0 — zero width must be rejected
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=t,f=32,i=1,s=0,v=1;AAAAAA==", &mut chunk_state);
-    assert!(
-        result.is_none(),
+    assert_apc_none!(
+        b"a=t,f=32,i=1,s=0,v=1;AAAAAA==",
         "Transmit with zero width must return None for raw formats"
     );
 }
@@ -318,10 +324,8 @@ fn test_transmit_zero_width_returns_none() {
 #[test]
 fn test_transmit_zero_height_returns_none() {
     // f=32 (raw RGBA) with v=0 — zero height must be rejected
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=t,f=32,i=1,s=1,v=0;AAAAAA==", &mut chunk_state);
-    assert!(
-        result.is_none(),
+    assert_apc_none!(
+        b"a=t,f=32,i=1,s=1,v=0;AAAAAA==",
         "Transmit with zero height must return None for raw formats"
     );
 }
@@ -331,12 +335,7 @@ fn test_transmit_zero_height_returns_none() {
 #[test]
 fn test_animation_frame_action_returns_none() {
     // a=f is unsupported; must return None without panicking
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=f,i=1;", &mut chunk_state);
-    assert!(
-        result.is_none(),
-        "Animation frame action (a=f) must return None"
-    );
+    assert_apc_none!(b"a=f,i=1;", "Animation frame action (a=f) must return None");
 }
 
 // ── Delete sub-command default ─────────────────────────────────────────────────
@@ -362,10 +361,8 @@ fn test_delete_command_default_sub() {
 #[test]
 fn test_transmit_unknown_format_returns_none() {
     // f=99 is not a valid Kitty format code
-    let mut chunk_state = None;
-    let result = process_apc_payload(b"a=t,f=99,i=1,s=1,v=1;AAAAAA==", &mut chunk_state);
-    assert!(
-        result.is_none(),
+    assert_apc_none!(
+        b"a=t,f=99,i=1,s=1,v=1;AAAAAA==",
         "Transmit with unknown format code must return None"
     );
 }

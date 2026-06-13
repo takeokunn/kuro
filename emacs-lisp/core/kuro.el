@@ -175,20 +175,19 @@ When done:
 
 The original terminal buffer is not modified; the PTY continues to run."
   (interactive)
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro terminal buffer"))
-  (let* ((source (current-buffer))
-         (snap-name (format "*kuro-scrollback: %s*" (buffer-name source)))
-         (snap (get-buffer-create snap-name)))
-    (with-current-buffer snap
-      (kuro-scrollback-edit-mode)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert-buffer-substring source))
-      (setq kuro-edit-scrollback--source-buffer source)
-      (goto-char (point-min)))
-    (switch-to-buffer snap)
-    (message "Kuro scrollback edit — C-c C-c: send to PTY, C-c C-k: discard")))
+  (kuro--with-kuro-mode
+   (let* ((source (current-buffer))
+          (snap-name (format "*kuro-scrollback: %s*" (buffer-name source)))
+          (snap (get-buffer-create snap-name)))
+     (with-current-buffer snap
+       (kuro-scrollback-edit-mode)
+       (let ((inhibit-read-only t))
+         (erase-buffer)
+         (insert-buffer-substring source))
+       (setq kuro-edit-scrollback--source-buffer source)
+       (goto-char (point-min)))
+     (switch-to-buffer snap)
+     (message "Kuro scrollback edit — C-c C-c: send to PTY, C-c C-k: discard"))))
 
 ;;;###autoload
 (defun kuro-scrollback-send ()
@@ -197,17 +196,16 @@ The entire buffer is sent via `kuro--send-paste-or-raw' which applies
 bracketed-paste wrapping when the target terminal has mode 2004 active.
 Signals `user-error' when the source buffer no longer exists."
   (interactive)
-  (unless (derived-mode-p 'kuro-scrollback-edit-mode)
-    (user-error "Not in a Kuro scrollback edit buffer"))
-  (let ((text   (buffer-string))
-        (source kuro-edit-scrollback--source-buffer))
-    (unless (buffer-live-p source)
-      (user-error "Source Kuro buffer no longer exists"))
-    (kill-buffer (current-buffer))
-    (with-current-buffer source
-      (kuro--send-paste-or-raw text)
-      (kuro--schedule-immediate-render)
-      (message "kuro: scrollback content sent to PTY"))))
+  (kuro--with-mode kuro-scrollback-edit-mode "Not in a Kuro scrollback edit buffer"
+    (let ((text   (buffer-string))
+          (source kuro-edit-scrollback--source-buffer))
+      (unless (buffer-live-p source)
+        (user-error "Source Kuro buffer no longer exists"))
+      (kill-buffer (current-buffer))
+      (with-current-buffer source
+        (kuro--send-paste-or-raw text)
+        (kuro--schedule-immediate-render)
+        (message "kuro: scrollback content sent to PTY")))))
 
 ;;;###autoload
 (defun kuro-scrollback-discard ()

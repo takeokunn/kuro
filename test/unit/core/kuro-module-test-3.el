@@ -196,5 +196,63 @@
           (should-not (kuro-module--verify-sha256 tmpfile "0000deadbeef")))
       (delete-file tmpfile))))
 
+;;; Group 25: kuro-module--locate-cargo-toml direct tests
+
+(ert-deftest kuro-module-test--locate-cargo-toml-finds-in-repo ()
+  "`kuro-module--locate-cargo-toml' returns a string ending in rust-core/Cargo.toml in this repo."
+  ;; Bind load-file-name to a file in the repo so the walker has a starting point.
+  (let* ((load-file-name (expand-file-name "emacs-lisp/core/kuro-module.el"))
+         (result (kuro-module--locate-cargo-toml)))
+    (should (stringp result))
+    (should (string-suffix-p "rust-core/Cargo.toml" result))
+    (should (file-exists-p result))))
+
+(ert-deftest kuro-module-test--locate-cargo-toml-returns-nil-from-unrelated-dir ()
+  "`kuro-module--locate-cargo-toml' returns nil when started in a temp dir with no Cargo.toml parent."
+  (let* ((tmp (make-temp-file "kuro-test-" t))
+         (load-file-name (expand-file-name "fake.el" tmp)))
+    (unwind-protect
+        (should-not (kuro-module--locate-cargo-toml))
+      (delete-directory tmp t))))
+
+(ert-deftest kuro-module-test--locate-cargo-toml-finds-in-nested-subdir ()
+  "`kuro-module--locate-cargo-toml' walks up from nested dirs and finds Cargo.toml."
+  (let* ((tmp      (make-temp-file "kuro-locate-" t))
+         (rust-dir (expand-file-name "rust-core" tmp))
+         (sub-dir  (expand-file-name "a/b/c" tmp)))
+    (unwind-protect
+        (progn
+          (make-directory rust-dir t)
+          (make-directory sub-dir t)
+          (write-region "" nil (expand-file-name "Cargo.toml" rust-dir))
+          (let* ((load-file-name (expand-file-name "test.el" sub-dir))
+                 (result (kuro-module--locate-cargo-toml)))
+            (should (stringp result))
+            (should (string-suffix-p "rust-core/Cargo.toml" result))))
+      (delete-directory tmp t))))
+
+;;; kuro--module-try macro structural tests
+
+(ert-deftest kuro-module-try-expands-to-let ()
+  "`kuro--module-try' single-step expands to a `let' form."
+  (let ((exp (macroexpand-1
+              '(kuro--module-try (concat "test" ".so")))))
+    (should (eq (car exp) 'let))))
+
+(ert-deftest kuro-module-try-expansion-binds-p ()
+  "`kuro--module-try' binds the path expression to `p' in the `let'."
+  (let* ((exp (macroexpand-1
+               '(kuro--module-try "/some/path")))
+         ;; (let ((p ...)) ...) → bindings = ((p ...)) → first = (p ...) → car = p
+         (var (caaadr exp)))
+    (should (eq var 'p))))
+
+(ert-deftest kuro-module-try-expansion-guards-with-when ()
+  "`kuro--module-try' body is a `when' guarded by `file-exists-p'."
+  (let* ((exp (macroexpand-1
+               '(kuro--module-try "/some/path")))
+         (when-form (caddr exp)))
+    (should (eq (car when-form) 'when))))
+
 (provide 'kuro-module-test-3)
 ;;; kuro-module-test-3.el ends here

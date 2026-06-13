@@ -318,6 +318,34 @@ the behavior so we notice if the contract changes."
     (kuro--color-scheme-uninstall-hook)
     (should (null kuro--color-scheme-debounce-timer))))
 
+
+;;; ── Group 9 (A): kuro--color-scheme-apply-now direct tests ──────────────────
+
+(ert-deftest kuro-color-scheme-apply-now-clears-debounce-timer ()
+  "A1: `kuro--color-scheme-apply-now' sets `kuro--color-scheme-debounce-timer' to nil."
+  (let ((kuro--color-scheme-debounce-timer 'fake-timer-token))
+    (kuro-color-scheme-test--with-fake-buffers nil
+      (kuro-color-scheme-test--with-stubbed-set #'ignore
+        (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                   (lambda () nil)))
+          (kuro--color-scheme-apply-now))))
+    (should (null kuro--color-scheme-debounce-timer))))
+
+(ert-deftest kuro-color-scheme-apply-now-direct-push-to-session ()
+  "A2: `kuro--color-scheme-apply-now' calls FFI with session id and dark flag."
+  (let ((calls nil))
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (setq-local kuro--session-id 99)
+        (kuro-color-scheme-test--with-fake-buffers (list buf)
+          (kuro-color-scheme-test--with-stubbed-set
+              (lambda (id dark) (push (list id dark) calls))
+            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                       (lambda () t)))
+              (kuro--color-scheme-apply-now))))))
+    (should (= 1 (length calls)))
+    (should (equal (car calls) '(99 t)))))
+
 (provide 'kuro-color-scheme-test)
 
 ;;; kuro-color-scheme-test.el ends here

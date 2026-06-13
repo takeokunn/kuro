@@ -256,5 +256,61 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
   "`kuro--send-shifted-return' must be an interactive command."
   (should (commandp #'kuro--send-shifted-return)))
 
+;;; Group 19: kuro--def-shifted-key macro — generated commands
+
+(defconst kuro-input-keymap-test--shifted-key-table
+  '((kuro-input-keymap--g19-shifted-tab-kkp
+     kuro--send-shifted-tab  "\e[9;2u"  "\e[Z")
+    (kuro-input-keymap--g19-shifted-return-kkp
+     kuro--send-shifted-return "\e[13;2u" "\r"))
+  "Table: (test-name fn kkp-seq legacy-seq) for kuro--def-shifted-key generated fns.")
+
+(defmacro kuro-input-keymap-test--def-shifted-key-sends (test-name fn kkp-seq legacy-seq)
+  "Define two tests: KKP path sends KKP-SEQ, legacy path sends LEGACY-SEQ."
+  `(progn
+     (ert-deftest ,test-name ()
+       ,(format "`%s' sends KKP seq when DISAMBIGUATE flag is set." fn)
+       (let ((sent nil))
+         (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s)))
+                   ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
+                   ((symbol-function 'kuro--kkp-flag-p) (lambda (_) t)))
+           (funcall #',fn)
+           (should (equal sent ,kkp-seq)))))))
+
+(kuro-input-keymap-test--def-shifted-key-sends
+ kuro-input-keymap--g19-shifted-tab-kkp
+ kuro--send-shifted-tab "\e[9;2u" "\e[Z")
+
+(kuro-input-keymap-test--def-shifted-key-sends
+ kuro-input-keymap--g19-shifted-return-kkp
+ kuro--send-shifted-return "\e[13;2u" "\r")
+
+(ert-deftest kuro-input-keymap--g19-shifted-key-table-all-interactive ()
+  "All entries in `kuro-input-keymap-test--shifted-key-table' are interactive commands."
+  (dolist (entry kuro-input-keymap-test--shifted-key-table)
+    (should (commandp (symbol-function (nth 1 entry))))))
+
+;;; Group 20: kuro--def-shifted-key macro — structural coverage
+
+(ert-deftest kuro-input-keymap-def-shifted-key-expands-to-defun ()
+  "`kuro--def-shifted-key' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-shifted-key kuro-test--sk "\e[9;2u" "\e[Z" "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--sk))))
+
+(ert-deftest kuro-input-keymap-def-shifted-key-expansion-has-interactive ()
+  "`kuro--def-shifted-key' expansion contains `(interactive)'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-shifted-key kuro-test--sk2 "\e[13;2u" "\r" "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-input-keymap-def-shifted-key-expansion-no-args ()
+  "`kuro--def-shifted-key' generated function has an empty arglist (no parameters)."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-shifted-key kuro-test--sk3 "\e[Z" "\e[Z" "doc")))
+         (arglist (caddr exp)))
+    (should (null arglist))))
+
 (provide 'kuro-input-keymap-test-4)
 ;;; kuro-input-keymap-test-4.el ends here

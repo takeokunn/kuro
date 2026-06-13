@@ -359,6 +359,28 @@ proving clrhash fired (old stale entries are gone) and iteration started."
       (set 'kuro-color-red saved-red)
       (kuro--rebuild-named-colors))))
 
+;;; kuro--defcolor macro structural tests
+
+(ert-deftest kuro-colors-defcolor-expands-to-defcustom ()
+  "`kuro--defcolor' single-step expands to a `defcustom' form."
+  (let ((exp (macroexpand-1
+              '(kuro--defcolor "test-color" "#123456" "test color" 99))))
+    (should (eq (car exp) 'defcustom))))
+
+(ert-deftest kuro-colors-defcolor-generated-symbol-has-kuro-color-prefix ()
+  "`kuro--defcolor' generates a symbol prefixed `kuro-color-'."
+  (let* ((exp (macroexpand-1
+               '(kuro--defcolor "test-hue" "#abcdef" "test hue" 42)))
+         (sym (cadr exp)))
+    (should (eq sym 'kuro-color-test-hue))))
+
+(ert-deftest kuro-colors-defcolor-default-value-in-expansion ()
+  "`kuro--defcolor' places the DEFAULT hex value as the `defcustom' initial value."
+  (let* ((exp (macroexpand-1
+               '(kuro--defcolor "tst" "#ff0000" "red test" 1)))
+         (default-val (caddr exp)))
+    (should (equal default-val "#ff0000"))))
+
 (provide 'kuro-colors-test-2)
 
 ;;; kuro-colors-test-2.el ends here

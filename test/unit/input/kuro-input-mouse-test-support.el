@@ -76,6 +76,29 @@
                (lambda (_pos) (cons ,col ,row))))
      ,@body))
 
+(defmacro kuro-mouse-test--with-encode-buffer (mode sgr pixel col row &rest body)
+  "Temp buffer with mouse MODE/SGR/PIXEL and event position COL/ROW; run BODY."
+  (declare (indent 5))
+  `(with-temp-buffer
+     (setq-local kuro--mouse-mode ,mode
+                 kuro--mouse-sgr ,sgr
+                 kuro--mouse-pixel-mode ,pixel)
+     (kuro-mouse-test--with-event ,col ,row
+       ,@body)))
+
+(defmacro kuro-mouse-test--full-stub (col row btn-type &rest body)
+  "Stub all event functions and run BODY with COL/ROW position and BTN-TYPE basic type."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'event-start)
+               (lambda (_ev) 'fake-pos))
+              ((symbol-function 'event-basic-type)
+               (lambda (_ev) ,btn-type))
+              ((symbol-function 'posn-col-row)
+               (lambda (_pos) (cons ,col ,row)))
+              ((symbol-function 'posn-x-y)
+               (lambda (_pos) (cons ,col ,row))))
+     ,@body))
+
 (provide 'kuro-input-mouse-test-support)
 
 ;;; kuro-input-mouse-test-support.el ends here

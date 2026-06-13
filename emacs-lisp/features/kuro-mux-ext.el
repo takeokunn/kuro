@@ -24,19 +24,19 @@
 (declare-function kuro-mux-other-window        "kuro-mux" ())
 (declare-function kuro-mux-rotate-panes        "kuro-mux" (&optional backward))
 (declare-function kuro-mux-rotate-panes-backward "kuro-mux" ())
-(declare-function kuro-mux-last                "kuro-mux" ())
-(declare-function kuro-mux-find-window         "kuro-mux" (name))
+(declare-function kuro-mux-last                "kuro-mux-windows" ())
+(declare-function kuro-mux-find-window         "kuro-mux-windows" (name))
 (declare-function kuro-mux-select-by-index     "kuro-mux" (n))
-(declare-function kuro-mux-split-right         "kuro-mux" (&optional command))
-(declare-function kuro-mux-split-below         "kuro-mux" (&optional command))
-(declare-function kuro-mux-detach              "kuro-mux" ())
-(declare-function kuro-mux-zoom                "kuro-mux" ())
-(declare-function kuro-mux-kill                "kuro-mux" ())
-(declare-function kuro-mux-swap-pane-forward   "kuro-mux" ())
-(declare-function kuro-mux-swap-pane-backward  "kuro-mux" ())
-(declare-function kuro-mux-resize-pane         "kuro-mux" (direction &optional delta))
+(declare-function kuro-mux-split-right         "kuro-mux-windows" (&optional command))
+(declare-function kuro-mux-split-below         "kuro-mux-windows" (&optional command))
+(declare-function kuro-mux-detach              "kuro-mux-windows" ())
+(declare-function kuro-mux-zoom                "kuro-mux-windows" ())
+(declare-function kuro-mux-kill                "kuro-mux-windows" ())
+(declare-function kuro-mux-swap-pane-forward   "kuro-mux-windows" ())
+(declare-function kuro-mux-swap-pane-backward  "kuro-mux-windows" ())
+(declare-function kuro-mux-resize-pane         "kuro-mux-windows" (direction &optional delta))
 (declare-function kuro-mux-install-mode-line       "kuro-mux"      ())
-(declare-function kuro-mux--track-window-change    "kuro-mux"      (_frame))
+(declare-function kuro-mux--track-window-change    "kuro-mux-windows" (_frame))
 (declare-function kuro--activity-notify            "kuro-activity" (title body))
 
 ;; Forward declarations for buffer-local variables defined in kuro-mux.el.
@@ -65,15 +65,14 @@ windows, it is removed from the frame after the new frame is created.
 When it is the sole window, the buffer is shown in both frames momentarily;
 the caller may close the old frame manually."
   (interactive)
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro buffer"))
-  (let* ((buf        (current-buffer))
-         (can-delete (> (length (window-list nil 0)) 1))
-         (new-frame  (make-frame)))
-    (with-selected-frame new-frame
-      (switch-to-buffer buf))
-    (when can-delete
-      (delete-window))))
+  (kuro--with-kuro-mode
+   (let* ((buf        (current-buffer))
+          (can-delete (> (length (window-list nil 0)) 1))
+          (new-frame  (make-frame)))
+     (with-selected-frame new-frame
+       (switch-to-buffer buf))
+     (when can-delete
+       (delete-window)))))
 
 ;;;###autoload
 (defun kuro-mux-join-pane (name)
@@ -101,14 +100,13 @@ Use `kuro-mux-break-pane' to perform the reverse operation."
 Updates the mode-line and the tab-bar tab (when `kuro-mux-tab-bar-mode'
 is active).  NAME is shown by `kuro-mux-switch-by-name'."
   (interactive "sSession name: ")
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a kuro buffer"))
-  (setq kuro-mux--name (if (string-empty-p name) nil name))
-  (when kuro-mux-tab-bar-mode
-    (kuro-mux--tab-bar-update))
-  (force-mode-line-update)
-  (message "kuro-mux: session renamed to %s"
-           (or kuro-mux--name (buffer-name))))
+  (kuro--with-kuro-mode
+   (setq kuro-mux--name (if (string-empty-p name) nil name))
+   (when kuro-mux-tab-bar-mode
+     (kuro-mux--tab-bar-update))
+   (force-mode-line-update)
+   (message "kuro-mux: session renamed to %s"
+            (or kuro-mux--name (buffer-name)))))
 
 (defun kuro-mux--name-lighter ()
   "Return a mode-line string for the current session name.
@@ -272,15 +270,14 @@ frame.  Subsequent notifications are throttled by
 `kuro-mux-monitor-activity-debounce'.
 Analogous to tmux `:monitor-activity on/off'."
   (interactive)
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro buffer"))
-  (setq kuro-mux--monitor-activity (not kuro-mux--monitor-activity))
-  (if kuro-mux--monitor-activity
-      (progn
-        (add-hook 'after-change-functions #'kuro-mux--activity-watcher nil t)
-        (message "kuro-mux: activity monitoring ON for %s" (buffer-name)))
-    (remove-hook 'after-change-functions #'kuro-mux--activity-watcher t)
-    (message "kuro-mux: activity monitoring OFF for %s" (buffer-name))))
+  (kuro--with-kuro-mode
+   (setq kuro-mux--monitor-activity (not kuro-mux--monitor-activity))
+   (if kuro-mux--monitor-activity
+       (progn
+         (add-hook 'after-change-functions #'kuro-mux--activity-watcher nil t)
+         (message "kuro-mux: activity monitoring ON for %s" (buffer-name)))
+     (remove-hook 'after-change-functions #'kuro-mux--activity-watcher t)
+     (message "kuro-mux: activity monitoring OFF for %s" (buffer-name)))))
 
 ;;;###autoload
 (defun kuro-mux-monitor-silence (seconds)
@@ -290,19 +287,18 @@ no output for SECONDS consecutive seconds.  The timer is reset on every
 new output event.  Pass 0 to disable silence monitoring for this session.
 Analogous to tmux `:monitor-silence N'."
   (interactive "nMonitor silence after (seconds, 0=off): ")
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro buffer"))
-  (setq kuro-mux--monitor-silence-seconds (and (> seconds 0) seconds))
-  (if kuro-mux--monitor-silence-seconds
-      (progn
-        (add-hook 'after-change-functions #'kuro-mux--silence-watcher nil t)
-        (message "kuro-mux: silence monitoring ON (%gs) for %s"
-                 seconds (buffer-name)))
-    (when (timerp kuro-mux--monitor-silence-timer)
-      (cancel-timer kuro-mux--monitor-silence-timer)
-      (setq kuro-mux--monitor-silence-timer nil))
-    (remove-hook 'after-change-functions #'kuro-mux--silence-watcher t)
-    (message "kuro-mux: silence monitoring OFF for %s" (buffer-name))))
+  (kuro--with-kuro-mode
+   (setq kuro-mux--monitor-silence-seconds (and (> seconds 0) seconds))
+   (if kuro-mux--monitor-silence-seconds
+       (progn
+         (add-hook 'after-change-functions #'kuro-mux--silence-watcher nil t)
+         (message "kuro-mux: silence monitoring ON (%gs) for %s"
+                  seconds (buffer-name)))
+     (when (timerp kuro-mux--monitor-silence-timer)
+       (cancel-timer kuro-mux--monitor-silence-timer)
+       (setq kuro-mux--monitor-silence-timer nil))
+     (remove-hook 'after-change-functions #'kuro-mux--silence-watcher t)
+     (message "kuro-mux: silence monitoring OFF for %s" (buffer-name)))))
 
 
 ;;;; Pipe pane — capture rendered session output to a file
@@ -328,16 +324,15 @@ Bound to `P' in the mux prefix map."
    (if kuro-mux--pipe-pane-file
        (list nil)
      (list (read-file-name "Pipe output to file: "))))
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro buffer"))
-  (if (null file)
-      (progn
-        (setq kuro-mux--pipe-pane-file nil)
-        (remove-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher t)
-        (message "kuro-mux: pipe-pane stopped for %s" (buffer-name)))
-    (setq kuro-mux--pipe-pane-file (expand-file-name file))
-    (add-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher nil t)
-    (message "kuro-mux: piping %s → %s" (buffer-name) kuro-mux--pipe-pane-file)))
+  (kuro--with-kuro-mode
+   (if (null file)
+       (progn
+         (setq kuro-mux--pipe-pane-file nil)
+         (remove-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher t)
+         (message "kuro-mux: pipe-pane stopped for %s" (buffer-name)))
+     (setq kuro-mux--pipe-pane-file (expand-file-name file))
+     (add-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher nil t)
+     (message "kuro-mux: piping %s → %s" (buffer-name) kuro-mux--pipe-pane-file))))
 
 
 (provide 'kuro-mux-ext)

@@ -154,5 +154,133 @@
         (kuro-search-backward)
         (should isearch-called)))))
 
+;;; ── Group 31: kuro--def-copy-goto-prompt macro — structural coverage ──────────
+
+(ert-deftest kuro-copy-test-goto-next-prompt-is-interactive ()
+  "`kuro--copy-goto-next-prompt' is an interactive command (macro-generated)."
+  (should (commandp #'kuro--copy-goto-next-prompt)))
+
+(ert-deftest kuro-copy-test-goto-prev-prompt-is-interactive ()
+  "`kuro--copy-goto-prev-prompt' is an interactive command (macro-generated)."
+  (should (commandp #'kuro--copy-goto-prev-prompt)))
+
+(ert-deftest kuro-copy-test-goto-next-prompt-goto-char-when-found ()
+  "`kuro--copy-goto-next-prompt' calls `goto-char' with the target position."
+  (with-temp-buffer
+    (insert "abc\ndef\nghi\n")
+    (goto-char (point-min))
+    (let ((moved-to nil))
+      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 7))
+                ((symbol-function 'goto-char) (lambda (pos) (setq moved-to pos))))
+        (kuro--copy-goto-next-prompt)
+        (should (= moved-to 7))))))
+
+(ert-deftest kuro-copy-test-goto-next-prompt-calls-fallback-when-absent ()
+  "`kuro--copy-goto-next-prompt' calls `forward-paragraph' when no target."
+  (with-temp-buffer
+    (insert "abc\n")
+    (goto-char (point-min))
+    (let ((fallback-called nil))
+      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) nil))
+                ((symbol-function 'forward-paragraph)
+                 (lambda () (setq fallback-called t))))
+        (kuro--copy-goto-next-prompt)
+        (should fallback-called)))))
+
+(ert-deftest kuro-copy-test-goto-prev-prompt-goto-char-when-found ()
+  "`kuro--copy-goto-prev-prompt' calls `goto-char' with the target position."
+  (with-temp-buffer
+    (insert "abc\ndef\nghi\n")
+    (goto-char (point-max))
+    (let ((moved-to nil))
+      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 5))
+                ((symbol-function 'goto-char) (lambda (pos) (setq moved-to pos))))
+        (kuro--copy-goto-prev-prompt)
+        (should (= moved-to 5))))))
+
+(ert-deftest kuro-copy-test-goto-prev-prompt-calls-fallback-when-absent ()
+  "`kuro--copy-goto-prev-prompt' calls `backward-paragraph' when no target."
+  (with-temp-buffer
+    (insert "abc\n")
+    (goto-char (point-max))
+    (let ((fallback-called nil))
+      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) nil))
+                ((symbol-function 'backward-paragraph)
+                 (lambda () (setq fallback-called t))))
+        (kuro--copy-goto-prev-prompt)
+        (should fallback-called)))))
+
+(ert-deftest kuro-copy-test-def-copy-goto-prompt-macroexpand-1-is-defun ()
+  "`kuro--def-copy-goto-prompt' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-goto-prompt kuro-copy-test--dummy-cmd
+                 :fwd forward-paragraph "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-copy-test--dummy-cmd))))
+
+;;; ── Group 32: kuro--def-copy-search-enter macro — structural coverage ──────────
+
+(ert-deftest kuro-copy-test-def-copy-search-enter-expands-to-defun ()
+  "`kuro--def-copy-search-enter' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-search-enter kuro-test--fake-search-enter
+                 isearch-forward "Test search enter."))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-search-enter))))
+
+(ert-deftest kuro-copy-test-def-copy-search-enter-expansion-has-interactive ()
+  "`kuro--def-copy-search-enter' expansion body contains `(interactive)'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-search-enter kuro-test--fake-srch2
+                 isearch-forward "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-copy-test-def-copy-search-enter-skips-enter-when-already-in-mode ()
+  "`kuro-search-forward' does NOT call `kuro--enter-copy-mode' when already in copy mode."
+  (kuro-el-test--with-kuro-mode-buffer
+    (setq-local kuro--copy-mode t)
+    (let ((enter-called nil))
+      (cl-letf (((symbol-function 'kuro--enter-copy-mode)
+                 (lambda () (setq enter-called t)))
+                ((symbol-function 'isearch-forward) #'ignore))
+        (kuro-search-forward)
+        (should-not enter-called)))))
+
+;;; ── Group 33: kuro--def-copy-window-move / kuro--def-copy-search structural tests ──
+
+(ert-deftest kuro-copy-test-def-copy-window-move-expands-to-defun ()
+  "`kuro--def-copy-window-move' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-window-move kuro-test--wm-top 0 "Move to top."))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--wm-top))))
+
+(ert-deftest kuro-copy-test-def-copy-window-move-expansion-has-interactive ()
+  "`kuro--def-copy-window-move' expansion contains `(interactive)'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-window-move kuro-test--wm-mid nil "Move to middle."))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-copy-test-def-copy-window-move-generated-cmds-are-interactive ()
+  "Commands generated by `kuro--def-copy-window-move' are interactive."
+  (should (commandp #'kuro--copy-move-to-top))
+  (should (commandp #'kuro--copy-move-to-middle))
+  (should (commandp #'kuro--copy-move-to-bottom)))
+
+(ert-deftest kuro-copy-test-def-copy-search-expands-to-defun ()
+  "`kuro--def-copy-search' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-search kuro-test--cs-fwd
+                 search-forward isearch-forward (point-min) "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--cs-fwd))))
+
+(ert-deftest kuro-copy-test-def-copy-search-expansion-has-interactive ()
+  "`kuro--def-copy-search' expansion contains `(interactive)'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-copy-search kuro-test--cs-bwd
+                 search-backward isearch-backward (point-max) "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
 (provide 'kuro-copy-mode-adv-test-2)
 ;;; kuro-copy-mode-adv-test-2.el ends here

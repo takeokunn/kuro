@@ -210,6 +210,44 @@ Mirrors the 9 entries in `kuro--ea-range-probe-table'.  All ranges must map to w
              (lambda (&rest _) (error "simulated font-at error"))))
     (should-not (kuro--probe-glyph-metrics ?a))))
 
+
+;;; Group 17: kuro-char-width-setup
+
+(ert-deftest kuro-char-width-setup-adds-hook ()
+  "`kuro-char-width-setup' adds `kuro--reapply-char-width-in-all-buffers' to `set-language-environment-hook'."
+  (let ((set-language-environment-hook nil))
+    (kuro-char-width-setup)
+    (should (memq #'kuro--reapply-char-width-in-all-buffers
+                  set-language-environment-hook))))
+
+(ert-deftest kuro-char-width-setup-is-idempotent ()
+  "`kuro-char-width-setup' called twice does not add duplicate hook entries."
+  (let ((set-language-environment-hook nil))
+    (kuro-char-width-setup)
+    (kuro-char-width-setup)
+    (should (= 1 (length (memq #'kuro--reapply-char-width-in-all-buffers
+                               set-language-environment-hook))))))
+
+;;; kuro--set-fontset-font-both macro structural tests
+
+(ert-deftest kuro-char-width-set-fontset-font-both-expands-to-progn ()
+  "`kuro--set-fontset-font-both' expands to a `progn' with two `set-fontset-font' calls."
+  (let* ((exp (macroexpand-1
+               '(kuro--set-fontset-font-both (#x2580 . #x259F) my-spec)))
+         (body (cdr exp)))
+    (should (eq (car exp) 'progn))
+    (should (= (length body) 2))
+    (should (cl-every (lambda (f) (eq (car f) 'set-fontset-font)) body))))
+
+(ert-deftest kuro-char-width-set-fontset-font-both-targets-nil-and-t ()
+  "`kuro--set-fontset-font-both' targets nil (current frame) then t (default fontset)."
+  (let* ((exp (macroexpand-1
+               '(kuro--set-fontset-font-both (#x2190 . #x21FF) my-spec)))
+         (first-target  (cadr (car (cdr exp))))
+         (second-target (cadr (cadr (cdr exp)))))
+    (should (null first-target))
+    (should (eq second-target t))))
+
 (provide 'kuro-char-width-test)
 
 ;;; kuro-char-width-test.el ends here

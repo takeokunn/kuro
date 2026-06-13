@@ -401,6 +401,19 @@ This is the same guard that kuro--assert-terminal-p would implement."
         (kuro-scrollback-discard))
       (should-not (buffer-live-p snap)))))
 
+(ert-deftest kuro-el-test--scrollback-discard-emits-message ()
+  "kuro-scrollback-discard shows a confirmation message after killing the buffer."
+  (kuro-el-test--with-kuro-mode-buffer
+    (rename-buffer "*kuro-test-discard-msg*")
+    (kuro-edit-scrollback)
+    (let ((msg nil)
+          (snap (get-buffer "*kuro-scrollback: *kuro-test-discard-msg**")))
+      (with-current-buffer snap
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+          (kuro-scrollback-discard)))
+      (should (string= msg "kuro: scrollback snapshot discarded")))))
+
 (ert-deftest kuro-el-test--scrollback-send-errors-outside-edit-mode ()
   "kuro-scrollback-send signals user-error when not in kuro-scrollback-edit-mode."
   (with-temp-buffer

@@ -235,12 +235,8 @@ minibuffer context where it operates correctly."
   (interactive)
   (when (characterp last-command-event)
     (kuro--line-undo-push)
-    (let ((p kuro--line-point))
-      (setq kuro--line-buffer
-            (concat (substring kuro--line-buffer 0 p)
-                    (string last-command-event)
-                    (substring kuro--line-buffer p)))
-      (setq kuro--line-point (1+ p)))
+    (kuro--line-splice kuro--line-point kuro--line-point
+                       (string last-command-event) (1+ kuro--line-point))
     (if (bound-and-true-p kuro-line-use-minibuffer)
         (kuro-line-minibuffer-send)
       (kuro--line-mode-update-display))))
@@ -255,24 +251,16 @@ dispatched to the PTY on RET, without those keys triggering their normal
 line-mode editing commands."
   (interactive)
   (let* ((ch (read-quoted-char "C-q-"))
-         (s  (char-to-string ch))
-         (p  kuro--line-point))
+         (s  (char-to-string ch)))
     (kuro--with-line-edit-undo
-     (setq kuro--line-buffer
-           (concat (substring kuro--line-buffer 0 p) s (substring kuro--line-buffer p))
-           kuro--line-point (+ p (length s))))))
+     (kuro--line-splice kuro--line-point kuro--line-point s (+ kuro--line-point (length s))))))
 
 (defun kuro--line-delete ()
   "Remove the character before `kuro--line-point' (backspace in line mode)."
   (interactive)
   (when (> kuro--line-point 0)
-    (kuro--line-undo-push)
-    (let ((p kuro--line-point))
-      (setq kuro--line-buffer
-            (concat (substring kuro--line-buffer 0 (1- p))
-                    (substring kuro--line-buffer p)))
-      (setq kuro--line-point (1- p)))
-    (kuro--line-mode-update-display)))
+    (kuro--with-line-edit-undo
+     (kuro--line-splice (1- kuro--line-point) kuro--line-point "" (1- kuro--line-point)))))
 
 (defun kuro--line-newline ()
   "Insert a literal newline into the line buffer without sending (C-o).
@@ -281,14 +269,8 @@ pasted block — entirely within line mode, then dispatch the whole thing to
 the PTY at once with RET.  The embedded newlines are sent verbatim ahead of
 the final carriage return, so the shell runs each line in sequence."
   (interactive)
-  (kuro--line-undo-push)
-  (let ((p kuro--line-point))
-    (setq kuro--line-buffer
-          (concat (substring kuro--line-buffer 0 p)
-                  "\n"
-                  (substring kuro--line-buffer p)))
-    (setq kuro--line-point (1+ p)))
-  (kuro--line-mode-update-display))
+  (kuro--with-line-edit-undo
+   (kuro--line-splice kuro--line-point kuro--line-point "\n" (1+ kuro--line-point))))
 
 (defun kuro--line-kill-line ()
   "Kill from `kuro--line-point' to end of line (C-k in line mode)."

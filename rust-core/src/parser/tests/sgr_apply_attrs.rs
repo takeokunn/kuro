@@ -129,3 +129,167 @@ fn apply_sgr_attrs_skip_empty_group() {
     apply_sgr_attrs(&mut a, &[empty, bold]);
     assert!(a.flags.contains(SgrFlags::BOLD), "empty group must be skipped");
 }
+
+#[test]
+fn apply_sgr_attrs_dim_on() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[2u16]]);
+    assert!(a.flags.contains(SgrFlags::DIM));
+}
+
+#[test]
+fn apply_sgr_attrs_dim_off_via_sgr22() {
+    let mut a = fresh_attrs();
+    a.flags.insert(SgrFlags::BOLD);
+    a.flags.insert(SgrFlags::DIM);
+    apply_sgr_attrs(&mut a, &[&[22u16]]);
+    assert!(!a.flags.contains(SgrFlags::BOLD));
+    assert!(!a.flags.contains(SgrFlags::DIM));
+}
+
+#[test]
+fn apply_sgr_attrs_blink_slow_on() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[5u16]]);
+    assert!(a.flags.contains(SgrFlags::BLINK_SLOW));
+}
+
+#[test]
+fn apply_sgr_attrs_blink_fast_on() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[6u16]]);
+    assert!(a.flags.contains(SgrFlags::BLINK_FAST));
+}
+
+#[test]
+fn apply_sgr_attrs_blink_off_via_sgr25() {
+    let mut a = fresh_attrs();
+    a.flags.insert(SgrFlags::BLINK_SLOW);
+    a.flags.insert(SgrFlags::BLINK_FAST);
+    apply_sgr_attrs(&mut a, &[&[25u16]]);
+    assert!(!a.flags.contains(SgrFlags::BLINK_SLOW));
+    assert!(!a.flags.contains(SgrFlags::BLINK_FAST));
+}
+
+#[test]
+fn apply_sgr_attrs_inverse_on_off() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[7u16]]);
+    assert!(a.flags.contains(SgrFlags::INVERSE));
+    apply_sgr_attrs(&mut a, &[&[27u16]]);
+    assert!(!a.flags.contains(SgrFlags::INVERSE));
+}
+
+#[test]
+fn apply_sgr_attrs_hidden_on_off() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[8u16]]);
+    assert!(a.flags.contains(SgrFlags::HIDDEN));
+    apply_sgr_attrs(&mut a, &[&[28u16]]);
+    assert!(!a.flags.contains(SgrFlags::HIDDEN));
+}
+
+#[test]
+fn apply_sgr_attrs_strikethrough_on_off() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[9u16]]);
+    assert!(a.flags.contains(SgrFlags::STRIKETHROUGH));
+    apply_sgr_attrs(&mut a, &[&[29u16]]);
+    assert!(!a.flags.contains(SgrFlags::STRIKETHROUGH));
+}
+
+#[test]
+fn apply_sgr_attrs_double_underline_direct_sgr21() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[21u16]]);
+    assert_eq!(a.underline_style, UnderlineStyle::Double);
+}
+
+#[test]
+fn apply_sgr_attrs_background_named_green() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[42u16]]);
+    assert!(matches!(a.background, Color::Named(_)));
+    assert_ne!(a.background, Color::Default);
+}
+
+#[test]
+fn apply_sgr_attrs_background_default_resets() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[42u16]]);
+    apply_sgr_attrs(&mut a, &[&[49u16]]);
+    assert_eq!(a.background, Color::Default);
+}
+
+#[test]
+fn apply_sgr_attrs_underline_color_direct_rgb() {
+    let mut a = fresh_attrs();
+    // SGR 58:2:255:0:128 — direct RGB underline color
+    let uc: &[u16] = &[58, 2, 255, 0, 128];
+    apply_sgr_attrs(&mut a, &[uc]);
+    assert!(matches!(a.underline_color, Color::Rgb(..)));
+}
+
+#[test]
+fn apply_sgr_attrs_underline_color_default_resets() {
+    let mut a = fresh_attrs();
+    let uc: &[u16] = &[58, 2, 255, 0, 128];
+    apply_sgr_attrs(&mut a, &[uc]);
+    apply_sgr_attrs(&mut a, &[&[59u16]]);
+    assert_eq!(a.underline_color, Color::Default);
+}
+
+#[test]
+fn apply_sgr_attrs_bright_foreground_90_to_97() {
+    let mut a = fresh_attrs();
+    for param in 90u16..=97 {
+        apply_sgr_attrs(&mut a, &[&[param]]);
+        assert!(matches!(a.foreground, Color::Named(_)), "SGR {param} must set bright fg");
+    }
+}
+
+#[test]
+fn apply_sgr_attrs_bright_background_100_to_107() {
+    let mut a = fresh_attrs();
+    for param in 100u16..=107 {
+        apply_sgr_attrs(&mut a, &[&[param]]);
+        assert!(matches!(a.background, Color::Named(_)), "SGR {param} must set bright bg");
+    }
+}
+
+#[test]
+fn apply_sgr_attrs_unknown_param_is_ignored() {
+    let mut a = fresh_attrs();
+    let before = format!("{a:?}");
+    apply_sgr_attrs(&mut a, &[&[999u16]]);
+    let after = format!("{a:?}");
+    assert_eq!(before, after, "unknown SGR param must not change attrs");
+}
+
+#[test]
+fn apply_sgr_attrs_underline_subparam_dotted() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[4u16, 4]]);
+    assert_eq!(a.underline_style, UnderlineStyle::Dotted);
+}
+
+#[test]
+fn apply_sgr_attrs_underline_subparam_dashed() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[4u16, 5]]);
+    assert_eq!(a.underline_style, UnderlineStyle::Dashed);
+}
+
+#[test]
+fn apply_sgr_attrs_underline_subparam_double() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[4u16, 2]]);
+    assert_eq!(a.underline_style, UnderlineStyle::Double);
+}
+
+#[test]
+fn apply_sgr_attrs_underline_subparam_unknown_defaults_to_straight() {
+    let mut a = fresh_attrs();
+    apply_sgr_attrs(&mut a, &[&[4u16, 99]]);
+    assert_eq!(a.underline_style, UnderlineStyle::Straight);
+}

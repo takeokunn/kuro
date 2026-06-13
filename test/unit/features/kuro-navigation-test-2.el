@@ -241,5 +241,42 @@
       (should (= result 0)))))
 
 
+;;; Group 14 — kuro--def-nav-cmd / kuro--def-navigator structural tests
+
+(ert-deftest kuro-navigation-def-nav-cmd-expands-to-defun ()
+  "`kuro--def-nav-cmd' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-nav-cmd kuro-test--fake-nav kuro--navigate-to-prompt previous "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-nav))))
+
+(ert-deftest kuro-navigation-def-nav-cmd-expansion-has-interactive ()
+  "`kuro--def-nav-cmd' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-nav-cmd kuro-test--fake-nav2 kuro--navigate-to-prompt next "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-navigation-def-navigator-expands-to-defun-with-direction-arg ()
+  "`kuro--def-navigator' generates a `defun' with `(direction)' arglist.
+Unlike `kuro--def-nav-cmd', the navigator is called programmatically (no
+`(interactive)'), and takes a DIRECTION argument at call time."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-navigator kuro-test--fake-navigator
+                  (lambda (e) t) (goto-char (cadr target))
+                  (message "no target")
+                  "doc")))
+         (arglist (caddr exp)))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-navigator))
+    (should (equal arglist '(direction)))))
+
+(ert-deftest kuro-navigation-def-navigator-expansion-is-not-interactive ()
+  "`kuro--def-navigator' generates a NON-interactive helper (called programmatically)."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-navigator kuro-test--fake-navigator2
+                  (lambda (e) t) (ignore) (ignore) "doc")))
+         (body (cddr exp)))
+    (should-not (member '(interactive) body))))
+
 (provide 'kuro-navigation-test-2)
 ;;; kuro-navigation-test-2.el ends here

@@ -253,6 +253,15 @@ must be called to update the cached values."
         (setq called t))))
     (should-not called)))
 
+(ert-deftest kuro-overlays-call-with-normalized-ffi-face-range-all-clamped-to-line-end ()
+  "Range starting beyond line-end clamps both positions to line-end, skipping continuation."
+  (let ((called nil))
+    (should-not
+     (kuro--call-with-normalized-ffi-face-range
+      [10 20 10 20 30 40] 5 10
+      (lambda (&rest _args) (setq called t))))
+    (should-not called)))
+
 ;;; Group 6: kuro--render-image-notification
 
 (ert-deftest kuro-overlays-render-image-notification-no-error-when-image-nil ()

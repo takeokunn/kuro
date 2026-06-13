@@ -286,19 +286,31 @@ test_sgr_all_bright_variants!(test_sgr_all_bright_bg_variants, base 100, backgro
 /// This is the faithfulness contract DECRQSS (`DCS $ q m`) depends on.
 #[test]
 fn test_serialize_sgr_round_trips_through_parser() {
-    let cases: [&[u8]; 12] = [
+    let cases: [&[u8]; 24] = [
         b"\x1b[m",              // default / reset
         b"\x1b[1m",             // bold
         b"\x1b[2m",             // dim
         b"\x1b[1;3;4;7;9m",     // bold italic underline inverse strikethrough
         b"\x1b[5m",             // slow blink
         b"\x1b[6m",             // fast blink
+        b"\x1b[8m",             // hidden (concealed)
         b"\x1b[31m",            // fg named red
         b"\x1b[91m",            // fg bright red
         b"\x1b[38;5;196m",      // fg indexed
         b"\x1b[38;2;10;20;30m", // fg RGB
+        b"\x1b[41m",            // bg named red (append_sgr_color base branch)
+        b"\x1b[101m",           // bg bright red (append_sgr_color bright_base branch)
+        b"\x1b[48;5;21m",       // bg indexed
+        b"\x1b[48;2;10;20;30m", // bg RGB
         b"\x1b[4:3m",           // curly underline
         b"\x1b[58;2;9;8;7m",    // underline color RGB
+        b"\x1b[58;5;200m",      // underline color indexed
+        b"\x1b[53m",            // overline on
+        b"\x1b[73m",            // superscript on
+        b"\x1b[75m",            // subscript on
+        b"\x1b[4:4m",           // dotted underline
+        b"\x1b[4:5m",           // dashed underline
+        b"\x1b[21m",            // double underline (SGR 21)
     ];
     for seq in cases {
         let mut a = crate::TerminalCore::new(24, 80);

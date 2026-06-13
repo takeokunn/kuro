@@ -289,6 +289,19 @@
           (should (equal (cdar sent-to) "test-input")))
       (kill-buffer buf-b))))
 
+(ert-deftest kuro-mux-test-broadcast-send-noop-when-already-broadcasting ()
+  "`kuro-mux--broadcast-send' is a no-op when `kuro-mux--broadcasting' is already t.
+This guards against infinite recursion from the :after advice re-entering itself."
+  (let ((kuro-mux--broadcast-mode t)
+        (kuro-mux--broadcasting t)
+        (called nil))
+    (cl-letf (((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list (current-buffer))))
+              ((symbol-function 'kuro--send-paste-or-raw)
+               (lambda (_) (setq called t))))
+      (kuro-mux--broadcast-send "recursive-input")
+      (should-not called))))
+
 (kuro-mux-test--def-prefix-map-binding kuro-mux-test-broadcast-B-bound-in-prefix-map "B" kuro-mux-broadcast-toggle)
 
 (provide 'kuro-mux-test-2)

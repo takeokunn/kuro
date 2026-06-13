@@ -53,70 +53,11 @@ fn test_handle_osc_133_mark_records_cursor_position() {
 
 // ── handle_osc_133 exit_code ─────────────────────────────────────────────────
 
-#[test]
-fn test_handle_osc_133_command_end_exit_code_zero() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"0"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(0));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_one() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_127() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"127"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(127));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_negative() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"-1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(-1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"abc"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, None);
-}
+test_osc_133_exit_code!(test_handle_osc_133_command_end_exit_code_zero,             b"0",   Some(0));
+test_osc_133_exit_code!(test_handle_osc_133_command_end_exit_code_one,              b"1",   Some(1));
+test_osc_133_exit_code!(test_handle_osc_133_command_end_exit_code_127,              b"127", Some(127));
+test_osc_133_exit_code!(test_handle_osc_133_command_end_exit_code_negative,         b"-1",  Some(-1));
+test_osc_133_exit_code!(test_handle_osc_133_command_end_exit_code_non_numeric_is_none, b"abc", None);
 
 #[test]
 fn test_handle_osc_133_command_end_no_exit_code_param() {

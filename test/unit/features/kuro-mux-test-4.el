@@ -164,5 +164,50 @@
     (should (string-prefix-p "kuro-mux: " last-msg))))
 
 
+;;; Group 45 — kuro-mux-help behavioral coverage
+
+(ert-deftest kuro-mux-test--help-creates-named-buffer ()
+  "`kuro-mux-help' leaves a buffer named \"*kuro-mux help*\" in the buffer list."
+  (cl-letf (((symbol-function 'substitute-command-keys) #'identity))
+    (kuro-mux-help)
+    (let ((buf (get-buffer "*kuro-mux help*")))
+      (unwind-protect
+          (should buf)
+        (when buf (kill-buffer buf))))))
+
+(ert-deftest kuro-mux-test--help-prints-prefix-key ()
+  "`kuro-mux-help' prints the current `kuro-mux-prefix-key'."
+  (let ((printed "")
+        (kuro-mux-prefix-key "C-c x"))
+    (cl-letf (((symbol-function 'with-help-window)
+               (lambda (_name &rest body) (eval (cons 'progn body) t)))
+              ((symbol-function 'princ)
+               (lambda (s) (setq printed (concat printed s))))
+              ((symbol-function 'substitute-command-keys) #'identity))
+      (kuro-mux-help)
+      (should (string-match-p "C-c x" printed)))))
+
+(ert-deftest kuro-mux-test--help-prints-available-commands-header ()
+  "`kuro-mux-help' prints the \"Available commands\" section header."
+  (let ((printed ""))
+    (cl-letf (((symbol-function 'with-help-window)
+               (lambda (_name &rest body) (eval (cons 'progn body) t)))
+              ((symbol-function 'princ)
+               (lambda (s) (setq printed (concat printed s))))
+              ((symbol-function 'substitute-command-keys) #'identity))
+      (kuro-mux-help)
+      (should (string-match-p "Available commands" printed)))))
+
+(ert-deftest kuro-mux-test--clock-message-contains-time ()
+  "`kuro-mux-clock' message includes a time formatted as HH:MM:SS."
+  (let (last-msg)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq last-msg (apply #'format fmt args))))
+              ((symbol-function 'format-time-string)
+               (lambda (_fmt) "12:34:56")))
+      (kuro-mux-clock)
+      (should (string-match-p "12:34:56" last-msg)))))
+
+
 (provide 'kuro-mux-test-4)
 ;;; kuro-mux-test-4.el ends here

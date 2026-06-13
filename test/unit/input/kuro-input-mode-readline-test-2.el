@@ -219,127 +219,115 @@
 
 (ert-deftest kuro-input-mode-test-unix-word-rubout-kills-to-whitespace ()
   "C-w kills backward to the nearest space, treating hyphens as word chars."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "git commit-amend")
    (setq kuro--line-point 16)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-unix-word-rubout)
-     (should (string= kuro--line-buffer "git "))
-     (should (= kuro--line-point 4)))))
+   (kuro--line-unix-word-rubout)
+   (should (string= kuro--line-buffer "git "))
+   (should (= kuro--line-point 4))))
 
 (ert-deftest kuro-input-mode-test-unix-word-rubout-skips-trailing-spaces ()
   "C-w skips whitespace before the token to kill."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "foo   ")
    (setq kuro--line-point 6)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-unix-word-rubout)
-     (should (string= kuro--line-buffer ""))
-     (should (= kuro--line-point 0)))))
+   (kuro--line-unix-word-rubout)
+   (should (string= kuro--line-buffer ""))
+   (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-unix-word-rubout-at-bol-is-noop ()
   "C-w at beginning of line leaves the buffer unchanged."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "hello")
    (setq kuro--line-point 0)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-unix-word-rubout)
-     (should (string= kuro--line-buffer "hello"))
-     (should (= kuro--line-point 0)))))
+   (kuro--line-unix-word-rubout)
+   (should (string= kuro--line-buffer "hello"))
+   (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-unix-word-rubout-keeps-text-after-point ()
   "C-w does not disturb text after point."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "rm -rf /tmp/foo bar")
    (setq kuro--line-point 15)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-unix-word-rubout)
-     (should (string= kuro--line-buffer "rm -rf  bar"))
-     (should (= kuro--line-point 7)))))
+   (kuro--line-unix-word-rubout)
+   (should (string= kuro--line-buffer "rm -rf  bar"))
+   (should (= kuro--line-point 7))))
 
 ;;; Group 29 — word case operations (M-u, M-l, M-c)
 
 (ert-deftest kuro-input-mode-test-upcase-word-from-point ()
   "M-u upcases the next word and advances point to word end."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "hello world")
    (setq kuro--line-point 6)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-upcase-word)
-     (should (string= kuro--line-buffer "hello WORLD"))
-     (should (= kuro--line-point 11)))))
+   (kuro--line-upcase-word)
+   (should (string= kuro--line-buffer "hello WORLD"))
+   (should (= kuro--line-point 11))))
 
 (ert-deftest kuro-input-mode-test-downcase-word-from-point ()
   "M-l downcases the next word and advances point to word end."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "HELLO WORLD")
    (setq kuro--line-point 6)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-downcase-word)
-     (should (string= kuro--line-buffer "HELLO world"))
-     (should (= kuro--line-point 11)))))
+   (kuro--line-downcase-word)
+   (should (string= kuro--line-buffer "HELLO world"))
+   (should (= kuro--line-point 11))))
 
 (ert-deftest kuro-input-mode-test-capitalize-word-from-point ()
   "M-c capitalizes the next word: first char upper, rest lower."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "HELLO wOrLd")
    (setq kuro--line-point 6)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-capitalize-word)
-     (should (string= kuro--line-buffer "HELLO World"))
-     (should (= kuro--line-point 11)))))
+   (kuro--line-capitalize-word)
+   (should (string= kuro--line-buffer "HELLO World"))
+   (should (= kuro--line-point 11))))
 
 (ert-deftest kuro-input-mode-test-upcase-word-skips-leading-punct ()
   "M-u skips non-word chars before the word."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "  hello")
    (setq kuro--line-point 0)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-upcase-word)
-     (should (string= kuro--line-buffer "  HELLO"))
-     (should (= kuro--line-point 7)))))
+   (kuro--line-upcase-word)
+   (should (string= kuro--line-buffer "  HELLO"))
+   (should (= kuro--line-point 7))))
 
 (ert-deftest kuro-input-mode-test-word-case-at-eol-is-noop ()
   "Case commands at EOL where no word follows are no-ops."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "done")
    (setq kuro--line-point 4)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-upcase-word)
-     (should (string= kuro--line-buffer "done"))
-     (should (= kuro--line-point 4)))))
+   (kuro--line-upcase-word)
+   (should (string= kuro--line-buffer "done"))
+   (should (= kuro--line-point 4))))
 
 ;;; Group 30 — kuro--line-transpose-words (M-t)
 
 (ert-deftest kuro-input-mode-test-transpose-words-basic ()
   "M-t swaps word before point with word after point."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "foo bar baz")
    (setq kuro--line-point 7)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-transpose-words)
-     (should (string= kuro--line-buffer "foo baz bar"))
-     (should (= kuro--line-point 11)))))
+   (kuro--line-transpose-words)
+   (should (string= kuro--line-buffer "foo baz bar"))
+   (should (= kuro--line-point 11))))
 
 (ert-deftest kuro-input-mode-test-transpose-words-point-in-space ()
   "M-t with point in whitespace between words still transposes them."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "alpha beta")
    (setq kuro--line-point 5)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-transpose-words)
-     (should (string= kuro--line-buffer "beta alpha"))
-     (should (= kuro--line-point 10)))))
+   (kuro--line-transpose-words)
+   (should (string= kuro--line-buffer "beta alpha"))
+   (should (= kuro--line-point 10))))
 
 (ert-deftest kuro-input-mode-test-transpose-words-no-second-word-is-noop ()
   "M-t at end of last word does not modify the buffer."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (setq kuro--line-buffer "only")
    (setq kuro--line-point 4)
-   (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-     (kuro--line-transpose-words)
-     (should (string= kuro--line-buffer "only"))
-     (should (= kuro--line-point 4)))))
+   (kuro--line-transpose-words)
+   (should (string= kuro--line-buffer "only"))
+   (should (= kuro--line-point 4))))
 
 ;;; Group 31 — keymap bindings for iter-28 commands
 
@@ -350,6 +338,70 @@
 (kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-p-history-prev     "C-p"  kuro--line-history-prev)
 (kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-n-history-next     "C-n"  kuro--line-history-next)
 (kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-t-transpose-words  "M-t"  kuro--line-transpose-words)
+
+;;; Group 32 — kuro--def-line-kill-word macro structural coverage
+
+(ert-deftest kuro-input-mode-test-def-line-kill-word-kill-word-is-interactive ()
+  "`kuro--line-kill-word' is an interactive command (macro-generated)."
+  (should (commandp #'kuro--line-kill-word)))
+
+(ert-deftest kuro-input-mode-test-def-line-kill-word-backward-kill-word-is-interactive ()
+  "`kuro--line-backward-kill-word' is an interactive command (macro-generated)."
+  (should (commandp #'kuro--line-backward-kill-word)))
+
+(ert-deftest kuro-input-mode-test-def-line-kill-word-macroexpand-1-is-defun ()
+  "`kuro--def-line-kill-word' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-line-kill-word kuro-test--dummy-kill
+                 kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
+                 p bound bound "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--dummy-kill))))
+
+(ert-deftest kuro-input-mode-test-def-line-kill-word-expansion-contains-interactive ()
+  "`kuro--def-line-kill-word' expansion contains (interactive) form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-line-kill-word kuro-test--dummy-kill2
+                 kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
+                 p bound bound "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+;;; Group 33 — kuro--line-kill-to-bol and kuro--line-kill-line edge cases
+
+(ert-deftest kuro-input-mode-test-line-kill-to-bol-at-bol-is-noop ()
+  "`kuro--line-kill-to-bol' with point at BOL leaves buffer and point unchanged."
+  (kuro-input-mode-test--with-line "git" 0
+   (kuro--line-kill-to-bol)
+   (should (string= kuro--line-buffer "git"))
+   (should (= kuro--line-point 0))))
+
+(ert-deftest kuro-input-mode-test-line-kill-to-bol-at-eol-kills-all ()
+  "`kuro--line-kill-to-bol' with point at EOL clears the entire buffer."
+  (kuro-input-mode-test--with-line "git" 3
+   (kuro--line-kill-to-bol)
+   (should (string= kuro--line-buffer ""))
+   (should (= kuro--line-point 0))))
+
+(ert-deftest kuro-input-mode-test-line-kill-line-from-middle ()
+  "`kuro--line-kill-line' kills from point to EOL; point stays at kill position."
+  (kuro-input-mode-test--with-line "git status" 4
+   (kuro--line-kill-line)
+   (should (string= kuro--line-buffer "git "))
+   (should (= kuro--line-point 4))))
+
+(ert-deftest kuro-input-mode-test-line-kill-line-from-bol-kills-all ()
+  "`kuro--line-kill-line' from BOL empties the buffer."
+  (kuro-input-mode-test--with-line "git" 0
+   (kuro--line-kill-line)
+   (should (string= kuro--line-buffer ""))
+   (should (= kuro--line-point 0))))
+
+(ert-deftest kuro-input-mode-test-line-kill-line-at-eol-is-noop ()
+  "`kuro--line-kill-line' with point at EOL leaves buffer unchanged."
+  (kuro-input-mode-test--with-line "git" 3
+   (kuro--line-kill-line)
+   (should (string= kuro--line-buffer "git"))
+   (should (= kuro--line-point 3))))
 
 (provide 'kuro-input-mode-readline-test-2)
 

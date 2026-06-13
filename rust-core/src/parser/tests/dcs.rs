@@ -160,45 +160,13 @@ fn test_xtgettcap_odd_length_hex_is_skipped() {
     );
 }
 
-/// XTGETTCAP for "Tc" (true-color flag) must produce a success response.
-///
-/// "Tc" hex-encoded is "5463".
-#[test]
-fn test_xtgettcap_truecolor_flag_response() {
-    let mut core = crate::TerminalCore::new(24, 80);
+// ── Single-capability XTGETTCAP: truecolor + colors ──────────────────────────
+// `test_xtgettcap!(payload => success hex)`: ESC P 1 + r prefix + hex echo.
 
-    run_dcs(&mut core, b"+", 'q', b"5463");
-
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "Tc capability response must start with ESC P 1 + r, got: {resp:?}"
-    );
-    assert!(
-        resp.contains("5463"),
-        "response must echo back the hex-encoded name"
-    );
-}
-
-/// XTGETTCAP for "colors" (hex "636f6c6f7273") must produce a success response
-/// with the "256" value encoded.
-#[test]
-fn test_xtgettcap_colors_capability_response() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    // "colors" hex-encoded: c=63, o=6f, l=6c, o=6f, r=72, s=73 → "636f6c6f7273"
-    run_dcs(&mut core, b"+", 'q', b"636f6c6f7273");
-
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "colors capability response must start with ESC P 1 + r, got: {resp:?}"
-    );
-}
+/// "Tc" (true-color flag) — hex "5463".
+#[test] fn test_xtgettcap_truecolor_flag_response()    { test_xtgettcap!(b"5463"         => success "5463"); }
+/// "colors" (256-colour count) — hex "636f6c6f7273".
+#[test] fn test_xtgettcap_colors_capability_response() { test_xtgettcap!(b"636f6c6f7273" => success "636f6c6f7273"); }
 
 /// XTGETTCAP for "E3" (clear-scrollback) must report the `CSI 3 J` sequence so
 /// tmux knows it can clear the host scrollback.
@@ -268,68 +236,20 @@ fn test_xtgettcap_multiple_unknown_capabilities() {
     }
 }
 
-/// XTGETTCAP for Ts (strikethrough set) must return the SGR 9 sequence.
-#[test]
-fn test_xtgettcap_strikethrough_ts() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    run_dcs(&mut core, b"+", 'q', b"5473"); // "Ts" hex-encoded
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "Ts must succeed: {resp:?}");
-    assert!(resp.contains("5473="), "response must echo Ts hex: {resp:?}");
-}
+// ── Single-capability XTGETTCAP: terminfo / key capabilities ─────────────────
 
-/// XTGETTCAP for Te (strikethrough reset) must return the SGR 29 sequence.
-#[test]
-fn test_xtgettcap_strikethrough_te() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    run_dcs(&mut core, b"+", 'q', b"5465"); // "Te" hex-encoded
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "Te must succeed: {resp:?}");
-}
-
-/// XTGETTCAP for setrgbf (truecolor foreground terminfo) must succeed.
-#[test]
-fn test_xtgettcap_setrgbf() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    // "setrgbf" = 73 65 74 72 67 62 66
-    run_dcs(&mut core, b"+", 'q', b"73657472676266");
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "setrgbf must succeed: {resp:?}");
-}
-
-/// XTGETTCAP for setrgbb (truecolor background terminfo) must succeed.
-#[test]
-fn test_xtgettcap_setrgbb() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    // "setrgbb" = 73 65 74 72 67 62 62
-    run_dcs(&mut core, b"+", 'q', b"73657472676262");
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "setrgbb must succeed: {resp:?}");
-}
-
-/// XTGETTCAP for kbs (backspace key) must succeed.
-#[test]
-fn test_xtgettcap_kbs() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    run_dcs(&mut core, b"+", 'q', b"6B6273"); // "kbs" hex-encoded
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "kbs must succeed: {resp:?}");
-}
-
-/// XTGETTCAP for Sync (synchronized output) must succeed.
-#[test]
-fn test_xtgettcap_sync() {
-    let mut core = crate::TerminalCore::new(24, 80);
-    run_dcs(&mut core, b"+", 'q', b"53796E63"); // "Sync" hex-encoded
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    assert!(resp.starts_with("\x1bP1+r"), "Sync must succeed: {resp:?}");
-}
+/// `Ts` (strikethrough set) — hex "5473"; response echoes "5473=".
+#[test] fn test_xtgettcap_strikethrough_ts() { test_xtgettcap!(b"5473"           => success "5473="); }
+/// `Te` (strikethrough reset) — hex "5465".
+#[test] fn test_xtgettcap_strikethrough_te() { test_xtgettcap!(b"5465"           => success "5465"); }
+/// `setrgbf` (truecolor fg terminfo) — hex "73657472676266".
+#[test] fn test_xtgettcap_setrgbf()          { test_xtgettcap!(b"73657472676266" => success "73657472676266"); }
+/// `setrgbb` (truecolor bg terminfo) — hex "73657472676262".
+#[test] fn test_xtgettcap_setrgbb()          { test_xtgettcap!(b"73657472676262" => success "73657472676262"); }
+/// `kbs` (backspace key) — hex "6B6273".
+#[test] fn test_xtgettcap_kbs()              { test_xtgettcap!(b"6B6273"         => success "6B6273"); }
+/// `Sync` (synchronized output) — hex "53796E63".
+#[test] fn test_xtgettcap_sync()             { test_xtgettcap!(b"53796E63"       => success "53796E63"); }
 
 /// A Sixel DCS sequence with valid pixel data must produce exactly one image
 /// placement notification.

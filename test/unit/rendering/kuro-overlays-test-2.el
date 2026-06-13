@@ -258,6 +258,27 @@
     (kuro--clear-row-image-overlays 0)
     (should (null kuro--image-overlays))))
 
+;;; Group 10: kuro--toggle-blink-state / kuro--register-blink-overlay structural tests
+
+(ert-deftest kuro-overlays-toggle-blink-state-expands-to-if ()
+  "`kuro--toggle-blink-state' expands to an `if' dispatch on BLINK-TYPE."
+  (let ((exp (macroexpand-1 '(kuro--toggle-blink-state my-type))))
+    (should (eq (car exp) 'if))))
+
+(ert-deftest kuro-overlays-toggle-blink-state-slow-path-sets-slow-var ()
+  "`kuro--toggle-blink-state' slow path toggles `kuro--blink-visible-slow'."
+  (let* ((exp (macroexpand-1 '(kuro--toggle-blink-state my-type)))
+         (then-branch (nth 2 exp)))
+    ;; then-branch should be (setq kuro--blink-visible-slow ...)
+    (should (eq (car then-branch) 'setq))
+    (should (eq (cadr then-branch) 'kuro--blink-visible-slow))))
+
+(ert-deftest kuro-overlays-register-blink-overlay-expands-to-progn ()
+  "`kuro--register-blink-overlay' expands to a `progn' wrapper."
+  (let ((exp (macroexpand-1
+              '(kuro--register-blink-overlay ov blink-type row))))
+    (should (eq (car exp) 'progn))))
+
 (provide 'kuro-overlays-test-2)
 
 ;;; kuro-overlays-test-2.el ends here

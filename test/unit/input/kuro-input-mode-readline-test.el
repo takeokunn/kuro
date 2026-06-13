@@ -17,40 +17,36 @@
 
 (ert-deftest kuro-input-mode-test-complete-history-replaces-buffer-with-match ()
   "`kuro--line-complete-history' replaces buffer with first prefix-matching entry."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (let ((kuro--line-history '("git status" "git diff" "ls"))
          (kuro--line-buffer "git"))
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-       (kuro--line-complete-history)
-       (should (equal kuro--line-buffer "git status"))))))
+     (kuro--line-complete-history)
+     (should (equal kuro--line-buffer "git status")))))
 
 (ert-deftest kuro-input-mode-test-complete-history-skips-exact-match ()
   "`kuro--line-complete-history' skips the history entry that equals the current buffer."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (let ((kuro--line-history '("git" "git status"))
          (kuro--line-buffer "git"))
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-       (kuro--line-complete-history)
-       ;; "git" is exact match → skip; "git status" is prefix match → use it
-       (should (equal kuro--line-buffer "git status"))))))
+     (kuro--line-complete-history)
+     ;; "git" is exact match → skip; "git status" is prefix match → use it
+     (should (equal kuro--line-buffer "git status")))))
 
 (ert-deftest kuro-input-mode-test-complete-history-no-op-when-no-match ()
   "`kuro--line-complete-history' leaves buffer unchanged when no prefix match exists."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (let ((kuro--line-history '("ls" "pwd"))
          (kuro--line-buffer "git"))
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-       (kuro--line-complete-history)
-       (should (equal kuro--line-buffer "git"))))))
+     (kuro--line-complete-history)
+     (should (equal kuro--line-buffer "git")))))
 
 (ert-deftest kuro-input-mode-test-complete-history-empty-prefix-matches-first ()
   "`kuro--line-complete-history' with empty buffer completes to first history entry."
-  (kuro-input-mode-test--with-buffer
+  (kuro-input-mode-test--with-edit
    (let ((kuro--line-history '("ls -la" "pwd"))
          (kuro--line-buffer ""))
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
-       (kuro--line-complete-history)
-       (should (equal kuro--line-buffer "ls -la"))))))
+     (kuro--line-complete-history)
+     (should (equal kuro--line-buffer "ls -la")))))
 
 (ert-deftest kuro-input-mode-test-complete-history-bound-in-line-keymap ()
   "`kuro--line-mode-keymap' binds \"M-/\" to `kuro--line-complete-history'."
@@ -162,6 +158,13 @@
   (kuro-input-mode-test--with-line "abc" 3
    (kuro--line-delete-char)
    (should (string= kuro--line-buffer "abc"))))
+
+(ert-deftest kuro-input-mode-test-line-delete-char-at-bol-deletes-first ()
+  "`kuro--line-delete-char' at BOL removes the first character."
+  (kuro-input-mode-test--with-line "abc" 0
+   (kuro--line-delete-char)
+   (should (string= kuro--line-buffer "bc"))
+   (should (= kuro--line-point 0))))
 
 (ert-deftest kuro-input-mode-test-line-kill-to-bol-kills-backward ()
   "`kuro--line-kill-to-bol' kills from BOL to point."

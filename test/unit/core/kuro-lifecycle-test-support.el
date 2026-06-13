@@ -74,6 +74,50 @@ i.e. the init guard in `kuro--send-key' / `kuro--call' short-circuits."
        ,fn-call)
      (should-not called)))
 
+(defmacro kuro-lifecycle-test--check-kill-shutdown (mode expected-form)
+  "Call `kuro-kill' in a temp buffer with MAJOR-MODE; check if shutdown was called.
+EXPECTED-FORM is the assertion form — `should' or `should-not'."
+  `(with-temp-buffer
+     (setq major-mode ,mode)
+     (let ((shutdown-called nil))
+       (kuro-lifecycle-test--with-kill-stubs
+         (cl-letf (((symbol-function 'kuro--shutdown)
+                    (lambda () (setq shutdown-called t))))
+           (kuro-kill)
+           (,expected-form shutdown-called))))))
+
+(defmacro kuro-lifecycle-test--with-rollback-stubs (msg-fn kill-fn &rest body)
+  "Stub the three `kuro--rollback-attach' dependencies.
+MSG-FN stubs `message', KILL-FN stubs `kill-buffer'.
+Callers manage `kuro--session-id' and `kuro--initialized' themselves."
+  `(cl-letf (((symbol-function 'kuro-core-detach) #'ignore)
+             ((symbol-function 'message)           ,msg-fn)
+             ((symbol-function 'kill-buffer)       ,kill-fn))
+     ,@body))
+
+(defmacro kuro-lifecycle-test--with-init-session-buffer (&rest body)
+  "Run BODY in a temp buffer with `kuro--init-session-buffer' deps stubbed.
+Initializes the buffer-local vars that `kuro--init-session-buffer' expects."
+  `(with-temp-buffer
+     (setq-local kuro--cursor-marker nil
+                 kuro--last-rows     0
+                 kuro--last-cols     0
+                 kuro--scroll-offset 0)
+     (kuro-lifecycle-test--with-init-stubs
+       ,@body)))
+
+(defmacro kuro-lifecycle-test--with-kuro-attach (&rest body)
+  "Stub `kuro--ensure-module-loaded' and `kuro-mode' for attach tests.
+BODY runs with `kuro-attach-result' bound; the buffer is cleaned up afterward."
+  `(let ((kuro-attach-result nil))
+     (cl-letf (((symbol-function 'kuro--ensure-module-loaded) #'ignore)
+               ((symbol-function 'kuro-mode)
+                (lambda () (setq major-mode 'kuro-mode))))
+       (unwind-protect
+           (progn ,@body)
+         (when (buffer-live-p kuro-attach-result)
+           (kill-buffer kuro-attach-result))))))
+
 (provide 'kuro-lifecycle-test-support)
 
 ;;; kuro-lifecycle-test-support.el ends here

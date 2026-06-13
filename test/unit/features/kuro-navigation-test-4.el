@@ -268,5 +268,88 @@
       (should (cl-some (lambda (m) (string-match-p "no command history" m)) msgs)))))
 
 
+;;; Group 15: kuro--def-nav-cmd macro — structural coverage
+
+(defconst kuro-navigation-test--nav-cmd-table
+  '((kuro-previous-prompt         kuro-previous-prompt         kuro--navigate-to-prompt         previous)
+    (kuro-next-prompt             kuro-next-prompt             kuro--navigate-to-prompt         next)
+    (kuro-next-failed-command     kuro-next-failed-command     kuro--navigate-to-failed-command next)
+    (kuro-previous-failed-command kuro-previous-failed-command kuro--navigate-to-failed-command previous))
+  "Table: (test-sym cmd-sym delegate-fn direction) for kuro--def-nav-cmd commands.")
+
+(defmacro kuro-navigation-test--def-nav-cmd-commandp (test-name cmd)
+  `(ert-deftest ,test-name ()
+     ,(format "`%s' is an interactive command (kuro--def-nav-cmd)." cmd)
+     (should (commandp #',cmd))))
+
+(kuro-navigation-test--def-nav-cmd-commandp
+ kuro-nav-test-previous-prompt-is-interactive         kuro-previous-prompt)
+(kuro-navigation-test--def-nav-cmd-commandp
+ kuro-nav-test-next-prompt-is-interactive             kuro-next-prompt)
+(kuro-navigation-test--def-nav-cmd-commandp
+ kuro-nav-test-next-failed-command-is-interactive     kuro-next-failed-command)
+(kuro-navigation-test--def-nav-cmd-commandp
+ kuro-nav-test-previous-failed-command-is-interactive kuro-previous-failed-command)
+
+(ert-deftest kuro-nav-test-all-nav-commands-are-interactive ()
+  "Invariant: all kuro--def-nav-cmd-generated commands satisfy `commandp'."
+  (dolist (entry kuro-navigation-test--nav-cmd-table)
+    (should (commandp (cadr entry)))))
+
+(ert-deftest kuro-nav-test-previous-prompt-calls-navigate-to-prompt-previous ()
+  "`kuro-previous-prompt' delegates to `kuro--navigate-to-prompt' with direction `previous'."
+  (kuro-nav-test--with-prompts nil
+    (let ((called-with nil))
+      (cl-letf (((symbol-function 'kuro--navigate-to-prompt)
+                 (lambda (dir) (setq called-with dir))))
+        (kuro-previous-prompt)
+        (should (eq called-with 'previous))))))
+
+(ert-deftest kuro-nav-test-next-prompt-calls-navigate-to-prompt-next ()
+  "`kuro-next-prompt' delegates to `kuro--navigate-to-prompt' with direction `next'."
+  (kuro-nav-test--with-prompts nil
+    (let ((called-with nil))
+      (cl-letf (((symbol-function 'kuro--navigate-to-prompt)
+                 (lambda (dir) (setq called-with dir))))
+        (kuro-next-prompt)
+        (should (eq called-with 'next))))))
+
+;;; Group 16: kuro--def-navigator macro — structural coverage
+
+(ert-deftest kuro-nav-test-navigator-on-found-runs-when-target-found ()
+  "`kuro--def-navigator' ON-FOUND body executes when a matching target exists."
+  (let ((found-row nil))
+    (kuro--def-navigator kuro-nav-test--navigate-dummy
+      (lambda (e) (equal (car e) "prompt-start"))
+      (setq found-row (cadr target))
+      (error "should not reach on-miss")
+      "Test navigator — on-found path.")
+    (kuro-nav-test--with-prompts '(("prompt-start" 5 0 nil))
+      (kuro-nav-test--navigate-dummy 'next)
+      (should (eq found-row 5)))))
+
+(ert-deftest kuro-nav-test-navigator-on-miss-runs-when-no-target ()
+  "`kuro--def-navigator' ON-MISS body executes when no matching target exists."
+  (let ((missed nil))
+    (kuro--def-navigator kuro-nav-test--navigate-dummy2
+      (lambda (e) (equal (car e) "command-end"))
+      (error "should not reach on-found")
+      (setq missed direction)
+      "Test navigator — on-miss path.")
+    (kuro-nav-test--with-prompts '(("prompt-start" 5 0 nil))
+      (kuro-nav-test--navigate-dummy2 'next)
+      (should (eq missed 'next)))))
+
+(ert-deftest kuro-nav-test-navigator-macroexpand-1-shows-let-if ()
+  "`kuro--def-navigator' single-step expands to a `defun' containing `let'/`if'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-navigator kuro-nav-test--dummy-exp
+                 (lambda (_e) t)
+                 (goto-char 1)
+                 (message "miss")
+                 "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-nav-test--dummy-exp))))
+
 (provide 'kuro-navigation-test-4)
 ;;; kuro-navigation-test-4.el ends here

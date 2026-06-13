@@ -300,3 +300,74 @@ fn test_csi_ech_erases_without_moving_cursor() {
         "ECH must not move cursor"
     );
 }
+
+// ── XTMODKEYS (CSI > type ; value m) ─────────────────────────────────────────
+
+/// XTMODKEYS type=4, value=2: sets modify_other_keys to 2 (level 2 extended).
+#[test]
+fn test_xtmodkeys_type4_value2_sets_level2() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[>4;2m");
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 2,
+        "XTMODKEYS 4;2 must set modify_other_keys to 2"
+    );
+}
+
+/// XTMODKEYS type=4, value=1: sets modify_other_keys to 1 (level 1).
+#[test]
+fn test_xtmodkeys_type4_value1_sets_level1() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[>4;1m");
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 1,
+        "XTMODKEYS 4;1 must set modify_other_keys to 1"
+    );
+}
+
+/// XTMODKEYS type=4, value=0: resets modify_other_keys to 0 (disabled).
+#[test]
+fn test_xtmodkeys_type4_value0_disables() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[>4;2m"); // set level 2 first
+    term.advance(b"\x1b[>4;0m"); // then reset to 0
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 0,
+        "XTMODKEYS 4;0 must reset modify_other_keys to 0"
+    );
+}
+
+/// XTMODKEYS with a value > 2 is clamped to 2 (value.min(2)).
+#[test]
+fn test_xtmodkeys_type4_value_clamped_to_2() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[>4;99m");
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 2,
+        "XTMODKEYS value > 2 must be clamped to 2"
+    );
+}
+
+/// XTMODKEYS with a non-4 type is silently ignored (modify_other_keys unchanged).
+#[test]
+fn test_xtmodkeys_non_type4_is_noop() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.modify_other_keys = 1; // pre-set to 1
+    term.advance(b"\x1b[>2;2m"); // type=2, not 4 — must be a no-op
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 1,
+        "XTMODKEYS type != 4 must not change modify_other_keys"
+    );
+}
+
+/// XTMODKEYS with omitted params (bare CSI > m) defaults to type=0, which is not type 4 — noop.
+#[test]
+fn test_xtmodkeys_omitted_params_is_noop() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.modify_other_keys = 2;
+    term.advance(b"\x1b[>m"); // no params — both type and value default to 0
+    assert_eq!(
+        term.dec_modes.modify_other_keys, 2,
+        "XTMODKEYS with no params (type=0) must not change modify_other_keys"
+    );
+}

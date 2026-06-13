@@ -1,22 +1,8 @@
 // === Modern Terminal Features (continued) ===
 
-#[test]
-fn vt_focus_events() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?1004h");
-    assert!(t.dec_modes().focus_events);
-    t.advance(b"\x1b[?1004l");
-    assert!(!t.dec_modes().focus_events);
-}
-
-#[test]
-fn vt_synchronized_output() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?2026h");
-    assert!(t.dec_modes().synchronized_output);
-    t.advance(b"\x1b[?2026l");
-    assert!(!t.dec_modes().synchronized_output);
-}
+// DEC private mode toggles: `vt_dec_toggle!` defined in vt_compliance.rs parent.
+vt_dec_toggle!(vt_focus_events,        b"\x1b[?1004h", b"\x1b[?1004l", focus_events);
+vt_dec_toggle!(vt_synchronized_output, b"\x1b[?2026h", b"\x1b[?2026l", synchronized_output);
 
 /// Verify that the synchronized output mode state transitions work correctly.
 /// The mode should be set when ?2026h is sent and cleared when ?2026l is sent.
@@ -61,14 +47,7 @@ fn vt_synchronized_output_state_transitions() {
     );
 }
 
-#[test]
-fn vt_decom_origin_mode() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?6h");
-    assert!(t.dec_modes().origin_mode);
-    t.advance(b"\x1b[?6l");
-    assert!(!t.dec_modes().origin_mode);
-}
+vt_dec_toggle!(vt_decom_origin_mode,   b"\x1b[?6h",    b"\x1b[?6l",    origin_mode);
 
 #[test]
 fn vt_underline_styles() {

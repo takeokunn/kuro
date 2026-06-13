@@ -1,15 +1,18 @@
 // ── New edge-case tests ───────────────────────────────────────────────────────
 
 #[test]
-fn test_sgr_53_overline_is_noop() {
-    // SGR 53 (overline) is not supported by this terminal and falls into `_ => {}`.
-    // It must not panic and must leave all other attributes unchanged.
+fn test_sgr_53_sets_overline_without_disturbing_other_attrs() {
+    // SGR 53 enables overline; must not disturb BOLD or foreground color.
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1m"); // bold on first
-    term.advance(b"\x1b[53m"); // overline — unrecognised, should be ignored
+    term.advance(b"\x1b[53m"); // overline on
+    assert!(
+        term.current_attrs.overline,
+        "SGR 53 must set overline"
+    );
     assert!(
         term.current_attrs.flags.contains(SgrFlags::BOLD),
-        "SGR 53 must not clear BOLD (unrecognised code is a no-op)"
+        "SGR 53 must not clear BOLD"
     );
     assert_eq!(
         term.current_attrs.foreground,
@@ -19,14 +22,19 @@ fn test_sgr_53_overline_is_noop() {
 }
 
 #[test]
-fn test_sgr_55_overline_reset_is_noop() {
-    // SGR 55 (overline off) is unrecognised and must be a no-op.
+fn test_sgr_55_clears_overline_without_disturbing_other_attrs() {
+    // SGR 55 disables overline; must not disturb ITALIC.
     let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[3m"); // italic on
-    term.advance(b"\x1b[55m"); // overline off — unrecognised
+    term.advance(b"\x1b[53m"); // overline on
+    term.advance(b"\x1b[3m");  // italic on
+    term.advance(b"\x1b[55m"); // overline off
+    assert!(
+        !term.current_attrs.overline,
+        "SGR 55 must clear overline"
+    );
     assert!(
         term.current_attrs.flags.contains(SgrFlags::ITALIC),
-        "SGR 55 must not clear ITALIC (unrecognised code is a no-op)"
+        "SGR 55 must not clear ITALIC"
     );
 }
 

@@ -51,5 +51,11 @@
            kuro--timer)
        ,@body)))
 
+(defmacro kuro-renderer-test--with-title-stub (title &rest body)
+  "Stub `kuro--get-and-clear-title' to return TITLE; evaluate BODY in a renderer buffer."
+  `(kuro-renderer-helpers-test--with-buffer
+     (cl-letf (((symbol-function 'kuro--get-and-clear-title) (lambda () ,title)))
+       ,@body)))
+
 (provide 'kuro-renderer-test-support)
 ;;; kuro-renderer-test-support.el ends here

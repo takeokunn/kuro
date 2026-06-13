@@ -276,6 +276,28 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
       (should (= 2 set-fontset-called)))))
 
 
+;;; Group 25: kuro--set-fontset-font-both — macro functional coverage
+
+(ert-deftest test-kuro-set-fontset-font-both-calls-nil-and-t-fontsets ()
+  "`kuro--set-fontset-font-both' calls `set-fontset-font' for both nil (frame) and t (default)."
+  (let ((fontsets nil))
+    (cl-letf (((symbol-function 'set-fontset-font)
+               (lambda (fontset &rest _) (push fontset fontsets))))
+      (kuro--set-fontset-font-both '(#x2500 . #x257F) (font-spec :family "TestFont")))
+    (should (= (length fontsets) 2))
+    (should (memq nil fontsets))
+    (should (memq t fontsets))))
+
+(ert-deftest test-kuro-set-fontset-font-both-macroexpands-to-progn-with-two-calls ()
+  "`kuro--set-fontset-font-both' expands to a `progn' with two `set-fontset-font' calls."
+  (let* ((form '(kuro--set-fontset-font-both 'latin (font-spec :family "Foo")))
+         (expanded (macroexpand-1 form)))
+    (should (eq (car expanded) 'progn))
+    (should (= (length (cdr expanded)) 2))
+    ;; First call targets nil (current frame), second targets t (default fontset)
+    (should (eq (nth 1 (nth 1 expanded)) nil))
+    (should (eq (nth 1 (nth 2 expanded)) t))))
+
 (provide 'kuro-char-width-test-2)
 
 ;;; kuro-char-width-test-2.el ends here

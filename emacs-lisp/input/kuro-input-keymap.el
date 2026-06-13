@@ -242,21 +242,24 @@ of the xterm CSI 1;Nm form.  Mirrors `kuro--xterm-arrow-codes' key order.")
 Covers arrow keys, home/end/page/insert/delete, and scrollback viewport.
 Applied by `kuro--keymap-setup-navigation'.")
 
-(defun kuro--send-shifted-tab ()
-  "Send Shift+Tab to the PTY: KKP CSI 9;2u or legacy ESC [ Z."
-  (interactive)
-  (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-      (kuro--send-key "\e[9;2u")
-    (kuro--send-key "\e[Z"))
-  (kuro--schedule-immediate-render))
+(defmacro kuro--def-shifted-key (name kkp-seq legacy-seq docstring)
+  "Define NAME as an interactive key-sender dispatching on KKP DISAMBIGUATE flag.
+Sends KKP-SEQ when the flag is active, LEGACY-SEQ otherwise, then schedules render."
+  `(defun ,name ()
+     ,docstring
+     (interactive)
+     (kuro--send-key (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
+                         ,kkp-seq
+                       ,legacy-seq))
+     (kuro--schedule-immediate-render)))
 
-(defun kuro--send-shifted-return ()
-  "Send Shift+Return to the PTY: KKP CSI 13;2u or legacy CR."
-  (interactive)
-  (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-      (kuro--send-key "\e[13;2u")
-    (kuro--send-key "\r"))
-  (kuro--schedule-immediate-render))
+(kuro--def-shifted-key kuro--send-shifted-tab
+  "\e[9;2u" "\e[Z"
+  "Send Shift+Tab to the PTY: KKP CSI 9;2u or legacy ESC [ Z.")
+
+(kuro--def-shifted-key kuro--send-shifted-return
+  "\e[13;2u" "\r"
+  "Send Shift+Return to the PTY: KKP CSI 13;2u or legacy CR.")
 
 (defun kuro--keymap-setup-navigation (map)
   "Add arrow, home, end, page, function key and modifier+arrow bindings to MAP."

@@ -11,47 +11,32 @@
 
 (ert-deftest kuro-lifecycle--init-session-buffer-calls-apply-font ()
   "kuro--init-session-buffer calls kuro--apply-font-to-buffer with the buffer."
-  (with-temp-buffer
-    (setq-local kuro--cursor-marker nil
-                kuro--last-rows     0
-                kuro--last-cols     0
-                kuro--scroll-offset 0)
-    (let ((font-called-with nil))
-      (kuro-lifecycle-test--with-init-stubs
-        (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
-                   (lambda (b) (setq font-called-with b))))
-          (kuro--init-session-buffer (current-buffer) 24 80)
-          (should (eq font-called-with (current-buffer))))))))
+  (let ((font-called-with nil))
+    (kuro-lifecycle-test--with-init-session-buffer
+      (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
+                 (lambda (b) (setq font-called-with b))))
+        (kuro--init-session-buffer (current-buffer) 24 80)
+        (should (eq font-called-with (current-buffer)))))))
 
 (ert-deftest kuro-lifecycle--init-session-buffer-calls-remap-default-face ()
   "kuro--init-session-buffer calls kuro--remap-default-face with fg/bg strings."
-  (with-temp-buffer
-    (setq-local kuro--cursor-marker nil
-                kuro--last-rows     0
-                kuro--last-cols     0
-                kuro--scroll-offset 0)
-    (let ((remap-args nil))
-      (kuro-lifecycle-test--with-init-stubs
-        (cl-letf (((symbol-function 'kuro--remap-default-face)
-                   (lambda (fg bg) (setq remap-args (list fg bg)))))
-          (kuro--init-session-buffer (current-buffer) 24 80)
-          (should (consp remap-args))
-          (should (stringp (car remap-args)))
-          (should (stringp (cadr remap-args))))))))
+  (let ((remap-args nil))
+    (kuro-lifecycle-test--with-init-session-buffer
+      (cl-letf (((symbol-function 'kuro--remap-default-face)
+                 (lambda (fg bg) (setq remap-args (list fg bg)))))
+        (kuro--init-session-buffer (current-buffer) 24 80)
+        (should (consp remap-args))
+        (should (stringp (car remap-args)))
+        (should (stringp (cadr remap-args)))))))
 
 (ert-deftest kuro-lifecycle--init-session-buffer-calls-setup-char-width ()
   "kuro--init-session-buffer calls kuro--setup-char-width-table."
-  (with-temp-buffer
-    (setq-local kuro--cursor-marker nil
-                kuro--last-rows     0
-                kuro--last-cols     0
-                kuro--scroll-offset 0)
-    (let ((char-width-called nil))
-      (kuro-lifecycle-test--with-init-stubs
-        (cl-letf (((symbol-function 'kuro--setup-char-width-table)
-                   (lambda () (setq char-width-called t))))
-          (kuro--init-session-buffer (current-buffer) 24 80)
-          (should char-width-called))))))
+  (let ((char-width-called nil))
+    (kuro-lifecycle-test--with-init-session-buffer
+      (cl-letf (((symbol-function 'kuro--setup-char-width-table)
+                 (lambda () (setq char-width-called t))))
+        (kuro--init-session-buffer (current-buffer) 24 80)
+        (should char-width-called)))))
 
 ;;; ── Group 24 (cleanup): kuro--rollback-attach — kill-buffer arg, noop-dead, state ─────
 ;;
@@ -61,28 +46,18 @@
 (ert-deftest kuro-lifecycle-ext-rollback-attach-kills-correct-buffer ()
   "kuro--rollback-attach calls kill-buffer with the exact buffer argument."
   (let* ((buf (generate-new-buffer " *kuro-ext-rollback-correct*"))
-         (killed nil)
-         (kuro--session-id 0)
-         (kuro--initialized nil))
-    (cl-letf (((symbol-function 'kuro-core-detach) #'ignore)
-              ((symbol-function 'message)           #'ignore)
-              ((symbol-function 'kill-buffer)
-               (lambda (b) (setq killed b))))
+         (killed nil))
+    (kuro-lifecycle-test--with-rollback-stubs #'ignore (lambda (b) (setq killed b))
       (kuro--rollback-attach 7 buf "err")
       (should (eq killed buf)))
-    ;; Clean up in case our stub skipped the real kill.
     (when (buffer-live-p buf)
       (kill-buffer buf))))
 
 (ert-deftest kuro-lifecycle-ext-rollback-attach-noop-when-buffer-dead ()
   "kuro--rollback-attach does not signal when the buffer is already dead."
-  (let ((dead-buf (generate-new-buffer " *kuro-ext-rollback-dead*"))
-        (kuro--session-id 0)
-        (kuro--initialized nil))
+  (let ((dead-buf (generate-new-buffer " *kuro-ext-rollback-dead*")))
     (kill-buffer dead-buf)
-    (cl-letf (((symbol-function 'kuro-core-detach) #'ignore)
-              ((symbol-function 'message)           #'ignore))
-      ;; Pass the dead buffer; real kill-buffer on a dead buffer does not signal.
+    (kuro-lifecycle-test--with-rollback-stubs #'ignore #'ignore
       (should-not (condition-case err
                       (progn (kuro--rollback-attach 0 dead-buf "e") nil)
                     (error err))))))
@@ -92,9 +67,7 @@
   (with-temp-buffer
     (let ((kuro--session-id 42)
           (kuro--initialized t))
-      (cl-letf (((symbol-function 'kuro-core-detach) #'ignore)
-                ((symbol-function 'message)           #'ignore)
-                ((symbol-function 'kill-buffer)       #'ignore))
+      (kuro-lifecycle-test--with-rollback-stubs #'ignore #'ignore
         (kuro--rollback-attach 42 (current-buffer) "state-test")
         (should-not kuro--initialized)
         (should (= kuro--session-id 0))))))

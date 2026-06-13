@@ -171,5 +171,57 @@
       (kuro-mux-split-below nil)
       (should (equal create-cmd "/bin/sh")))))
 
+;;; Group 37 — kuro--def-mux-split macro structural tests
+
+(ert-deftest kuro-mux-test-def-mux-split-expands-to-defun ()
+  "`kuro--def-mux-split' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-split kuro-test--fake-split split-window-right "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-split))))
+
+(ert-deftest kuro-mux-test-def-mux-split-expansion-has-interactive ()
+  "`kuro--def-mux-split' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-split kuro-test--fake-split2 split-window-below "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-mux-test-def-mux-split-expansion-accepts-optional-command ()
+  "`kuro--def-mux-split' generated function has `(&optional command)' arglist."
+  (let* ((exp (macroexpand-1
+               '(kuro--def-mux-split kuro-test--fake-split3 split-window-right "doc")))
+         (arglist (caddr exp)))
+    (should (equal arglist '(&optional command)))))
+
+;;; Group 38 — kuro--def-mux-nav macro structural tests
+
+(ert-deftest kuro-mux-test-def-mux-nav-expands-to-defun ()
+  "`kuro--def-mux-nav' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-nav kuro-test--fake-nav kuro-mux--next-buffer "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-nav))))
+
+(ert-deftest kuro-mux-test-def-mux-nav-expansion-has-interactive ()
+  "`kuro--def-mux-nav' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-nav kuro-test--fake-nav2 kuro-mux--prev-buffer "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+;;; Group 39 — kuro--def-mux-swap macro structural tests
+
+(ert-deftest kuro-mux-test-def-mux-swap-expands-to-defun ()
+  "`kuro--def-mux-swap' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-swap kuro-test--fake-swap next-window "doc"))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--fake-swap))))
+
+(ert-deftest kuro-mux-test-def-mux-swap-expansion-has-interactive ()
+  "`kuro--def-mux-swap' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-mux-swap kuro-test--fake-swap2 previous-window "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
 (provide 'kuro-mux-test-7)
 ;;; kuro-mux-test-7.el ends here

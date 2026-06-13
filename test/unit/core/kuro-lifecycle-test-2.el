@@ -273,6 +273,29 @@ and returns nil, so the table is rendered with zero rows."
       (should (= kuro--scroll-offset 0)))))
 
 
+;;; Group 12 — kuro--def-control-key / kuro--clear-session-state structural tests
+
+(ert-deftest kuro-lifecycle-def-control-key-expands-to-defun ()
+  "`kuro--def-control-key' single-step expands to a `defun' form."
+  (let ((exp (macroexpand-1
+              '(kuro--def-control-key kuro-test--ck [?\C-c] "Test control key."))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--ck))))
+
+(ert-deftest kuro-lifecycle-def-control-key-expansion-has-interactive ()
+  "`kuro--def-control-key' expansion contains `(interactive)' in the body."
+  (let ((exp (macroexpand-1
+              '(kuro--def-control-key kuro-test--ck2 [?\C-z] "doc"))))
+    (should (member '(interactive) (cddr exp)))))
+
+(ert-deftest kuro-lifecycle-clear-session-state-expands-to-setq ()
+  "`kuro--clear-session-state' expands to a `setq' form resetting session identity."
+  (let ((exp (macroexpand-1 '(kuro--clear-session-state))))
+    (should (eq (car exp) 'setq))
+    ;; The setq pairs must include kuro--initialized and kuro--session-id.
+    (should (memq 'kuro--initialized exp))
+    (should (memq 'kuro--session-id exp))))
+
 (provide 'kuro-lifecycle-test-2)
 
 ;;; kuro-lifecycle-test-2.el ends here

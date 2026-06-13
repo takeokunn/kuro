@@ -8,36 +8,21 @@
 
 (ert-deftest kuro-input-paste--send-paste-or-raw-plain-mode ()
   "kuro--send-paste-or-raw sends text verbatim when bracketed paste is off."
-  (with-temp-buffer
-    (let ((kuro--bracketed-paste-mode nil)
-          (captured nil))
-      (cl-letf (((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq captured s))))
-        (kuro--send-paste-or-raw "hello"))
-      (should (equal captured "hello")))))
+  (kuro-paste-test--with-send-paste nil "hello"
+    (should (equal captured "hello"))))
 
 (ert-deftest kuro-input-paste--send-paste-or-raw-bracketed-mode-wraps ()
   "kuro--send-paste-or-raw wraps text with open/close sequences when mode is on."
-  (with-temp-buffer
-    (let ((kuro--bracketed-paste-mode t)
-          (captured nil))
-      (cl-letf (((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq captured s))))
-        (kuro--send-paste-or-raw "world"))
-      (should (string-prefix-p kuro--paste-open captured))
-      (should (string-suffix-p kuro--paste-close captured))
-      (should (string-match-p "world" captured)))))
+  (kuro-paste-test--with-send-paste t "world"
+    (should (string-prefix-p kuro--paste-open captured))
+    (should (string-suffix-p kuro--paste-close captured))
+    (should (string-match-p "world" captured))))
 
 (ert-deftest kuro-input-paste--send-paste-or-raw-bracketed-mode-sanitizes ()
   "kuro--send-paste-or-raw sanitizes ESC from text in bracketed mode."
-  (with-temp-buffer
-    (let ((kuro--bracketed-paste-mode t)
-          (esc (string #x1b))
-          (captured nil))
-      (cl-letf (((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq captured s))))
-        (kuro--send-paste-or-raw (concat "a" esc "b")))
-      ;; The inner content must not contain ESC (only the bracket sequences do)
+  (let ((esc (string #x1b)))
+    (kuro-paste-test--with-send-paste t (concat "a" esc "b")
+      ;; Only the bracket sequences may contain ESC — not the inner content.
       (let* ((inner-start (length kuro--paste-open))
              (inner-end (- (length captured) (length kuro--paste-close)))
              (inner (substring captured inner-start inner-end)))
@@ -45,13 +30,8 @@
 
 (ert-deftest kuro-input-paste--send-paste-or-raw-plain-preserves-esc ()
   "kuro--send-paste-or-raw does NOT sanitize in plain mode — ESC passes through."
-  (with-temp-buffer
-    (let ((kuro--bracketed-paste-mode nil)
-          (esc (string #x1b))
-          (captured nil))
-      (cl-letf (((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq captured s))))
-        (kuro--send-paste-or-raw (concat "a" esc "b")))
+  (let ((esc (string #x1b)))
+    (kuro-paste-test--with-send-paste nil (concat "a" esc "b")
       (should (string= captured (concat "a" esc "b"))))))
 
 ;;; Group 8: kuro--yank dispatch

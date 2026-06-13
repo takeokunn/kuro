@@ -262,6 +262,42 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
   (should (and (integerp kuro--blink-fast-frames-cached) (> kuro--blink-fast-frames-cached 0)))
   (should (and (integerp kuro--blink-slow-frames-cached) (> kuro--blink-slow-frames-cached 0))))
 
+;;; Group 23: kuro--place-image-overlay — column offset and wide cell-width
+
+(ert-deftest kuro-overlays-place-image-overlay-with-col-offset ()
+  "`kuro--place-image-overlay' navigates to the correct column via `forward-char'."
+  (kuro-overlays-test--with-buffer
+    (insert "hello\n")
+    (let ((kuro--image-overlays nil)
+          (kuro--has-images nil))
+      (kuro--place-image-overlay 'fake-img 0 3 1)
+      (should (= (length kuro--image-overlays) 1))
+      (let ((ov (car kuro--image-overlays)))
+        ;; Overlay starts at col 3 of row 0: point-min=1, forward-char 3 → position 4
+        (should (= (overlay-start ov) 4))
+        (should (= (overlay-end ov) 5))))))
+
+(ert-deftest kuro-overlays-place-image-overlay-wide-cell-width ()
+  "`kuro--place-image-overlay' end = min(start + cell-width, point-max) for wide spans."
+  (kuro-overlays-test--with-buffer
+    (insert "hello\n")
+    (let ((kuro--image-overlays nil)
+          (kuro--has-images nil))
+      (kuro--place-image-overlay 'fake-img 0 0 3)
+      (should (= (length kuro--image-overlays) 1))
+      (let ((ov (car kuro--image-overlays)))
+        (should (= (overlay-start ov) 1))
+        (should (= (overlay-end ov) 4))))))
+
+(ert-deftest kuro-overlays-place-image-overlay-sets-evaporate ()
+  "`kuro--place-image-overlay' sets the `evaporate' overlay property to t."
+  (kuro-overlays-test--with-buffer
+    (insert "hello\n")
+    (let ((kuro--image-overlays nil)
+          (kuro--has-images nil))
+      (kuro--place-image-overlay 'fake-img 0 0 1)
+      (should (overlay-get (car kuro--image-overlays) 'evaporate)))))
+
 (provide 'kuro-overlays-test-3)
 
 ;;; kuro-overlays-test-3.el ends here

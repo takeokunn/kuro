@@ -29,6 +29,14 @@
      (use-local-map kuro-mode-map)
      ,@body))
 
+(defmacro kuro-input-mode-test--with-edit (&rest body)
+  "Run BODY in a kuro-mode buffer with `kuro--line-mode-update-display' stubbed.
+Encodes the test invariant: every line-mode mutation ends with a display update,
+so the stub is the default environment for all mutation unit tests."
+  `(kuro-input-mode-test--with-buffer
+    (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
+      ,@body)))
+
 (defmacro kuro-input-mode-test--with-line (buf-str point-pos &rest body)
   "Run BODY in line mode with `kuro--line-buffer' = BUF-STR and point at POINT-POS."
   `(kuro-input-mode-test--with-buffer
@@ -36,6 +44,24 @@
           kuro--line-buffer ,buf-str
           kuro--line-point  ,point-pos)
     ,@body))
+
+(defmacro kuro-input-mode-edit-test--with-line-edit (name content point &rest body)
+  "Open a kuro line-edit buffer for CONTENT with terminal buffer named NAME.
+BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
+  `(kuro-input-mode-test--with-buffer
+     (let ((term-buf (current-buffer)))
+       (setq kuro--line-buffer ,content
+             kuro--line-point ,point)
+       (rename-buffer (concat "*kuro: " ,name "*") t)
+       (cl-letf (((symbol-function 'switch-to-buffer) #'ignore)
+                 ((symbol-function 'message) #'ignore)
+                 ((symbol-function 'kuro--line-clear-overlay) #'ignore))
+         (kuro--line-edit-in-buffer)
+         (let ((edit-buf (get-buffer (concat "*kuro-line-edit: *kuro: " ,name "**"))))
+           (unwind-protect
+               (progn ,@body)
+             (when (buffer-live-p edit-buf)
+               (kill-buffer edit-buf))))))))
 
 (provide 'kuro-input-mode-test-support)
 

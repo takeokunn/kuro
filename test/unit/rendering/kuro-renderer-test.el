@@ -219,38 +219,30 @@
 
 (ert-deftest kuro-renderer-apply-title-update-renames-buffer ()
   "kuro--apply-title-update renames the buffer to *kuro: <title>* format."
-  (kuro-renderer-helpers-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--get-and-clear-title)
-               (lambda () "vim")))
-      (kuro--apply-title-update)
-      (should (string-match-p "\\*kuro: vim\\*" (buffer-name))))))
+  (kuro-renderer-test--with-title-stub "vim"
+    (kuro--apply-title-update)
+    (should (string-match-p "\\*kuro: vim\\*" (buffer-name)))))
 
 (ert-deftest kuro-renderer-apply-title-update-sanitizes-title ()
   "kuro--apply-title-update sanitizes the title (strips control chars)."
-  (kuro-renderer-helpers-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--get-and-clear-title)
-               (lambda () (concat "bash" (string #x1b) "[31m"))))
-      (kuro--apply-title-update)
-      ;; ESC and bracket should be stripped; result: "bash[31m"
-      (should (string-match-p "\\*kuro: bash\\[31m\\*" (buffer-name))))))
+  ;; ESC and bracket should be stripped; result: "bash[31m"
+  (kuro-renderer-test--with-title-stub (concat "bash" (string #x1b) "[31m")
+    (kuro--apply-title-update)
+    (should (string-match-p "\\*kuro: bash\\[31m\\*" (buffer-name)))))
 
 (ert-deftest kuro-renderer-apply-title-update-noop-on-nil-title ()
   "kuro--apply-title-update does not rename when FFI returns nil."
-  (kuro-renderer-helpers-test--with-buffer
+  (kuro-renderer-test--with-title-stub nil
     (let ((name-before (buffer-name)))
-      (cl-letf (((symbol-function 'kuro--get-and-clear-title)
-                 (lambda () nil)))
-        (kuro--apply-title-update)
-        (should (equal (buffer-name) name-before))))))
+      (kuro--apply-title-update)
+      (should (equal (buffer-name) name-before)))))
 
 (ert-deftest kuro-renderer-apply-title-update-noop-on-empty-title ()
   "kuro--apply-title-update does not rename when FFI returns an empty string."
-  (kuro-renderer-helpers-test--with-buffer
+  (kuro-renderer-test--with-title-stub ""
     (let ((name-before (buffer-name)))
-      (cl-letf (((symbol-function 'kuro--get-and-clear-title)
-                 (lambda () "")))
-        (kuro--apply-title-update)
-        (should (equal (buffer-name) name-before))))))
+      (kuro--apply-title-update)
+      (should (equal (buffer-name) name-before)))))
 
 (ert-deftest kuro-renderer-apply-title-update-sets-frame-name ()
   "kuro--apply-title-update sets the frame name via set-frame-parameter."

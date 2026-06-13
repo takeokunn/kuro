@@ -326,6 +326,43 @@ a plain 24-bit RGB fg (#x00FF0000 = no tag bits, decodes to (cons 'rgb #xFF0000)
     ;; After eviction, cache should be smaller than 5 + 1 = 6
     (should (< (hash-table-count kuro--face-cache) 6))))
 
+;;; Group 17: kuro--with-face-remap macro — structural coverage
+
+(ert-deftest kuro-faces-with-face-remap-expands-to-progn ()
+  "`kuro--with-face-remap' single-step expands to a `progn' form."
+  (let ((exp (macroexpand-1
+              '(kuro--with-face-remap kuro-test--cookie
+                 (setq kuro-test--cookie (face-remap-add-relative 'default :weight 'bold))))))
+    (should (eq (car exp) 'progn))))
+
+(ert-deftest kuro-faces-with-face-remap-expansion-resets-cookie-to-nil ()
+  "`kuro--with-face-remap' expansion sets COOKIE-VAR to nil via `setq'."
+  (let* ((exp (macroexpand-1
+               '(kuro--with-face-remap kuro-test--cookie (ignore))))
+         ;; The progn body is the `when' guard + remap-body forms.
+         (when-form (cadr exp))
+         (when-body (cddr when-form)))
+    ;; The `when' body should contain (setq kuro-test--cookie nil).
+    (should (member '(setq kuro-test--cookie nil) when-body))))
+
+(ert-deftest kuro-faces-with-face-remap-pure-remove-has-no-extra-body ()
+  "`kuro--with-face-remap' with no remap-body produces only the `when' guard."
+  (let* ((exp (macroexpand-1
+               '(kuro--with-face-remap kuro-test--cookie)))
+         (body (cdr exp)))
+    ;; Only the `when' guard should be in the progn body (no trailing forms).
+    (should (= (length body) 1))
+    (should (eq (car (car body)) 'when))))
+
+(ert-deftest kuro-faces-with-face-remap-calls-face-remap-remove-relative ()
+  "`kuro--with-face-remap' expansion calls `face-remap-remove-relative' with COOKIE-VAR."
+  (let* ((exp (macroexpand-1
+               '(kuro--with-face-remap kuro-test--cookie)))
+         (when-form (cadr exp))
+         (when-body (cddr when-form)))
+    ;; `(face-remap-remove-relative kuro-test--cookie)' must appear in the when body.
+    (should (member '(face-remap-remove-relative kuro-test--cookie) when-body))))
+
 (provide 'kuro-faces-test-3)
 
 ;;; kuro-faces-test-3.el ends here

@@ -116,6 +116,28 @@ macro_rules! test_osc_133_mark {
     };
 }
 
+/// Generate an `handle_osc_133` `CommandEnd` exit-code test.
+///
+/// Sends `params = [b"133", b"D", $code_bytes]` and asserts the single recorded
+/// event has `mark = CommandEnd` and `exit_code == $expected`.
+/// Use for numeric codes (`b"0"`, `b"127"`, `b"-1"`) and non-numeric (`b"abc"`).
+macro_rules! test_osc_133_exit_code {
+    ($name:ident, $code_bytes:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            use crate::types::osc::PromptMark;
+            use crate::TerminalCore;
+            let mut core = TerminalCore::new(24, 80);
+            let params: &[&[u8]] = &[b"133", b"D", $code_bytes];
+            super::handle_osc_133(&mut core, params);
+            assert_eq!(core.osc_data().prompt_marks.len(), 1);
+            let ev = &core.osc_data().prompt_marks[0];
+            assert_eq!(ev.mark, PromptMark::CommandEnd);
+            assert_eq!(ev.exit_code, $expected);
+        }
+    };
+}
+
 /// Generate a `handle_osc_default_colors` set test (OSC 10/11/12).
 ///
 /// Sends `params = [osc_num, color_spec]`, then asserts:

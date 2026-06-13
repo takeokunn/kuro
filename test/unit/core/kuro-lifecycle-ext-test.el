@@ -304,5 +304,68 @@
       (kuro-sessions-refresh))
     (should reverted)))
 
+
+;;; ── Group 17: kuro-sessions--entry and kuro-sessions--fetch-raw ──────────────
+
+(ert-deftest kuro-lifecycle--sessions-entry-nil-for-non-list ()
+  "`kuro-sessions--entry' returns nil when entry is not a list."
+  (should (null (kuro-sessions--entry "not-a-list")))
+  (should (null (kuro-sessions--entry 42)))
+  (should (null (kuro-sessions--entry nil))))
+
+(ert-deftest kuro-lifecycle--sessions-entry-nil-for-short-entry ()
+  "`kuro-sessions--entry' returns nil when entry has fewer than 4 elements."
+  (should (null (kuro-sessions--entry '(0 "bash" nil))))
+  (should (null (kuro-sessions--entry '(0))))
+  (should (null (kuro-sessions--entry '()))))
+
+(defconst kuro-lifecycle-test--session-status-table
+  '((kuro-lifecycle--sessions-entry-running  (5 "fish" nil t)   "running")
+    (kuro-lifecycle--sessions-entry-detached (3 "bash" t   t)   "detached")
+    (kuro-lifecycle--sessions-entry-dead     (7 "zsh"  nil nil) "dead"))
+  "Table: (test-name raw-entry expected-status) for session status conversion.")
+
+(defmacro kuro-lifecycle-test--def-session-status (test-name raw-entry expected-status)
+  "Generate a test verifying `kuro-sessions--entry' produces EXPECTED-STATUS."
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-sessions--entry' converts session to status %S." expected-status)
+     (let ((row (kuro-sessions--entry ',raw-entry)))
+       (should row)
+       (should (equal (aref (cadr row) 2) ,expected-status)))))
+
+(kuro-lifecycle-test--def-session-status
+ kuro-lifecycle--sessions-entry-running  (5 "fish" nil t)   "running")
+(kuro-lifecycle-test--def-session-status
+ kuro-lifecycle--sessions-entry-detached (3 "bash" t   t)   "detached")
+(kuro-lifecycle-test--def-session-status
+ kuro-lifecycle--sessions-entry-dead     (7 "zsh"  nil nil) "dead")
+
+(ert-deftest kuro-lifecycle--sessions-entry-status-invariant ()
+  "Invariant: every entry in the status table converts to the expected status string."
+  (dolist (spec kuro-lifecycle-test--session-status-table)
+    (pcase-let ((`(,_name ,raw ,expected) spec))
+      (let ((row (kuro-sessions--entry raw)))
+        (should row)
+        (should (equal (aref (cadr row) 2) expected))))))
+
+(ert-deftest kuro-lifecycle--sessions-fetch-raw-returns-list-on-success ()
+  "`kuro-sessions--fetch-raw' returns the list from `kuro-core-list-sessions'."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () '((0 "fish" nil t) (1 "bash" t nil)))))
+    (should (equal (kuro-sessions--fetch-raw)
+                   '((0 "fish" nil t) (1 "bash" t nil))))))
+
+(ert-deftest kuro-lifecycle--sessions-fetch-raw-nil-on-error ()
+  "`kuro-sessions--fetch-raw' returns nil when `kuro-core-list-sessions' errors."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () (error "module unavailable"))))
+    (should (null (kuro-sessions--fetch-raw)))))
+
+(ert-deftest kuro-lifecycle--sessions-fetch-raw-nil-when-returns-nil ()
+  "`kuro-sessions--fetch-raw' returns nil when `kuro-core-list-sessions' returns nil."
+  (cl-letf (((symbol-function 'kuro-core-list-sessions)
+             (lambda () nil)))
+    (should (null (kuro-sessions--fetch-raw)))))
+
 (provide 'kuro-lifecycle-ext-test)
 ;;; kuro-lifecycle-ext-test.el ends here

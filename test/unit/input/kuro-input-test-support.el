@@ -45,5 +45,18 @@
   `(let ((last-command-event ,char))
      (should (equal (kuro-input-test--capture-sent (kuro--self-insert)) ,expected))))
 
+(defmacro kuro-input-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
+                                              get-offset-fn &rest body)
+  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
+  (declare (indent 3))
+  `(with-temp-buffer
+     (setq-local kuro--initialized t
+                 kuro--scroll-offset 0)
+     (cl-letf (((symbol-function 'kuro--scroll-up)        ,scroll-up-fn)
+               ((symbol-function 'kuro--scroll-down)      ,scroll-down-fn)
+               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
+               ((symbol-function 'kuro--render-cycle)     #'ignore))
+       ,@body)))
+
 (provide 'kuro-input-test-support)
 ;;; kuro-input-test-support.el ends here

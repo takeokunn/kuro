@@ -258,6 +258,45 @@ after variable-length text replacement in a single-pass batch update."
       (setq budget-120 kuro--frame-budget-seconds))
     (should (> budget-30 budget-120))))
 
+;;; kuro--recompute-budget-vars structural tests (Group 17)
+
+(ert-deftest kuro-renderer-recompute-budget-vars-expands-to-progn ()
+  "`kuro--recompute-budget-vars' single-step expands to a `progn' form."
+  (let ((exp (macroexpand-1 '(kuro--recompute-budget-vars rate))))
+    (should (eq (car exp) 'progn))))
+
+(ert-deftest kuro-renderer-recompute-budget-vars-has-five-setq-forms ()
+  "`kuro--recompute-budget-vars' expansion body contains exactly 5 `setq' forms."
+  (let* ((exp (macroexpand-1 '(kuro--recompute-budget-vars rate)))
+         (forms (cdr exp)))
+    (should (= (length forms) 5))
+    (should (cl-every (lambda (f) (eq (car f) 'setq)) forms))))
+
+(ert-deftest kuro-renderer-recompute-budget-vars-first-sets-frame-budget-seconds ()
+  "`kuro--recompute-budget-vars' first form sets `kuro--frame-budget-seconds'."
+  (let* ((exp (macroexpand-1 '(kuro--recompute-budget-vars rate)))
+         (first-form (cadr exp)))
+    (should (eq (cadr first-form) 'kuro--frame-budget-seconds))))
+
+;;; kuro--with-frame-coalescing structural tests (Group 18)
+
+(ert-deftest kuro-renderer-with-frame-coalescing-expands-to-let ()
+  "`kuro--with-frame-coalescing' single-step expands to a `let' form."
+  (let ((exp (macroexpand-1 '(kuro--with-frame-coalescing (ignore)))))
+    (should (eq (car exp) 'let))))
+
+(ert-deftest kuro-renderer-with-frame-coalescing-binds-now ()
+  "`kuro--with-frame-coalescing' binding variable is `now'."
+  (let* ((exp (macroexpand-1 '(kuro--with-frame-coalescing (ignore))))
+         (binding-name (car (caadr exp))))
+    (should (eq binding-name 'now))))
+
+(ert-deftest kuro-renderer-with-frame-coalescing-body-is-when-guard ()
+  "`kuro--with-frame-coalescing' body is a `when' guard for frame throttle."
+  (let* ((exp (macroexpand-1 '(kuro--with-frame-coalescing (ignore))))
+         (body (caddr exp)))
+    (should (eq (car body) 'when))))
+
 (provide 'kuro-renderer-test)
 
 (provide 'kuro-renderer-test-3)

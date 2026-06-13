@@ -64,34 +64,21 @@
 
 (ert-deftest kuro-poll-modes-osc52-response-format ()
   "kuro--send-osc52-clipboard-response sends correctly formatted OSC 52 sequence."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill) (lambda (_n _no-move) "hello"))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        (should (string-prefix-p "\e]52;c;" sent))
-        (should (string-suffix-p "\a" sent))))))
+  (kuro-poll-test--with-osc52-response "hello"
+    (should (string-prefix-p "\e]52;c;" sent))
+    (should (string-suffix-p "\a" sent))))
 
 (ert-deftest kuro-poll-modes-osc52-response-contains-base64 ()
   "kuro--send-osc52-clipboard-response encodes kill-ring text as base64."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill) (lambda (_n _no-move) "abc"))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        ;; base64 of "abc" is "YWJj"
-        (should (string-match-p "YWJj" sent))))))
+  ;; base64 of "abc" is "YWJj"
+  (kuro-poll-test--with-osc52-response "abc"
+    (should (string-match-p "YWJj" sent))))
 
 (ert-deftest kuro-poll-modes-osc52-response-empty-kill-ring-sends-empty ()
   "kuro--send-osc52-clipboard-response sends empty base64 when kill-ring errors."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill)
-                 (lambda (_n _no-move) (error "kill-ring is empty")))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        ;; base64 of "" is ""
-        (should (string-match-p "\e]52;c;\a" sent))))))
+  ;; base64 of "" is ""
+  (kuro-poll-test--with-osc52-response (error "kill-ring is empty")
+    (should (string-match-p "\e]52;c;\a" sent))))
 
 ;; ------------------------------------------------------------
 ;; Group O — kuro--handle-clipboard-actions multiple/compound scenarios

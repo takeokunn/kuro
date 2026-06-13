@@ -43,6 +43,15 @@ pub(crate) fn serialize_sgr(attrs: &SgrAttributes) -> String {
     if f.contains(SgrFlags::STRIKETHROUGH) {
         out.push_str(";9");
     }
+    if attrs.superscript {
+        out.push_str(";73");
+    }
+    if attrs.subscript {
+        out.push_str(";75");
+    }
+    if attrs.overline {
+        out.push_str(";53");
+    }
     append_sgr_color(&mut out, attrs.foreground, 30, 90, 38);
     append_sgr_color(&mut out, attrs.background, 40, 100, 48);
     // Underline color: only indexed (58;5;n) or RGB (58;2;r;g;b) — the parser

@@ -261,3 +261,5 @@ fn test_su_two_row_scroll_region() {
     assert_eq!(term.screen.get_line(3).unwrap().cells[0].char(), '3');
     assert_eq!(term.screen.get_line(6).unwrap().cells[0].char(), '6');
 }
+
+include!("scroll_sl_sr.rs");

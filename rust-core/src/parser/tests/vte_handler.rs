@@ -411,3 +411,4 @@ include!("vte_handler_charset.rs");
 include!("vte_handler_device_attrs.rs");
 include!("vte_handler_esc.rs");
 include!("vte_handler_osc.rs");
+include!("vte_handler_csi_misc.rs");

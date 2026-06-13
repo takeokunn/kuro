@@ -284,6 +284,40 @@
     (should (boundp (cdr entry)))))
 
 
+
+;;; Group 20 — kuro--line-history-stash-if-fresh
+
+(ert-deftest kuro-input-mode-test-stash-if-fresh-sets-stash-at-idx-minus-1 ()
+  "`kuro--line-history-stash-if-fresh' stashes buffer when idx is -1 (fresh entry)."
+  (kuro-input-mode-test--with-buffer
+   (setq kuro--line-buffer "current-cmd"
+         kuro--line-history-idx -1
+         kuro--line-history-stash "")
+   (kuro--line-history-stash-if-fresh)
+   (should (string= kuro--line-history-stash "current-cmd"))))
+
+(ert-deftest kuro-input-mode-test-stash-if-fresh-noop-when-navigating ()
+  "`kuro--line-history-stash-if-fresh' does nothing when idx != -1 (already navigating)."
+  (kuro-input-mode-test--with-buffer
+   (setq kuro--line-buffer "current-cmd"
+         kuro--line-history-idx 0
+         kuro--line-history-stash "original-stash")
+   (kuro--line-history-stash-if-fresh)
+   (should (string= kuro--line-history-stash "original-stash"))))
+
+(ert-deftest kuro-input-mode-test-stash-if-fresh-idempotent-at-idx-minus-1 ()
+  "`kuro--line-history-stash-if-fresh' called twice at idx=-1: stash reflects first call."
+  (kuro-input-mode-test--with-buffer
+   (setq kuro--line-buffer "first"
+         kuro--line-history-idx -1
+         kuro--line-history-stash "")
+   (kuro--line-history-stash-if-fresh)
+   (setq kuro--line-buffer "second")
+   ;; idx is still -1 so second call also updates stash
+   (kuro--line-history-stash-if-fresh)
+   (should (string= kuro--line-history-stash "second"))))
+
+
 (provide 'kuro-input-mode-test-3)
 
 ;;; kuro-input-mode-test-3.el ends here

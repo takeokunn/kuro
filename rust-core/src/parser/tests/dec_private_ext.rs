@@ -282,6 +282,32 @@ fn test_dec_2048_disable_emits_no_report() {
     );
 }
 
+/// When ?2048 is active, `resize()` pushes a new in-band size report.
+#[test]
+fn test_dec_2048_resize_emits_report_when_active() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?2048h");
+    term.meta.pending_responses.clear(); // discard the initial report from enable
+    term.resize(30, 100);
+    assert_eq!(
+        term.meta.pending_responses,
+        vec![b"\x1b[48;30;100;0;0t".to_vec()],
+        "resize() while ?2048 is set must emit a new size report"
+    );
+}
+
+/// When ?2048 is NOT active, `resize()` emits nothing.
+#[test]
+fn test_dec_2048_resize_emits_nothing_when_inactive() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // mode 2048 is off by default
+    term.resize(30, 100);
+    assert!(
+        term.meta.pending_responses.is_empty(),
+        "resize() without ?2048 must not emit any report"
+    );
+}
+
 /// `DecModes::apply_mode` / `get_mode` round-trip for 2048 in isolation.
 #[test]
 fn test_dec_modes_2048_apply_get_round_trip() {

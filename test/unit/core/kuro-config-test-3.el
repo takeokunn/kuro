@@ -151,5 +151,41 @@
       (set-default 'kuro-tui-frame-rate orig))))
 
 
+;;; Group — kuro--broadcast-to-buffers / kuro--in-all-buffers / kuro--with-mode structural tests
+
+(ert-deftest kuro-config-broadcast-to-buffers-expands-to-when ()
+  "`kuro--broadcast-to-buffers' expands to a `when' form guarded by `fboundp'."
+  (let ((exp (macroexpand-1
+              '(kuro--broadcast-to-buffers kuro--render-cycle))))
+    (should (eq (car exp) 'when))
+    ;; Condition is (fboundp 'kuro--render-cycle).
+    (should (equal (cadr exp) '(fboundp 'kuro--render-cycle)))))
+
+(ert-deftest kuro-config-in-all-buffers-expands-to-dolist ()
+  "`kuro--in-all-buffers' expands to a `dolist' over `kuro--kuro-buffers'."
+  (let* ((exp (macroexpand-1
+               '(kuro--in-all-buffers (setq x 1))))
+         (binding (cadr exp)))
+    (should (eq (car exp) 'dolist))
+    ;; (dolist (buf (kuro--kuro-buffers)) ...)
+    (should (eq (car binding) 'buf))
+    (should (equal (cadr binding) '(kuro--kuro-buffers)))))
+
+(ert-deftest kuro-config-with-mode-expands-to-if ()
+  "`kuro--with-mode' expands to an `if' with `derived-mode-p' guard."
+  (let ((exp (macroexpand-1
+              '(kuro--with-mode kuro-mode "Not in kuro" (ignore)))))
+    (should (eq (car exp) 'if))
+    ;; Condition is (derived-mode-p 'kuro-mode).
+    (should (equal (cadr exp) '(derived-mode-p 'kuro-mode)))))
+
+(ert-deftest kuro-config-def-positive-int-setter-expands-to-defun ()
+  "`kuro--def-positive-int-setter' expands to a `defun'."
+  (let ((exp (macroexpand-1
+              '(kuro--def-positive-int-setter kuro-test--pos-setter
+                 "Must be positive." "doc" (ignore)))))
+    (should (eq (car exp) 'defun))
+    (should (eq (cadr exp) 'kuro-test--pos-setter))))
+
 (provide 'kuro-config-test-3)
 ;;; kuro-config-test-3.el ends here

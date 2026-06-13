@@ -246,21 +246,24 @@ by the OSC 133 annotation system."
         (cl-find-if (lambda (p) (> p pos)) marks)
       (cl-find-if (lambda (p) (< p pos)) (reverse marks)))))
 
-(defun kuro--copy-goto-next-prompt ()
-  "Jump to the next shell-prompt overlay in copy mode (vim: }).
-Falls back to `forward-paragraph' when no prompt overlays exist."
-  (interactive)
-  (if-let ((target (kuro--copy-find-prompt :fwd)))
-      (goto-char target)
-    (forward-paragraph)))
+(defmacro kuro--def-copy-goto-prompt (name direction fallback docstring)
+  "Define a copy-mode prompt navigation command.
+NAME jumps to the nearest OSC 133 prompt in DIRECTION (:fwd or :bwd),
+falling back to FALLBACK when no overlay marks exist."
+  `(defun ,name ()
+     ,docstring
+     (interactive)
+     (if-let ((target (kuro--copy-find-prompt ,direction)))
+         (goto-char target)
+       (,fallback))))
 
-(defun kuro--copy-goto-prev-prompt ()
+(kuro--def-copy-goto-prompt kuro--copy-goto-next-prompt :fwd forward-paragraph
+  "Jump to the next shell-prompt overlay in copy mode (vim: }).
+Falls back to `forward-paragraph' when no prompt overlays exist.")
+
+(kuro--def-copy-goto-prompt kuro--copy-goto-prev-prompt :bwd backward-paragraph
   "Jump to the previous shell-prompt overlay in copy mode (vim: {).
-Falls back to `backward-paragraph' when no prompt overlays exist."
-  (interactive)
-  (if-let ((target (kuro--copy-find-prompt :bwd)))
-      (goto-char target)
-    (backward-paragraph)))
+Falls back to `backward-paragraph' when no prompt overlays exist.")
 
 
 ;;;; Keymap
@@ -368,22 +371,20 @@ movement, region selection, and copy commands (\\[kill-ring-save],
 The buffer remains read-only; only navigation and selection
 are enabled.  Call \\[kuro-copy-mode] again to return to terminal mode."
   (interactive)
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Kuro-copy-mode: not in a Kuro terminal buffer"))
-  (if kuro--copy-mode
-      (kuro--exit-copy-mode)
-    (kuro--enter-copy-mode)))
+  (kuro--with-kuro-mode
+   (if kuro--copy-mode
+       (kuro--exit-copy-mode)
+     (kuro--enter-copy-mode))))
 
 (defmacro kuro--def-copy-search-enter (name search-fn docstring)
   "Define a command that enters copy mode (if needed) then calls SEARCH-FN."
   `(defun ,name ()
      ,docstring
      (interactive)
-     (unless (derived-mode-p 'kuro-mode)
-       (user-error "Not in a Kuro terminal buffer"))
-     (unless kuro--copy-mode
-       (kuro--enter-copy-mode))
-     (,search-fn)))
+     (kuro--with-kuro-mode
+      (unless kuro--copy-mode
+        (kuro--enter-copy-mode))
+      (,search-fn))))
 
 ;;;###autoload
 (kuro--def-copy-search-enter kuro-search-forward isearch-forward
@@ -406,11 +407,10 @@ Enters copy mode automatically if needed.  Results appear in a separate
 *Occur* buffer with clickable links back to the matched lines; the
 terminal buffer itself is never modified (it remains read-only)."
   (interactive "sSearch terminal output (regexp): ")
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "Not in a Kuro terminal buffer"))
-  (unless kuro--copy-mode
-    (kuro--enter-copy-mode))
-  (occur regexp))
+  (kuro--with-kuro-mode
+   (unless kuro--copy-mode
+     (kuro--enter-copy-mode))
+   (occur regexp)))
 
 (provide 'kuro-copy)
 

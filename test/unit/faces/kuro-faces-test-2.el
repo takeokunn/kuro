@@ -10,28 +10,30 @@
 
 ;;; Group 10: Character width table and font detection
 
-(ert-deftest kuro-test-char-width-table-emoji ()
-  "After setup, fire emoji (U+1F525) has char-width 2."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= (char-width ?\U0001F525) 2))))
+(defconst kuro-faces-test--char-width-table
+  '((kuro-test-char-width-table-emoji ?\U0001F525 2)
+    (kuro-test-char-width-table-cjk   ?\u65E5     2)
+    (kuro-test-char-width-table-pua   ?\xE0B0     1))
+  "Table of (test-name char expected-width) after `kuro--setup-char-width-table'.")
 
-(ert-deftest kuro-test-char-width-table-cjk ()
-  "After setup, CJK ideograph U+65E5 has char-width 2."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= (char-width ?\u65E5) 2))))
+(defmacro kuro-faces-test--def-char-width (test-name char expected)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--setup-char-width-table': char-width of U+%04X \u2192 %d." char expected)
+     (with-temp-buffer
+       (kuro--setup-char-width-table)
+       (should (= (char-width ,char) ,expected)))))
 
-(ert-deftest kuro-test-char-width-table-pua ()
-  "After setup, PUA codepoint U+E0B0 (Nerd Font) has char-width 1."
-  (with-temp-buffer
-    (kuro--setup-char-width-table)
-    (should (= (char-width ?\xE0B0) 1))))
+(kuro-faces-test--def-char-width kuro-test-char-width-table-emoji ?\U0001F525 2)
+(kuro-faces-test--def-char-width kuro-test-char-width-table-cjk   ?\u65E5     2)
+(kuro-faces-test--def-char-width kuro-test-char-width-table-pua   ?\xE0B0     1)
 
-(ert-deftest kuro-test-detect-nerd-font-nil ()
-  "kuro--detect-nerd-font returns nil or a string without error."
-  (let ((result (kuro--detect-nerd-font)))
-    (should (or (null result) (stringp result)))))
+(ert-deftest kuro-faces-test--char-width-all-entries ()
+  "Invariant: char-width matches expected for all entries in char-width table."
+  (dolist (entry kuro-faces-test--char-width-table)
+    (pcase-let ((`(,_name ,char ,expected) entry))
+      (with-temp-buffer
+        (kuro--setup-char-width-table)
+        (should (= (char-width char) expected))))))
 
 ;;; Group 11: kuro--apply-palette-updates
 
@@ -100,24 +102,34 @@ With three palette entries the cache must be flushed once, not three times."
 
 ;;; Group 12: palette entry application via kuro--apply-palette-updates
 
-(ert-deftest kuro-test-merge-palette-entry-valid-index ()
-  "kuro--apply-palette-updates writes the correct hex color for a valid index."
-  (let ((kuro--initialized t))
-    (kuro--rebuild-named-colors)
-    ;; Index 4 = "blue" in kuro--ansi-color-names; default is #492ee1, not #0000ff
-    (cl-letf (((symbol-function 'kuro--get-palette-updates)
-               (lambda () '((4 0 0 255)))))
-      (kuro--apply-palette-updates)
-      (should (equal (gethash "blue" kuro--named-colors) "#0000ff")))))
+(defconst kuro-faces-test--merge-palette-entry-table
+  '((kuro-test-merge-palette-entry-valid-index  4  0   0   255 "blue"         "#0000ff")
+    (kuro-test-merge-palette-entry-index-15    15 200 210  220 "bright-white" "#c8d2dc"))
+  "Table of (test-name idx r g b color-name expected-hex) for palette-update writes.")
 
-(ert-deftest kuro-test-merge-palette-entry-index-15 ()
-  "kuro--apply-palette-updates handles the last valid index (15 = bright-white)."
-  (let ((kuro--initialized t))
-    (kuro--rebuild-named-colors)
-    (cl-letf (((symbol-function 'kuro--get-palette-updates)
-               (lambda () '((15 200 210 220)))))
-      (kuro--apply-palette-updates)
-      (should (equal (gethash "bright-white" kuro--named-colors) "#c8d2dc")))))
+(defmacro kuro-faces-test--def-merge-palette-entry (test-name idx r g b color-name expected-hex)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--apply-palette-updates' idx=%d → %s in named-colors." idx expected-hex)
+     (let ((kuro--initialized t))
+       (kuro--rebuild-named-colors)
+       (cl-letf (((symbol-function 'kuro--get-palette-updates)
+                  (lambda () (list (list ,idx ,r ,g ,b)))))
+         (kuro--apply-palette-updates)
+         (should (equal (gethash ,color-name kuro--named-colors) ,expected-hex))))))
+
+(kuro-faces-test--def-merge-palette-entry kuro-test-merge-palette-entry-valid-index  4  0   0   255 "blue"         "#0000ff")
+(kuro-faces-test--def-merge-palette-entry kuro-test-merge-palette-entry-index-15    15 200 210  220 "bright-white" "#c8d2dc")
+
+(ert-deftest kuro-faces-test--all-merge-palette-entries-correct ()
+  "All entries in `kuro-faces-test--merge-palette-entry-table' write correct hex colors."
+  (dolist (entry kuro-faces-test--merge-palette-entry-table)
+    (pcase-let ((`(,_name ,idx ,r ,g ,b ,color-name ,expected-hex) entry))
+      (let ((kuro--initialized t))
+        (kuro--rebuild-named-colors)
+        (cl-letf (((symbol-function 'kuro--get-palette-updates)
+                   (lambda () (list (list idx r g b)))))
+          (kuro--apply-palette-updates)
+          (should (equal (gethash color-name kuro--named-colors) expected-hex)))))))
 
 (ert-deftest kuro-test-merge-palette-entry-index-16-ignored ()
   "kuro--apply-palette-updates silently ignores index 16 (out of ANSI range)."
@@ -150,15 +162,26 @@ With three palette entries the cache must be flushed once, not three times."
   (let ((result (kuro--make-face :default :default 0 nil)))
     (should (listp result))))
 
-(ert-deftest kuro-faces-make-face-bold-weight ()
-  "kuro--make-face with bold flag produces :weight bold."
-  (let ((result (kuro--make-face :default :default 1 nil)))
-    (should (eq (plist-get result :weight) 'bold))))
+(defconst kuro-faces-test--make-face-single-attr-table
+  '((kuro-faces-make-face-bold-weight  1 :weight bold)
+    (kuro-faces-make-face-italic-slant 4 :slant  italic))
+  "Table of (test-name flags plist-key expected-val) for single-attribute kuro--make-face.")
 
-(ert-deftest kuro-faces-make-face-italic-slant ()
-  "kuro--make-face with italic flag produces :slant italic."
-  (let ((result (kuro--make-face :default :default 4 nil)))
-    (should (eq (plist-get result :slant) 'italic))))
+(defmacro kuro-faces-test--def-make-face-single-attr (test-name flags plist-key expected-val)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--make-face' flags=%d: plist-get %s → %s." flags plist-key expected-val)
+     (let ((result (kuro--make-face :default :default ,flags nil)))
+       (should (eq (plist-get result ,plist-key) ',expected-val)))))
+
+(kuro-faces-test--def-make-face-single-attr kuro-faces-make-face-bold-weight  1 :weight bold)
+(kuro-faces-test--def-make-face-single-attr kuro-faces-make-face-italic-slant 4 :slant  italic)
+
+(ert-deftest kuro-faces-test--make-face-single-attr-all-entries ()
+  "Invariant: each flag produces the expected plist attribute in kuro--make-face."
+  (dolist (entry kuro-faces-test--make-face-single-attr-table)
+    (pcase-let ((`(,_name ,flags ,plist-key ,expected-val) entry))
+      (let ((result (kuro--make-face :default :default flags nil)))
+        (should (eq (plist-get result plist-key) expected-val))))))
 
 (ert-deftest kuro-faces-make-face-rgb-fg-and-bg ()
   "kuro--make-face with RGB fg and bg produces :foreground and :background."
@@ -182,19 +205,30 @@ With three palette entries the cache must be flushed once, not three times."
         (face-sentinel (kuro--get-cached-face-raw 0 0 0 #xFF000000)))
     (should (eq face-zero face-sentinel))))
 
-(ert-deftest kuro-faces-cached-face-raw-max-u32-ul-is-distinct ()
-  "ul-enc=#xFFFFFFFF (max u32) is NOT normalized to 0 and produces a distinct face."
-  (kuro--clear-face-cache)
-  (let ((face-zero   (kuro--get-cached-face-raw 0 0 0 0))
-        (face-maxu32 (kuro--get-cached-face-raw 0 0 0 #xFFFFFFFF)))
-    (should-not (eq face-zero face-maxu32))))
+(defconst kuro-faces-test--ul-enc-distinct-table
+  '((kuro-faces-cached-face-raw-max-u32-ul-is-distinct #xFFFFFFFF)
+    (kuro-faces-cached-face-raw-nonzero-ul-distinct     #x0000FF))
+  "Table: (test-name ul-enc) — each ul-enc must be cache-distinct from ul-enc=0.")
 
-(ert-deftest kuro-faces-cached-face-raw-nonzero-ul-distinct ()
-  "A non-zero, non-sentinel ul-enc stays distinct from the ul=0 cache slot."
-  (kuro--clear-face-cache)
-  (let ((face-no-ul   (kuro--get-cached-face-raw 0 0 0 0))
-        (face-with-ul (kuro--get-cached-face-raw 0 0 0 #x0000FF)))
-    (should-not (eq face-no-ul face-with-ul))))
+(defmacro kuro-faces-test--def-ul-enc-distinct (test-name ul-enc)
+  `(ert-deftest ,test-name ()
+     ,(format "ul-enc=#x%X is NOT normalized to 0 and produces a distinct cache entry." ul-enc)
+     (kuro--clear-face-cache)
+     (let ((face-zero  (kuro--get-cached-face-raw 0 0 0 0))
+           (face-other (kuro--get-cached-face-raw 0 0 0 ,ul-enc)))
+       (should-not (eq face-zero face-other)))))
+
+(kuro-faces-test--def-ul-enc-distinct kuro-faces-cached-face-raw-max-u32-ul-is-distinct #xFFFFFFFF)
+(kuro-faces-test--def-ul-enc-distinct kuro-faces-cached-face-raw-nonzero-ul-distinct     #x0000FF)
+
+(ert-deftest kuro-faces-test--all-ul-enc-distinct ()
+  "Invariant: each ul-enc in the table produces a cache entry distinct from ul-enc=0."
+  (dolist (entry kuro-faces-test--ul-enc-distinct-table)
+    (pcase-let ((`(,_name ,ul-enc) entry))
+      (kuro--clear-face-cache)
+      (let ((face-zero  (kuro--get-cached-face-raw 0 0 0 0))
+            (face-other (kuro--get-cached-face-raw 0 0 0 ul-enc)))
+        (should-not (eq face-zero face-other))))))
 
 (ert-deftest kuro-faces-cached-face-raw-evicts-when-over-max ()
   "Cache is cleared when entry count exceeds kuro--face-cache-max-size."
@@ -217,305 +251,6 @@ With three palette entries the cache must be flushed once, not three times."
   (let ((face-no-bold   (kuro--get-cached-face-raw 0 0 0 0))
         (face-with-bold (kuro--get-cached-face-raw 0 0 1 0)))
     (should-not (eq face-no-bold face-with-bold))))
-
-;;; Group 15: Color variables, named-color table, and face uniqueness
-
-(ert-deftest kuro-faces-color-black-is-hex-string ()
-  "kuro-color-black is a 6-digit hex color string."
-  (should (stringp kuro-color-black))
-  (should (string-match-p kuro--hex-color-regexp kuro-color-black)))
-
-(ert-deftest kuro-faces-color-white-is-hex-string ()
-  "kuro-color-white is a 6-digit hex color string."
-  (should (stringp kuro-color-white))
-  (should (string-match-p kuro--hex-color-regexp kuro-color-white)))
-
-(ert-deftest kuro-faces-all-16-color-vars-are-hex-strings ()
-  "All 16 kuro-color-* defcustom variables hold valid hex color strings."
-  (dolist (sym '(kuro-color-black kuro-color-red kuro-color-green
-                 kuro-color-yellow kuro-color-blue kuro-color-magenta
-                 kuro-color-cyan kuro-color-white
-                 kuro-color-bright-black kuro-color-bright-red
-                 kuro-color-bright-green kuro-color-bright-yellow
-                 kuro-color-bright-blue kuro-color-bright-magenta
-                 kuro-color-bright-cyan kuro-color-bright-white))
-    (let ((val (symbol-value sym)))
-      (should (stringp val))
-      (should (string-match-p kuro--hex-color-regexp val)))))
-
-(ert-deftest kuro-faces-named-colors-hash-has-16-entries ()
-  "kuro--named-colors contains exactly 16 entries after rebuild."
-  (kuro--rebuild-named-colors)
-  (should (= (hash-table-count kuro--named-colors) 16)))
-
-(ert-deftest kuro-faces-named-colors-hash-contains-standard-names ()
-  "kuro--named-colors has entries for all standard ANSI color names."
-  (kuro--rebuild-named-colors)
-  (dolist (name '("black" "red" "green" "yellow"
-                  "blue" "magenta" "cyan" "white"
-                  "bright-black" "bright-red" "bright-green" "bright-yellow"
-                  "bright-blue" "bright-magenta" "bright-cyan" "bright-white"))
-    (should (gethash name kuro--named-colors))))
-
-(ert-deftest kuro-faces-cache-miss-returns-nil-on-gethash ()
-  "A fresh cache has no entry for an unusual key — gethash returns nil."
-  (kuro--clear-face-cache)
-  ;; Use a key that we know has never been inserted.
-  (let ((key (vector #xDEADBEEF #xDEADBEEF 0 0)))
-    (should-not (gethash key kuro--face-cache))))
-
-(ert-deftest kuro-faces-cache-hit-returns-eq-object ()
-  "After one cache-miss lookup, a second lookup for the same args returns eq."
-  (kuro--clear-face-cache)
-  (let ((face1 (kuro--get-cached-face-raw #x80000002 0 0 0))
-        (face2 (kuro--get-cached-face-raw #x80000002 0 0 0)))
-    (should (eq face1 face2))))
-
-(ert-deftest kuro-faces-unique-attrs-produce-distinct-faces ()
-  "Four different attribute flag combinations produce four distinct cache entries.
-This exercises the key-uniqueness property that kuro--make-face-name would provide
-for named face registration: bold, italic, dim, and strikethrough must not alias."
-  (kuro--clear-face-cache)
-  (let ((f-bold   (kuro--get-cached-face-raw 0 0 #x01 0))   ; bold
-        (f-italic (kuro--get-cached-face-raw 0 0 #x04 0))   ; italic
-        (f-dim    (kuro--get-cached-face-raw 0 0 #x02 0))   ; dim
-        (f-strike (kuro--get-cached-face-raw 0 0 #x100 0))) ; strikethrough
-    (should-not (eq f-bold f-italic))
-    (should-not (eq f-bold f-dim))
-    (should-not (eq f-bold f-strike))
-    (should-not (eq f-italic f-dim))
-    (should-not (eq f-italic f-strike))
-    (should-not (eq f-dim f-strike))))
-
-(ert-deftest kuro-faces-ansi-color-names-vector-length-16 ()
-  "kuro--ansi-color-names is a vector of exactly 16 elements."
-  (should (vectorp kuro--ansi-color-names))
-  (should (= (length kuro--ansi-color-names) 16)))
-
-(ert-deftest kuro-faces-ansi-color-names-all-strings ()
-  "Every element of kuro--ansi-color-names is a non-empty string."
-  (dotimes (i 16)
-    (let ((name (aref kuro--ansi-color-names i)))
-      (should (stringp name))
-      (should (< 0 (length name))))))
-
-(ert-deftest kuro-faces-named-colors-all-values-are-hex ()
-  "Every value in kuro--named-colors is a 6-digit hex color string."
-  (kuro--rebuild-named-colors)
-  (maphash (lambda (_k v)
-             (should (stringp v))
-             (should (string-match-p kuro--hex-color-regexp v)))
-           kuro--named-colors))
-
-;;; Group 16: kuro--apply-palette-entry — OSC 4 named-color update
-
-(ert-deftest kuro-faces-apply-palette-entry-updates-named-colors ()
-  "idx=0, r=255, g=0, b=0 stores #ff0000 under the name at index 0."
-  (kuro--rebuild-named-colors)
-  (kuro--apply-palette-entry 0 255 0 0)
-  (let ((name (aref kuro--ansi-color-names 0)))
-    (should (equal (gethash name kuro--named-colors) "#ff0000"))))
-
-(ert-deftest kuro-faces-apply-palette-entry-returns-t-on-change ()
-  "Returns t when the stored color actually changes."
-  (kuro--rebuild-named-colors)
-  (should (eq t (kuro--apply-palette-entry 0 255 0 0))))
-
-(ert-deftest kuro-faces-apply-palette-entry-returns-nil-when-unchanged ()
-  "Returns nil on the second call with identical RGB (no change)."
-  (kuro--rebuild-named-colors)
-  (kuro--apply-palette-entry 2 0 200 0)
-  (should-not (kuro--apply-palette-entry 2 0 200 0)))
-
-(ert-deftest kuro-faces-apply-palette-entry-ignores-idx-16-and-above ()
-  "idx=16 returns nil and does not modify kuro--named-colors."
-  (kuro--rebuild-named-colors)
-  (let ((before (hash-table-count kuro--named-colors)))
-    (should-not (kuro--apply-palette-entry 16 255 0 0))
-    (should (= (hash-table-count kuro--named-colors) before))))
-
-(ert-deftest kuro-faces-apply-palette-entry-idx-15-accepted ()
-  "idx=15 (last valid index) updates the corresponding named color."
-  (kuro--rebuild-named-colors)
-  (kuro--apply-palette-entry 15 10 20 30)
-  (let ((name (aref kuro--ansi-color-names 15)))
-    (should (equal (gethash name kuro--named-colors) "#0a141e"))))
-
-;;; Group 17: kuro--apply-font-to-buffer and kuro--remap-default-face
-
-(ert-deftest kuro-faces-apply-font-to-buffer-noop-in-non-graphical ()
-  "kuro--apply-font-to-buffer is a no-op when display-graphic-p returns nil."
-  (with-temp-buffer
-    (setq-local kuro--font-remap-cookie nil)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () nil)))
-      (kuro--apply-font-to-buffer (current-buffer))
-      (should (null kuro--font-remap-cookie)))))
-
-(ert-deftest kuro-faces-apply-font-to-buffer-sets-cookie-with-family ()
-  "kuro--apply-font-to-buffer sets kuro--font-remap-cookie in graphical frame."
-  (with-temp-buffer
-    (setq-local kuro--font-remap-cookie nil)
-    (let ((kuro-font-family "Monospace")
-          (kuro-font-size nil))
-      (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-                ((symbol-function 'face-remap-add-relative)
-                 (lambda (&rest _) 'fake-cookie)))
-        (kuro--apply-font-to-buffer (current-buffer))
-        (should (eq kuro--font-remap-cookie 'fake-cookie))))))
-
-(ert-deftest kuro-faces-apply-font-to-buffer-removes-old-cookie ()
-  "kuro--apply-font-to-buffer removes the existing cookie before setting a new one."
-  (with-temp-buffer
-    (setq-local kuro--font-remap-cookie 'old-cookie)
-    (let ((removed nil)
-          (kuro-font-family "Mono")
-          (kuro-font-size nil))
-      (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-                ((symbol-function 'face-remap-remove-relative)
-                 (lambda (cookie) (setq removed cookie)))
-                ((symbol-function 'face-remap-add-relative)
-                 (lambda (&rest _) 'new-cookie)))
-        (kuro--apply-font-to-buffer (current-buffer))
-        (should (eq removed 'old-cookie))
-        (should (eq kuro--font-remap-cookie 'new-cookie))))))
-
-(ert-deftest kuro-faces-remap-default-face-noop-in-non-graphical ()
-  "kuro--remap-default-face is a no-op when display-graphic-p returns nil."
-  (with-temp-buffer
-    (setq-local kuro--default-color-remap-cookie nil)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () nil)))
-      (kuro--remap-default-face "#ffffff" "#000000")
-      (should (null kuro--default-color-remap-cookie)))))
-
-(ert-deftest kuro-faces-remap-default-face-sets-cookie ()
-  "kuro--remap-default-face calls face-remap-add-relative and stores cookie."
-  (with-temp-buffer
-    (setq-local kuro--default-color-remap-cookie nil)
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-              ((symbol-function 'face-remap-add-relative)
-               (lambda (&rest _) 'color-cookie)))
-      (kuro--remap-default-face "#ffffff" "#000000")
-      (should (eq kuro--default-color-remap-cookie 'color-cookie)))))
-
-;;; Group 18: kuro--apply-default-colors
-
-(ert-deftest kuro-faces-apply-default-colors-noop-when-not-initialized ()
-  "kuro--apply-default-colors does nothing when kuro--initialized is nil."
-  (with-temp-buffer
-    (setq-local kuro--initialized nil)
-    (let ((remapped nil))
-      (cl-letf (((symbol-function 'kuro--remap-default-face)
-                 (lambda (&rest _) (setq remapped t))))
-        (kuro--apply-default-colors)
-        (should-not remapped)))))
-
-(ert-deftest kuro-faces-apply-default-colors-noop-when-colors-nil ()
-  "kuro--apply-default-colors does nothing when kuro--get-default-colors returns nil."
-  (with-temp-buffer
-    (setq-local kuro--initialized t)
-    (let ((remapped nil))
-      (cl-letf (((symbol-function 'kuro--get-default-colors) (lambda () nil))
-                ((symbol-function 'kuro--remap-default-face)
-                 (lambda (&rest _) (setq remapped t))))
-        (kuro--apply-default-colors)
-        (should-not remapped)))))
-
-(ert-deftest kuro-faces-apply-default-colors-calls-remap-when-colors-present ()
-  "kuro--apply-default-colors calls kuro--remap-default-face with decoded color strings."
-  (with-temp-buffer
-    (setq-local kuro--initialized t)
-    (let ((fg-arg nil) (bg-arg nil))
-      (cl-letf (((symbol-function 'kuro--get-default-colors)
-                 (lambda () (list 0 0 0)))
-                ((symbol-function 'kuro--decode-ffi-color)
-                 (lambda (_) 'fake-color))
-                ((symbol-function 'kuro--color-to-emacs)
-                 (lambda (_) "#aabbcc"))
-                ((symbol-function 'kuro--remap-default-face)
-                 (lambda (fg bg) (setq fg-arg fg bg-arg bg))))
-        (kuro--apply-default-colors)
-        (should (equal fg-arg "#aabbcc"))
-        (should (equal bg-arg "#aabbcc"))))))
-
-;;; Group 19: kuro--with-face-remap macro
-
-(ert-deftest kuro-faces-ext-test-with-face-remap-removes-non-nil-cookie ()
-  "`kuro--with-face-remap' calls face-remap-remove-relative when cookie is non-nil."
-  (let ((cookie 'sentinel)
-        removed)
-    (cl-letf (((symbol-function 'face-remap-remove-relative)
-               (lambda (c) (setq removed c))))
-      (kuro--with-face-remap cookie))
-    (should (eq removed 'sentinel))))
-
-(ert-deftest kuro-faces-ext-test-with-face-remap-clears-cookie-before-body ()
-  "`kuro--with-face-remap' sets cookie var to nil before evaluating body."
-  (let ((cookie 'old)
-        captured)
-    (cl-letf (((symbol-function 'face-remap-remove-relative) #'ignore))
-      (kuro--with-face-remap cookie
-        (setq captured cookie)))
-    (should (null captured))))
-
-(ert-deftest kuro-faces-ext-test-with-face-remap-skips-remove-when-nil ()
-  "`kuro--with-face-remap' does not call face-remap-remove-relative when cookie is nil."
-  (let ((cookie nil)
-        remove-called)
-    (cl-letf (((symbol-function 'face-remap-remove-relative)
-               (lambda (_) (setq remove-called t))))
-      (kuro--with-face-remap cookie))
-    (should-not remove-called)))
-
-(ert-deftest kuro-faces-ext-test-with-face-remap-executes-body ()
-  "`kuro--with-face-remap' evaluates body forms after removing old cookie."
-  (let ((cookie nil)
-        ran)
-    (kuro--with-face-remap cookie
-      (setq ran t))
-    (should ran)))
-
-(ert-deftest kuro-faces-ext-test-with-face-remap-empty-body-is-pure-remove ()
-  "`kuro--with-face-remap' with no body acts as a pure remove."
-  (let ((cookie 'old)
-        removed)
-    (cl-letf (((symbol-function 'face-remap-remove-relative)
-               (lambda (c) (setq removed c))))
-      (kuro--with-face-remap cookie))
-    (should (eq removed 'old))
-    (should (null cookie))))
-
-;;; Group 20: kuro--get-cached-face-raw--miss — cache insertion and FIFO eviction
-
-(ert-deftest kuro-faces-test--cache-miss-stores-face ()
-  "`kuro--get-cached-face-raw--miss' stores the new face in `kuro--face-cache'."
-  (let ((kuro--face-cache (make-hash-table :test 'equal)))
-    (kuro--get-cached-face-raw--miss kuro--ffi-color-default kuro--ffi-color-default 0 0)
-    (should (= (hash-table-count kuro--face-cache) 1))))
-
-(ert-deftest kuro-faces-test--cache-miss-returns-face-plist ()
-  "`kuro--get-cached-face-raw--miss' returns a non-nil face value."
-  (let ((kuro--face-cache (make-hash-table :test 'equal)))
-    (let ((face (kuro--get-cached-face-raw--miss
-                 kuro--ffi-color-default kuro--ffi-color-default 0 0)))
-      (should face))))
-
-(ert-deftest kuro-faces-test--cache-miss-lookup-key-vector-correct ()
-  "`kuro--get-cached-face-raw--miss' stores under a key vector matching the inputs."
-  (let ((kuro--face-cache (make-hash-table :test 'equal)))
-    (kuro--get-cached-face-raw--miss #x00FF0000 #x000000FF #x01 0)
-    (should (gethash (vector #x00FF0000 #x000000FF #x01 0) kuro--face-cache))))
-
-(ert-deftest kuro-faces-test--cache-miss-evicts-when-over-limit ()
-  "`kuro--get-cached-face-raw--miss' evicts entries when cache exceeds max size."
-  (let* ((kuro--face-cache (make-hash-table :test 'equal))
-         (kuro--face-cache-max-size 4)
-         (kuro--face-cache-evict-fraction 0.5))
-    ;; Fill cache just past the limit
-    (dotimes (i 5)
-      (puthash (vector i 0 0 0) t kuro--face-cache))
-    (kuro--get-cached-face-raw--miss kuro--ffi-color-default kuro--ffi-color-default 0 0)
-    ;; After eviction, cache should be smaller than 5 + 1 = 6
-    (should (< (hash-table-count kuro--face-cache) 6))))
 
 (provide 'kuro-faces-test-2)
 

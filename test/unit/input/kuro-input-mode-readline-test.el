@@ -176,6 +176,24 @@
    (kuro--line-transpose-chars)
    (should (string= kuro--line-buffer "acbd"))))
 
+(ert-deftest kuro-input-mode-test-line-transpose-chars-at-eol ()
+  "`kuro--line-transpose-chars' at EOL transposes the two chars before point."
+  (kuro-input-mode-test--with-line "abcd" 4
+   (kuro--line-transpose-chars)
+   (should (string= kuro--line-buffer "abdc"))))
+
+(ert-deftest kuro-input-mode-test-line-transpose-chars-at-bol-is-noop ()
+  "`kuro--line-transpose-chars' at position 0 is a no-op."
+  (kuro-input-mode-test--with-line "abc" 0
+   (kuro--line-transpose-chars)
+   (should (string= kuro--line-buffer "abc"))))
+
+(ert-deftest kuro-input-mode-test-line-transpose-chars-single-char-is-noop ()
+  "`kuro--line-transpose-chars' on a one-character buffer is a no-op."
+  (kuro-input-mode-test--with-line "x" 1
+   (kuro--line-transpose-chars)
+   (should (string= kuro--line-buffer "x"))))
+
 (ert-deftest kuro-input-mode-test-line-keymap-binds-readline-ops ()
   "Line keymap binds all readline motion/editing keys."
   (kuro-input-mode-test--with-buffer

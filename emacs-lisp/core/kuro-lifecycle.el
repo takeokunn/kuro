@@ -454,11 +454,17 @@ to send it to a running shell or REPL without using the kill ring."
 DOC is the docstring for the generated command."
   `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
 
+(defconst kuro--control-key-commands
+  '((kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
+    (kuro-send-sigstop   [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
+    (kuro-send-sigquit   [?\C-\\] "Send quit signal (C-\\) to the terminal process."))
+  "Control key command data: each entry is (NAME SEQUENCE DOCSTRING).")
+
 (kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
 ;;;###autoload (autoload 'kuro-send-interrupt "kuro-lifecycle" nil t)
-(kuro--def-control-key kuro-send-sigstop  [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
+(kuro--def-control-key kuro-send-sigstop   [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
 ;;;###autoload (autoload 'kuro-send-sigstop "kuro-lifecycle" nil t)
-(kuro--def-control-key kuro-send-sigquit  [?\C-\\] "Send quit signal (C-\\) to the terminal process.")
+(kuro--def-control-key kuro-send-sigquit   [?\C-\\] "Send quit signal (C-\\) to the terminal process.")
 ;;;###autoload (autoload 'kuro-send-sigquit "kuro-lifecycle" nil t)
 
 (defun kuro--cleanup-render-state ()

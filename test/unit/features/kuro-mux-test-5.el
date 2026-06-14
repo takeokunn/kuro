@@ -147,6 +147,32 @@
       (kill-buffer kuro-buf)
       (kill-buffer plain))))
 
+(ert-deftest kuro-mux-test-visible-windows-empty-when-no-kuro-windows ()
+  "`kuro-mux--visible-windows' returns nil when no windows show a kuro buffer."
+  (let ((plain (get-buffer-create "*mux-vw-plain-only*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'window-list)
+                   (lambda (&rest _) '(w1)))
+                  ((symbol-function 'window-buffer)
+                   (lambda (_w) plain)))
+          (should (null (kuro-mux--visible-windows))))
+      (kill-buffer plain))))
+
+(ert-deftest kuro-mux-test-visible-windows-all-when-all-are-kuro ()
+  "`kuro-mux--visible-windows' returns all windows when every window shows a kuro buffer."
+  (let ((kuro-a (get-buffer-create "*mux-vw-kuro-a*"))
+        (kuro-b (get-buffer-create "*mux-vw-kuro-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer kuro-a (kuro-mode))
+          (with-current-buffer kuro-b (kuro-mode))
+          (cl-letf (((symbol-function 'window-list)
+                     (lambda (&rest _) '(wa wb)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (w) (pcase w ('wa kuro-a) ('wb kuro-b)))))
+            (should (equal (kuro-mux--visible-windows) '(wa wb)))))
+      (kill-buffer kuro-a)
+      (kill-buffer kuro-b))))
 
 (provide 'kuro-mux-test-5)
 ;;; kuro-mux-test-5.el ends here

@@ -174,6 +174,26 @@ kuro- command via OSC 51."
       (kuro--poll-eval-command-updates)
       (should (equal processed '("(cd \"/tmp\")"))))))
 
+(ert-deftest kuro-eval-poll-noop-when-no-commands ()
+  "`kuro--poll-eval-command-updates' is a no-op when no commands are pending."
+  (let (eval-called)
+    (cl-letf (((symbol-function 'kuro--poll-eval-commands)
+               (lambda () nil))
+              ((symbol-function 'kuro--eval-osc51-command)
+               (lambda (_cmd) (setq eval-called t))))
+      (kuro--poll-eval-command-updates)
+      (should-not eval-called))))
+
+(ert-deftest kuro-eval-poll-processes-multiple-commands ()
+  "`kuro--poll-eval-command-updates' processes all commands in order."
+  (let ((processed nil))
+    (cl-letf (((symbol-function 'kuro--poll-eval-commands)
+               (lambda () '("(cd \"/tmp\")" "(setenv \"K\" \"v\")")))
+              ((symbol-function 'kuro--eval-osc51-command)
+               (lambda (cmd) (push cmd processed))))
+      (kuro--poll-eval-command-updates)
+      (should (equal (reverse processed) '("(cd \"/tmp\")" "(setenv \"K\" \"v\")"))))))
+
 (provide 'kuro-eval-test)
 
 ;;; kuro-eval-test.el ends here

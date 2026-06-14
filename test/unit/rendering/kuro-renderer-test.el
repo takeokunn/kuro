@@ -297,6 +297,20 @@
         (kuro--process-scroll-events)
         (should-not apply-called)))))
 
+(ert-deftest kuro-renderer-process-scroll-events-noop-when-scrollback-active ()
+  "kuro--process-scroll-events is a no-op when kuro--scroll-offset is positive."
+  (kuro-renderer-helpers-test--with-buffer
+    (setq kuro--scroll-offset 5)
+    (let ((apply-called nil)
+          (consume-called nil))
+      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
+                 (lambda () (setq consume-called t) '(3 . 0)))
+                ((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (_up _down) (setq apply-called t))))
+        (kuro--process-scroll-events)
+        (should-not consume-called)
+        (should-not apply-called)))))
+
 ;;; Group 9: kuro--update-tui-streaming-timer (TUI streaming timer management)
 
 (ert-deftest kuro-renderer-update-tui-increments-frame-count-when-full-dirty ()

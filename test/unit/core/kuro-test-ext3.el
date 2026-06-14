@@ -147,5 +147,56 @@
     (setq-local kuro--copy-mode nil)
     (should-not kuro--copy-mode)))
 
+;;; ── Group 10: kuro--window-size-change — full function call via stubs ──────────
+;;
+;; The function requires window/frame infrastructure.  We stub window-list,
+;; window-buffer, window-body-height, and window-body-width so the full
+;; dolist + derived-mode-p + resize-pending path can be exercised in batch ERT.
+
+(ert-deftest kuro-el-test--window-size-change-sets-pending-for-kuro-buffer ()
+  "`kuro--window-size-change' sets kuro--resize-pending when dimensions change."
+  (let ((buf (get-buffer-create "*kuro-wsc-test-resize*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (kuro-mode)
+            (setq kuro--initialized t
+                  kuro--last-rows 24
+                  kuro--last-cols 80
+                  kuro--resize-pending nil))
+          (cl-letf (((symbol-function 'window-list)
+                     (lambda (&rest _) '(fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (_w) buf))
+                    ((symbol-function 'window-body-height)
+                     (lambda (_w) 30))
+                    ((symbol-function 'window-body-width)
+                     (lambda (_w) 100)))
+            (kuro--window-size-change nil)
+            (with-current-buffer buf
+              (should (equal kuro--resize-pending (cons 30 100))))))
+      (kill-buffer buf))))
+
+(ert-deftest kuro-el-test--window-size-change-noop-for-non-kuro-buffer ()
+  "`kuro--window-size-change' skips buffers that are not in kuro-mode."
+  (let ((buf (get-buffer-create "*kuro-wsc-test-noop*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (fundamental-mode)
+            (setq-local kuro--resize-pending nil))
+          (cl-letf (((symbol-function 'window-list)
+                     (lambda (&rest _) '(fake-win)))
+                    ((symbol-function 'window-buffer)
+                     (lambda (_w) buf))
+                    ((symbol-function 'window-body-height)
+                     (lambda (_w) 30))
+                    ((symbol-function 'window-body-width)
+                     (lambda (_w) 100)))
+            (kuro--window-size-change nil)
+            (with-current-buffer buf
+              (should (null kuro--resize-pending)))))
+      (kill-buffer buf))))
+
 (provide 'kuro-test-ext3)
 ;;; kuro-test-ext3.el ends here

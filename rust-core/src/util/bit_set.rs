@@ -369,4 +369,50 @@ mod tests {
         assert!(!s.get(59), "bit 59 must be clear");
         assert!(!s.get(68), "bit 68 must be clear");
     }
+
+    #[test]
+    fn test_len_reports_capacity() {
+        let s = BitSet::new(100);
+        assert_eq!(s.len(), 100);
+    }
+
+    #[test]
+    fn test_get_out_of_bounds_returns_false() {
+        // get() must not panic — it returns false for any index >= len().
+        let s = BitSet::new(8);
+        assert!(!s.get(8),  "get(8) must be false for len=8 set");
+        assert!(!s.get(99), "get(99) must be false for len=8 set");
+    }
+
+    #[test]
+    fn test_resize_shrink_drops_high_bits() {
+        // Shrink from 128 to 64 bits — bits at index >= 64 must become inaccessible.
+        let mut s = BitSet::new(128);
+        s.set(63, true);
+        s.set(64, true); // will be dropped by shrink
+        s.resize(64, false);
+        assert_eq!(s.bit_len, 64);
+        assert!(s.get(63), "bit 63 must survive shrink to 64");
+        assert!(!s.get(64), "bit 64 must return false after shrink to 64 (out of range)");
+    }
+
+    #[test]
+    fn test_copy_within_empty_range_is_noop() {
+        // copy_within with len=0 (src.start == src.end) must change nothing.
+        let mut s = BitSet::new(8);
+        s.set(2, true);
+        s.copy_within(3..3, 0); // empty range
+        assert!(s.get(2), "bit 2 must be unchanged after empty copy_within");
+        assert!(!s.get(0), "bit 0 must be unchanged after empty copy_within");
+    }
+
+    #[test]
+    fn test_copy_within_src_eq_dst_is_noop() {
+        // copy_within with src == dst must leave the set unchanged.
+        let mut s = BitSet::new(8);
+        s.set(3, true);
+        s.copy_within(3..6, 3); // same position
+        assert!(s.get(3), "bit 3 must remain set after src==dst copy_within");
+        assert!(!s.get(4), "bit 4 must remain clear after src==dst copy_within");
+    }
 }

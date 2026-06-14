@@ -239,10 +239,22 @@
       (cl-letf (((symbol-function 'kuro--apply-palette-updates)
                  (lambda () (setq palette-called t)))
                 ((symbol-function 'kuro--apply-default-colors)
-                 (lambda () (setq default-colors-called t))))
+                 (lambda () (setq default-colors-called t)))
+                ((symbol-function 'kuro--handle-notifications) #'ignore))
         (kuro--poll-osc-events)
         (should palette-called)
         (should default-colors-called)))))
+
+(ert-deftest kuro-poll-modes-poll-osc-events-calls-handle-notifications ()
+  "kuro--poll-osc-events calls kuro--handle-notifications."
+  (kuro-poll-test--with-buffer
+    (let ((notif-called nil))
+      (cl-letf (((symbol-function 'kuro--apply-palette-updates) #'ignore)
+                ((symbol-function 'kuro--apply-default-colors) #'ignore)
+                ((symbol-function 'kuro--handle-notifications)
+                 (lambda () (setq notif-called t))))
+        (kuro--poll-osc-events)
+        (should notif-called)))))
 
 ;;; Group I: kuro--poll-image-events
 

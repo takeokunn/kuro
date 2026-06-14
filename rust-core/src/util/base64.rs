@@ -150,4 +150,39 @@ mod tests {
     fn test_decode_invalid() {
         assert!(decode(b"!!!").is_err());
     }
+
+    #[test]
+    fn test_decode_empty_input_returns_empty_vec() {
+        // Empty slice skips the length check and returns Ok(vec![])
+        assert_eq!(decode(b"").unwrap(), b"");
+    }
+
+    #[test]
+    fn test_decode_invalid_char_in_valid_length_string() {
+        // "!!!!" is length 4 (passes mod-4 check) but '!' is not in the alphabet.
+        assert!(decode(b"!!!!").is_err());
+    }
+
+    #[test]
+    fn test_decode_strips_whitespace() {
+        // RFC 4648 / xterm practice: newlines and spaces are stripped before decode.
+        let with_newlines = b"TQ\n=\r=";  // "TQ==" with embedded whitespace
+        assert_eq!(decode(with_newlines).unwrap(), b"M");
+    }
+
+    #[test]
+    fn test_decode_error_display() {
+        let msg = format!("{}", DecodeError);
+        assert!(
+            msg.contains("invalid") || msg.contains("base64"),
+            "DecodeError display must mention 'invalid' or 'base64', got: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn test_decode_invalid_c1_byte() {
+        // First byte 'A' maps to 0, but second byte '!' is invalid (0xFF in table).
+        // b"A!AA" is length 4 and first byte is valid — triggers c1 == 0xFF branch.
+        assert!(decode(b"A!AA").is_err());
+    }
 }

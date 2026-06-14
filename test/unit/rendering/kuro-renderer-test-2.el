@@ -307,6 +307,20 @@ Row 0 has 2 ranges (12 elements) and row 1 has 3 ranges (18 elements) = 5 total.
       (kuro--pipeline-step-apply nil)
       (should (= 0 called)))))
 
+(ert-deftest kuro-renderer-pipeline-step-apply-calls-dirty-lines-when-non-nil ()
+  "kuro--pipeline-step-apply calls kuro--apply-dirty-lines with the update list."
+  (let* ((updates (vector (vector 0 "abc" [] [])))
+         (received nil))
+    (cl-letf (((symbol-function 'kuro--apply-dirty-lines)
+               (lambda (ul) (setq received ul))))
+      (kuro--pipeline-step-apply updates)
+      (should (eq received updates)))))
+
+(ert-deftest kuro-renderer-pipeline-step-apply-returns-nil-for-nil ()
+  "kuro--pipeline-step-apply returns nil (from `when') for a nil update-list."
+  (cl-letf (((symbol-function 'kuro--apply-dirty-lines) #'ignore))
+    (should (null (kuro--pipeline-step-apply nil)))))
+
 ;;; kuro--reset-cursor-cache structural tests (Group 13 ext.)
 
 (ert-deftest kuro-renderer-reset-cursor-cache-expands-to-setq ()

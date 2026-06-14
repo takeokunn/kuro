@@ -272,3 +272,28 @@ fn test_osc22_no_shape_param_is_noop() {
         "OSC 22 without shape param must leave pointer_shape unchanged"
     );
 }
+
+/// OSC 777 notify with an oversized body must be a silent no-op.
+///
+/// Exercises the `body_raw.len() > NOTIFICATION_MAX_BYTES` early-return
+/// in `handle_osc_777` (4096-byte limit).
+#[test]
+fn test_osc777_oversized_body_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let big_body = "B".repeat(4097); // 4097 > NOTIFICATION_MAX_BYTES (4096)
+    let params: &[&[u8]] = &[b"777", b"notify", b"title", big_body.as_bytes()];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "oversized body → no notification");
+}
+
+/// OSC 777 notify with an oversized title must be a silent no-op.
+///
+/// Exercises the `title_raw.len() > NOTIFICATION_MAX_BYTES` early-return.
+#[test]
+fn test_osc777_oversized_title_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let big_title = "T".repeat(4097);
+    let params: &[&[u8]] = &[b"777", b"notify", big_title.as_bytes(), b"body"];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "oversized title → no notification");
+}

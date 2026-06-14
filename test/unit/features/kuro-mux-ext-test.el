@@ -356,5 +356,74 @@
         (should (eq (car hook-removed) 'after-change-functions))))))
 
 
+;;; Group 65 — kuro-mux--on-session-created tab-bar branch
+
+(ert-deftest kuro-mux-ext-on-session-created-calls-tab-bar-update-when-mode-active ()
+  "`kuro-mux--on-session-created' calls `kuro-mux--tab-bar-update' when `kuro-mux-tab-bar-mode' is non-nil."
+  (let ((kuro-mux-tab-bar-mode t)
+        tab-bar-update-called)
+    (cl-letf (((symbol-function 'kuro-mux--register) #'ignore)
+              ((symbol-function 'kuro-mux--tab-bar-update)
+               (lambda () (setq tab-bar-update-called t))))
+      (kuro-mux--on-session-created)
+      (should tab-bar-update-called))))
+
+(ert-deftest kuro-mux-ext-on-session-created-skips-tab-bar-update-when-mode-nil ()
+  "`kuro-mux--on-session-created' does not call `kuro-mux--tab-bar-update' when `kuro-mux-tab-bar-mode' is nil."
+  (let ((kuro-mux-tab-bar-mode nil)
+        tab-bar-update-called)
+    (cl-letf (((symbol-function 'kuro-mux--register) #'ignore)
+              ((symbol-function 'kuro-mux--tab-bar-update)
+               (lambda () (setq tab-bar-update-called t))))
+      (kuro-mux--on-session-created)
+      (should-not tab-bar-update-called))))
+
+;;; Group 66 — kuro-mux--tab-bar-update active path
+
+(ert-deftest kuro-mux-ext-tab-bar-update-creates-tab-for-new-session ()
+  "`kuro-mux--tab-bar-update' calls `tab-bar-new-tab' when a session has no existing tab."
+  (let ((new-tab-created nil)
+        (real-fboundp (symbol-function 'fboundp)))
+    (with-temp-buffer
+      (let ((sess-buf (current-buffer)))
+        (cl-letf (((symbol-function 'fboundp)
+                   (lambda (sym)
+                     (if (memq sym '(tab-bar-tabs tab-bar-select-tab-by-name tab-bar-rename-tab))
+                         t
+                       (funcall real-fboundp sym))))
+                  ((symbol-function 'tab-bar-mode) #'ignore)
+                  ((symbol-function 'kuro-mux--live-sessions) (lambda () (list sess-buf)))
+                  ((symbol-function 'kuro-mux--session-display-name)
+                   (lambda (_) "test-session"))
+                  ((symbol-function 'tab-bar-tabs) (lambda () '()))
+                  ((symbol-function 'tab-bar-new-tab)
+                   (lambda () (setq new-tab-created t)))
+                  ((symbol-function 'switch-to-buffer) #'ignore)
+                  ((symbol-function 'tab-bar-rename-tab) #'ignore))
+          (kuro-mux--tab-bar-update)
+          (should new-tab-created))))))
+
+(ert-deftest kuro-mux-ext-tab-bar-update-skips-existing-tab ()
+  "`kuro-mux--tab-bar-update' does not call `tab-bar-new-tab' when a matching tab already exists."
+  (let ((new-tab-created nil)
+        (real-fboundp (symbol-function 'fboundp)))
+    (with-temp-buffer
+      (let ((sess-buf (current-buffer)))
+        (cl-letf (((symbol-function 'fboundp)
+                   (lambda (sym)
+                     (if (memq sym '(tab-bar-tabs tab-bar-select-tab-by-name))
+                         t
+                       (funcall real-fboundp sym))))
+                  ((symbol-function 'tab-bar-mode) #'ignore)
+                  ((symbol-function 'kuro-mux--live-sessions) (lambda () (list sess-buf)))
+                  ((symbol-function 'kuro-mux--session-display-name)
+                   (lambda (_) "test-session"))
+                  ((symbol-function 'tab-bar-tabs)
+                   (lambda () (list (list (cons 'name "test-session")))))
+                  ((symbol-function 'tab-bar-new-tab)
+                   (lambda () (setq new-tab-created t))))
+          (kuro-mux--tab-bar-update)
+          (should-not new-tab-created))))))
+
 (provide 'kuro-mux-ext-test)
 ;;; kuro-mux-ext-test.el ends here

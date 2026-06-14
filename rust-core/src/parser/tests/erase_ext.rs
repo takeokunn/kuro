@@ -398,3 +398,21 @@ fn xtpushcolors_capped_at_10() {
         "palette stack must be capped at 10"
     );
 }
+
+#[test]
+fn xtpopcolors_on_empty_stack_is_noop() {
+    // XTPOPCOLORS (CSI # Q) on an empty stack must be a no-op: no panic,
+    // palette unchanged, palette_dirty stays false.
+    let mut term = crate::TerminalCore::new(5, 10);
+    // Set a known palette entry so we can confirm it is unchanged.
+    term.advance(b"\x1b]4;7;rgb:aa/bb/cc\x07");
+    assert_eq!(term.osc_data.palette[7], Some([0xaa, 0xbb, 0xcc]));
+    assert!(term.osc_data.palette_stack.is_empty());
+    // Pop on empty stack — must not panic and palette must survive.
+    term.advance(b"\x1b[#Q");
+    assert_eq!(
+        term.osc_data.palette[7],
+        Some([0xaa, 0xbb, 0xcc]),
+        "palette must be unchanged after XTPOPCOLORS on empty stack"
+    );
+}

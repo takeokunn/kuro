@@ -124,6 +124,22 @@ test_build_response!(
     "Ms", "4d73" => success contains "4d73"
 );
 
+// ── Additional capability coverage (Smulx, Smol, Ss/Se, Su, ccc, U8/u8, Cr, bce, sitm/ritm, kt) ──
+
+test_build_response!(build_xtgettcap_response_smulx_success, "Smulx", "536d756c78" => success);
+test_build_response!(build_xtgettcap_response_smol_success,  "Smol",  "536d6f6c"   => success);
+test_build_response!(build_xtgettcap_response_ss_success,    "Ss",    "5373"       => success);
+test_build_response!(build_xtgettcap_response_se_success,    "Se",    "5365"       => success);
+test_build_response!(build_xtgettcap_response_su_success,    "Su",    "5375"       => success);
+test_build_response!(build_xtgettcap_response_ccc_success,   "ccc",   "636363"     => success);
+test_build_response!(build_xtgettcap_response_u8_upper,      "U8",    "5538"       => success);
+test_build_response!(build_xtgettcap_response_u8_lower,      "u8",    "7538"       => success);
+test_build_response!(build_xtgettcap_response_cr_success,    "Cr",    "4372"       => success);
+test_build_response!(build_xtgettcap_response_bce_success,   "bce",   "626365"     => success);
+test_build_response!(build_xtgettcap_response_sitm_success,  "sitm",  "7369746d"   => success);
+test_build_response!(build_xtgettcap_response_ritm_success,  "ritm",  "7269746d"   => success);
+test_build_response!(build_xtgettcap_response_kt_success,    "kt",    "6b74"       => success);
+
 include!("dcs_xtgettcap_payload.rs");
 
 use proptest::prelude::*;

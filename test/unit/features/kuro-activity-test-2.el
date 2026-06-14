@@ -181,5 +181,21 @@
     (pcase-let ((`(,_name ,code ,expected) entry))
       (should (equal (kuro--activity-exit-code-status code) expected)))))
 
+;;; Group 13 — kuro-activity-clear with-live-buffer branch
+
+(ert-deftest kuro-activity-test-clear-refreshes-live-list-buffer ()
+  "`kuro-activity-clear' calls `kuro-activity-list--refresh' when `*kuro-activity*' is live."
+  (let ((kuro-activity--log (list '(nil "s" "b")))
+        (refresh-called nil))
+    (with-temp-buffer
+      (let ((the-buf (current-buffer)))
+        (cl-letf (((symbol-function 'get-buffer)
+                   (lambda (_name) the-buf))
+                  ((symbol-function 'kuro-activity-list--refresh)
+                   (lambda () (setq refresh-called t))))
+          (kuro-activity-clear)
+          (should (null kuro-activity--log))
+          (should refresh-called))))))
+
 (provide 'kuro-activity-test-2)
 ;;; kuro-activity-test-2.el ends here

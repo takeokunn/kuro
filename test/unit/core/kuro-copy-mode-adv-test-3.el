@@ -145,6 +145,30 @@
         (kuro--copy-search-word-forward))
       (should (equal isearch-string "hello")))))
 
+;;; ── Group 36: kuro--copy-set-mark rectangle branch ──────────────────────────
+
+(ert-deftest kuro-copy-test-set-mark-deactivates-rectangle-mode ()
+  "`kuro--copy-set-mark' disables `rectangle-mark-mode' when it is active."
+  (kuro-el-test--with-kuro-mode-buffer
+    (let ((rect-mode-arg nil))
+      (setq-local rectangle-mark-mode t)
+      (cl-letf (((symbol-function 'rectangle-mark-mode)
+                 (lambda (arg) (setq rect-mode-arg arg)))
+                ((symbol-function 'set-mark-command) #'ignore))
+        (kuro--copy-set-mark)
+        (should (= rect-mode-arg -1))))))
+
+(ert-deftest kuro-copy-test-set-mark-line-deactivates-rectangle-mode ()
+  "`kuro--copy-set-mark-line' disables `rectangle-mark-mode' when it is active."
+  (kuro-el-test--with-kuro-mode-buffer
+    (let ((rect-mode-arg nil))
+      (setq-local rectangle-mark-mode t)
+      (cl-letf (((symbol-function 'rectangle-mark-mode)
+                 (lambda (arg) (setq rect-mode-arg arg)))
+                ((symbol-function 'set-mark-command) #'ignore))
+        (kuro--copy-set-mark-line)
+        (should (= rect-mode-arg -1))))))
+
 (provide 'kuro-copy-mode-adv-test-3)
 
 ;;; kuro-copy-mode-adv-test-3.el ends here

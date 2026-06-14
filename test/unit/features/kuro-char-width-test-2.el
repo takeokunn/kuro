@@ -298,6 +298,122 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
     (should (eq (nth 1 (nth 1 expanded)) nil))
     (should (eq (nth 1 (nth 2 expanded)) t))))
 
+;;; Group 26: kuro--assign-mono-fonts graphical branches
+
+(ert-deftest kuro-char-width-test--assign-mono-fonts-nil-ascii-font-is-noop ()
+  "`kuro--assign-mono-fonts' is a no-op when `face-attribute' returns nil."
+  (let (called)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'face-attribute) (lambda (&rest _) nil))
+              ((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (setq called t))))
+      (kuro--assign-mono-fonts)
+      (should-not called))))
+
+(ert-deftest kuro-char-width-test--assign-mono-fonts-nil-family-is-noop ()
+  "`kuro--assign-mono-fonts' is a no-op when `font-get' returns nil for :family."
+  (let ((mock-font (font-spec :family "M" :size 10))
+        called)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'face-attribute) (lambda (&rest _) mock-font))
+              ((symbol-function 'font-get) (lambda (&rest _) nil))
+              ((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (setq called t))))
+      (kuro--assign-mono-fonts)
+      (should-not called))))
+
+(ert-deftest kuro-char-width-test--assign-mono-fonts-symbol-family-calls-set-fontset ()
+  "`kuro--assign-mono-fonts' calls `set-fontset-font' when `font-get' returns symbol family."
+  (let ((mock-font (font-spec :family "M" :size 10))
+        (call-count 0))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'face-attribute) (lambda (&rest _) mock-font))
+              ((symbol-function 'font-get) (lambda (&rest _) 'MockFont))
+              ((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (setq call-count (1+ call-count)))))
+      (kuro--assign-mono-fonts)
+      (should (> call-count 0)))))
+
+(ert-deftest kuro-char-width-test--assign-mono-fonts-string-family-calls-set-fontset ()
+  "`kuro--assign-mono-fonts' calls `set-fontset-font' when `font-get' returns string family."
+  (let ((mock-font (font-spec :family "MockFont" :size 10))
+        (call-count 0))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'face-attribute) (lambda (&rest _) mock-font))
+              ((symbol-function 'font-get) (lambda (&rest _) "MockFont"))
+              ((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (setq call-count (1+ call-count)))))
+      (kuro--assign-mono-fonts)
+      (should (> call-count 0)))))
+
+(ert-deftest kuro-char-width-test--assign-mono-fonts-fontset-error-swallowed ()
+  "`kuro--assign-mono-fonts' silently swallows errors from `set-fontset-font'."
+  (let ((mock-font (font-spec :family "MockFont" :size 10)))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'face-attribute) (lambda (&rest _) mock-font))
+              ((symbol-function 'font-get) (lambda (&rest _) "ErrorFont"))
+              ((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (error "fontset error"))))
+      (should-not (condition-case err
+                      (progn (kuro--assign-mono-fonts) nil)
+                    (error err))))))
+
+;;; Group 27: kuro--setup-fontset graphical branches
+
+(ert-deftest kuro-char-width-test--setup-fontset-nerd-font-sets-pua-ranges ()
+  "`kuro--setup-fontset' calls `set-fontset-font' for both PUA ranges when nerd font detected."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'kuro--detect-nerd-font) (lambda () "TestNerd"))
+              ((symbol-function 'font-family-list) (lambda () '()))
+              ((symbol-function 'set-fontset-font)
+               (lambda (_fs range &rest _) (push range calls))))
+      (kuro--setup-fontset)
+      (should (= (length calls) 2))
+      (should (member '(#xE000 . #xF8FF) calls))
+      (should (member '(#xF0000 . #xFFFFF) calls)))))
+
+(ert-deftest kuro-char-width-test--setup-fontset-emoji-font-sets-emoji-range ()
+  "`kuro--setup-fontset' calls `set-fontset-font' with `emoji when emoji font found."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'kuro--detect-nerd-font) (lambda () nil))
+              ((symbol-function 'font-family-list)
+               (lambda () '("Noto Color Emoji" "DejaVu Sans Mono")))
+              ((symbol-function 'set-fontset-font)
+               (lambda (_fs range &rest _) (push range calls))))
+      (kuro--setup-fontset)
+      (should (= (length calls) 1))
+      (should (member 'emoji calls)))))
+
+(ert-deftest kuro-char-width-test--setup-fontset-prefers-apple-color-emoji ()
+  "`kuro--setup-fontset' picks `Apple Color Emoji' over `Noto Color Emoji' when both available."
+  (let ((fonts-used nil))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'kuro--detect-nerd-font) (lambda () nil))
+              ((symbol-function 'font-family-list)
+               (lambda () '("Apple Color Emoji" "Noto Color Emoji")))
+              ((symbol-function 'set-fontset-font)
+               (lambda (_fs _range font &rest _) (push font fonts-used))))
+      (kuro--setup-fontset)
+      (should (= (length fonts-used) 1))
+      (should (equal (car fonts-used) "Apple Color Emoji")))))
+
+(ert-deftest kuro-char-width-test--setup-fontset-nerd-and-emoji-both-set ()
+  "`kuro--setup-fontset' sets both PUA ranges and emoji when both fonts are available."
+  (let ((all-ranges nil))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
+              ((symbol-function 'kuro--detect-nerd-font) (lambda () "TestNerd"))
+              ((symbol-function 'font-family-list)
+               (lambda () '("Apple Color Emoji")))
+              ((symbol-function 'set-fontset-font)
+               (lambda (_fs range &rest _) (push range all-ranges))))
+      (kuro--setup-fontset)
+      (should (= (length all-ranges) 3))
+      (should (member '(#xE000 . #xF8FF) all-ranges))
+      (should (member '(#xF0000 . #xFFFFF) all-ranges))
+      (should (member 'emoji all-ranges)))))
+
 (provide 'kuro-char-width-test-2)
 
 ;;; kuro-char-width-test-2.el ends here

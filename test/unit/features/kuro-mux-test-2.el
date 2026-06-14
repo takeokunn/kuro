@@ -67,6 +67,18 @@
       (kuro-mux-detach)
       (should switched))))
 
+(ert-deftest kuro-mux-test-detach-messages-when-only-session ()
+  "`kuro-mux-detach' shows a message when there is only one session and one window."
+  (let ((msg nil))
+    (cl-letf (((symbol-function 'derived-mode-p)      (lambda (&rest _) t))
+              ((symbol-function 'count-windows)        (lambda () 1))
+              ((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list (current-buffer))))
+              ((symbol-function 'message)
+               (lambda (fmt &rest _) (setq msg fmt))))
+      (kuro-mux-detach)
+      (should (stringp msg)))))
+
 (ert-deftest kuro-mux-test-zoom-saves-config-on-first-call ()
   "`kuro-mux-zoom' sets `kuro-mux--zoom-config' on the first call."
   (let ((kuro-mux--zoom-config nil)

@@ -312,5 +312,26 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
          (arglist (caddr exp)))
     (should (null arglist))))
 
+(ert-deftest kuro-input-keymap-apply-exceptions-non-meta-clears-binding-only ()
+  "`kuro--keymap-apply-exceptions' clears a non-M-* binding without touching ESC+char."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions '("C-g")))
+    (define-key km (kbd "C-g") #'ignore)
+    (kuro--keymap-apply-exceptions km)
+    ;; The C-g binding must be cleared.
+    (should-not (lookup-key km (kbd "C-g")))))
+
+(ert-deftest kuro-input-keymap-apply-exceptions-multi-char-meta-no-esc-fallback ()
+  "`kuro--keymap-apply-exceptions' handles M-<multi-char> without touching ESC+char.
+When the part after \"M-\" is more than one char (e.g. \"M-C-f\"), `char' is nil
+and the inner `(when char ...)' branch is skipped — no ESC+char clear attempt."
+  (let ((km (make-sparse-keymap))
+        (kuro-keymap-exceptions '("M-C-f")))
+    (define-key km (kbd "M-C-f") #'ignore)
+    ;; Must not error — the (when char) guard must prevent the (aref rest 0) call.
+    (should-not (condition-case err
+                    (progn (kuro--keymap-apply-exceptions km) nil)
+                  (error err)))))
+
 (provide 'kuro-input-keymap-test-4)
 ;;; kuro-input-keymap-test-4.el ends here

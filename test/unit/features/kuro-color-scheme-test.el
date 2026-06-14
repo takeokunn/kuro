@@ -346,6 +346,49 @@ the behavior so we notice if the contract changes."
     (should (= 1 (length calls)))
     (should (equal (car calls) '(99 t)))))
 
+(ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-nil-session-id ()
+  "A3: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is nil."
+  (let ((calls nil))
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (setq-local kuro--session-id nil)
+        (kuro-color-scheme-test--with-fake-buffers (list buf)
+          (kuro-color-scheme-test--with-stubbed-set
+              (lambda (id dark) (push (list id dark) calls))
+            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                       (lambda () t)))
+              (kuro--color-scheme-apply-now))))))
+    (should (null calls))))
+
+(ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-zero-session-id ()
+  "A4: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is 0."
+  (let ((calls nil))
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (setq-local kuro--session-id 0)
+        (kuro-color-scheme-test--with-fake-buffers (list buf)
+          (kuro-color-scheme-test--with-stubbed-set
+              (lambda (id dark) (push (list id dark) calls))
+            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                       (lambda () nil)))
+              (kuro--color-scheme-apply-now))))))
+    (should (null calls))))
+
+(ert-deftest kuro-color-scheme-apply-now-swallows-ffi-error ()
+  "A5: `kuro--color-scheme-apply-now' swallows FFI errors via ignore-errors."
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      (setq-local kuro--session-id 7)
+      (kuro-color-scheme-test--with-fake-buffers (list buf)
+        (kuro-color-scheme-test--with-stubbed-set
+            (lambda (_id _dark) (error "FFI failure"))
+          (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                     (lambda () t)))
+            ;; Must not propagate the error.
+            (should-not (condition-case err
+                            (progn (kuro--color-scheme-apply-now) nil)
+                          (error err)))))))))
+
 (provide 'kuro-color-scheme-test)
 
 ;;; kuro-color-scheme-test.el ends here

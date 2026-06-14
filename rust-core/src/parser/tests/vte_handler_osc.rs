@@ -189,6 +189,27 @@ fn test_osc_dispatch_osc7_non_file_url_ignored() {
     );
 }
 
+// OSC 0 with a title exceeding MAX_TITLE_BYTES (1024) must be silently ignored.
+#[test]
+fn test_osc_dispatch_osc0_oversized_title_ignored() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.meta.title = "old".to_string();
+    // Craft an OSC 0 sequence whose title is MAX_TITLE_BYTES + 1 = 1025 bytes.
+    let big = "X".repeat(crate::parser::limits::MAX_TITLE_BYTES + 1);
+    let mut seq = b"\x1b]0;".to_vec();
+    seq.extend_from_slice(big.as_bytes());
+    seq.push(b'\x07'); // BEL terminator
+    term.advance(&seq);
+    assert_eq!(
+        term.meta.title, "old",
+        "OSC 0 oversized title must leave the title unchanged"
+    );
+    assert!(
+        !term.meta.title_dirty,
+        "title_dirty must not be set for an oversized title"
+    );
+}
+
 use proptest::prelude::*;
 
 proptest! {

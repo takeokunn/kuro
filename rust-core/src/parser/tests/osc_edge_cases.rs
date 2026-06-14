@@ -172,6 +172,18 @@ fn test_osc9_missing_body_is_noop() {
     assert!(core.osc_data.notifications.is_empty(), "no body → no notification");
 }
 
+/// OSC 9 with three params (ConEmu progress form `OSC 9 ; 4 ; …`) must be ignored.
+///
+/// The handler requires exactly two params (`params.len() == 2`).  Three params
+/// exercises the `params.len() != 2` early-return for the ConEmu case.
+#[test]
+fn test_osc9_three_params_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"9", b"4", b"50"]; // ConEmu progress: type=4, value=50%
+    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "3-param ConEmu form → no notification");
+}
+
 /// OSC 9 with an empty body param must be silently ignored.
 #[test]
 fn test_osc9_empty_body_is_noop() {
@@ -229,4 +241,34 @@ fn test_osc777_missing_subcommand_is_noop() {
     let params: &[&[u8]] = &[b"777"];
     crate::parser::osc_protocol::handle_osc_777(&mut core, params);
     assert!(core.osc_data.notifications.is_empty(), "no subcommand → no notification");
+}
+
+/// OSC 0 with no semicolon (single-param) must be a silent no-op.
+///
+/// `params.get(1)` returns `None`, so neither title nor title_dirty are touched.
+/// This exercises the None branch of the defensive `if let Some(raw) = params.get(1)`.
+#[test]
+fn test_osc0_no_title_param_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.meta.title = "previous".to_string();
+    let params: &[&[u8]] = &[b"0"]; // no semicolon → only one param
+    handle_osc(&mut core, params, false);
+    assert_eq!(core.meta.title, "previous", "OSC 0 without title param must leave title unchanged");
+    assert!(!core.meta.title_dirty, "title_dirty must not be set when title param is absent");
+}
+
+/// OSC 22 with no second param (cursor-shape absent) must be a silent no-op.
+///
+/// `params.get(1)` returns `None`, so pointer_shape stays at its default.
+#[test]
+fn test_osc22_no_shape_param_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.osc_data.pointer_shape = Some("crosshair".to_string());
+    let params: &[&[u8]] = &[b"22"]; // no semicolon → only one param
+    handle_osc(&mut core, params, false);
+    assert_eq!(
+        core.osc_data.pointer_shape.as_deref(),
+        Some("crosshair"),
+        "OSC 22 without shape param must leave pointer_shape unchanged"
+    );
 }

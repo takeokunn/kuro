@@ -148,3 +148,85 @@ fn test_osc8_uri_at_exactly_limit() {
         "URI of exactly OSC8_MAX_URI_BYTES must be stored intact without truncation"
     );
 }
+
+// ── OSC 9 — iTerm2 desktop notifications (body only) ─────────────────────────
+
+/// OSC 9 with a non-empty body must push a `Notification` with no title.
+#[test]
+fn test_osc9_basic_notification_pushed() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b]9;Build complete\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1, "one notification should be queued");
+    let n = &core.osc_data.notifications[0];
+    assert_eq!(n.body, "Build complete");
+    assert!(n.title.is_none(), "OSC 9 sets no title");
+}
+
+/// OSC 9 with exactly one param (no body) must be silently ignored.
+#[test]
+fn test_osc9_missing_body_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    // Advance only the sequence code with no second param.
+    let params: &[&[u8]] = &[b"9"];
+    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "no body → no notification");
+}
+
+/// OSC 9 with an empty body param must be silently ignored.
+#[test]
+fn test_osc9_empty_body_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"9", b""];
+    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "empty body → no notification");
+}
+
+// ── OSC 777 — URXVT desktop notifications (subcommand + title + body) ─────────
+
+/// OSC 777 `notify` with title and body pushes a `Notification` with both set.
+#[test]
+fn test_osc777_notify_with_title_and_body() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b]777;notify;MyApp;Download done\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1, "one notification should be queued");
+    let n = &core.osc_data.notifications[0];
+    assert_eq!(n.body, "Download done");
+    assert_eq!(n.title.as_deref(), Some("MyApp"));
+}
+
+/// OSC 777 `notify` without a title (empty title param) stores title as None.
+#[test]
+fn test_osc777_notify_empty_title_stores_none() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"777", b"notify", b"", b"job finished"];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    assert!(core.osc_data.notifications[0].title.is_none(), "empty title → None");
+}
+
+/// OSC 777 with an unknown subcommand (not `"notify"`) must be silently ignored.
+#[test]
+fn test_osc777_unknown_subcommand_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"777", b"bell", b"title", b"body"];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "unknown subcommand → no notification");
+}
+
+/// OSC 777 `notify` with empty body must be silently ignored.
+#[test]
+fn test_osc777_empty_body_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"777", b"notify", b"title", b""];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "empty body → no notification");
+}
+
+/// OSC 777 with missing subcommand param must be silently ignored.
+#[test]
+fn test_osc777_missing_subcommand_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"777"];
+    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
+    assert!(core.osc_data.notifications.is_empty(), "no subcommand → no notification");
+}

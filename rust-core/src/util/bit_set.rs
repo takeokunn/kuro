@@ -320,4 +320,53 @@ mod tests {
         assert!(s2.get(63));
         assert!(!s2.get(64)); // out of range → false
     }
+
+    #[test]
+    fn test_fill_range_basic() {
+        // fill_range(2..5, true) must set bits 2, 3, 4 and leave 0, 1, 5 clear.
+        let mut s = BitSet::new(8);
+        s.fill_range(2..5, true);
+        assert!(!s.get(0));
+        assert!(!s.get(1));
+        assert!(s.get(2));
+        assert!(s.get(3));
+        assert!(s.get(4));
+        assert!(!s.get(5));
+        assert_eq!(s.count_ones(), 3);
+    }
+
+    #[test]
+    fn test_fill_range_empty_range_is_noop() {
+        // fill_range(3..3, true) is an empty range — no bits must be changed.
+        let mut s = BitSet::new(8);
+        s.fill_range(3..3, true);
+        assert_eq!(s.count_ones(), 0, "empty range fill must not set any bits");
+    }
+
+    #[test]
+    fn test_fill_range_clear_subset() {
+        // Set the full range, then clear a sub-range — only those bits must go false.
+        let mut s = BitSet::new(8);
+        s.fill(true);
+        s.fill_range(3..6, false);
+        assert!(s.get(2));
+        assert!(!s.get(3));
+        assert!(!s.get(4));
+        assert!(!s.get(5));
+        assert!(s.get(6));
+        assert_eq!(s.count_ones(), 5);
+    }
+
+    #[test]
+    fn test_fill_range_cross_word_boundary() {
+        // A range spanning from bit 60 to bit 68 crosses the 64-bit word boundary.
+        let mut s = BitSet::new(128);
+        s.fill_range(60..68, true);
+        assert_eq!(s.count_ones(), 8);
+        for i in 60..68 {
+            assert!(s.get(i), "bit {i} must be set");
+        }
+        assert!(!s.get(59), "bit 59 must be clear");
+        assert!(!s.get(68), "bit 68 must be clear");
+    }
 }

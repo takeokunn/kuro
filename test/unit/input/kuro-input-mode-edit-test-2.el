@@ -328,6 +328,78 @@
     (kuro--line-transpose-chars)
     (should (string= kuro--line-buffer "a"))))
 
+;;; Group 42 — kuro--line-yank (C-y)
+
+(ert-deftest kuro-input-mode-test-yank-inserts-top-of-kill-ring ()
+  "`kuro--line-yank' inserts the top kill-ring entry at point."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "ab" kuro--line-point 2)
+    (let ((kill-ring '("XYZ")))
+      (kuro--line-yank)
+      (should (string= kuro--line-buffer "abXYZ"))
+      (should (= kuro--line-point 5)))))
+
+(ert-deftest kuro-input-mode-test-yank-sets-yank-length ()
+  "`kuro--line-yank' sets `kuro--line-yank-length' to the length of the yanked text."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "" kuro--line-point 0)
+    (let ((kill-ring '("hello")))
+      (kuro--line-yank)
+      (should (= kuro--line-yank-length 5)))))
+
+(ert-deftest kuro-input-mode-test-yank-empty-kill-ring-is-noop ()
+  "`kuro--line-yank' displays a message and leaves buffer unchanged when kill ring is empty."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "abc" kuro--line-point 3)
+    (let ((kill-ring nil))
+      (cl-letf (((symbol-function 'message) #'ignore))
+        (kuro--line-yank))
+      (should (string= kuro--line-buffer "abc")))))
+
+(ert-deftest kuro-input-mode-test-yank-at-interior-point ()
+  "`kuro--line-yank' inserts at a mid-buffer point, not necessarily the end."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "ac" kuro--line-point 1)
+    (let ((kill-ring '("b")))
+      (kuro--line-yank)
+      (should (string= kuro--line-buffer "abc"))
+      (should (= kuro--line-point 2)))))
+
+;;; Group 43 — kuro--line-yank-pop (M-y)
+
+(ert-deftest kuro-input-mode-test-yank-pop-replaces-last-yank ()
+  "`kuro--line-yank-pop' replaces the previously yanked region with the next kill."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "" kuro--line-point 0)
+    (let ((kill-ring '("first" "second")) kill-ring-yank-pointer)
+      (kuro--line-yank)
+      (setq last-command 'kuro--line-yank)
+      (kuro--line-yank-pop)
+      (should (string= kuro--line-buffer "second"))
+      (should (= kuro--line-yank-length 6)))))
+
+(ert-deftest kuro-input-mode-test-yank-pop-requires-prior-yank ()
+  "`kuro--line-yank-pop' signals `user-error' when the previous command was not a yank."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "" kuro--line-point 0)
+    (let ((kill-ring '("text")) kill-ring-yank-pointer
+          (last-command 'self-insert-command))
+      (should-error (kuro--line-yank-pop) :type 'user-error))))
+
+(ert-deftest kuro-input-mode-test-yank-pop-chain-accepted ()
+  "`kuro--line-yank-pop' is accepted as previous command for a second invocation.
+`current-kill 1 t' uses do-not-move=t so the kill-ring pointer stays fixed;
+both pops return the same next-kill entry (\"B\"), making the result idempotent."
+  (kuro-input-mode-test--with-edit
+    (setq kuro--line-buffer "" kuro--line-point 0)
+    (let ((kill-ring '("A" "B" "C")) kill-ring-yank-pointer)
+      (kuro--line-yank)
+      (setq last-command 'kuro--line-yank)
+      (kuro--line-yank-pop)
+      (setq last-command 'kuro--line-yank-pop)
+      (kuro--line-yank-pop)
+      (should (string= kuro--line-buffer "B")))))
+
 (provide 'kuro-input-mode-edit-test-2)
 
 ;;; kuro-input-mode-edit-test-2.el ends here

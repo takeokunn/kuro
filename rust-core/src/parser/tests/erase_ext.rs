@@ -349,6 +349,25 @@ fn deccara_oob_coords_clamped() {
     term.advance(b"\x1b[0;0;999;999;1$r");
 }
 
+#[test]
+fn deccara_inverted_rect_is_noop() {
+    // When bottom < top (inverted row order), DECCARA must be a silent no-op.
+    // CSI 4;1;2;5;1 $ r  → top=3, left=0, bottom=1, right=4 (bottom < top).
+    // No cell should become bold.
+    let mut term = crate::TerminalCore::new(5, 10);
+    term.advance(b"\x1b[4;1;2;5;1$r");
+    for r in 0..5usize {
+        if let Some(line) = term.screen.get_line(r) {
+            for c in 0..10usize {
+                assert!(
+                    !line.cells[c].attrs.flags.contains(SgrFlags::BOLD),
+                    "cell ({r},{c}) must not be bold after inverted-rect DECCARA"
+                );
+            }
+        }
+    }
+}
+
 // ── XTPUSHCOLORS / XTPOPCOLORS ─────────────────────────────────────────────
 
 #[test]

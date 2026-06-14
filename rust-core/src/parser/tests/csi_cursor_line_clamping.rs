@@ -289,12 +289,12 @@ test_csi_cursor_moves! {
 }
 
 #[test]
-fn test_csi_rep_does_not_panic() {
-    // REP (CSI 3 b) is not implemented (falls through to `_ => {}`).
-    // Verify that feeding it after a printable character does not panic.
+fn test_csi_rep_repeats_and_advances_cursor() {
+    // REP (CSI 3 b) repeats the last printed character 3 times.
+    // After 'A' at col 0, cursor moves to col 1; REP 3 prints three more 'A's,
+    // leaving the cursor at col 4.
     let mut term = term!(24, 80);
-    term.advance(b"A"); // print 'A'
-    term.advance(b"\x1b[3b"); // REP 3 — silently ignored
-    // The cursor must not have moved back or wrapped in an unexpected way.
-    assert_cursor!(term, row = 0);
+    term.advance(b"A"); // print 'A' at col 0; cursor → col 1
+    term.advance(b"\x1b[3b"); // REP 3 — repeat 'A' at cols 1, 2, 3
+    assert_cursor!(term, 0, 4); // row 0, col 4 after 1 original + 3 repeated
 }

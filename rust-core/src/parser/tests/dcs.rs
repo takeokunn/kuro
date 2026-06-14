@@ -335,3 +335,4 @@ fn test_sixel_empty_data_no_placement() {
 
 
 include!("dcs_xtgettcap.rs");
+include!("dcs_decrqss.rs");

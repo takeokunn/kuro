@@ -276,5 +276,94 @@ fn compute_row_hash_empty_vs_spaces_differ() {
     );
 }
 
+// -------------------------------------------------------------------------
+// compute_row_hash_from_pool / compute_row_hash_from_encoded tests
+// -------------------------------------------------------------------------
+
+/// Same pool data produced twice → identical hashes.
+#[test]
+fn compute_row_hash_from_pool_is_deterministic() {
+    let mut pool = EncodePool::new();
+    pool.text = String::from("hello");
+    pool.face_ranges = vec![(0, 5, 0, 0, 0, 0)];
+    pool.col_to_buf = vec![0, 1, 2, 3, 4];
+    let h1 = compute_row_hash_from_pool(&pool);
+    let h2 = compute_row_hash_from_pool(&pool);
+    assert_eq!(h1, h2, "same pool data must produce identical hashes");
+}
+
+/// Changing `pool.text` must change the hash.
+#[test]
+fn compute_row_hash_from_pool_differs_on_text_change() {
+    let mut pool_a = EncodePool::new();
+    pool_a.text = String::from("abc");
+
+    let mut pool_b = EncodePool::new();
+    pool_b.text = String::from("xyz");
+
+    let ha = compute_row_hash_from_pool(&pool_a);
+    let hb = compute_row_hash_from_pool(&pool_b);
+    assert_ne!(ha, hb, "different text must produce different hashes");
+}
+
+/// Changing `pool.face_ranges` must change the hash.
+#[test]
+fn compute_row_hash_from_pool_differs_on_face_range_change() {
+    let mut pool_a = EncodePool::new();
+    pool_a.text = String::from("x");
+    pool_a.face_ranges = vec![(0, 1, 0xFF_0000, 0, 0, 0)]; // red fg
+
+    let mut pool_b = EncodePool::new();
+    pool_b.text = String::from("x");
+    pool_b.face_ranges = vec![(0, 1, 0x00_FF00, 0, 0, 0)]; // green fg
+
+    let ha = compute_row_hash_from_pool(&pool_a);
+    let hb = compute_row_hash_from_pool(&pool_b);
+    assert_ne!(ha, hb, "different face_ranges must produce different hashes");
+}
+
+/// Same encoded data → identical hashes.
+#[test]
+fn compute_row_hash_from_encoded_is_deterministic() {
+    let text = "world";
+    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[(0, 5, 0, 0, 1, 0)];
+    let ctb: &[usize] = &[0, 1, 2, 3, 4];
+    let h1 = compute_row_hash_from_encoded(text, faces, ctb);
+    let h2 = compute_row_hash_from_encoded(text, faces, ctb);
+    assert_eq!(h1, h2, "same encoded inputs must produce identical hashes");
+}
+
+/// Changing `text` must change the encoded hash.
+#[test]
+fn compute_row_hash_from_encoded_differs_on_text_change() {
+    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[];
+    let ctb: &[usize] = &[];
+    let ha = compute_row_hash_from_encoded("aaa", faces, ctb);
+    let hb = compute_row_hash_from_encoded("bbb", faces, ctb);
+    assert_ne!(ha, hb, "different text must produce different encoded hashes");
+}
+
+/// `compute_row_hash_from_pool` and `compute_row_hash_from_encoded` must agree
+/// when they represent the same data (pool-owned vs. caller-owned post-mem::take).
+#[test]
+fn compute_row_hash_pool_and_encoded_agree() {
+    let text = "rust";
+    let faces: Vec<(usize, usize, u32, u32, u64, u32)> = vec![(0, 4, 1, 2, 0x3, 0)];
+    let ctb: Vec<usize> = vec![0, 1, 2, 3];
+
+    // Build a pool with the same data.
+    let mut pool = EncodePool::new();
+    pool.text = String::from(text);
+    pool.face_ranges = faces.clone();
+    pool.col_to_buf = ctb.clone();
+
+    let h_pool = compute_row_hash_from_pool(&pool);
+    let h_encoded = compute_row_hash_from_encoded(text, &faces, &ctb);
+    assert_eq!(
+        h_pool, h_encoded,
+        "pool-hash and encoded-hash must agree for identical data"
+    );
+}
+
 include!("codec_binary_faces.rs");
 

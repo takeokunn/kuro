@@ -276,6 +276,57 @@ mod tests {
     }
 
     #[test]
+    fn test_is_all_default_true_for_fresh_attrs() {
+        let attrs = SgrAttributes::default();
+        assert!(
+            attrs.is_all_default(),
+            "SgrAttributes::default() must satisfy is_all_default"
+        );
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_flags_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.flags = SgrFlags::BOLD;
+        assert!(!attrs.is_all_default(), "BOLD flag must make is_all_default false");
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_overline_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.overline = true;
+        assert!(!attrs.is_all_default(), "overline must make is_all_default false");
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_foreground_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.foreground = Color::Named(crate::types::NamedColor::Red);
+        assert!(!attrs.is_all_default(), "non-default foreground must make is_all_default false");
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_background_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.background = Color::Indexed(100);
+        assert!(!attrs.is_all_default(), "non-default background must make is_all_default false");
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_underline_color_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.underline_color = Color::Rgb(10, 20, 30);
+        assert!(!attrs.is_all_default(), "non-default underline_color must make is_all_default false");
+    }
+
+    #[test]
+    fn test_is_all_default_false_when_underline_style_set() {
+        let mut attrs = SgrAttributes::default();
+        attrs.underline_style = UnderlineStyle::Curly;
+        assert!(!attrs.is_all_default(), "Curly underline style must make is_all_default false");
+    }
+
+    #[test]
     fn test_sgr_attributes_equality() {
         let a = SgrAttributes {
             flags: SgrFlags::BOLD,

@@ -302,3 +302,47 @@ proptest! {
         }
     }
 }
+
+// -------------------------------------------------------------------------
+// take_dirty_lines_into tests
+// -------------------------------------------------------------------------
+
+/// `take_dirty_lines_into` with full_dirty → fills all row indices and clears.
+#[test]
+fn take_dirty_lines_into_full_dirty_fills_all_rows() {
+    let mut s = Screen::new(4, 80);
+    s.mark_all_dirty();
+    let mut out: Vec<usize> = Vec::new();
+    s.take_dirty_lines_into(&mut out);
+    assert_eq!(out, vec![0, 1, 2, 3], "full_dirty must yield all 4 rows");
+    // second call — no dirty rows
+    s.take_dirty_lines_into(&mut out);
+    assert!(out.is_empty(), "after full_dirty is consumed, out must be empty");
+}
+
+/// `take_dirty_lines_into` with partial dirty → fills only dirty rows.
+#[test]
+fn take_dirty_lines_into_partial_dirty_fills_correct_rows() {
+    let mut s = Screen::new(8, 80);
+    let _ = s.take_dirty_lines(); // consume initial full_dirty
+    s.mark_line_dirty(2);
+    s.mark_line_dirty(5);
+    let mut out: Vec<usize> = vec![99]; // pre-populate to confirm clear
+    s.take_dirty_lines_into(&mut out);
+    assert!(out.contains(&2), "row 2 must be in out");
+    assert!(out.contains(&5), "row 5 must be in out");
+    assert_eq!(out.len(), 2, "out must contain exactly 2 entries");
+    assert!(!out.contains(&99), "take_dirty_lines_into must clear out before filling");
+}
+
+/// After `take_dirty_lines_into`, calling it again returns empty (dirty cleared).
+#[test]
+fn take_dirty_lines_into_clears_after_call() {
+    let mut s = Screen::new(4, 80);
+    s.mark_all_dirty();
+    let mut out: Vec<usize> = Vec::new();
+    s.take_dirty_lines_into(&mut out);
+    assert_eq!(out.len(), 4);
+    s.take_dirty_lines_into(&mut out);
+    assert!(out.is_empty(), "dirty set must be empty after take_dirty_lines_into");
+}

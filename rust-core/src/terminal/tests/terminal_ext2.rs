@@ -246,3 +246,5 @@ fn test_reset_restores_parser_state() {
     );
     assert!(term.print_buf.is_empty(), "reset must clear print_buf");
 }
+
+include!("terminal_ext3.rs");

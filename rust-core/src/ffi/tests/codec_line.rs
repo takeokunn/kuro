@@ -297,3 +297,83 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
         "combining-char grapheme at end must advance buf_offset by its scalar count"
     );
 }
+
+// -------------------------------------------------------------------------
+// encode_line_with_pool tests
+// -------------------------------------------------------------------------
+
+/// Empty slice → all-empty tuple; pool is not mutated in a visible way.
+#[test]
+fn test_encode_line_with_pool_empty() {
+    let mut pool = EncodePool::new();
+    let (text, ranges, ctb) = encode_line_with_pool(&[], false, &mut pool);
+    assert_eq!(text, "");
+    assert!(ranges.is_empty());
+    assert!(ctb.is_empty());
+}
+
+/// Non-empty slice → same output as `encode_line` (which is a thin wrapper).
+#[test]
+fn test_encode_line_with_pool_single_cell_matches_encode_line() {
+    let cell = Cell::new('Q');
+    let mut pool = EncodePool::new();
+    let (text_pool, ranges_pool, ctb_pool) = encode_line_with_pool(&[cell.clone()], false, &mut pool);
+    let (text_line, ranges_line, ctb_line) = encode_line(&[cell]);
+    assert_eq!(text_pool, text_line, "text must match encode_line");
+    assert_eq!(ranges_pool, ranges_line, "face ranges must match encode_line");
+    assert_eq!(ctb_pool, ctb_line, "col_to_buf must match encode_line");
+}
+
+/// After `encode_line_with_pool`, calling it again on a different cell reuses
+/// the pool correctly (pool is cleared and refilled, not accumulated).
+#[test]
+fn test_encode_line_with_pool_reuse_clears_state() {
+    let mut pool = EncodePool::new();
+    let _ = encode_line_with_pool(&[Cell::new('X'), Cell::new('Y')], false, &mut pool);
+    // Second call: a single-cell line must not contain 'X' or 'Y' from the prior call.
+    let (text, ranges, _) = encode_line_with_pool(&[Cell::new('Z')], false, &mut pool);
+    assert_eq!(text, "Z", "pool must be cleared between calls");
+    assert_eq!(ranges.len(), 1, "only one face range for 'Z'");
+}
+
+// -------------------------------------------------------------------------
+// encode_line_into_buf tests
+// -------------------------------------------------------------------------
+
+/// Empty cells → 16-byte empty-row entry in buf; function returns empty string.
+#[test]
+fn test_encode_line_into_buf_empty_cells_writes_16_byte_row() {
+    let mut pool = EncodePool::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let text = encode_line_into_buf(&[], false, &mut pool, 7, &mut buf);
+    assert_eq!(text, "", "empty cells must return empty string");
+    // 16-byte layout: [row_index=7: u32][num_face_ranges=0: u32][text_byte_len=0: u32][col_to_buf_len=0: u32]
+    assert_eq!(buf.len(), 16, "empty cells must produce exactly 16 bytes");
+    assert_eq!(read_u32_le(&buf, 0), 7, "row_index must be encoded at offset 0");
+    assert_eq!(read_u32_le(&buf, 4), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32_le(&buf, 8), 0, "text_byte_len must be 0");
+    assert_eq!(read_u32_le(&buf, 12), 0, "col_to_buf_len must be 0");
+}
+
+/// Non-empty cells → text returned, face ranges serialised into buf at row_index=2.
+#[test]
+fn test_encode_line_into_buf_single_cell_serialises_correctly() {
+    let mut pool = EncodePool::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let cell = Cell::new('H');
+    let text = encode_line_into_buf(&[cell], false, &mut pool, 2, &mut buf);
+    assert_eq!(text, "H", "text must be returned separately");
+    // Layout: [row_index=2: u32][num_face_ranges=1: u32][text_byte_len=0: u32]
+    //         [28-byte face range][col_to_buf_len=0: u32]
+    // Total = 12 + 28 + 4 = 44 bytes
+    assert_eq!(buf.len(), 44, "single cell must produce 44 bytes");
+    assert_eq!(read_u32_le(&buf, 0), 2, "row_index must be 2");
+    assert_eq!(read_u32_le(&buf, 4), 1, "num_face_ranges must be 1");
+    assert_eq!(read_u32_le(&buf, 8), 0, "text_byte_len must always be 0");
+    // The face range starts at buf[12]: start_buf=0, end_buf=1 for 'H'.
+    assert_eq!(read_u32_le(&buf, 12), 0, "face range start_buf must be 0");
+    assert_eq!(read_u32_le(&buf, 16), 1, "face range end_buf must be 1 for single char");
+    // col_to_buf_len at the end: 0 (pure ASCII identity mapping)
+    let col_to_buf_len_offset = 12 + 28;
+    assert_eq!(read_u32_le(&buf, col_to_buf_len_offset), 0, "col_to_buf_len must be 0 for ASCII");
+}

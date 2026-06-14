@@ -297,3 +297,23 @@
         assert!(line.get_cell(0).is_none());
     }
 
+    /// `mark_dirty_and_bump` sets `is_dirty` AND increments `version`.
+    #[test]
+    fn test_mark_dirty_and_bump_sets_dirty_and_increments_version() {
+        let mut line = Line::new(4);
+        let v0 = line.version;
+        line.mark_dirty_and_bump();
+        assert!(line.is_dirty, "mark_dirty_and_bump must set is_dirty");
+        assert_eq!(line.version, v0.wrapping_add(1), "mark_dirty_and_bump must increment version");
+    }
+
+    /// Calling `mark_dirty_and_bump` twice increments version by 2.
+    #[test]
+    fn test_mark_dirty_and_bump_version_wraps() {
+        let mut line = Line::new(4);
+        let v0 = line.version;
+        line.mark_dirty_and_bump();
+        line.mark_dirty_and_bump();
+        assert_eq!(line.version, v0.wrapping_add(2), "two bumps must increment version by 2");
+    }
+

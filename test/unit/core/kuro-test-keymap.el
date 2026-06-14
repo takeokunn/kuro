@@ -4,6 +4,21 @@
 
 (require 'kuro-test-support)
 
+;;; ── Helpers ──────────────────────────────────────────────────────────────────
+
+(defmacro kuro-test-keymap--with-snap (buf-suffix &rest body)
+  "Run BODY with `snap' bound to a fresh edit-scrollback snapshot buffer.
+Creates a kuro-mode buffer named *kuro-test-BUF-SUFFIX*, calls
+`kuro-edit-scrollback', binds `snap' to the resulting snapshot buffer,
+then executes BODY.  Kills `snap' on cleanup if still live."
+  `(kuro-el-test--with-kuro-mode-buffer
+     (rename-buffer ,(concat "*kuro-test-" buf-suffix "*"))
+     (kuro-edit-scrollback)
+     (let ((snap (get-buffer ,(concat "*kuro-scrollback: *kuro-test-" buf-suffix "**"))))
+       (unwind-protect
+           (progn ,@body)
+         (when (buffer-live-p snap) (kill-buffer snap))))))
+
 ;;; ── Group 10 (keymap): kuro-mode-map keymap ─────────────────────────────────
 
 (ert-deftest kuro-el-test--mode-map-is-sparse-keymap ()
@@ -294,13 +309,8 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--edit-scrollback-creates-snapshot-buffer ()
   "kuro-edit-scrollback creates a snapshot buffer named *kuro-scrollback: <name>*."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-snap*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-snap**")))
-      (unwind-protect
-          (should (buffer-live-p snap))
-        (when (buffer-live-p snap) (kill-buffer snap))))))
+  (kuro-test-keymap--with-snap "snap"
+    (should (buffer-live-p snap))))
 
 (ert-deftest kuro-el-test--edit-scrollback-copies-content ()
   "kuro-edit-scrollback snapshot contains the terminal buffer's text."
@@ -318,25 +328,15 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--edit-scrollback-snapshot-is-writable ()
   "The snapshot buffer is not read-only."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-writable*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-writable**")))
-      (unwind-protect
-          (with-current-buffer snap
-            (should-not buffer-read-only))
-        (when (buffer-live-p snap) (kill-buffer snap))))))
+  (kuro-test-keymap--with-snap "writable"
+    (with-current-buffer snap
+      (should-not buffer-read-only))))
 
 (ert-deftest kuro-el-test--edit-scrollback-mode-is-kuro-scrollback-edit ()
   "The snapshot buffer is in `kuro-scrollback-edit-mode'."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-mode*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-mode**")))
-      (unwind-protect
-          (with-current-buffer snap
-            (should (derived-mode-p 'kuro-scrollback-edit-mode)))
-        (when (buffer-live-p snap) (kill-buffer snap))))))
+  (kuro-test-keymap--with-snap "mode"
+    (with-current-buffer snap
+      (should (derived-mode-p 'kuro-scrollback-edit-mode)))))
 
 (ert-deftest kuro-el-test--edit-scrollback-source-buffer-set ()
   "The snapshot buffer stores the source kuro buffer."
@@ -352,67 +352,49 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--scrollback-send-sends-content ()
   "kuro-scrollback-send sends the buffer content to the source PTY."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-send-snap*")
-    (kuro-edit-scrollback)
-    (let* ((snap (get-buffer "*kuro-scrollback: *kuro-test-send-snap**"))
-           (sent nil))
+  (let ((sent nil))
+    (kuro-test-keymap--with-snap "send-snap"
       (with-current-buffer snap
         (erase-buffer)
         (insert "edited content")
         (cl-letf (((symbol-function 'kuro--send-paste-or-raw)
                    (lambda (text) (setq sent text)))
                   ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-          (kuro-scrollback-send)))
-      (should (equal sent "edited content")))))
+          (kuro-scrollback-send))))
+    (should (equal sent "edited content"))))
 
 (ert-deftest kuro-el-test--scrollback-send-kills-snap-buffer ()
   "kuro-scrollback-send closes the snapshot buffer."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-kill-snap*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-kill-snap**")))
-      (with-current-buffer snap
-        (cl-letf (((symbol-function 'kuro--send-paste-or-raw) #'ignore)
-                  ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-          (kuro-scrollback-send)))
-      (should-not (buffer-live-p snap)))))
+  (kuro-test-keymap--with-snap "kill-snap"
+    (with-current-buffer snap
+      (cl-letf (((symbol-function 'kuro--send-paste-or-raw) #'ignore)
+                ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+        (kuro-scrollback-send)))
+    (should-not (buffer-live-p snap))))
 
 (ert-deftest kuro-el-test--scrollback-send-errors-on-dead-source ()
   "kuro-scrollback-send signals user-error if source buffer is dead."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-dead-source*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-dead-source**")))
-      (unwind-protect
-          (with-current-buffer snap
-            ;; Simulate dead source by setting the var to nil
-            (setq kuro-edit-scrollback--source-buffer nil)
-            (should-error (kuro-scrollback-send) :type 'user-error))
-        (when (buffer-live-p snap) (kill-buffer snap))))))
+  (kuro-test-keymap--with-snap "dead-source"
+    (with-current-buffer snap
+      (setq kuro-edit-scrollback--source-buffer nil)
+      (should-error (kuro-scrollback-send) :type 'user-error))))
 
 (ert-deftest kuro-el-test--scrollback-discard-kills-buffer ()
   "kuro-scrollback-discard closes the snapshot without sending."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-discard*")
-    (kuro-edit-scrollback)
-    (let ((snap (get-buffer "*kuro-scrollback: *kuro-test-discard**")))
-      (with-current-buffer snap
-        (kuro-scrollback-discard))
-      (should-not (buffer-live-p snap)))))
+  (kuro-test-keymap--with-snap "discard"
+    (with-current-buffer snap
+      (kuro-scrollback-discard))
+    (should-not (buffer-live-p snap))))
 
 (ert-deftest kuro-el-test--scrollback-discard-emits-message ()
   "kuro-scrollback-discard shows a confirmation message after killing the buffer."
-  (kuro-el-test--with-kuro-mode-buffer
-    (rename-buffer "*kuro-test-discard-msg*")
-    (kuro-edit-scrollback)
-    (let ((msg nil)
-          (snap (get-buffer "*kuro-scrollback: *kuro-test-discard-msg**")))
+  (let ((msg nil))
+    (kuro-test-keymap--with-snap "discard-msg"
       (with-current-buffer snap
         (cl-letf (((symbol-function 'message)
                    (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
-          (kuro-scrollback-discard)))
-      (should (string= msg "kuro: scrollback snapshot discarded")))))
+          (kuro-scrollback-discard))))
+    (should (string= msg "kuro: scrollback snapshot discarded"))))
 
 (ert-deftest kuro-el-test--scrollback-send-errors-outside-edit-mode ()
   "kuro-scrollback-send signals user-error when not in kuro-scrollback-edit-mode."

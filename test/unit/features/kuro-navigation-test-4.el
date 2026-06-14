@@ -267,6 +267,21 @@
         (kuro-command-history))
       (should (cl-some (lambda (m) (string-match-p "no command history" m)) msgs)))))
 
+(ert-deftest kuro-nav-command-history-no-match-is-noop ()
+  "`kuro-command-history' does not navigate when completing-read returns a non-matching string."
+  (kuro-nav-test--with-content
+      "$ cmd\n"
+      (list '("prompt-start" 0 0)
+            '("command-end"  0 0 0))
+    (goto-char (point-max))
+    (let ((recenter-called nil))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) "UNMATCHED STRING"))
+                ((symbol-function 'recenter)
+                 (lambda () (setq recenter-called t))))
+        (kuro-command-history)
+        (should-not recenter-called)))))
+
 
 ;;; Group 15: kuro--def-nav-cmd macro — structural coverage
 

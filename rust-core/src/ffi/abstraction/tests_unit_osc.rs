@@ -144,4 +144,96 @@ fn test_clear_scrollback_idempotent_on_empty() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// get_cwd_host: OSC 7 hostname extraction
+// ---------------------------------------------------------------------------
+
+/// `get_cwd_host` returns `None` on a fresh session (no OSC 7 received).
+#[test]
+fn test_get_cwd_host_none_on_fresh_session() {
+    let session = make_session();
+    assert!(
+        session.get_cwd_host().is_none(),
+        "get_cwd_host must return None when no OSC 7 has been received"
+    );
+}
+
+/// `get_cwd_host` returns `Some(hostname)` after OSC 7 with a non-local host.
+#[test]
+fn test_get_cwd_host_returns_hostname_after_osc7() {
+    let mut session = make_session();
+    session.core.advance(b"\x1b]7;file://remotehost/tmp\x07");
+    let host = session.get_cwd_host();
+    assert_eq!(
+        host.as_deref(),
+        Some("remotehost"),
+        "get_cwd_host must return the hostname from OSC 7, got: {host:?}"
+    );
+}
+
+/// `get_cwd_host` is non-destructive: successive calls return the same value.
+#[test]
+fn test_get_cwd_host_is_non_destructive() {
+    let mut session = make_session();
+    session.core.advance(b"\x1b]7;file://myhost/home\x07");
+    let first = session.get_cwd_host();
+    let second = session.get_cwd_host();
+    assert_eq!(
+        first, second,
+        "get_cwd_host must return the same value on repeated calls (non-destructive)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// get_hyperlink_ranges: cross-row hyperlink extraction
+// ---------------------------------------------------------------------------
+
+/// `get_hyperlink_ranges` returns an empty vec on a fresh terminal (no hyperlinks).
+#[test]
+fn test_get_hyperlink_ranges_empty_on_fresh_terminal() {
+    let session = make_session();
+    let ranges = session.get_hyperlink_ranges();
+    assert!(
+        ranges.is_empty(),
+        "get_hyperlink_ranges must return empty vec when no hyperlinks are set"
+    );
+}
+
+/// `get_hyperlink_ranges` returns one entry per hyperlink run after an OSC 8 link on row 0.
+#[test]
+fn test_get_hyperlink_ranges_single_link_on_row_0() {
+    let mut session = make_session();
+    // OSC 8 hyperlink: open, write 3 chars, close
+    session.core.advance(b"\x1b]8;;https://example.com\x07abc\x1b]8;;\x07");
+    let ranges = session.get_hyperlink_ranges();
+    assert!(
+        !ranges.is_empty(),
+        "get_hyperlink_ranges must return at least one entry after OSC 8"
+    );
+    let (row, _start, _end, uri) = &ranges[0];
+    assert_eq!(*row, 0, "hyperlink on the first row must have row index 0");
+    assert!(
+        uri.contains("example.com"),
+        "URI must contain 'example.com', got: {uri:?}"
+    );
+}
+
+/// `get_hyperlink_ranges` includes `(row, start, end, uri)` tuples where `end > start`.
+#[test]
+fn test_get_hyperlink_ranges_start_less_than_end() {
+    let mut session = make_session();
+    session.core.advance(b"\x1b]8;;https://test.invalid\x07hello\x1b]8;;\x07");
+    let ranges = session.get_hyperlink_ranges();
+    assert!(
+        !ranges.is_empty(),
+        "expected at least one hyperlink range"
+    );
+    for (_, start, end, _) in &ranges {
+        assert!(
+            end > start,
+            "each hyperlink range must satisfy end > start, got start={start} end={end}"
+        );
+    }
+}
+
 include!("tests_unit_isolation.rs");

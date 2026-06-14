@@ -336,6 +336,32 @@ fn osc_133_aid_at_limit_accepted() {
     );
 }
 
+// ── parse_osc133_extras — invalid UTF-8 extra param is silently skipped ──────
+
+/// An extras param containing invalid UTF-8 bytes must be silently skipped.
+///
+/// `parse_osc133_extras` iterates over `params[2..]` and calls
+/// `std::str::from_utf8` on each; the `Err(_) => continue` branch skips
+/// the offending param without corrupting other fields.
+/// This test exercises that branch by injecting a lone 0xFF byte as an extra
+/// alongside a valid `aid=` param that must still be captured.
+#[test]
+fn osc_133_invalid_utf8_extra_is_skipped() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // params: ["133", "A", <0xFF — invalid UTF-8>, "aid=goodid"]
+    let bad: &[u8] = &[0xFF];
+    let params: &[&[u8]] = &[b"133", b"A", bad, b"aid=goodid"];
+    super::handle_osc_133(&mut core, params);
+    assert_eq!(core.osc_data().prompt_marks.len(), 1, "mark must still be pushed");
+    let ev = &core.osc_data().prompt_marks[0];
+    assert_eq!(
+        ev.aid.as_deref(),
+        Some("goodid"),
+        "aid= after the invalid-UTF8 param must still be captured"
+    );
+}
+
 // ── MAX_PENDING_PROMPT_MARKS cap (DoS prevention) ────────────────────────────
 
 /// C4 (V#?): pushing more than `MAX_PENDING_PROMPT_MARKS` prompt-A marks must

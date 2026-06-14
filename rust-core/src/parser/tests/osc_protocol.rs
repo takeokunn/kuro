@@ -426,5 +426,29 @@ fn osc51_empty_command_stored() {
     assert_eq!(core.osc_data().eval_commands[0], "");
 }
 
+/// OSC 51 with no subcommand param at all (`params = ["51"]`) must be a no-op.
+///
+/// Exercises the `if let Some(sub) = params.get(1)` None branch.
+#[test]
+fn osc51_no_subcommand_param_is_noop() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty(), "no subcommand → no eval command");
+}
+
+/// OSC 51 with `e` subcommand but no command param (`params = ["51","e"]`) is a no-op.
+///
+/// Exercises the `if let Some(cmd_raw) = params.get(2)` None branch.
+#[test]
+fn osc51_e_subcommand_no_command_is_noop() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty(), "e without command → no eval command");
+}
+
 
 include!("osc_protocol_osc7.rs");

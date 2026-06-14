@@ -435,3 +435,49 @@ fn xtpopcolors_on_empty_stack_is_noop() {
         "palette must be unchanged after XTPOPCOLORS on empty stack"
     );
 }
+
+#[test]
+fn deccra_zero_row_rect_is_noop() {
+    // DECCRA with src_top > src_bottom (inverted row order) must be a silent
+    // no-op: rect_rows = src_bottom.saturating_sub(src_top) = 0 → early return.
+    // CSI 5;1;3;5;0;1;1$v on a 5x5 terminal:
+    //   src_top=4 (Pt=5), src_bottom=3 (Pb=3) → rect_rows=0.
+    let mut term = crate::TerminalCore::new(5, 5);
+    // Fill row 0 with 'Z' so we can confirm it is unchanged.
+    for c in 0..5usize {
+        if let Some(line) = term.screen.get_line_mut(0) {
+            line.update_cell_with(c, crate::types::Cell::new('Z'));
+        }
+    }
+    term.advance(b"\x1b[5;1;3;5;0;1;1$v");
+    // Destination row 0 must be untouched (the copy was a no-op).
+    for c in 0..5usize {
+        assert_eq!(
+            term.screen.get_cell(0, c).map(|c| c.char()),
+            Some('Z'),
+            "DECCRA zero-row rect must not modify dst cell ({c})"
+        );
+    }
+}
+
+#[test]
+fn deccra_zero_col_rect_is_noop() {
+    // DECCRA with src_left > src_right (inverted col order) must be a no-op:
+    // rect_cols = src_right.saturating_sub(src_left) = 0 → early return.
+    // CSI 1;5;3;3;0;1;1$v on a 5x5 terminal:
+    //   src_left=4 (Pl=5), src_right=3 (Pr=3) → rect_cols=0.
+    let mut term = crate::TerminalCore::new(5, 5);
+    for c in 0..5usize {
+        if let Some(line) = term.screen.get_line_mut(0) {
+            line.update_cell_with(c, crate::types::Cell::new('Q'));
+        }
+    }
+    term.advance(b"\x1b[1;5;3;3;0;1;1$v");
+    for c in 0..5usize {
+        assert_eq!(
+            term.screen.get_cell(0, c).map(|c| c.char()),
+            Some('Q'),
+            "DECCRA zero-col rect must not modify dst cell ({c})"
+        );
+    }
+}

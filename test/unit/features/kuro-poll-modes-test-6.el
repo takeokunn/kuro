@@ -197,5 +197,42 @@
         (should osc-called)))))
 
 
+;;; Group G2: kuro--default-notify D-Bus path
+
+(ert-deftest kuro-poll-modes-default-notify-dbus-success-skips-message ()
+  "`kuro--default-notify' calls `notifications-notify' and skips `message' when D-Bus succeeds."
+  (let (notify-called message-called)
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest _) (setq notify-called t) t))
+              ((symbol-function 'message)
+               (lambda (&rest _) (setq message-called t))))
+      (kuro--default-notify "Title" "Body")
+      (should notify-called)
+      (should-not message-called))))
+
+(ert-deftest kuro-poll-modes-default-notify-dbus-error-falls-back-to-message ()
+  "`kuro--default-notify' falls back to `message' when `notifications-notify' errors."
+  (let ((shown nil))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest _) (error "dbus error")))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq shown (apply #'format fmt args)))))
+      (kuro--default-notify "Title" "Body")
+      (should (equal shown "Title: Body")))))
+
+(ert-deftest kuro-poll-modes-default-notify-dbus-nil-title-uses-default ()
+  "`kuro--default-notify' passes \"kuro\" as title to `notifications-notify' when title is nil."
+  (let ((received-title nil))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args)
+                 (setq received-title (plist-get args :title))
+                 t))
+              ((symbol-function 'message) #'ignore))
+      (kuro--default-notify nil "Body")
+      (should (equal received-title "kuro")))))
+
 (provide 'kuro-poll-modes-test-6)
 ;;; kuro-poll-modes-test-6.el ends here

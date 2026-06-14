@@ -346,5 +346,55 @@ mod tests {
         assert_ne!(a, c);
     }
 
+    // ── SgrFlags primitive methods ──────────────────────────────────────────────
+
+    #[test]
+    fn test_sgr_flags_bits_roundtrip() {
+        // bits() must return the raw u8 stored inside SgrFlags.
+        let flags = SgrFlags::BOLD | SgrFlags::ITALIC;
+        let raw = flags.bits();
+        assert_eq!(SgrFlags::from_bits_truncate(raw), flags,
+            "from_bits_truncate(bits()) must produce the original value");
+    }
+
+    #[test]
+    fn test_sgr_flags_insert_adds_bits() {
+        let mut flags = SgrFlags::BOLD;
+        flags.insert(SgrFlags::ITALIC);
+        assert!(flags.contains(SgrFlags::BOLD),  "BOLD must remain set after insert(ITALIC)");
+        assert!(flags.contains(SgrFlags::ITALIC), "ITALIC must be set after insert(ITALIC)");
+    }
+
+    #[test]
+    fn test_sgr_flags_remove_clears_bits() {
+        let mut flags = SgrFlags::BOLD | SgrFlags::ITALIC;
+        flags.remove(SgrFlags::BOLD);
+        assert!(!flags.contains(SgrFlags::BOLD), "BOLD must be clear after remove(BOLD)");
+        assert!(flags.contains(SgrFlags::ITALIC), "ITALIC must remain after remove(BOLD)");
+    }
+
+    #[test]
+    fn test_sgr_flags_set_true_inserts() {
+        let mut flags = SgrFlags::default();
+        flags.set(SgrFlags::DIM, true);
+        assert!(flags.contains(SgrFlags::DIM), "set(DIM, true) must add the DIM bit");
+    }
+
+    #[test]
+    fn test_sgr_flags_set_false_removes() {
+        let mut flags = SgrFlags::DIM | SgrFlags::BOLD;
+        flags.set(SgrFlags::DIM, false);
+        assert!(!flags.contains(SgrFlags::DIM), "set(DIM, false) must clear the DIM bit");
+        assert!(flags.contains(SgrFlags::BOLD),  "BOLD must be unaffected by set(DIM, false)");
+    }
+
+    #[test]
+    fn test_sgr_flags_from_bits_truncate_preserves_all_bits() {
+        // All 8 bits must survive a round-trip through from_bits_truncate.
+        let raw: u8 = 0b1111_1111;
+        let flags = SgrFlags::from_bits_truncate(raw);
+        assert_eq!(flags.bits(), raw, "all 8 bits must be preserved");
+    }
+
     include!("cell_pbt.rs");
 }

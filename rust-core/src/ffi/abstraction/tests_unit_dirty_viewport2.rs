@@ -1,7 +1,11 @@
+use super::dirty_viewport_support::{
+    assert_scrollback_non_empty, make_viewport_session, scrollback_batch, scrollback_with_marker,
+};
+
 /// `set_detached()` transitions the session state so `is_detached()` returns true.
 #[test]
 fn test_set_detached_changes_state() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     assert!(
         !session.is_detached(),
         "pre-condition: session must be Bound before set_detached()"
@@ -16,7 +20,7 @@ fn test_set_detached_changes_state() {
 /// `set_bound()` after `set_detached()` reverses the state transition.
 #[test]
 fn test_set_bound_reverses_detach() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.set_detached();
     assert!(
         session.is_detached(),
@@ -32,7 +36,7 @@ fn test_set_bound_reverses_detach() {
 /// Multiple `set_detached` calls are idempotent.
 #[test]
 fn test_set_detached_idempotent() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.set_detached();
     session.set_detached(); // second call — must not panic or corrupt state
     assert!(
@@ -49,7 +53,7 @@ fn test_set_detached_idempotent() {
 /// return both with correct index and RGB values.
 #[test]
 fn test_get_palette_updates_multiple_entries() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     // Index 0 → red
     session.core.advance(b"\x1b]4;0;rgb:ff/00/00\x1b\\");
     // Index 1 → green
@@ -79,7 +83,7 @@ fn test_get_palette_updates_multiple_entries() {
 /// Three OSC 4 sequences set three distinct entries; all three must appear.
 #[test]
 fn test_get_palette_updates_three_entries() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.core.advance(b"\x1b]4;0;rgb:ff/00/00\x1b\\"); // red
     session.core.advance(b"\x1b]4;1;rgb:00/ff/00\x1b\\"); // green
     session.core.advance(b"\x1b]4;2;rgb:00/00/ff\x1b\\"); // blue
@@ -115,14 +119,8 @@ fn test_get_palette_updates_three_entries() {
 /// the cumulative number of lines pushed into scrollback.
 #[test]
 fn test_get_scrollback_count_after_multiple_scrolls() {
-    let mut session = make_session();
-
-    // Each batch of 24 newlines on a 24-row terminal pushes exactly 24 rows
-    // into scrollback (the live screen content scrolls off the top).
-    for _ in 0..3 {
-        let newlines = b"\n".repeat(24);
-        session.core.advance(&newlines);
-    }
+    let mut session = make_viewport_session();
+    scrollback_batch(&mut session, 3);
 
     let count = session.get_scrollback_count();
     assert!(
@@ -135,16 +133,14 @@ fn test_get_scrollback_count_after_multiple_scrolls() {
 /// `get_scrollback_count` increases monotonically with each scroll batch.
 #[test]
 fn test_get_scrollback_count_increases_monotonically() {
-    let mut session = make_session();
-
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
+    let mut session = make_viewport_session();
+    scrollback_batch(&mut session, 1);
     let count_after_1 = session.get_scrollback_count();
 
-    session.core.advance(&newlines);
+    scrollback_batch(&mut session, 1);
     let count_after_2 = session.get_scrollback_count();
 
-    session.core.advance(&newlines);
+    scrollback_batch(&mut session, 1);
     let count_after_3 = session.get_scrollback_count();
 
     assert!(
@@ -171,17 +167,11 @@ fn test_get_scrollback_count_increases_monotonically() {
 /// whose content includes text that was pushed into scrollback.
 #[test]
 fn test_viewport_scroll_up_then_lines_appear_in_get_scrollback() {
-    let mut session = make_session();
-
-    // Write a distinctive marker then push it into scrollback with 24 newlines.
-    session.core.advance(b"VISIBLE_IN_SCROLLBACK");
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
-
-    // Confirm scrollback is non-empty before scrolling the viewport.
-    assert!(
-        session.core.screen.scrollback_line_count > 0,
-        "pre-condition: scrollback must be non-empty before viewport_scroll_up"
+    let mut session = make_viewport_session();
+    scrollback_with_marker(&mut session, b"VISIBLE_IN_SCROLLBACK");
+    assert_scrollback_non_empty(
+        &session,
+        "pre-condition: scrollback must be non-empty before viewport_scroll_up",
     );
 
     // Scroll the viewport up — this moves the view into the scrollback region.
@@ -212,7 +202,7 @@ fn test_viewport_scroll_up_then_lines_appear_in_get_scrollback() {
 /// `get_cursor_visible()` must return `true` again.
 #[test]
 fn test_get_cursor_visible_after_show_command() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
 
     // Hide cursor.
     session.core.advance(b"\x1b[?25l");

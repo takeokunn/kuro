@@ -319,20 +319,6 @@
   (should (null (kuro-sessions--entry '(0))))
   (should (null (kuro-sessions--entry '()))))
 
-(defconst kuro-lifecycle-test--session-status-table
-  '((kuro-lifecycle--sessions-entry-running  (5 "fish" nil t)   "running")
-    (kuro-lifecycle--sessions-entry-detached (3 "bash" t   t)   "detached")
-    (kuro-lifecycle--sessions-entry-dead     (7 "zsh"  nil nil) "dead"))
-  "Table: (test-name raw-entry expected-status) for session status conversion.")
-
-(defmacro kuro-lifecycle-test--def-session-status (test-name raw-entry expected-status)
-  "Generate a test verifying `kuro-sessions--entry' produces EXPECTED-STATUS."
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro-sessions--entry' converts session to status %S." expected-status)
-     (let ((row (kuro-sessions--entry ',raw-entry)))
-       (should row)
-       (should (equal (aref (cadr row) 2) ,expected-status)))))
-
 (kuro-lifecycle-test--def-session-status
  kuro-lifecycle--sessions-entry-running  (5 "fish" nil t)   "running")
 (kuro-lifecycle-test--def-session-status

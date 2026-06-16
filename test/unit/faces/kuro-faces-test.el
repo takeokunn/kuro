@@ -11,6 +11,7 @@
 (require 'kuro-faces)
 (require 'kuro-char-width)
 (require 'kuro-overlays)
+(require 'kuro-colors-test-support)
 
 ;;; Group 1: kuro--color-to-emacs
 
@@ -26,10 +27,7 @@
 
 (ert-deftest kuro-faces-color-to-emacs-named-all-16 ()
   "All 16 ANSI named colors resolve to hex strings."
-  (dolist (name '("black" "red" "green" "yellow"
-                  "blue" "magenta" "cyan" "white"
-                  "bright-black" "bright-red" "bright-green" "bright-yellow"
-                  "bright-blue" "bright-magenta" "bright-cyan" "bright-white"))
+  (dolist (name (kuro-colors-test--color-names))
     (let ((result (kuro--color-to-emacs (cons 'named name))))
       (should (stringp result))
       (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" result)))))
@@ -143,10 +141,7 @@
 
 (ert-deftest kuro-faces-decode-ffi-color-named-all-16 ()
   "Named color encoding for all 16 base colors (bit 31 + low byte)."
-  (let ((names ["black" "red" "green" "yellow"
-                "blue" "magenta" "cyan" "white"
-                "bright-black" "bright-red" "bright-green" "bright-yellow"
-                "bright-blue" "bright-magenta" "bright-cyan" "bright-white"]))
+  (let ((names (kuro-colors-test--color-name-vector)))
     (dotimes (i 16)
       (let* ((enc (logior #x80000000 i))
              (result (kuro--decode-ffi-color enc)))

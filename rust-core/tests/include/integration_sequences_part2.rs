@@ -1,3 +1,5 @@
+use super::*;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DECFRA (CSI Pch;Pt;Pl;Pb;Pr $ x) — Fill Rectangular Area
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9,8 +11,11 @@ fn test_decfra_fills_rectangle_with_char() {
     term.advance(b"\x1b[88;1;2;3;5$x");
     for row in 0..3 {
         for col in 1..5 {
-            assert_eq!(term.get_cell(row, col).map(|c| c.char()).unwrap_or('\0'), 'X',
-                "DECFRA: cell ({row},{col}) must be 'X'");
+            assert_eq!(
+                cell_char(&term, row, col),
+                'X',
+                "DECFRA: cell ({row},{col}) must be 'X'"
+            );
         }
     }
 }
@@ -19,7 +24,7 @@ fn test_decfra_fills_rectangle_with_char() {
 fn test_decfra_does_not_panic_out_of_bounds() {
     let mut term = TerminalCore::new(5, 10);
     term.advance(b"\x1b[65;1;1;999;999$x"); // 'A', huge rect
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), 'A');
+    assert_eq!(cell_char(&term, 0, 0), 'A');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +36,7 @@ fn test_decsed_erases_display_without_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     term.advance(b"\x1b[?2J"); // DECSED: erase entire display
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -39,7 +44,7 @@ fn test_decsel_erases_line_without_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     term.advance(b"\x1b[?K"); // DECSEL: erase to end of line
-    assert!(term.cursor_col() < 80);
+    assert_cursor_in_bounds(&term);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,9 +73,9 @@ fn test_sl_shifts_line_content_left() {
     // Scroll left by 3 (CSI 3 SP @)
     term.advance(b"\x1b[3 @");
     // cols 0-6 should be D-J (shifted left), cols 7-9 should be blank
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), 'D');
-    assert_eq!(term.get_cell(0, 6).map(|c| c.char()).unwrap_or('\0'), 'J');
-    assert_eq!(term.get_cell(0, 7).map(|c| c.char()).unwrap_or('\0'), ' ');
+    assert_eq!(cell_char(&term, 0, 0), 'D');
+    assert_eq!(cell_char(&term, 0, 6), 'J');
+    assert_eq!(cell_char(&term, 0, 7), ' ');
 }
 
 #[test]
@@ -81,10 +86,10 @@ fn test_sr_shifts_line_content_right() {
     // Scroll right by 2 (CSI 2 SP A)
     term.advance(b"\x1b[2 A");
     // cols 0-1 should be blank, cols 2-9 should be A-H (shifted right)
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), ' ');
-    assert_eq!(term.get_cell(0, 1).map(|c| c.char()).unwrap_or('\0'), ' ');
-    assert_eq!(term.get_cell(0, 2).map(|c| c.char()).unwrap_or('\0'), 'A');
-    assert_eq!(term.get_cell(0, 9).map(|c| c.char()).unwrap_or('\0'), 'H');
+    assert_eq!(cell_char(&term, 0, 0), ' ');
+    assert_eq!(cell_char(&term, 0, 1), ' ');
+    assert_eq!(cell_char(&term, 0, 2), 'A');
+    assert_eq!(cell_char(&term, 0, 9), 'H');
 }
 
 #[test]
@@ -92,7 +97,7 @@ fn test_sl_does_not_panic_on_large_count() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"Hello");
     term.advance(b"\x1b[999 @"); // huge count — must clamp, not panic
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,18 +133,18 @@ fn test_decic_inserts_blank_column_across_all_rows() {
     term.advance(b"\x1b[1;3H"); // cursor to row 0, col 2 (1-indexed)
     term.advance(b"\x1b[2'}"); // DECIC: insert 2 columns (intermediate = apostrophe 0x27)
     // Row 0: A B _ _ C D E F G H (cols 0-9), where _ is blank
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), 'A');
-    assert_eq!(term.get_cell(0, 1).map(|c| c.char()).unwrap_or('\0'), 'B');
-    assert_eq!(term.get_cell(0, 2).map(|c| c.char()).unwrap_or('\0'), ' ');
-    assert_eq!(term.get_cell(0, 3).map(|c| c.char()).unwrap_or('\0'), ' ');
-    assert_eq!(term.get_cell(0, 4).map(|c| c.char()).unwrap_or('\0'), 'C');
+    assert_eq!(cell_char(&term, 0, 0), 'A');
+    assert_eq!(cell_char(&term, 0, 1), 'B');
+    assert_eq!(cell_char(&term, 0, 2), ' ');
+    assert_eq!(cell_char(&term, 0, 3), ' ');
+    assert_eq!(cell_char(&term, 0, 4), 'C');
 }
 
 #[test]
 fn test_decic_does_not_panic_out_of_bounds() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[999'}"); // huge count (apostrophe intermediate)
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,10 +159,10 @@ fn test_decdc_deletes_column_across_all_rows() {
     term.advance(b"\x1b[1;2H"); // cursor to row 0, col 1 (1-indexed = 0-indexed col 1)
     term.advance(b"\x1b[1'~"); // DECDC: delete 1 column (apostrophe intermediate)
     // Row 0: A C D E F G H I J _ (B deleted, rest shifted left)
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), 'A');
-    assert_eq!(term.get_cell(0, 1).map(|c| c.char()).unwrap_or('\0'), 'C');
-    assert_eq!(term.get_cell(0, 2).map(|c| c.char()).unwrap_or('\0'), 'D');
-    assert_eq!(term.get_cell(0, 9).map(|c| c.char()).unwrap_or('\0'), ' ');
+    assert_eq!(cell_char(&term, 0, 0), 'A');
+    assert_eq!(cell_char(&term, 0, 1), 'C');
+    assert_eq!(cell_char(&term, 0, 2), 'D');
+    assert_eq!(cell_char(&term, 0, 9), ' ');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,15 +182,18 @@ fn test_deccra_copies_rectangle_to_destination() {
     // Try: ESC [ 1 ; 1 ; 1 ; 2 ; 0 ; 3 ; 5 $ v
     term.advance(b"\x1b[1;1HXYXYXYXY"); // refresh source
     term.advance(b"\x1b[1;1;1;2;0;3;5$v"); // DECCRA
-    assert_eq!(term.get_cell(2, 4).map(|c| c.char()).unwrap_or('\0'), 'X',
-        "DECCRA: dst cell must be X");
+    assert_eq!(
+        cell_char(&term, 2, 4),
+        'X',
+        "DECCRA: dst cell must be X"
+    );
 }
 
 #[test]
 fn test_deccra_does_not_panic_out_of_bounds() {
     let mut term = TerminalCore::new(5, 10);
     term.advance(b"\x1b[1;1;999;999;0;1;1$v"); // huge source rect
-    assert!(term.cursor_row() < 5);
+    assert_cursor_in_bounds(&term);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,10 +220,10 @@ fn test_irm_inserts_ascii_chars() {
     term.advance(b"\x1b[1;3H");             // cursor to col 2 (0-indexed)
     term.advance(b"\x1b[4h");              // IRM on
     term.advance(b"X");                    // insert X at col 2 → A B X C D (E pushed off)
-    assert_eq!(term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0'), 'A');
-    assert_eq!(term.get_cell(0, 1).map(|c| c.char()).unwrap_or('\0'), 'B');
-    assert_eq!(term.get_cell(0, 2).map(|c| c.char()).unwrap_or('\0'), 'X');
-    assert_eq!(term.get_cell(0, 3).map(|c| c.char()).unwrap_or('\0'), 'C');
+    assert_eq!(cell_char(&term, 0, 0), 'A');
+    assert_eq!(cell_char(&term, 0, 1), 'B');
+    assert_eq!(cell_char(&term, 0, 2), 'X');
+    assert_eq!(cell_char(&term, 0, 3), 'C');
 }
 
 #[test]
@@ -225,8 +233,8 @@ fn test_irm_reset_restores_replace_mode() {
     term.advance(b"\x1b[4h\x1b[4l"); // IRM on then off
     term.advance(b"\x1b[1;3H");
     term.advance(b"X");               // Replace mode: X overwrites C
-    assert_eq!(term.get_cell(0, 2).map(|c| c.char()).unwrap_or('\0'), 'X');
-    assert_eq!(term.get_cell(0, 3).map(|c| c.char()).unwrap_or('\0'), 'D');
+    assert_eq!(cell_char(&term, 0, 2), 'X');
+    assert_eq!(cell_char(&term, 0, 3), 'D');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,4 +337,5 @@ fn test_xtgettcap_smulx_returns_extended_underline() {
     assert!(resp.contains("1+r"), "Smulx response must be DCS 1+r (known)");
 }
 
-include!("integration_sequences_part2b.rs");
+#[path = "integration_sequences_part2b.rs"]
+mod part2b;

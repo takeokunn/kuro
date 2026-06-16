@@ -4,6 +4,14 @@ use std::sync::Arc;
 
 use crate::types::color::Color;
 
+/// Default color slots handled by OSC 10/11/12 and resets 110/111/112.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DefaultColorSlot {
+    Foreground,
+    Background,
+    Cursor,
+}
+
 /// Prompt mark type for OSC 133 shell integration
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptMark {
@@ -15,6 +23,19 @@ pub enum PromptMark {
     CommandStart,
     /// D - Command end
     CommandEnd,
+}
+
+impl PromptMark {
+    /// Maps an OSC 133 mark byte to a prompt mark variant.
+    pub(crate) fn from_osc_133_mark(mark: u8) -> Option<Self> {
+        match mark {
+            b'A' => Some(Self::PromptStart),
+            b'B' => Some(Self::PromptEnd),
+            b'C' => Some(Self::CommandStart),
+            b'D' => Some(Self::CommandEnd),
+            _ => None,
+        }
+    }
 }
 
 /// Pending prompt mark with position
@@ -43,12 +64,34 @@ pub struct PromptMarkEvent {
     pub(crate) err_path: Option<String>,
 }
 
+impl PromptMarkEvent {
+    /// Creates a prompt-mark event from the parsed OSC 133 payload and cursor position.
+    pub(crate) fn new(
+        mark: PromptMark,
+        row: usize,
+        col: usize,
+        exit_code: Option<i32>,
+        aid: Option<String>,
+        duration_ms: Option<u64>,
+        err_path: Option<String>,
+    ) -> Self {
+        Self {
+            mark,
+            row,
+            col,
+            exit_code,
+            aid,
+            duration_ms,
+            err_path,
+        }
+    }
+}
+
 /// Active hyperlink state for OSC 8
 #[derive(Debug, Clone, Default)]
 pub struct HyperlinkState {
     /// The URI of the hyperlink, or None if no hyperlink is active
-    /// NOTE: kept pub for integration test access (tests/ crate)
-    pub uri: Option<Arc<str>>,
+    pub(crate) uri: Option<Arc<str>>,
 }
 
 /// Clipboard action for OSC 52
@@ -73,27 +116,27 @@ pub struct Notification {
 #[derive(Debug)]
 pub struct OscData {
     /// Current working directory from OSC 7
-    pub cwd: Option<String>,
+    pub(crate) cwd: Option<String>,
     /// Whether cwd has been updated and not yet read
-    pub cwd_dirty: bool,
+    pub(crate) cwd_dirty: bool,
     /// Active hyperlink state from OSC 8
-    pub hyperlink: HyperlinkState,
+    pub(crate) hyperlink: HyperlinkState,
     /// Pending clipboard actions from OSC 52
     pub(crate) clipboard_actions: Vec<ClipboardAction>,
     /// Pending desktop notifications from OSC 9 (iTerm2) / OSC 777
     pub(crate) notifications: Vec<Notification>,
     /// Pending prompt mark events from OSC 133
-    pub prompt_marks: Vec<PromptMarkEvent>,
+    pub(crate) prompt_marks: Vec<PromptMarkEvent>,
     /// Whether the color palette needs to be reset (OSC 104)
     pub(crate) palette_dirty: bool,
     /// Default foreground color from OSC 10
-    pub default_fg: Option<Color>,
+    pub(crate) default_fg: Option<Color>,
     /// Default background color from OSC 11
-    pub default_bg: Option<Color>,
+    pub(crate) default_bg: Option<Color>,
     /// Cursor color from OSC 12
-    pub cursor_color: Option<Color>, // NOTE: kept pub for integration test access (tests/ crate)
+    pub(crate) cursor_color: Option<Color>,
     /// 256-color palette overrides from OSC 4 (index → `[R,G,B]` or `None`=unset)
-    pub palette: Vec<Option<[u8; 3]>>,
+    pub(crate) palette: Vec<Option<[u8; 3]>>,
     /// Pending default-color-change notifications for FFI (fg, bg, cursor)
     pub(crate) default_colors_dirty: bool,
     /// Pending Elisp eval commands from OSC 51 (security: whitelist-filtered on Elisp side)
@@ -106,6 +149,119 @@ pub struct OscData {
     /// Save/restore stack for the 256-color palette (XTPUSHCOLORS / XTPOPCOLORS).
     /// CSI # P pushes; CSI # Q pops and restores palette_dirty; capped at 10.
     pub(crate) palette_stack: Vec<Vec<Option<[u8; 3]>>>,
+}
+
+impl OscData {
+    /// Returns the current working directory reported by OSC 7.
+    pub fn cwd(&self) -> Option<&str> {
+        self.cwd.as_deref()
+    }
+
+    /// Returns whether the current working directory has changed and is unread.
+    pub fn cwd_dirty(&self) -> bool {
+        self.cwd_dirty
+    }
+
+    /// Returns the active OSC 8 hyperlink URI.
+    pub fn hyperlink_uri(&self) -> Option<&str> {
+        self.hyperlink.uri.as_deref()
+    }
+
+    /// Returns the pending OSC 133 prompt marks.
+    pub fn prompt_marks(&self) -> &[PromptMarkEvent] {
+        &self.prompt_marks
+    }
+
+    /// Returns the current OSC 10 default foreground color.
+    pub fn default_fg(&self) -> Option<Color> {
+        self.default_fg
+    }
+
+    /// Returns the current OSC 11 default background color.
+    pub fn default_bg(&self) -> Option<Color> {
+        self.default_bg
+    }
+
+    /// Returns the current OSC 12 cursor color.
+    pub fn cursor_color(&self) -> Option<Color> {
+        self.cursor_color
+    }
+
+    /// Returns the OSC 4 palette overrides.
+    pub fn palette(&self) -> &[Option<[u8; 3]>] {
+        &self.palette
+    }
+
+    /// Resets the entire OSC 4 palette and marks it dirty.
+    pub(crate) fn clear_palette(&mut self) {
+        for entry in &mut self.palette {
+            *entry = None;
+        }
+        self.palette_dirty = true;
+    }
+
+    /// Resets one OSC 4 palette entry and marks the palette dirty.
+    pub(crate) fn clear_palette_entry(&mut self, idx: usize) {
+        if let Some(entry) = self.palette.get_mut(idx) {
+            *entry = None;
+            self.palette_dirty = true;
+        }
+    }
+
+    /// Stores one OSC 4 palette entry and marks the palette dirty.
+    pub(crate) fn set_palette_entry(&mut self, idx: usize, color: [u8; 3]) {
+        if let Some(entry) = self.palette.get_mut(idx) {
+            *entry = Some(color);
+            self.palette_dirty = true;
+        }
+    }
+
+    /// Restores the full OSC 4 palette from a saved snapshot and marks it dirty.
+    pub(crate) fn restore_palette(&mut self, palette: Vec<Option<[u8; 3]>>) {
+        self.palette = palette;
+        self.palette_dirty = true;
+    }
+
+    pub(crate) fn default_color(&self, slot: DefaultColorSlot) -> &Option<Color> {
+        match slot {
+            DefaultColorSlot::Foreground => &self.default_fg,
+            DefaultColorSlot::Background => &self.default_bg,
+            DefaultColorSlot::Cursor => &self.cursor_color,
+        }
+    }
+
+    pub(crate) fn set_default_color(&mut self, slot: DefaultColorSlot, color: Option<Color>) {
+        match slot {
+            DefaultColorSlot::Foreground => self.default_fg = color,
+            DefaultColorSlot::Background => self.default_bg = color,
+            DefaultColorSlot::Cursor => self.cursor_color = color,
+        }
+        self.default_colors_dirty = true;
+    }
+
+    pub(crate) fn reset_default_color(&mut self, slot: DefaultColorSlot) {
+        self.set_default_color(slot, None);
+    }
+
+    pub(crate) fn default_color_rgb(&self, slot: DefaultColorSlot) -> [u8; 3] {
+        match self.default_color(slot) {
+            Some(Color::Rgb(r, g, b)) => [*r, *g, *b],
+            _ => [128, 128, 128],
+        }
+    }
+
+    /// Pushes an OSC 133 prompt mark if the queue has not reached `max_pending`.
+    pub(crate) fn push_prompt_mark(
+        &mut self,
+        event: PromptMarkEvent,
+        max_pending: usize,
+    ) -> bool {
+        if self.prompt_marks.len() >= max_pending {
+            return false;
+        }
+        self.prompt_marks.push(event);
+        true
+    }
 }
 
 impl Default for OscData {
@@ -131,8 +287,6 @@ impl Default for OscData {
     }
 }
 
-
 #[cfg(test)]
-mod tests {
-    include!("osc_tests.rs");
-}
+#[path = "osc/tests.rs"]
+mod tests;

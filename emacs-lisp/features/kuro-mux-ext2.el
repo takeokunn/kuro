@@ -12,6 +12,7 @@
 ;;; Code:
 
 (declare-function kuro-mux--live-sessions      "kuro-mux" ())
+(declare-function kuro-mux--for-each-live-session "kuro-mux" (fn &optional exclude))
 (declare-function kuro-mux--install-hooks      "kuro-mux-ext" ())
 (declare-function kuro-mux--register           "kuro-mux" ())
 (declare-function kuro-mux-install-mode-line   "kuro-mux" ())
@@ -124,11 +125,11 @@ Signals `user-error' if the layout file does not exist."
   (interactive)
   (let ((layout (kuro-mux--read-layout-file)))
     (unless layout
-      (user-error "kuro-mux: no layout file found at %s"
+      (user-error "Kuro-mux: no layout file found at %s"
                   kuro-mux-layout-file))
     ;; layout = (kuro-mux-layout :name N :command C :directory D ...)
     (unless (eq (car layout) 'kuro-mux-layout)
-      (user-error "kuro-mux: invalid layout file format"))
+      (user-error "Kuro-mux: invalid layout file format"))
     (let* ((raw   (cdr layout))
            (specs (kuro-mux--parse-layout-plists raw)))
       (dolist (spec specs)
@@ -176,9 +177,10 @@ or missing :command) are silently dropped."
   "Arrow resize entries (key direction delta) for `kuro-mux-prefix-map'.")
 
 (defvar kuro-mux-prefix-map
-  (let ((map (make-sparse-keymap)))
-    (dolist (b kuro-mux--prefix-bindings)
-      (define-key map (kbd (car b)) (cdr b)))
+  (let ((map (kuro--build-keymap-from-alist kuro-mux--prefix-bindings
+                                            (lambda (binding)
+                                              (kbd (car binding)))
+                                            #'cdr)))
     (dotimes (i 9)
       (let ((n (1+ i)))
         (define-key map (kbd (number-to-string n))
@@ -193,11 +195,11 @@ Bound under `kuro-mux-prefix-key' by `kuro-mux-install-keys'.
 See `kuro-mux--prefix-bindings' for the full command table.")
 
 (defcustom kuro-mux-prefix-key "C-c m"
-  "Key sequence (a `kbd' string) under which `kuro-mux-prefix-map' is bound.
-Used by `kuro-mux-install-keys'.  The default \"C-c m\" coexists with the
-existing kuro-mode `C-c C-x' terminal bindings because the prefix uses a
-plain letter, not a control character, after C-c.
-Changing this after `kuro-mux-install-keys' has run requires re-running it."
+  "Key sequence under which `kuro-mux-prefix-map' is bound.
+The value is a `kbd' string used by `kuro-mux-install-keys'.  The default
+coexists with the existing terminal-control bindings because the prefix ends
+with a plain letter rather than another control character.  Changing this
+after `kuro-mux-install-keys' has run requires re-running it."
   :type 'string
   :group 'kuro)
 
@@ -218,7 +220,7 @@ in every kuro terminal buffer.  Call this once after loading kuro, e.g.
 from `kuro-mux-setup' or your init file.  Returns the keymap modified."
   (let ((map (or keymap (and (boundp 'kuro-mode-map) kuro-mode-map))))
     (unless (keymapp map)
-      (user-error "kuro-mux-install-keys: no valid keymap to bind into"))
+      (user-error "Kuro-mux-install-keys: no valid keymap to bind into"))
     (define-key map (kbd kuro-mux-prefix-key) kuro-mux-prefix-map)
     map))
 
@@ -264,10 +266,11 @@ progress (`kuro-mux--broadcasting' non-nil)."
   (when (and kuro-mux--broadcast-mode (not kuro-mux--broadcasting))
     (let ((kuro-mux--broadcasting t)
           (origin (current-buffer)))
-      (dolist (buf (kuro-mux--live-sessions))
-        (unless (eq buf origin)
-          (with-current-buffer buf
-            (kuro--send-paste-or-raw text)))))))
+      (kuro-mux--for-each-live-session
+       (lambda (buf)
+         (with-current-buffer buf
+           (kuro--send-paste-or-raw text)))
+       origin))))
 
 ;;;###autoload
 (defun kuro-mux-broadcast-toggle ()

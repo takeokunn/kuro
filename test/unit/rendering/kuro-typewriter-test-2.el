@@ -138,38 +138,7 @@
 
 ;;; Group 9: defcustom defaults and rate calculation
 
-(ert-deftest kuro-typewriter-negative-cps-clamped-to-one ()
-  "kuro--start-typewriter-timer clamps negative CPS to 1 via (max 1 cps).
-When kuro-typewriter-chars-per-second is -5, interval = 1.0/max(1,-5) = 1.0.
-The result must be exactly 1.0 (not negative, not infinite)."
-  (kuro-typewriter-test--with-buffer
-    (let ((kuro-typewriter-effect t)
-          (kuro-typewriter-chars-per-second -5)
-          (captured nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay _repeat _fn)
-                   (setq captured delay)
-                   'fake-timer)))
-        (kuro--start-typewriter-timer)
-        ;; max(1, -5) = 1, so interval = 1.0/1 = 1.0
-        (should (floatp captured))
-        (should (< (abs (- captured 1.0)) 1e-10))))))
-
-(ert-deftest kuro-typewriter-large-cps-produces-small-interval ()
-  "kuro--start-typewriter-timer with 1000 CPS produces interval ≈ 0.001 seconds.
-Verifies that large CPS values are NOT clamped and produce sub-millisecond intervals."
-  (kuro-typewriter-test--with-buffer
-    (let ((kuro-typewriter-effect t)
-          (kuro-typewriter-chars-per-second 1000)
-          (captured nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay _repeat _fn)
-                   (setq captured delay)
-                   'fake-timer)))
-        (kuro--start-typewriter-timer)
-        ;; 1.0 / 1000 = 0.001
-        (should (floatp captured))
-        (should (< (abs (- captured 0.001)) 1e-10))))))
+(kuro-typewriter-test--deftest-timer-interval-cases)
 
 (ert-deftest kuro-typewriter-tick-with-nil-current-text-dequeues-next ()
   "kuro--typewriter-tick with nil current-text but non-empty queue dequeues next item.
@@ -180,61 +149,12 @@ kuro--typewriter-queue-next fires and sets state from the queued item."
           kuro--typewriter-current-text nil
           kuro--typewriter-written-len 0
           kuro--typewriter-queue (list (cons 3 "dequeued")))
-    (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
-               (lambda (_row _text) (error "write-partial must not be called on dequeue tick"))))
+    (kuro-typewriter-test--with-write-partial-log write-calls
       (kuro--typewriter-tick)
-      ;; queue-next should have dequeued (3 . "dequeued") and set state
-      (should (= kuro--typewriter-current-row 3))
-      (should (equal kuro--typewriter-current-text "dequeued"))
-      (should (= kuro--typewriter-written-len 0))
-      (should (null kuro--typewriter-queue)))))
+      (should (null write-calls))
+      (kuro-typewriter-test--assert-state 3 "dequeued" 0 nil))))
 
-(ert-deftest kuro-typewriter-effect-default-is-nil ()
-  "kuro-typewriter-effect default value must be nil (effect is opt-in)."
-  (should (null (default-value 'kuro-typewriter-effect))))
-
-(ert-deftest kuro-typewriter-chars-per-second-default-is-positive ()
-  "kuro-typewriter-chars-per-second default must be a positive integer."
-  (let ((val (default-value 'kuro-typewriter-chars-per-second)))
-    (should (integerp val))
-    (should (> val 0))))
-
-(ert-deftest kuro-typewriter-chars-per-second-default-is-120 ()
-  "kuro-typewriter-chars-per-second default must be 120."
-  (should (= (default-value 'kuro-typewriter-chars-per-second) 120)))
-
-(ert-deftest kuro-typewriter-start-timer-uses-chars-per-second-for-interval ()
-  "kuro--start-typewriter-timer uses 1.0/kuro-typewriter-chars-per-second as interval.
-At 60 cps the interval should be 1/60 seconds."
-  (kuro-typewriter-test--with-buffer
-    (let ((kuro-typewriter-effect t)
-          (kuro-typewriter-chars-per-second 60)
-          (captured nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay repeat fn)
-                   (setq captured (list delay repeat fn))
-                   'fake-timer)))
-        (kuro--start-typewriter-timer)
-        (should captured)
-        (let ((interval (car captured)))
-          (should (floatp interval))
-          (should (< (abs (- interval (/ 1.0 60))) 1e-10)))))))
-
-(ert-deftest kuro-typewriter-start-timer-clamps-zero-cps-to-one ()
-  "kuro--start-typewriter-timer uses max 1 as minimum CPS denominator.
-When kuro-typewriter-chars-per-second is 0, interval = 1.0/max(1,0) = 1.0."
-  (kuro-typewriter-test--with-buffer
-    (let ((kuro-typewriter-effect t)
-          (kuro-typewriter-chars-per-second 0)
-          (captured nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay _repeat _fn)
-                   (setq captured delay)
-                   'fake-timer)))
-        (kuro--start-typewriter-timer)
-        ;; max(1, 0) = 1, so interval = 1.0
-        (should (floatp captured))
-        (should (< (abs (- captured 1.0)) 1e-10))))))
+(kuro-typewriter-test--deftest-default-value-cases)
 
 (provide 'kuro-typewriter-test-2)
 

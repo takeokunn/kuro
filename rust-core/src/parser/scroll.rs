@@ -24,8 +24,8 @@ pub fn handle_ri(term: &mut crate::TerminalCore) {
 /// - SD (CSI T): Scroll Down
 pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: char) {
     match c {
-        'r' => csi_decstbm(term, params), // DECSTBM
-        'S' => csi_su(term, params),      // SU - Scroll Up
+        'r' => csi_decstbm(term, params),  // DECSTBM
+        'S' => csi_su(term, params),       // SU - Scroll Up
         'T' | '^' => csi_sd(term, params), // SD - Scroll Down (^ = MINTTY alternate)
         _ => {}
     }
@@ -83,36 +83,30 @@ fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
     // If invalid, ignore the sequence (DEC behavior)
 }
 
-fn csi_su(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
+fn scroll_param_amount(params: &vte::Params) -> usize {
+    params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
-        .unwrap_or(1);
+        .unwrap_or(1)
+        .max(1) as usize
+}
 
-    // Ensure minimum scroll of 1 line
-    let n = n.max(1);
+fn csi_su(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = scroll_param_amount(params);
 
     // Scroll up (content moves down), applying BCE background to new blank lines
     term.screen
-        .scroll_up(n as usize, term.current_attrs.background);
+        .scroll_up(n, term.current_attrs.background);
 }
 
 fn csi_sd(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1);
-
-    // Ensure minimum scroll of 1 line
-    let n = n.max(1);
+    let n = scroll_param_amount(params);
 
     // Scroll down (content moves up), applying BCE background to new blank lines
     term.screen
-        .scroll_down(n as usize, term.current_attrs.background);
+        .scroll_down(n, term.current_attrs.background);
 }
 
 /// SL — Scroll Left (CSI Ps SP @)

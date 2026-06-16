@@ -7,75 +7,22 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-url-detect)
-
-;;; Helpers
-
-(defmacro kuro-url-detect-test--with-buffer (&rest body)
-  "Run BODY in a temp buffer with URL detection state initialized to defaults.
-Sets the following buffer-local variables:
-  `kuro--url-overlays' nil (no active overlays)
-  `kuro--url-detect-timer' nil (no active timer)
-  `kuro-url-detection' t (URL detection enabled)
-  `kuro-file-line-detection' t (file:line detection enabled)
-  `inhibit-read-only' t (allows buffer modification in tests)"
-  `(with-temp-buffer
-     (let ((inhibit-read-only t)
-           (kuro--url-overlays nil)
-           (kuro--url-detect-timer nil)
-           (kuro-url-detection t)
-           (kuro-file-line-detection t))
-       ,@body)))
+(require 'kuro-url-detect-test-support)
 
 ;;; Group 1: kuro--url-regexp matching
 
-(defmacro kuro-url-detect-test--def-url-match (test-name url)
-  "Generate an ERT test asserting that kuro--url-regexp matches URL."
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--url-regexp' matches `%s'." url)
-     (should (string-match kuro--url-regexp ,url))))
-
-(kuro-url-detect-test--def-url-match kuro-url-detect--regexp-matches-http
-                                     "http://example.com")
-(kuro-url-detect-test--def-url-match kuro-url-detect--regexp-matches-https
-                                     "https://example.com")
-(kuro-url-detect-test--def-url-match kuro-url-detect--regexp-matches-url-with-path
-                                     "https://example.com/path/to/page")
-(kuro-url-detect-test--def-url-match kuro-url-detect--regexp-matches-url-with-query
-                                     "https://example.com/search?q=test&page=1")
+(kuro-url-detect-test--deftest-url-matches
+  kuro-url-detect-test--url-match-cases)
 
 ;;; Group 2: kuro--url-regexp trailing punctuation exclusion
 
-(defmacro kuro-url-detect-test--def-trailing-punct (test-name input expected)
-  "Generate an ERT test asserting that kuro--url-regexp excludes trailing punctuation.
-INPUT is the full string containing the URL; EXPECTED is the URL without the punct."
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--url-regexp' excludes trailing punctuation in `%s'." input)
-     (string-match kuro--url-regexp ,input)
-     (should (string= (match-string 0 ,input) ,expected))))
-
-(kuro-url-detect-test--def-trailing-punct
- kuro-url-detect--regexp-excludes-trailing-period
- "Visit https://example.com." "https://example.com")
-(kuro-url-detect-test--def-trailing-punct
- kuro-url-detect--regexp-excludes-trailing-comma
- "See https://example.com, then" "https://example.com")
-(kuro-url-detect-test--def-trailing-punct
- kuro-url-detect--regexp-excludes-trailing-exclamation
- "Check https://example.com!" "https://example.com")
+(kuro-url-detect-test--deftest-trailing-punctuation
+  kuro-url-detect-test--trailing-punctuation-cases)
 
 ;;; Group 3: kuro--file-line-regexp matching
 
-(defmacro kuro-url-detect-test--def-file-line-match (test-name input)
-  "Generate an ERT test asserting kuro--file-line-regexp matches INPUT."
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--file-line-regexp' matches `%s'." input)
-     (should (string-match kuro--file-line-regexp ,input))))
-
-(kuro-url-detect-test--def-file-line-match
- kuro-url-detect--file-line-regexp-matches-absolute-path "/home/user/file.rs:42")
+(kuro-url-detect-test--deftest-file-line-matches
+  kuro-url-detect-test--file-line-match-cases)
 
 (ert-deftest kuro-url-detect--file-line-regexp-captures-file ()
   "kuro--file-line-regexp group 1 captures the file path."
@@ -269,35 +216,10 @@ INPUT is the full string containing the URL; EXPECTED is the URL without the pun
 
 ;;; Group 10: defcustom defaults
 
-(ert-deftest kuro-url-detect--url-detection-default-t ()
-  "kuro-url-detection defcustom defaults to t."
-  (should (eq (default-value 'kuro-url-detection) t)))
-
-(ert-deftest kuro-url-detect--file-line-detection-default-t ()
-  "kuro-file-line-detection defcustom defaults to t."
-  (should (eq (default-value 'kuro-file-line-detection) t)))
-
-(ert-deftest kuro-url-detect--detection-delay-default ()
-  "kuro-url-detection-delay defcustom defaults to 0.5."
-  (should (= (default-value 'kuro-url-detection-delay) 0.5)))
-
+(kuro-url-detect-test--deftest-defcustom-defaults
+  kuro-url-detect-test--defcustom-default-cases)
 
 ;;; Group 11: kuro--url-detect-visible
-
-(defmacro kuro-url-detect-test--with-kuro-visible (&rest body)
-  "Run BODY in a url-detect buffer mocked as kuro-mode with full-window scan.
-`derived-mode-p' returns t, `window-start'/`window-end' cover the full buffer,
-`kuro--scan-urls-in-region' is stubbed to a no-op unless overridden."
-  `(kuro-url-detect-test--with-buffer
-     (cl-letf (((symbol-function 'derived-mode-p)
-                (lambda (&rest _) t))
-               ((symbol-function 'window-start)
-                (lambda () (point-min)))
-               ((symbol-function 'window-end)
-                (lambda (_w _u) (point-max)))
-               ((symbol-function 'kuro--scan-urls-in-region)
-                (lambda (_s _e) nil)))
-       ,@body)))
 
 (ert-deftest kuro-url-detect--visible-skips-when-not-kuro-mode ()
   "`kuro--url-detect-visible' does nothing when `derived-mode-p' returns nil."
@@ -321,31 +243,8 @@ INPUT is the full string containing the URL; EXPECTED is the URL without the pun
         (kuro--url-detect-visible)
         (should-not scanned)))))
 
-(defconst kuro-url-detect-test--detection-flag-table
-  '((kuro-url-detect--visible-proceeds-when-url-only   t   nil)
-    (kuro-url-detect--visible-proceeds-when-file-only  nil t))
-  "Table: (test-name url-flag file-flag) — each enables scan via one flag.")
-
-(defmacro kuro-url-detect-test--def-detection-proceeds (test-name url-flag file-flag)
-  "Generate a test verifying `kuro--url-detect-visible' scans when flags allow it."
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--url-detect-visible' scans when url=%s file-line=%s." url-flag file-flag)
-     (kuro-url-detect-test--with-buffer
-       (let ((kuro-url-detection ,url-flag)
-             (kuro-file-line-detection ,file-flag)
-             (scanned nil))
-         (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-                   ((symbol-function 'window-start) (lambda () (point-min)))
-                   ((symbol-function 'window-end)   (lambda (_w _u) (point-max)))
-                   ((symbol-function 'kuro--scan-urls-in-region)
-                    (lambda (&rest _) (setq scanned t))))
-           (kuro--url-detect-visible)
-           (should scanned))))))
-
-(kuro-url-detect-test--def-detection-proceeds
- kuro-url-detect--visible-proceeds-when-url-only  t   nil)
-(kuro-url-detect-test--def-detection-proceeds
- kuro-url-detect--visible-proceeds-when-file-only nil t)
+(kuro-url-detect-test--deftest-detection-proceeds
+  kuro-url-detect-test--detection-flag-table)
 
 (ert-deftest kuro-url-detect--visible-detection-flag-invariant ()
   "Invariant: `kuro--url-detect-visible' scans for every entry in detection table."

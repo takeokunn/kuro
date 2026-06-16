@@ -164,9 +164,15 @@ fn test_xtgettcap_odd_length_hex_is_skipped() {
 // `test_xtgettcap!(payload => success hex)`: ESC P 1 + r prefix + hex echo.
 
 /// "Tc" (true-color flag) — hex "5463".
-#[test] fn test_xtgettcap_truecolor_flag_response()    { test_xtgettcap!(b"5463"         => success "5463"); }
+#[test]
+fn test_xtgettcap_truecolor_flag_response() {
+    test_xtgettcap!(b"5463"         => success "5463");
+}
 /// "colors" (256-colour count) — hex "636f6c6f7273".
-#[test] fn test_xtgettcap_colors_capability_response() { test_xtgettcap!(b"636f6c6f7273" => success "636f6c6f7273"); }
+#[test]
+fn test_xtgettcap_colors_capability_response() {
+    test_xtgettcap!(b"636f6c6f7273" => success "636f6c6f7273");
+}
 
 /// XTGETTCAP for "E3" (clear-scrollback) must report the `CSI 3 J` sequence so
 /// tmux knows it can clear the host scrollback.
@@ -239,17 +245,35 @@ fn test_xtgettcap_multiple_unknown_capabilities() {
 // ── Single-capability XTGETTCAP: terminfo / key capabilities ─────────────────
 
 /// `Ts` (strikethrough set) — hex "5473"; response echoes "5473=".
-#[test] fn test_xtgettcap_strikethrough_ts() { test_xtgettcap!(b"5473"           => success "5473="); }
+#[test]
+fn test_xtgettcap_strikethrough_ts() {
+    test_xtgettcap!(b"5473"           => success "5473=");
+}
 /// `Te` (strikethrough reset) — hex "5465".
-#[test] fn test_xtgettcap_strikethrough_te() { test_xtgettcap!(b"5465"           => success "5465"); }
+#[test]
+fn test_xtgettcap_strikethrough_te() {
+    test_xtgettcap!(b"5465"           => success "5465");
+}
 /// `setrgbf` (truecolor fg terminfo) — hex "73657472676266".
-#[test] fn test_xtgettcap_setrgbf()          { test_xtgettcap!(b"73657472676266" => success "73657472676266"); }
+#[test]
+fn test_xtgettcap_setrgbf() {
+    test_xtgettcap!(b"73657472676266" => success "73657472676266");
+}
 /// `setrgbb` (truecolor bg terminfo) — hex "73657472676262".
-#[test] fn test_xtgettcap_setrgbb()          { test_xtgettcap!(b"73657472676262" => success "73657472676262"); }
+#[test]
+fn test_xtgettcap_setrgbb() {
+    test_xtgettcap!(b"73657472676262" => success "73657472676262");
+}
 /// `kbs` (backspace key) — hex "6B6273".
-#[test] fn test_xtgettcap_kbs()              { test_xtgettcap!(b"6B6273"         => success "6B6273"); }
+#[test]
+fn test_xtgettcap_kbs() {
+    test_xtgettcap!(b"6B6273"         => success "6B6273");
+}
 /// `Sync` (synchronized output) — hex "53796E63".
-#[test] fn test_xtgettcap_sync()             { test_xtgettcap!(b"53796E63"       => success "53796E63"); }
+#[test]
+fn test_xtgettcap_sync() {
+    test_xtgettcap!(b"53796E63"       => success "53796E63");
+}
 
 /// A Sixel DCS sequence with valid pixel data must produce exactly one image
 /// placement notification.
@@ -333,6 +357,8 @@ fn test_sixel_empty_data_no_placement() {
     );
 }
 
+#[path = "dcs/xtgettcap.rs"]
+mod xtgettcap;
 
-include!("dcs_xtgettcap.rs");
-include!("dcs_decrqss.rs");
+#[path = "dcs/decrqss.rs"]
+mod decrqss;

@@ -1,3 +1,5 @@
+use super::*;
+
 // === Modern Terminal Features (continued) ===
 
 // DEC private mode toggles: `vt_dec_toggle!` defined in vt_compliance.rs parent.

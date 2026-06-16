@@ -411,6 +411,14 @@ fn test_sync_output_cursor_movement_inside_batch() {
     term.advance(b"\x1b[?2026l");
 }
 
-include!("include/integration_dec_inband_resize.rs");
-include!("include/integration_dec_sync_output.rs");
-include!("include/integration_dec_reverse_video.rs");
+#[path = "include/integration_dec_inband_resize.rs"]
+mod inband_resize;
+
+#[path = "include/integration_dec_sync_output.rs"]
+mod sync_output;
+
+#[path = "include/integration_dec_reverse_video.rs"]
+mod reverse_video;
+
+#[path = "include/integration_dec_focus_events.rs"]
+mod focus_events;

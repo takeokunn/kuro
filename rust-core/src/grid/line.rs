@@ -196,40 +196,5 @@ impl fmt::Display for Line {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::cell::SgrFlags;
-
-    #[test]
-    fn line_new_is_not_wrapped() {
-        assert!(!Line::new(10).wrapped);
-    }
-
-    #[test]
-    fn line_clear_resets_wrapped() {
-        let mut line = Line::new(10);
-        line.wrapped = true;
-        line.clear();
-        assert!(!line.wrapped);
-    }
-
-    #[test]
-    fn line_clear_with_bg_resets_wrapped() {
-        let mut line = Line::new(10);
-        line.wrapped = true;
-        line.clear_with_bg(Color::Default);
-        assert!(!line.wrapped);
-    }
-
-    #[test]
-    fn line_resize_resets_wrapped() {
-        let mut line = Line::new(10);
-        line.wrapped = true;
-        line.resize(5);
-        assert!(!line.wrapped);
-    }
-
-    include!("line_tests.rs");
-    include!("line_pbt.rs");
-
-}
+#[path = "line/tests.rs"]
+mod tests;

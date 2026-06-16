@@ -1,3 +1,5 @@
+use super::*;
+
 /// Simulates the exact startup sequence that claude-code sends.
 ///
 /// claude-code sends:

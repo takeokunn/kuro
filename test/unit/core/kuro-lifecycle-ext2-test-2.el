@@ -135,23 +135,6 @@
 ;; test 5 temporarily binds noninteractive to nil to exercise the live-mode
 ;; branch.
 
-(defmacro kuro-lifecycle-test--with-create-stubs (&rest body)
-  "Run BODY with every kuro-create side-effecting helper stubbed.
-Stubs kuro--ensure-module-loaded, kuro-mode, kuro--prefill-buffer,
-kuro--init-session-buffer, kuro--start-render-loop, and
-kuro--schedule-initial-render as no-ops so the test controls only
-`kuro--init' behaviour.  Override individual stubs inside BODY via
-`cl-letf'."
-  `(cl-letf (((symbol-function 'kuro--ensure-module-loaded)   #'ignore)
-             ((symbol-function 'kuro-mode)
-              (lambda () (setq major-mode 'kuro-mode)))
-             ((symbol-function 'kuro--prefill-buffer)          #'ignore)
-             ((symbol-function 'kuro--init-session-buffer)     #'ignore)
-             ((symbol-function 'kuro--start-render-loop)       #'ignore)
-             ((symbol-function 'kuro--schedule-initial-render) #'ignore)
-             ((symbol-function 'message)                       #'ignore))
-     ,@body))
-
 (ert-deftest kuro-lifecycle--create-init-failure-returns-nil ()
   "kuro-create returns nil when kuro--init returns nil.
 The buffer is still created; the return value of kuro-create should be

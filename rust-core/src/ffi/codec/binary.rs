@@ -8,7 +8,7 @@
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
-use super::line::{write_face_range, EncodedLine, EncodePool};
+use super::line::{encode_line_into_buf, write_face_range, EncodePool, EncodedLine};
 
 /// Current binary frame format version.
 ///
@@ -141,6 +141,24 @@ pub(crate) fn compute_row_hash_from_pool(pool: &EncodePool) -> u64 {
     pool.face_ranges.hash(&mut h);
     pool.col_to_buf.hash(&mut h);
     h.finish()
+}
+
+/// Encode a dirty row into the binary frame buffer and compute its hash.
+///
+/// This keeps the "emit row + update row hash" pairing in one place while
+/// preserving the borrow-friendly `EncodePool` / `Vec<u8>` call shape needed by
+/// `dirty.rs`.
+#[inline]
+pub(crate) fn encode_line_into_buf_and_hash(
+    cells: &[crate::types::cell::Cell],
+    has_wide: bool,
+    pool: &mut EncodePool,
+    row_index: usize,
+    buf: &mut Vec<u8>,
+) -> (String, u64) {
+    let text = encode_line_into_buf(cells, has_wide, pool, row_index, buf);
+    let hash = compute_row_hash_from_pool(pool);
+    (text, hash)
 }
 
 /// Hash already-returned encoded line data.

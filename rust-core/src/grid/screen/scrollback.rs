@@ -2,18 +2,45 @@
 
 use super::{Line, Screen};
 
+#[inline]
+fn trim_scrollback_to_max(screen: &mut Screen) {
+    while screen.scrollback_line_count > screen.scrollback_max_lines {
+        if screen.scrollback_buffer.pop_front().is_some() {
+            screen.scrollback_line_count -= 1;
+        }
+    }
+}
+
+#[inline]
+const fn reset_live_view_scroll_state(screen: &mut Screen) {
+    screen.full_dirty = true;
+    screen.scroll_dirty = false;
+
+    // Reset pending scroll counters that accumulated while the user was
+    // viewing scrollback. Without this, stale counts would burst-apply in
+    // `consume_scroll_events` on the first render frame after returning to the
+    // live view, causing the Emacs buffer to shift by the wrong number of
+    // lines.
+    screen.pending_scroll_up = 0;
+    screen.pending_scroll_down = 0;
+}
+
+#[inline]
+const fn set_scroll_offset(screen: &mut Screen, new_offset: usize) {
+    screen.scroll_offset = new_offset;
+    if new_offset == 0 {
+        reset_live_view_scroll_state(screen);
+    } else {
+        screen.scroll_dirty = true;
+    }
+}
+
 impl Screen {
     /// Set maximum scrollback buffer size
     pub fn set_scrollback_max_lines(&mut self, max_lines: usize) {
         if let Some(screen) = self.active_screen_mut() {
             screen.scrollback_max_lines = max_lines;
-
-            // Trim scrollback if new max is smaller than current count
-            while screen.scrollback_line_count > screen.scrollback_max_lines {
-                if screen.scrollback_buffer.pop_front().is_some() {
-                    screen.scrollback_line_count -= 1;
-                }
-            }
+            trim_scrollback_to_max(screen);
         }
     }
 
@@ -48,8 +75,7 @@ impl Screen {
         }
         let new_offset = (self.scroll_offset + n).min(self.scrollback_line_count);
         if new_offset != self.scroll_offset {
-            self.scroll_offset = new_offset;
-            self.scroll_dirty = true;
+            set_scroll_offset(self, new_offset);
         }
     }
 
@@ -62,20 +88,7 @@ impl Screen {
         }
         let new_offset = self.scroll_offset.saturating_sub(n);
         if new_offset != self.scroll_offset {
-            self.scroll_offset = new_offset;
-            if new_offset == 0 {
-                self.full_dirty = true;
-                self.scroll_dirty = false;
-                // Reset pending scroll counters that accumulated while the user
-                // was viewing scrollback.  Without this, stale counts would
-                // burst-apply in `consume_scroll_events` on the first render
-                // frame after returning to the live view, causing the Emacs
-                // buffer to shift by the wrong number of lines.
-                self.pending_scroll_up = 0;
-                self.pending_scroll_down = 0;
-            } else {
-                self.scroll_dirty = true;
-            }
+            set_scroll_offset(self, new_offset);
         }
     }
 
@@ -130,6 +143,5 @@ impl Screen {
 }
 
 #[cfg(test)]
-mod tests {
-    include!("scrollback_tests.rs");
-}
+#[path = "scrollback/tests.rs"]
+mod tests;

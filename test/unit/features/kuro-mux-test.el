@@ -9,6 +9,7 @@
 (require 'kuro-test-stubs)
 (require 'kuro-config)
 (require 'kuro-mux)
+(require 'kuro-mux-test-support)
 
 ;; Minimal kuro-mode definition for tests
 (unless (fboundp 'kuro-mode)
@@ -23,35 +24,6 @@
         (setq kuro-mux--command command))
       (switch-to-buffer buf)
       buf)))
-
-(defmacro kuro-mux-test--with-registry (&rest body)
-  "Run BODY with a clean `kuro-mux--sessions' registry, restored on exit."
-  `(let ((kuro-mux--sessions nil)
-         (kuro-mux-tab-bar-mode nil))
-     ,@body
-     ;; Clean up any buffers created by kuro-create stubs
-     (dolist (buf kuro-mux--sessions)
-       (when (buffer-live-p buf)
-         (kill-buffer buf)))
-     (setq kuro-mux--sessions nil)))
-
-(defmacro kuro-mux-test--make-session (name)
-  "Create a mock kuro-mode buffer named NAME and register it.
-Returns the buffer."
-  `(let ((buf (get-buffer-create ,name)))
-     (with-current-buffer buf
-       (kuro-mode)
-       (kuro-mux--register))
-     buf))
-
-(defmacro kuro-mux-test--check-spec (buf-name setup-form key expected)
-  "In a registry, make session BUF-NAME, apply SETUP-FORM, check plist KEY equals EXPECTED."
-  `(kuro-mux-test--with-registry
-    (let ((buf (kuro-mux-test--make-session ,buf-name)))
-      (with-current-buffer buf ,setup-form)
-      (should (equal (plist-get (kuro-mux--session-spec buf) ,key) ,expected))
-      (kill-buffer buf))))
-
 
 ;;; Group 1 — Registry management
 
@@ -209,23 +181,7 @@ Returns the buffer."
 
 ;;; Group 5 — Mode-line lighter
 
-(defconst kuro-mux-test--name-lighter-table
-  '((kuro-mux-test-lighter-returns-name-in-braces "*mux-lt1*" "dev" " {dev}")
-    (kuro-mux-test-lighter-empty-when-no-name     "*mux-lt2*" nil  ""))
-  "Table of (test-name buf-name name-val expected) for `kuro-mux--name-lighter'.")
-
-(defmacro kuro-mux-test--def-name-lighter (test-name buf-name name-val expected)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro-mux--name-lighter': name=%S → %S." name-val expected)
-     (kuro-mux-test--with-registry
-       (let ((buf (kuro-mux-test--make-session ,buf-name)))
-         (with-current-buffer buf
-           (setq kuro-mux--name ,name-val)
-           (should (string= (kuro-mux--name-lighter) ,expected)))
-         (kill-buffer buf)))))
-
-(kuro-mux-test--def-name-lighter kuro-mux-test-lighter-returns-name-in-braces "*mux-lt1*" "dev" " {dev}")
-(kuro-mux-test--def-name-lighter kuro-mux-test-lighter-empty-when-no-name     "*mux-lt2*" nil  "")
+(kuro-mux-test--deftest-name-lighters)
 
 (ert-deftest kuro-mux-test--all-name-lighter-cases-correct ()
   "Invariant: kuro-mux--name-lighter returns the expected string for each name-val."
@@ -241,20 +197,7 @@ Returns the buffer."
 
 ;;; Group 6 — Session spec for layout
 
-(defconst kuro-mux-test--session-spec-table
-  '((kuro-mux-test-session-spec-includes-name      "*mux-sp1*" kuro-mux--name      :name      "test-session")
-    (kuro-mux-test-session-spec-includes-command   "*mux-sp2*" kuro-mux--command   :command   "fish")
-    (kuro-mux-test-session-spec-includes-directory "*mux-sp3*" kuro-mux--directory :directory "/tmp"))
-  "Table of (test-name buf-name var key expected) for `kuro-mux--session-spec' field assertions.")
-
-(defmacro kuro-mux-test--def-session-spec (test-name buf-name var key expected)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro-mux--session-spec' includes `%s' in the plist." key)
-     (kuro-mux-test--check-spec ,buf-name (setq ,var ,expected) ,key ,expected)))
-
-(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-name      "*mux-sp1*" kuro-mux--name      :name      "test-session")
-(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-command   "*mux-sp2*" kuro-mux--command   :command   "fish")
-(kuro-mux-test--def-session-spec kuro-mux-test-session-spec-includes-directory "*mux-sp3*" kuro-mux--directory :directory "/tmp")
+(kuro-mux-test--deftest-session-specs)
 
 (ert-deftest kuro-mux-test-session-spec-nil-for-dead-buffer ()
   "`kuro-mux--session-spec' returns nil for a dead buffer."
@@ -264,14 +207,6 @@ Returns the buffer."
 
 
 ;;; Group 7 — Layout file save/restore
-
-(defmacro kuro-mux-test--with-layout-file (&rest body)
-  "Run BODY with a temporary layout file, cleaned up on exit."
-  `(let ((kuro-mux-layout-file (make-temp-file "kuro-mux-test-layout" nil ".el")))
-     (unwind-protect
-         (progn ,@body)
-       (when (file-exists-p kuro-mux-layout-file)
-         (delete-file kuro-mux-layout-file)))))
 
 (ert-deftest kuro-mux-test-save-layout-creates-file ()
   "`kuro-mux-save-layout' creates the layout file."
@@ -349,34 +284,7 @@ Returns the buffer."
 ;;   (kuro-mux-layout (:name "a" :command "sh" :directory "/a") (:name "b" ...))
 ;; `kuro-mux--parse-layout-plists' receives the cdr of that sexp.
 
-(ert-deftest kuro-mux-test-parse-layout-plists-single ()
-  "`kuro-mux--parse-layout-plists' parses a single session spec plist."
-  (let* ((raw '((:name "dev" :command "bash" :directory "/tmp")))
-         (parsed (kuro-mux--parse-layout-plists raw)))
-    (should (= 1 (length parsed)))
-    (should (string= (plist-get (car parsed) :name) "dev"))
-    (should (string= (plist-get (car parsed) :command) "bash"))
-    (should (string= (plist-get (car parsed) :directory) "/tmp"))))
-
-(ert-deftest kuro-mux-test-parse-layout-plists-multiple ()
-  "`kuro-mux--parse-layout-plists' parses multiple session spec plists."
-  (let* ((raw '((:name "a" :command "sh" :directory "/a")
-                (:name "b" :command "zsh" :directory "/b")))
-         (parsed (kuro-mux--parse-layout-plists raw)))
-    (should (= 2 (length parsed)))
-    (should (string= (plist-get (nth 0 parsed) :name) "a"))
-    (should (string= (plist-get (nth 1 parsed) :name) "b"))))
-
-(ert-deftest kuro-mux-test-parse-layout-plists-empty ()
-  "`kuro-mux--parse-layout-plists' returns nil for empty input."
-  (should (null (kuro-mux--parse-layout-plists nil))))
-
-(ert-deftest kuro-mux-test-parse-layout-plists-drops-invalid ()
-  "`kuro-mux--parse-layout-plists' silently drops entries missing :command."
-  (let* ((raw '((:name "ok" :command "bash") "not-a-list" (:name "broken")))
-         (parsed (kuro-mux--parse-layout-plists raw)))
-    (should (= 1 (length parsed)))
-    (should (string= (plist-get (car parsed) :name) "ok"))))
+(kuro-mux-test--deftest-parse-layout-plists)
 
 (ert-deftest kuro-mux-test-restore-layout-errors-on-invalid-format ()
   "`kuro-mux-restore-layout' signals user-error when the layout file has an unexpected car."

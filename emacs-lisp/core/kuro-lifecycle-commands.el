@@ -39,6 +39,7 @@
 (declare-function kuro--color-scheme-uninstall-hook "kuro-color-scheme"  ())
 (declare-function kuro-core-list-sessions           "ext:kuro-core"      ())
 (declare-function kuro-mode                         "kuro"               ())
+(declare-function face-remap-remove-relative        "face-remap"         (cookie))
 
 ;; Variables defined in kuro-lifecycle.el or loaded modules.
 (defvar kuro-shell)
@@ -96,9 +97,9 @@ so this returns the Kuro buffer the user was last in across all windows."
   "Send the text between START and END to a Kuro terminal buffer.
 When called inside a Kuro buffer, sends to the current buffer's PTY.
 When called from any other buffer, sends to the most recently active
-Kuro session.  The text is wrapped with bracketed-paste sequences
-(ESC[200~/ESC[201~) when the target terminal has mode 2004 active,
-preventing injection attacks through multi-line content.
+Kuro session.  When the target terminal has mode 2004 active, the text is
+wrapped with ESC[200~ and ESC[201~ bracketed-paste sequences, preventing
+injection attacks through multi-line content.
 
 Typical use: select a code block in a source buffer, call this command
 to send it to a running shell or REPL without using the kill ring."

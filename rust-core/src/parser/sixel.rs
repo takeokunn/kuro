@@ -152,6 +152,60 @@ impl SixelDecoder {
         }
     }
 
+    fn current_draw_limits(&self) -> (u32, u32) {
+        let max_w = if self.declared_width > 0 {
+            self.declared_width
+        } else {
+            4096
+        };
+        let max_h = if self.declared_height > 0 {
+            self.declared_height
+        } else {
+            4096
+        };
+        (max_w, max_h)
+    }
+
+    fn current_rgb(&self) -> [u8; 3] {
+        self.color_map
+            .get(&self.current_color)
+            .copied()
+            .unwrap_or([255, 255, 255])
+    }
+
+    fn push_current_param(&mut self) {
+        self.params.push(self.num_buf);
+        self.num_buf = 0;
+    }
+
+    fn reset_parameterized_command(&mut self) {
+        self.params.clear();
+        self.num_buf = 0;
+        self.state = SixelParseState::Normal;
+    }
+
+    fn write_sixel_pixel(&mut self, x: u32, y: u32, rgb: [u8; 3]) {
+        self.ensure_size(x + 1, y + 1);
+
+        let pixel_offset = ((y as usize) * (self.width as usize) + x as usize) * 4;
+        if pixel_offset + 3 >= self.pixels.len() {
+            return;
+        }
+
+        self.pixels[pixel_offset] = rgb[0];
+        self.pixels[pixel_offset + 1] = rgb[1];
+        self.pixels[pixel_offset + 2] = rgb[2];
+        self.pixels[pixel_offset + 3] = 255;
+    }
+
+    fn advance_logical_width(&mut self, max_w: u32) {
+        // Preserve logical width advancement even for blank sixel columns.
+        let logical_w = self.cursor_x.min(max_w);
+        if logical_w > self.width {
+            self.ensure_size(logical_w, self.height.max(1));
+        }
+    }
+
     fn handle_normal(&mut self, byte: u8) {
         match byte {
             b'#' => {
@@ -187,23 +241,20 @@ impl SixelDecoder {
         }
     }
 
-    fn handle_color(&mut self, byte: u8) {
+    fn handle_parameterized_command(&mut self, byte: u8, apply: fn(&mut Self)) {
         match byte {
             b'0'..=b'9' => accumulate_digit!(self, byte),
             b';' => {
-                self.params.push(self.num_buf);
-                self.num_buf = 0;
+                self.push_current_param();
             }
             _ => {
-                self.params.push(self.num_buf);
-                self.apply_color_command();
-                self.params.clear();
-                self.num_buf = 0;
-                self.state = SixelParseState::Normal;
-                // Re-process current byte in normal state.
-                self.handle_normal(byte);
+                self.finish_parameterized_command(byte, apply);
             }
         }
+    }
+
+    fn handle_color(&mut self, byte: u8) {
+        self.handle_parameterized_command(byte, Self::apply_color_command);
     }
 
     fn handle_repeat(&mut self, byte: u8) {
@@ -224,21 +275,19 @@ impl SixelDecoder {
     }
 
     fn handle_raster(&mut self, byte: u8) {
-        match byte {
-            b'0'..=b'9' => accumulate_digit!(self, byte),
-            b';' => {
-                self.params.push(self.num_buf);
-                self.num_buf = 0;
-            }
-            _ => {
-                self.params.push(self.num_buf);
-                self.apply_raster_command();
-                self.params.clear();
-                self.num_buf = 0;
-                self.state = SixelParseState::Normal;
-                self.handle_normal(byte);
-            }
-        }
+        self.handle_parameterized_command(byte, Self::apply_raster_command);
+    }
+
+    fn finish_parameterized_command(
+        &mut self,
+        byte: u8,
+        apply: fn(&mut Self),
+    ) {
+        self.push_current_param();
+        apply(self);
+        self.reset_parameterized_command();
+        // Re-process the current byte after returning to the normal state.
+        self.handle_normal(byte);
     }
 
     #[expect(
@@ -302,29 +351,35 @@ impl SixelDecoder {
         }
     }
 
+    /// Paint one repeated sixel column at `x`.
+    fn paint_sixel_column(&mut self, x: u32, bits: u8, y_base: u32, max_h: u32, rgb: [u8; 3]) {
+        if bits == 0 {
+            return;
+        }
+
+        for bit_idx in 0..6u32 {
+            if (bits >> bit_idx) & 1 == 0 {
+                continue;
+            }
+
+            let y = y_base.saturating_add(bit_idx);
+            if y >= max_h {
+                continue;
+            }
+
+            self.write_sixel_pixel(x, y, rgb);
+        }
+    }
+
     /// Paint a sixel column at the current position, repeated `count` times.
     fn paint_sixel(&mut self, bits: u8, count: u32) {
         if count == 0 {
             return;
         }
 
-        let rgb = self
-            .color_map
-            .get(&self.current_color)
-            .copied()
-            .unwrap_or([255, 255, 255]);
-
-        let y_base = self.band * 6;
-        let max_w = if self.declared_width > 0 {
-            self.declared_width
-        } else {
-            4096
-        };
-        let max_h = if self.declared_height > 0 {
-            self.declared_height
-        } else {
-            4096
-        };
+        let rgb = self.current_rgb();
+        let y_base = self.band.saturating_mul(6);
+        let (max_w, max_h) = self.current_draw_limits();
 
         for dx in 0..count {
             let x = self.cursor_x.saturating_add(dx);
@@ -332,36 +387,11 @@ impl SixelDecoder {
                 break;
             }
 
-            for bit_idx in 0..6u32 {
-                if (bits >> bit_idx) & 1 == 0 {
-                    continue;
-                }
-
-                let y = y_base.saturating_add(bit_idx);
-                if y >= max_h {
-                    continue;
-                }
-
-                self.ensure_size(x + 1, y + 1);
-                let pixel_offset = ((y as usize) * (self.width as usize) + x as usize) * 4;
-                if pixel_offset + 3 >= self.pixels.len() {
-                    continue;
-                }
-
-                self.pixels[pixel_offset] = rgb[0];
-                self.pixels[pixel_offset + 1] = rgb[1];
-                self.pixels[pixel_offset + 2] = rgb[2];
-                self.pixels[pixel_offset + 3] = 255;
-            }
+            self.paint_sixel_column(x, bits, y_base, max_h, rgb);
         }
 
         self.cursor_x = self.cursor_x.saturating_add(count);
-
-        // Preserve logical width advancement even for blank sixel columns.
-        let logical_w = self.cursor_x.min(max_w);
-        if logical_w > self.width {
-            self.ensure_size(logical_w, self.height.max(1));
-        }
+        self.advance_logical_width(max_w);
     }
 
     fn ensure_size(&mut self, min_w: u32, min_h: u32) {
@@ -405,28 +435,24 @@ impl SixelDecoder {
         self.height = new_h;
     }
 
-    /// Finalize decoding.
-    ///
-    /// Returns `(pixels_rgba, width, height)` or `None` when nothing was decoded.
-    #[must_use]
-    pub fn finish(mut self) -> Option<(Vec<u8>, u32, u32)> {
-        // Flush an unterminated command at sequence end.
+    fn flush_pending_parameterized_command_at_end(&mut self) {
+        // End-of-sequence flush for unterminated COLOR / RASTER commands.
         match self.state {
             SixelParseState::Color => {
-                self.params.push(self.num_buf);
+                self.push_current_param();
                 self.apply_color_command();
             }
             SixelParseState::Raster => {
-                self.params.push(self.num_buf);
+                self.push_current_param();
                 self.apply_raster_command();
             }
             SixelParseState::Repeat | SixelParseState::Normal => {}
         }
 
-        self.state = SixelParseState::Normal;
-        self.params.clear();
-        self.num_buf = 0;
+        self.reset_parameterized_command();
+    }
 
+    fn resolve_output_dimensions(&self) -> Option<(u32, u32)> {
         let declared_pixels =
             (self.declared_width as usize).saturating_mul(self.declared_height as usize);
         let declared_usable = self.declared_width > 0
@@ -441,14 +467,29 @@ impl SixelDecoder {
         };
 
         if w == 0 || h == 0 || self.pixels.is_empty() {
-            return None;
+            None
+        } else {
+            Some((w, h))
         }
+    }
 
+    /// Finalize decoding.
+    ///
+    /// Returns `(pixels_rgba, width, height)` or `None` when nothing was decoded.
+    #[must_use]
+    pub fn finish(mut self) -> Option<(Vec<u8>, u32, u32)> {
+        self.flush_pending_parameterized_command_at_end();
+        let (w, h) = self.resolve_output_dimensions()?;
         Some((self.pixels, w, h))
     }
 }
 
-include!("sixel_color.rs");
+#[path = "sixel_color.rs"]
+mod color;
+
+use color::hls_to_rgb;
+#[cfg(test)]
+use color::hue_to_rgb;
 
 #[cfg(test)]
 #[path = "tests/sixel.rs"]

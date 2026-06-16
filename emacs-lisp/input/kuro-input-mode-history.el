@@ -34,10 +34,10 @@ recent `kuro--line-history' entry that starts with (but is not equal to)
 that prefix.  No-ops with a message when no entry matches."
   (interactive)
   (let ((prefix kuro--line-buffer))
-    (if-let ((match (seq-find
-                     (lambda (h) (and (string-prefix-p prefix h)
-                                      (not (equal h prefix))))
-                     kuro--line-history)))
+    (if-let* ((match (seq-find
+                      (lambda (h) (and (string-prefix-p prefix h)
+                                       (not (equal h prefix))))
+                      kuro--line-history)))
         (progn
           (kuro--line-undo-push)
           (kuro--line-set-buffer match))
@@ -67,6 +67,40 @@ Both `kuro--line-complete-word' and `kuro--line-expand-abbrev' use this."
       (setq start (1- start)))
     (cons start end)))
 
+(defmacro kuro--line-with-word-span (vars &rest body)
+  "Bind VARS to the word span before point, then run BODY.
+VARS must be (START-VAR END-VAR WORD-VAR)."
+  (declare (indent defun))
+  (let ((start-var (nth 0 vars))
+        (end-var (nth 1 vars))
+        (word-var (nth 2 vars))
+        (span (make-symbol "span")))
+    `(let* ((,span (kuro--line-word-span-before-point))
+            (,start-var (car ,span))
+            (,end-var (cdr ,span))
+            (,word-var (substring kuro--line-buffer ,start-var ,end-var)))
+       ,@body)))
+
+(defun kuro--line-display-completions (candidates label)
+  "Display CANDIDATES and message their count with LABEL."
+  (with-output-to-temp-buffer "*Completions*"
+    (display-completion-list candidates))
+  (message "kuro: %d %s" (length candidates) label))
+
+(defun kuro--line-dispatch-completion-candidates
+    (candidates no-match-format no-match-value multiple-label single-cont)
+  "Run common completion control flow for CANDIDATES.
+NO-MATCH-FORMAT and NO-MATCH-VALUE build the no-candidate message.
+MULTIPLE-LABEL names the candidate kind in the multiple-candidate message.
+SINGLE-CONT is called with the only candidate when there is exactly one."
+  (cond
+   ((null candidates)
+    (message no-match-format no-match-value))
+   ((= (length candidates) 1)
+    (funcall single-cont (car candidates)))
+   (t
+    (kuro--line-display-completions candidates multiple-label))))
+
 (defun kuro--line-complete ()
   "Complete the current line-mode input (TAB).
 When `kuro-line-completion-function' is set, calls it with the word
@@ -84,35 +118,27 @@ buffer; no match messages the user."
   "TAB history completion: match full buffer prefix against all history entries."
   (let* ((prefix     (substring kuro--line-buffer 0 kuro--line-point))
          (candidates (kuro--line-all-history-completions prefix)))
-    (cond
-     ((null candidates)
-      (message "kuro: no history completions for %S" prefix))
-     ((= (length candidates) 1)
-      (kuro--line-undo-push)
-      (kuro--line-set-buffer (car candidates)))
-     (t
-      (with-output-to-temp-buffer "*Completions*"
-        (display-completion-list candidates))
-      (message "kuro: %d history completions" (length candidates))))))
+    (kuro--line-dispatch-completion-candidates
+     candidates
+     "kuro: no history completions for %S"
+     prefix
+     "history completions"
+     (lambda (candidate)
+       (kuro--line-undo-push)
+       (kuro--line-set-buffer candidate)))))
 
 (defun kuro--line-complete-word ()
   "TAB word completion via `kuro-line-completion-function' for the word at point."
-  (let* ((span       (kuro--line-word-span-before-point))
-         (word-start (car span))
-         (word-end   (cdr span))
-         (prefix     (substring kuro--line-buffer word-start word-end))
-         (candidates (funcall kuro-line-completion-function prefix)))
-    (cond
-     ((null candidates)
-      (message "kuro: no completions for %S" prefix))
-     ((= (length candidates) 1)
-      (kuro--with-line-edit-undo
-       (kuro--line-splice word-start word-end (car candidates)
-                          (+ word-start (length (car candidates))))))
-     (t
-      (with-output-to-temp-buffer "*Completions*"
-        (display-completion-list candidates))
-      (message "kuro: %d completions" (length candidates))))))
+  (kuro--line-with-word-span (word-start word-end prefix)
+    (kuro--line-dispatch-completion-candidates
+     (funcall kuro-line-completion-function prefix)
+     "kuro: no completions for %S"
+     prefix
+     "completions"
+     (lambda (candidate)
+       (kuro--with-line-edit-undo
+	(kuro--line-splice word-start word-end candidate
+			   (+ word-start (length candidate))))))))
 
 (defun kuro--line-expand-abbrev ()
   "Expand the word immediately before point using `kuro-line-abbrev-alist' (M-SPC).
@@ -121,26 +147,23 @@ at whitespace or buffer start), looks it up in the alist, and replaces it
 with the expansion.  Point is set to the end of the expansion.  No-ops with
 a message when no entry matches."
   (interactive)
-  (let* ((span      (kuro--line-word-span-before-point))
-         (start     (car span))
-         (end       (cdr span))
-         (word      (substring kuro--line-buffer start end))
-         (expansion (cdr (assoc word kuro-line-abbrev-alist))))
-    (if (null expansion)
-        (message "kuro: no abbreviation for %S" word)
-      (kuro--with-line-edit-undo
-       (kuro--line-splice start end expansion
-                          (+ start (length expansion)))))))
+  (kuro--line-with-word-span (start end word)
+    (let ((expansion (cdr (assoc word kuro-line-abbrev-alist))))
+      (if (null expansion)
+	  (message "kuro: no abbreviation for %S" word)
+	(kuro--with-line-edit-undo
+	 (kuro--line-splice start end expansion
+			    (+ start (length expansion))))))))
 
 (defun kuro--line-history-search ()
-  "Search `kuro--line-history' interactively using completion (C-r in line mode).
+  "Search `kuro--line-history' interactively using completion.
 Uses `completing-read' over all history entries so the user can filter by
 substring.  The selected entry replaces `kuro--line-buffer' with point at
-the end.  Signals `user-error' when history is empty.  C-g aborts without
-changing the line buffer."
+the end.  Signals `user-error' when history is empty.  Canceling leaves the
+line buffer unchanged."
   (interactive)
   (unless kuro--line-history
-    (user-error "kuro: history is empty"))
+    (user-error "Kuro: history is empty"))
   (condition-case nil
       (let ((match (completing-read "History: " kuro--line-history nil t
                                     nil nil kuro--line-buffer)))
@@ -153,6 +176,26 @@ changing the line buffer."
   "Load history entry IDX into the line buffer and refresh the display."
   (kuro--line-set-buffer (nth idx kuro--line-history)))
 
+(defsubst kuro--line-history-last-index ()
+  "Return the index of the oldest history entry."
+  (1- (length kuro--line-history)))
+
+(defsubst kuro--line-history-prev-index ()
+  "Return the history index reached by moving to older history."
+  (if (= kuro--line-history-idx -1)
+      0
+    (min (1+ kuro--line-history-idx)
+         (kuro--line-history-last-index))))
+
+(defsubst kuro--line-history-next-index ()
+  "Return the history index reached by moving to newer history."
+  (1- kuro--line-history-idx))
+
+(defsubst kuro--line-restore-history-stash ()
+  "Restore stashed live input and reset history navigation state."
+  (setq kuro--line-history-idx -1)
+  (kuro--line-set-buffer kuro--line-history-stash))
+
 (defun kuro--line-history-prev ()
   "Navigate to the previous (older) entry in line-mode history.
 On the first call stashes the current in-progress input, then moves
@@ -160,10 +203,7 @@ backward through `kuro--line-history' (index 0 = most recent)."
   (interactive)
   (when kuro--line-history
     (kuro--line-history-stash-if-fresh)
-    (setq kuro--line-history-idx
-          (if (= kuro--line-history-idx -1) 0
-            (min (1+ kuro--line-history-idx)
-                 (1- (length kuro--line-history)))))
+    (setq kuro--line-history-idx (kuro--line-history-prev-index))
     (kuro--line-load-history-entry kuro--line-history-idx)))
 
 (defun kuro--line-history-next ()
@@ -172,9 +212,9 @@ At the bottom (idx -1) does nothing.  At index 0 restores the stashed
 in-progress input and resets the navigation index to -1."
   (interactive)
   (unless (= kuro--line-history-idx -1)
-    (setq kuro--line-history-idx (1- kuro--line-history-idx))
+    (setq kuro--line-history-idx (kuro--line-history-next-index))
     (if (= kuro--line-history-idx -1)
-        (kuro--line-set-buffer kuro--line-history-stash)
+        (kuro--line-restore-history-stash)
       (kuro--line-load-history-entry kuro--line-history-idx))))
 
 (defun kuro--line-goto-history-oldest ()
@@ -185,17 +225,16 @@ Stashes the current in-progress input the same way as
   (interactive)
   (when kuro--line-history
     (kuro--line-history-stash-if-fresh)
-    (setq kuro--line-history-idx (1- (length kuro--line-history)))
+    (setq kuro--line-history-idx (kuro--line-history-last-index))
     (kuro--line-load-history-entry kuro--line-history-idx)))
 
 (defun kuro--line-goto-history-newest ()
   "Return to the most recent (in-progress) input in line-mode (readline M->).
 Restores `kuro--line-history-stash' and resets the navigation index to -1,
-mirroring the behavior of `kuro--line-history-next' at the bottom of history."
+  mirroring the behavior of `kuro--line-history-next' at the bottom of history."
   (interactive)
   (unless (= kuro--line-history-idx -1)
-    (setq kuro--line-history-idx -1)
-    (kuro--line-set-buffer kuro--line-history-stash)))
+    (kuro--line-restore-history-stash)))
 
 (kuro--def-line-nav kuro--line-beginning-of-line
   "Move `kuro--line-point' to the beginning of the line (C-a)."
@@ -219,15 +258,15 @@ mirroring the behavior of `kuro--line-history-next' at the bottom of history."
   "Move `kuro--line-point' forward past the end of the next word (M-f)."
   (let ((s kuro--line-buffer))
     (setq kuro--line-point
-          (kuro--line-skip-word-fwd s
-           (kuro--line-skip-non-word-fwd s kuro--line-point)))))
+	  (kuro--line-skip-word-fwd s
+				    (kuro--line-skip-non-word-fwd s kuro--line-point)))))
 
 (kuro--def-line-nav kuro--line-backward-word
   "Move `kuro--line-point' backward past the start of the previous word (M-b)."
   (let ((s kuro--line-buffer))
     (setq kuro--line-point
-          (kuro--line-skip-word-bwd s
-           (kuro--line-skip-non-word-bwd s kuro--line-point)))))
+	  (kuro--line-skip-word-bwd s
+				    (kuro--line-skip-non-word-bwd s kuro--line-point)))))
 
 (require 'kuro-input-mode-ext)
 

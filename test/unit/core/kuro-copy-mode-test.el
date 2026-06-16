@@ -87,6 +87,23 @@
         (kuro--enter-copy-mode)
         (should (eq (lookup-key (current-local-map) (kbd key-str)) fn-sym))))))
 
+(ert-deftest kuro-copy-mode-test-production-bindings-have-valid-shape ()
+  "`kuro--copy-mode-bindings' contains only key/command pairs."
+  (dolist (binding kuro--copy-mode-bindings)
+    (pcase-let ((`(,key . ,command) binding))
+      (should (or (vectorp key) (stringp key)))
+      (should (symbolp command)))))
+
+(ert-deftest kuro-copy-mode-test-production-bindings-are-installed ()
+  "Every production copy-mode binding is present in `kuro--copy-mode-map'."
+  (dolist (binding kuro--copy-mode-bindings)
+    (pcase-let ((`(,key . ,command) binding))
+      (kuro-el-test--with-kuro-mode-buffer
+        (kuro--enter-copy-mode)
+        (should (eq (lookup-key (current-local-map)
+                                (if (vectorp key) key (kbd key)))
+                    command))))))
+
 ;;; ── Groups 19+20 (commandp): interactive command assertions ─────────────────
 
 (defconst kuro-copy-mode-test--commandp-table

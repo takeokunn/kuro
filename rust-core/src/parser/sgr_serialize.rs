@@ -1,4 +1,7 @@
 
+use crate::types::cell::{SgrAttributes, SgrFlags, UnderlineStyle};
+use crate::types::Color;
+
 /// Serialize `attrs` back into an SGR parameter string for DECRQSS (`DCS $ q m`).
 ///
 /// Begins with `0` (reset) and appends a parameter for each active attribute,

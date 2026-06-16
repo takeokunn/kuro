@@ -142,7 +142,7 @@ every live frame's window tree — called only on cache miss."
     (setq kuro--cursor-marker (copy-marker pos))))
 
 (defsubst kuro--cursor-fallback-pos (row col)
-  "Return current cursor buffer position from marker or by computing it."
+  "Return cursor buffer position at ROW and COL from marker or grid."
   (or (and kuro--cursor-marker (marker-position kuro--cursor-marker))
       (kuro--grid-col-to-buffer-pos row col)))
 
@@ -156,7 +156,7 @@ Skips buffer position computation when cursor state is unchanged,
 but ALWAYS re-anchors the window at point-min to prevent Emacs'
 native redisplay from drifting the viewport between render cycles."
   (unless (> kuro--scroll-offset 0)
-    (when-let ((state (kuro--get-cursor-state)))
+    (when-let* ((state (kuro--get-cursor-state)))
       ;; cdr-chain: each cdr advances the spine once (shared intermediate cells).
       (let* ((row     (car state))
              (s1      (cdr state))
@@ -165,7 +165,7 @@ native redisplay from drifting the viewport between render cycles."
              (visible (car s2))
              (shape   (car (cdr s2))))
         ;; `visible' may be nil (hidden cursor) — guard only on window availability.
-        (when-let ((win (kuro--resolve-window)))
+        (when-let* ((win (kuro--resolve-window)))
           (if (kuro--cursor-state-changed-p row col visible shape)
               ;; State changed: recompute position, update cache and display.
               (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))

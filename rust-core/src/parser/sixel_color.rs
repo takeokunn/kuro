@@ -8,7 +8,7 @@
     clippy::many_single_char_names,
     reason = "h/l/s/p/q/r/g/b are standard HLS and RGB color component abbreviations"
 )]
-fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
+pub(super) fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     let l = (l / 100.0).clamp(0.0, 1.0);
     let s = (s / 100.0).clamp(0.0, 1.0);
 
@@ -32,7 +32,7 @@ fn hls_to_rgb(h: f32, l: f32, s: f32) -> [u8; 3] {
     [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
 }
 
-fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+pub(super) fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
     if t < 0.0 {
         t += 1.0;
     }

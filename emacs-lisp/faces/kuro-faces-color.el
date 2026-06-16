@@ -23,25 +23,32 @@
 
 ;;; Code:
 
+(require 'kuro-colors)
+
 (defconst kuro--ffi-color-default #xFF000000
   "FFI color encoding sentinel meaning Color::Default from the Rust side.
 Distinct from true black (#x000000) by the upper byte being 0xFF.
 See `encode_color' in rust-core/src/ffi/codec.rs for the encoding contract.")
 
 (defconst kuro--ansi-color-names
-  ["black" "red" "green" "yellow" "blue" "magenta" "cyan" "white"
-   "bright-black" "bright-red" "bright-green" "bright-yellow"
-   "bright-blue" "bright-magenta" "bright-cyan" "bright-white"]
+  (vconcat (mapcar #'car kuro--color-palette))
   "Standard ANSI terminal color names for indices 0-15.
 Used to look up named-color faces in `kuro--decode-ffi-color' and
 `kuro--indexed-to-emacs'.  Indices match the order of NamedColor in
 rust-core/src/types/color.rs.  Names match the keys in `kuro--named-colors'.")
 
+(defsubst kuro--build-color-cons-vector (len factory)
+  "Return a vector of LEN cons cells created by FACTORY.
+FACTORY is called with each integer index from 0 to LEN-1."
+  (let ((v (make-vector len nil)))
+    (dotimes (i len)
+      (aset v i (funcall factory i)))
+    v))
+
 (defconst kuro--named-color-conses
-  (let ((v (make-vector 16 nil)))
-    (dotimes (i 16)
-      (aset v i (cons 'named (aref kuro--ansi-color-names i))))
-    v)
+  (kuro--build-color-cons-vector
+   16
+   (lambda (i) (cons 'named (aref kuro--ansi-color-names i))))
   "Pre-allocated `(named . name)' cons cells for the 16 ANSI color indices.
 `kuro--decode-ffi-color' reads these directly on named-color hits, avoiding
 one cons allocation per unique named-color cache miss.")
@@ -117,9 +124,9 @@ unrecognised names are passed through rather than silently dropped."
   '((named   . kuro--color-named-to-emacs)
     (indexed  . kuro--indexed-to-emacs)
     (rgb      . kuro--rgb-to-emacs))
-  "Alist mapping Rust Color variant symbols to their Emacs conversion functions.
+  "Alist mapping Rust Color variant symbols to conversion functions.
 Each function receives the VALUE part of the `(type . value)' cons cell.
-Add a new entry here whenever a new Color variant is introduced on the Rust side.")
+Add an entry whenever a new Color variant is introduced on the Rust side.")
 
 (defun kuro--color-to-emacs (color)
   "Convert Rust Color enum value to Emacs color string or nil.
@@ -129,7 +136,7 @@ COLOR can be:
   - A cons cell (indexed . index) for 256-color palette
   - A cons cell (rgb . rgb-value) for truecolor (24-bit RGB)"
   (when (consp color)
-    (when-let ((fn (cdr (assq (car color) kuro--color-type-handlers))))
+    (when-let* ((fn (cdr (assq (car color) kuro--color-type-handlers))))
       (funcall fn (cdr color)))))
 
 (defun kuro--indexed-to-emacs (idx)
@@ -160,13 +167,17 @@ are O(1) with no string comparison.")
         (puthash rgb-value s kuro--rgb-string-cache)
         s)))
 
+(defsubst kuro--normalize-ffi-color-enc (color-enc)
+  "Canonicalize raw FFI COLOR-ENC for cache keys.
+Return 0 for the absent/default sentinel and COLOR-ENC unchanged otherwise."
+  (if (or (zerop color-enc) (= color-enc kuro--ffi-color-default))
+      0
+    color-enc))
+
 ;;; FFI color decoding
 
 (defconst kuro--indexed-color-conses
-  (let ((v (make-vector 256 nil)))
-    (dotimes (i 256)
-      (aset v i (cons 'indexed i)))
-    v)
+  (kuro--build-color-cons-vector 256 (lambda (i) (cons 'indexed i)))
   "Pre-allocated `(indexed . idx)' cons cells for all 256 indexed color indices.
 `kuro--decode-ffi-color' reads these directly on indexed-color hits, avoiding
 one cons allocation per unique indexed-color cache miss (analogous to

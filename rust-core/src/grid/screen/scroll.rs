@@ -20,6 +20,138 @@ fn push_to_scrollback(screen: &mut Screen, line: Line) {
 }
 
 impl Screen {
+    #[inline]
+    fn blank_line(cols: usize, bg: Color) -> Line {
+        Line::new_with_bg(cols, bg)
+    }
+
+    #[inline]
+    fn mark_scroll_region_dirty(&mut self) {
+        let top = self.scroll_region.top;
+        let bottom = self.scroll_region.bottom;
+        self.mark_dirty_range(top, bottom);
+    }
+
+    #[inline]
+    fn clamp_cursor_row_to_rows(&mut self) {
+        let rows = self.rows as usize;
+        if self.cursor.row >= rows {
+            self.cursor.row = rows.saturating_sub(1);
+        }
+    }
+
+    fn scroll_up_full_screen(&mut self, n: usize, bg: Color) {
+        let rows = self.rows as usize;
+        let cols = self.cols as usize;
+        let n_actual = n.min(rows);
+
+        // Swap each evicted line with a fresh blank, saving the original
+        // to scrollback WITHOUT cloning.  After `rotate_left(n_actual)`
+        // these blank lines end up at positions `rows-n_actual..rows`,
+        // which is exactly where we would have filled blanks anyway.
+        // This eliminates one full `Line` clone per evicted row.
+        for i in 0..n_actual {
+            if let Some(line) = self.lines.get_mut(i) {
+                let evicted = mem::replace(line, Self::blank_line(cols, bg));
+                push_to_scrollback(self, evicted);
+            }
+        }
+
+        // O(n) rotation: shifts indices [0..rows) left by n_actual.
+        // The blank lines we just placed at [0..n_actual) rotate to
+        // [rows-n_actual..rows), so no post-rotation blank fill needed.
+        self.lines.rotate_left(n_actual);
+
+        // Shift dirty bits to match the rotated content.
+        self.dirty_set.shift_left(n_actual);
+
+        // Mark ALL lines dirty so Emacs rewrites every row from Rust state.
+        //
+        // The original design marked only the new blank rows dirty and used
+        // pending_scroll_up to let Emacs shift the buffer content via
+        // delete-top + append-blank.  This fails when multiple scroll_up
+        // calls accumulate between render frames: the Emacs buffer scroll
+        // shifts blank rows (inserted by the previous frame's scroll) into
+        // the content region, then the dirty-line rewrite only updates the
+        // bottom rows — leaving stale blanks in the middle of the display.
+        //
+        // Setting full_dirty = true and NOT accumulating pending_scroll_up
+        // bypasses the Emacs buffer scroll entirely, forcing a full repaint.
+        // This is still O(rows) per frame (same as the number of lines to
+        // rewrite) and eliminates the scroll-accumulation display corruption.
+        self.full_dirty = true;
+        self.graphics.scroll_up(n_actual);
+    }
+
+    fn scroll_up_partial_region(&mut self, n: usize, bg: Color, is_primary: bool) {
+        let top = self.scroll_region.top;
+        let bottom = self.scroll_region.bottom;
+        let cols = self.cols as usize;
+
+        // Partial-region scroll: fall back to remove+insert.
+        // Each iteration is O(min(top, len-top)) for both remove and
+        // insert.  For n > 1 this is O(n * region_size), but n > 1 is
+        // extremely rare in practice (most terminal applications scroll
+        // one line at a time).  A batch drain+splice approach would be
+        // O(region_size) regardless of n, but adds complexity and risk
+        // to this correctness-critical path.
+        for _ in 0..n {
+            if top == 0 && is_primary {
+                // `remove` returns the evicted line — use it directly
+                // instead of cloning before removal.
+                if let Some(evicted) = self.lines.remove(top) {
+                    push_to_scrollback(self, evicted);
+                }
+            } else {
+                self.lines.remove(top);
+            }
+            self.lines.insert(bottom - 1, Self::blank_line(cols, bg));
+        }
+
+        self.mark_scroll_region_dirty();
+        self.clamp_cursor_row_to_rows();
+        self.graphics.scroll_up(n);
+    }
+
+    fn scroll_down_full_screen(&mut self, n: usize, bg: Color) {
+        let rows = self.rows as usize;
+        let n_actual = n.min(rows);
+        self.lines.rotate_right(n_actual);
+
+        // Shift dirty bits to match the rotated content.
+        self.dirty_set.shift_right(n_actual);
+
+        // Replace the now-stale head lines with fresh blank lines.
+        // Use clear_with_bg instead of new_with_bg to reuse the existing
+        // Vec<Cell> allocation — avoids one heap alloc+dealloc per rotated line.
+        for i in 0..n_actual {
+            if let Some(line) = self.lines.get_mut(i) {
+                line.clear_with_bg(bg);
+            }
+        }
+
+        // Mark ALL lines dirty (same rationale as scroll_up: avoids
+        // stale-blank corruption when scroll events accumulate between
+        // render frames).
+        self.full_dirty = true;
+        self.graphics.scroll_down(n_actual, rows);
+    }
+
+    fn scroll_down_partial_region(&mut self, n: usize, bg: Color, rows: usize) {
+        let top = self.scroll_region.top;
+        let bottom = self.scroll_region.bottom;
+        let cols = self.cols as usize;
+
+        // Partial-region scroll: fall back to remove+insert.
+        for _ in 0..n {
+            self.lines.remove(bottom - 1);
+            self.lines.insert(top, Self::blank_line(cols, bg));
+        }
+
+        self.mark_scroll_region_dirty();
+        self.graphics.scroll_down(n, rows);
+    }
+
     /// Internal scroll-up implementation that operates on `self` directly
     /// (no `active_screen_mut()` dispatch).  `is_primary` controls whether
     /// evicted lines are saved to the scrollback buffer and whether the
@@ -38,72 +170,9 @@ impl Screen {
         // requires.  For cmatrix with 40 rows scrolling once per frame at 60fps,
         // this eliminates 40 element clones per frame (~2400 clones/sec).
         if top == 0 && bottom == rows && is_primary {
-            let n_actual = n.min(rows);
-
-            // Swap each evicted line with a fresh blank, saving the original
-            // to scrollback WITHOUT cloning.  After `rotate_left(n_actual)`
-            // these blank lines end up at positions `rows-n_actual..rows`,
-            // which is exactly where we would have filled blanks anyway.
-            // This eliminates one full `Line` clone per evicted row.
-            for i in 0..n_actual {
-                if let Some(line) = self.lines.get_mut(i) {
-                    let evicted = mem::replace(line, Line::new_with_bg(self.cols as usize, bg));
-                    push_to_scrollback(self, evicted);
-                }
-            }
-
-            // O(n) rotation: shifts indices [0..rows) left by n_actual.
-            // The blank lines we just placed at [0..n_actual) rotate to
-            // [rows-n_actual..rows), so no post-rotation blank fill needed.
-            self.lines.rotate_left(n_actual);
-
-            // Shift dirty bits to match the rotated content.
-            self.dirty_set.shift_left(n_actual);
-
-            // Mark ALL lines dirty so Emacs rewrites every row from Rust state.
-            //
-            // The original design marked only the new blank rows dirty and used
-            // pending_scroll_up to let Emacs shift the buffer content via
-            // delete-top + append-blank.  This fails when multiple scroll_up
-            // calls accumulate between render frames: the Emacs buffer scroll
-            // shifts blank rows (inserted by the previous frame's scroll) into
-            // the content region, then the dirty-line rewrite only updates the
-            // bottom rows — leaving stale blanks in the middle of the display.
-            //
-            // Setting full_dirty = true and NOT accumulating pending_scroll_up
-            // bypasses the Emacs buffer scroll entirely, forcing a full repaint.
-            // This is still O(rows) per frame (same as the number of lines to
-            // rewrite) and eliminates the scroll-accumulation display corruption.
-            self.full_dirty = true;
-            self.graphics.scroll_up(n_actual);
+            self.scroll_up_full_screen(n, bg);
         } else {
-            // Partial-region scroll: fall back to remove+insert.
-            // Each iteration is O(min(top, len-top)) for both remove and
-            // insert.  For n > 1 this is O(n * region_size), but n > 1 is
-            // extremely rare in practice (most terminal applications scroll
-            // one line at a time).  A batch drain+splice approach would be
-            // O(region_size) regardless of n, but adds complexity and risk
-            // to this correctness-critical path.
-            for _ in 0..n {
-                if top == 0 && is_primary {
-                    // `remove` returns the evicted line — use it directly
-                    // instead of cloning before removal.
-                    if let Some(evicted) = self.lines.remove(top) {
-                        push_to_scrollback(self, evicted);
-                    }
-                } else {
-                    self.lines.remove(top);
-                }
-                let new_line = Line::new_with_bg(self.cols as usize, bg);
-                self.lines.insert(bottom - 1, new_line);
-
-                self.mark_dirty_range(top, bottom);
-
-                if self.cursor.row >= rows {
-                    self.cursor.row = rows.saturating_sub(1);
-                }
-            }
-            self.graphics.scroll_up(n);
+            self.scroll_up_partial_region(n, bg, is_primary);
         }
     }
 
@@ -128,36 +197,9 @@ impl Screen {
         // Guard `is_primary`: alternate screen has no scrollback and its
         // content is always full-dirty redrawn.
         if top == 0 && bottom == rows && is_primary {
-            let n_actual = n.min(rows);
-            self.lines.rotate_right(n_actual);
-
-            // Shift dirty bits to match the rotated content.
-            self.dirty_set.shift_right(n_actual);
-
-            // Replace the now-stale head lines with fresh blank lines.
-            // Use clear_with_bg instead of new_with_bg to reuse the existing
-            // Vec<Cell> allocation — avoids one heap alloc+dealloc per rotated line.
-            for i in 0..n_actual {
-                if let Some(line) = self.lines.get_mut(i) {
-                    line.clear_with_bg(bg);
-                }
-            }
-
-            // Mark ALL lines dirty (same rationale as scroll_up: avoids
-            // stale-blank corruption when scroll events accumulate between
-            // render frames).
-            self.full_dirty = true;
-            self.graphics.scroll_down(n_actual, rows);
+            self.scroll_down_full_screen(n, bg);
         } else {
-            // Partial-region scroll: fall back to remove+insert.
-            for _ in 0..n {
-                self.lines.remove(bottom - 1);
-                let new_line = Line::new_with_bg(self.cols as usize, bg);
-                self.lines.insert(top, new_line);
-
-                self.mark_dirty_range(top, bottom);
-            }
-            self.graphics.scroll_down(n, rows);
+            self.scroll_down_partial_region(n, bg, rows);
         }
     }
 
@@ -211,6 +253,5 @@ impl Screen {
 }
 
 #[cfg(test)]
-mod tests {
-    include!("scroll_tests.rs");
-}
+#[path = "scroll/tests.rs"]
+mod tests;

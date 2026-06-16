@@ -377,4 +377,5 @@ fn sgr_0_resets_fg_and_bg_colors() {
     );
 }
 
-include!("include/integration_sgr_combining.rs");
+#[path = "include/integration_sgr_combining.rs"]
+mod combining;

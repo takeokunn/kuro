@@ -77,13 +77,7 @@
   (should (eq (lookup-key kuro--line-edit-keymap (kbd "C-c C-k"))
               #'kuro-line-edit-discard)))
 
-(ert-deftest kuro-input-mode-test-keymap-binds-c-x-c-e-line-edit ()
-  "Line keymap binds C-x C-e to `kuro--line-edit-in-buffer'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "C-x C-e"))
-               #'kuro--line-edit-in-buffer))))
+(kuro-input-mode-edit-test--deftest-line-keymaps)
 
 ;;; Group 33 — kuro--line-goto-history-oldest + kuro--line-goto-history-newest
 
@@ -151,22 +145,6 @@
     (kuro--line-goto-history-newest)
     (should (string= kuro--line-buffer "my-draft"))
     (should (= kuro--line-history-idx -1))))
-
-(ert-deftest kuro-input-mode-test-M-less-bound-in-line-keymap ()
-  "Line keymap binds M-< to `kuro--line-goto-history-oldest'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-<"))
-               #'kuro--line-goto-history-oldest))))
-
-(ert-deftest kuro-input-mode-test-M-greater-bound-in-line-keymap ()
-  "Line keymap binds M-> to `kuro--line-goto-history-newest'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M->"))
-               #'kuro--line-goto-history-newest))))
 
 ;;; Group 34 — kuro--line-complete (TAB) + kuro-line-completion-function
 
@@ -255,14 +233,6 @@
       (should (string= kuro--line-buffer "make install"))
       (should (= kuro--line-point 12)))))
 
-(ert-deftest kuro-input-mode-test-tab-bound-to-line-complete ()
-  "Line keymap binds TAB to `kuro--line-complete'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "TAB"))
-               #'kuro--line-complete))))
-
 ;;; Group 35 — kuro--line-expand-abbrev (M-SPC)
 
 (ert-deftest kuro-input-mode-test-expand-abbrev-nil-alist-messages ()
@@ -343,14 +313,6 @@
        (kuro--line-expand-abbrev)
        (should (string= kuro--line-buffer "gs"))
        (should (cl-some (lambda (m) (string-match-p "no abbreviation" m)) msgs))))))
-
-(ert-deftest kuro-input-mode-test-M-SPC-bound-in-line-keymap ()
-  "Line keymap binds M-SPC to `kuro--line-expand-abbrev'."
-  (kuro-input-mode-test--with-buffer
-   (kuro--build-keymap)
-   (kuro--build-line-mode-keymap)
-   (should (eq (lookup-key kuro--line-mode-keymap (kbd "M-SPC"))
-               #'kuro--line-expand-abbrev))))
 
 ;;; Group 36 — kuro--line-clear-overlay
 

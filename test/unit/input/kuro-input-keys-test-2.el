@@ -8,10 +8,9 @@
 
 (ert-deftest kuro-input-keys--generated-sequences-are-strings ()
   "kuro--def-key-sequence sends string values (not symbols or integers)."
-  (dolist (fn '(kuro--arrow-up kuro--arrow-down kuro--arrow-left kuro--arrow-right
-                kuro--HOME kuro--END kuro--F1 kuro--F4 kuro--F5 kuro--F12))
-    (dolist (mode '(nil t))
-      (let ((kuro--application-cursor-keys-mode mode))
+  (dolist (fn (kuro-input-keys-test--string-sequence-sample-handlers))
+    (kuro-input-keys-test--dolist-cursor-mode (mode)
+      (kuro-input-keys-test--with-cursor-mode mode
         (kuro-input-keys-test--with-capture
           (funcall fn)
           (should (stringp (car kuro-input-keys-test--sent))))))))
@@ -34,59 +33,28 @@
 (ert-deftest kuro-input-keys--f1-f4-same-in-both-modes ()
   "F1-F4 send identical SS3 sequences regardless of application cursor mode.
 These keys do not change between normal and application cursor mode."
-  (let ((expected '((kuro--F1 . "\eOP")
-                    (kuro--F2 . "\eOQ")
-                    (kuro--F3 . "\eOR")
-                    (kuro--F4 . "\eOS"))))
-    (dolist (pair expected)
-      (dolist (mode '(nil t))
-        (let ((kuro--application-cursor-keys-mode mode))
-          (kuro-input-keys-test--with-capture
-            (funcall (car pair))
-            (should (equal (car kuro-input-keys-test--sent) (cdr pair)))))))))
+  (dolist (pair (kuro-input-keys-test--function-sequence-range 0 4))
+    (kuro-input-keys-test--dolist-cursor-mode (mode)
+      (kuro-input-keys-test--assert-sequence (car pair) mode (cdr pair)))))
 
 ;;; Group 14: F5-F12 send same CSI sequences in both cursor modes
 
 (ert-deftest kuro-input-keys--f5-f12-same-in-both-modes ()
   "F5-F12 send identical CSI sequences regardless of application cursor mode."
-  (let ((expected '((kuro--F5  . "\e[15~")
-                    (kuro--F6  . "\e[17~")
-                    (kuro--F7  . "\e[18~")
-                    (kuro--F8  . "\e[19~")
-                    (kuro--F9  . "\e[20~")
-                    (kuro--F10 . "\e[21~")
-                    (kuro--F11 . "\e[23~")
-                    (kuro--F12 . "\e[24~"))))
-    (dolist (pair expected)
-      (dolist (mode '(nil t))
-        (let ((kuro--application-cursor-keys-mode mode))
-          (kuro-input-keys-test--with-capture
-            (funcall (car pair))
-            (should (equal (car kuro-input-keys-test--sent) (cdr pair)))))))))
+  (dolist (pair (kuro-input-keys-test--function-sequence-range 4 12))
+    (kuro-input-keys-test--dolist-cursor-mode (mode)
+      (kuro-input-keys-test--assert-sequence (car pair) mode (cdr pair)))))
 
 ;;; Group 15: Navigation keys send exactly one string per call
 
 (ert-deftest kuro-input-keys--navigation-keys-send-exactly-one-string ()
   "Each navigation key handler sends exactly one string per invocation."
-  (dolist (fn '(kuro--HOME kuro--END kuro--INSERT kuro--DELETE
-                kuro--PAGE-UP kuro--PAGE-DOWN))
+  (dolist (fn (mapcar #'car kuro-input-keys-test--navigation-sequences))
     (kuro-input-keys-test--with-capture
       (funcall fn)
       (should (= (length kuro-input-keys-test--sent) 1)))))
 
-;;; Group 16: kuro--alt-modified with special characters
-
-(ert-deftest kuro-input-keys--alt-modified-sends-esc-space ()
-  "Alt+Space sends ESC followed by a space character."
-  (kuro-input-keys-test--with-capture
-    (kuro--alt-modified ?\s)
-    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?\s)))))
-
-(ert-deftest kuro-input-keys--alt-modified-sends-esc-dot ()
-  "Alt+. sends ESC followed by a period."
-  (kuro-input-keys-test--with-capture
-    (kuro--alt-modified ?.)
-    (should (equal (car kuro-input-keys-test--sent) "\e."))))
+;;; Group 16: kuro--alt-modified output cardinality
 
 (ert-deftest kuro-input-keys--alt-modified-sends-exactly-one-string ()
   "kuro--alt-modified sends exactly one string per invocation."
@@ -150,19 +118,7 @@ These keys do not change between normal and application cursor mode."
     (kuro--ctrl-modified ?C 0)
     (should (= (aref (car kuro-input-keys-test--sent) 0) 3))))
 
-;;; Group 19: kuro--alt-modified — uppercase and output length invariants
-
-(ert-deftest kuro-input-keys--alt-modified-uppercase-a ()
-  "Alt+A (uppercase) sends ESC followed by uppercase A."
-  (kuro-input-keys-test--with-capture
-    (kuro--alt-modified ?A)
-    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?A)))))
-
-(ert-deftest kuro-input-keys--alt-modified-uppercase-z ()
-  "Alt+Z (uppercase) sends ESC followed by uppercase Z."
-  (kuro-input-keys-test--with-capture
-    (kuro--alt-modified ?Z)
-    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?Z)))))
+;;; Group 19: kuro--alt-modified output length invariants
 
 (ert-deftest kuro-input-keys--alt-modified-output-is-two-byte-string ()
   "kuro--alt-modified output string has length 2 (ESC + char)."
@@ -184,20 +140,7 @@ These keys do not change between normal and application cursor mode."
       (kuro--alt-modified ch)
       (should (= (aref (car kuro-input-keys-test--sent) 1) ch)))))
 
-(ert-deftest kuro-input-keys--alt-modified-sends-esc-backspace ()
-  "Alt+Backspace (char=\\x7f) sends ESC followed by DEL byte."
-  (kuro-input-keys-test--with-capture
-    (kuro--alt-modified ?\x7f)
-    (should (equal (car kuro-input-keys-test--sent) (string ?\e ?\x7f)))))
-
 ;;; Group 20 — sequence value spot-checks and mode invariants
-
-(defmacro kuro-input-keys-test--assert-sequence (fn mode expected)
-  "Assert that FN sends EXPECTED when kuro--application-cursor-keys-mode is MODE."
-  `(let ((kuro--application-cursor-keys-mode ,mode))
-     (kuro-input-keys-test--with-capture
-       (funcall ,fn)
-       (should (equal (car kuro-input-keys-test--sent) ,expected)))))
 
 (ert-deftest kuro-input-keys--g20-f1-sends-ss3-p-normal ()
   "F1 sends ESC O P (SS3 P) in normal cursor mode."
@@ -233,22 +176,22 @@ These keys do not change between normal and application cursor mode."
 
 (ert-deftest kuro-input-keys--g20-page-up-both-modes ()
   "PAGE-UP sends ESC [ 5 ~ in both cursor modes."
-  (dolist (mode '(nil t))
+  (kuro-input-keys-test--dolist-cursor-mode (mode)
     (kuro-input-keys-test--assert-sequence #'kuro--PAGE-UP mode "\e[5~")))
 
 (ert-deftest kuro-input-keys--g20-page-down-both-modes ()
   "PAGE-DOWN sends ESC [ 6 ~ in both cursor modes."
-  (dolist (mode '(nil t))
+  (kuro-input-keys-test--dolist-cursor-mode (mode)
     (kuro-input-keys-test--assert-sequence #'kuro--PAGE-DOWN mode "\e[6~")))
 
 (ert-deftest kuro-input-keys--g20-insert-both-modes ()
   "INSERT sends ESC [ 2 ~ in both cursor modes."
-  (dolist (mode '(nil t))
+  (kuro-input-keys-test--dolist-cursor-mode (mode)
     (kuro-input-keys-test--assert-sequence #'kuro--INSERT mode "\e[2~")))
 
 (ert-deftest kuro-input-keys--g20-delete-both-modes ()
   "DELETE sends ESC [ 3 ~ in both cursor modes."
-  (dolist (mode '(nil t))
+  (kuro-input-keys-test--dolist-cursor-mode (mode)
     (kuro-input-keys-test--assert-sequence #'kuro--DELETE mode "\e[3~")))
 
 (provide 'kuro-input-keys-test-2)

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn kitty_quiet_two_suppresses_response() {
     let mut t = common::new_terminal();

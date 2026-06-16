@@ -9,8 +9,8 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 /// Initialize Kuro with the given shell command and terminal dimensions.
 ///
-/// Returns the session ID (a non-negative integer) on success, or nil on failure.
-/// The first session returns 0; subsequent sessions return incrementing values.
+/// Returns the session ID (a positive integer) on success, or nil on failure.
+/// The first session returns 1; subsequent sessions return incrementing values.
 ///
 /// ROWS and COLS must match the actual Emacs window dimensions so that the PTY
 /// is created with the correct size from the start.  Spawning the shell with the
@@ -20,7 +20,7 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 // `#[defun]` requires owned String for Emacs string arguments — &str is not supported.
 #[expect(
     clippy::cast_possible_wrap,
-    reason = "session_id is a monotonically increasing counter starting at 0; will never reach i64::MAX in practice"
+    reason = "session_id is a monotonically increasing counter starting at 1; will never reach i64::MAX in practice"
 )]
 #[defun]
 fn kuro_core_init<'e>(

@@ -6,11 +6,6 @@
 (require 'cl-lib)
 (require 'kuro-faces-color)
 
-
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-faces-color)
-
 (defmacro kuro-faces-color-test--should-decode (name encoded expected)
   "Define NAME as an ERT test asserting ENCODED decodes to EXPECTED."
   `(ert-deftest ,name ()

@@ -6,87 +6,7 @@
 
 ;;; Group 21: Kitty Keyboard Protocol (KKP) encoding
 
-;; Helper macro: run BODY with keyboard-flags set to FLAGS and send-key captured.
-(defmacro kuro-input-keys-test--with-kkp (flags &rest body)
-  "Execute BODY with `kuro--keyboard-flags' = FLAGS and key capture active."
-  `(kuro-input-keys-test--with-capture
-     (let ((kuro--keyboard-flags ,flags))
-       ,@body)))
-
-(ert-deftest kuro-input-keys--g21-kkp-flags-zero-legacy-arrow ()
-  "With keyboard-flags=0, arrow up sends legacy sequence."
-  (kuro-input-keys-test--with-kkp 0
-    (let ((kuro--application-cursor-keys-mode nil))
-      (kuro--arrow-up))
-    (should (equal (car kuro-input-keys-test--sent) "\e[A"))))
-
-(ert-deftest kuro-input-keys--g21-kkp-all-escape-arrow-up-csi-u ()
-  "With flag 0x08 (ALL_ESCAPE), arrow up sends KKP codepoint CSI 57352;1u."
-  (kuro-input-keys-test--with-kkp #x08
-    (kuro--arrow-up)
-    (should (equal (car kuro-input-keys-test--sent)
-                   (format "\e[%d;1u" kuro--kkp-cp-up)))))
-
-(ert-deftest kuro-input-keys--g21-kkp-all-escape-f1-csi-u ()
-  "With flag 0x08, F1 sends CSI 57364;1u."
-  (kuro-input-keys-test--with-kkp #x08
-    (kuro--F1)
-    (should (equal (car kuro-input-keys-test--sent)
-                   (format "\e[%d;1u" kuro--kkp-cp-f1)))))
-
-(ert-deftest kuro-input-keys--g21-kkp-all-escape-home-csi-u ()
-  "With flag 0x08, Home sends CSI 57356;1u."
-  (kuro-input-keys-test--with-kkp #x08
-    (kuro--HOME)
-    (should (equal (car kuro-input-keys-test--sent)
-                   (format "\e[%d;1u" kuro--kkp-cp-home)))))
-
-(ert-deftest kuro-input-keys--g21-kkp-all-escape-delete-csi-u ()
-  "With flag 0x08, Delete sends CSI 57349;1u."
-  (kuro-input-keys-test--with-kkp #x08
-    (kuro--DELETE)
-    (should (equal (car kuro-input-keys-test--sent)
-                   (format "\e[%d;1u" kuro--kkp-cp-delete)))))
-
-(ert-deftest kuro-input-keys--g21-kkp-only-disambiguate-arrow-legacy ()
-  "With only flag 0x01 (DISAMBIGUATE), arrow keys still use legacy encoding."
-  (kuro-input-keys-test--with-kkp #x01
-    (let ((kuro--application-cursor-keys-mode nil))
-      (kuro--arrow-down))
-    (should (equal (car kuro-input-keys-test--sent) "\e[B"))))
-
-(ert-deftest kuro-input-keys--g21-kkp-ctrl-all-escape-sends-csi-u ()
-  "With flag 0x08, Ctrl+A sends CSI 65;5u (distinguishable from C0 control codes)."
-  (kuro-input-keys-test--with-kkp #x08
-    (kuro--ctrl-modified ?A nil))
-  ;; After exiting with-kkp scope, check: sent in kuro-input-keys-test--sent
-  ;; Re-test inline since the macro resets sent list:
-  (kuro-input-keys-test--with-capture
-    (let ((kuro--keyboard-flags #x08))
-      (kuro--ctrl-modified ?A nil))
-    (should (equal (car kuro-input-keys-test--sent) "\e[65;5u"))))
-
-(ert-deftest kuro-input-keys--g21-kkp-ctrl-zero-flags-sends-c0 ()
-  "With flags=0, Ctrl+A sends raw C0 control byte (legacy)."
-  (kuro-input-keys-test--with-capture
-    (let ((kuro--keyboard-flags 0))
-      (kuro--ctrl-modified ?A nil))
-    ;; logand ?A 31 = 1 = C-a
-    (should (equal (car kuro-input-keys-test--sent) "\x01"))))
-
-(ert-deftest kuro-input-keys--g21-kkp-alt-disambiguate-sends-csi-u ()
-  "With flag 0x01 (DISAMBIGUATE), Alt+a sends CSI 97;3u instead of ESC+a."
-  (kuro-input-keys-test--with-capture
-    (let ((kuro--keyboard-flags #x01))
-      (kuro--alt-modified ?a))
-    (should (equal (car kuro-input-keys-test--sent) "\e[97;3u"))))
-
-(ert-deftest kuro-input-keys--g21-kkp-alt-zero-flags-sends-esc-prefix ()
-  "With flags=0, Alt+a sends legacy ESC+a."
-  (kuro-input-keys-test--with-capture
-    (let ((kuro--keyboard-flags 0))
-      (kuro--alt-modified ?a))
-    (should (equal (car kuro-input-keys-test--sent) "\ea"))))
+(kuro-input-keys-test--deftest-kkp-send-cases)
 
 (ert-deftest kuro-input-keys--g21-kkp-codepoints-are-integers ()
   "All KKP codepoint constants are positive integers."
@@ -97,13 +17,7 @@
                     kuro--kkp-cp-f1 kuro--kkp-cp-f12))
     (should (and (integerp cp) (> cp 0)))))
 
-(ert-deftest kuro-input-keys--g21-kkp-encode-kitty-key-no-modifier ()
-  "kuro--encode-kitty-key with modifier 0 produces ESC [ key u."
-  (should (equal (kuro--encode-kitty-key 97 0) "\e[97u")))
-
-(ert-deftest kuro-input-keys--g21-kkp-encode-kitty-key-with-ctrl ()
-  "kuro--encode-kitty-key with ctrl modifier encodes as ESC [ key ; 5 u."
-  (should (equal (kuro--encode-kitty-key 65 4) "\e[65;5u")))
+(kuro-input-keys-test--deftest-encode-kitty-key-cases)
 
 ;;; ── KKP flag constants and F-key codepoints ──────────────────────────────────
 
@@ -154,21 +68,7 @@
 
 ;;; Group 22: kuro--kkp-flag-p direct tests
 
-(ert-deftest kuro-input-keys--g22-kkp-flag-p-returns-t-when-bit-set ()
-  "`kuro--kkp-flag-p' returns non-nil when the flag bit is set in keyboard-flags."
-  (let ((kuro--keyboard-flags kuro--kkp-disambiguate))
-    (should (kuro--kkp-flag-p kuro--kkp-disambiguate))))
-
-(ert-deftest kuro-input-keys--g22-kkp-flag-p-returns-nil-when-bit-clear ()
-  "`kuro--kkp-flag-p' returns nil when the flag bit is not set."
-  (let ((kuro--keyboard-flags 0))
-    (should-not (kuro--kkp-flag-p kuro--kkp-disambiguate))))
-
-(ert-deftest kuro-input-keys--g22-kkp-flag-p-checks-specific-bit-only ()
-  "`kuro--kkp-flag-p' is true for set bits and false for clear bits independently."
-  (let ((kuro--keyboard-flags kuro--kkp-disambiguate))
-    (should     (kuro--kkp-flag-p kuro--kkp-disambiguate))
-    (should-not (kuro--kkp-flag-p kuro--kkp-all-escape))))
+(kuro-input-keys-test--deftest-kkp-flag-p-cases)
 
 ;;; Group 23: kuro--def-key-sequence macro — structural coverage
 ;;

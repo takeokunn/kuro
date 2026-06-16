@@ -247,95 +247,25 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 ;;; Group 9: kuro--dispatch-mouse-event (via event handlers)
 
-(ert-deftest kuro-input-mouse-dispatch-gates-on-mouse-mode ()
-  "kuro--dispatch-mouse-event is a no-op when kuro--mouse-mode is 0."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 0
-                kuro--mouse-sgr nil)
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro-mouse-test--with-event 0 0
-          (kuro--dispatch-mouse-event 0 t)))
-      (should-not sent))))
-
-(ert-deftest kuro-input-mouse-dispatch-nil-btn-is-noop ()
-  "kuro--dispatch-mouse-event with nil BTN does not send anything."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1000
-                kuro--mouse-sgr nil)
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro-mouse-test--with-event 0 0
-          (kuro--dispatch-mouse-event nil t)))
-      (should-not sent))))
-
-(ert-deftest kuro-input-mouse-dispatch-routes-to-sgr-encoder ()
-  "When kuro--mouse-sgr is t, dispatch calls kuro--encode-mouse-sgr."
-  (kuro-input-mouse-test--with-send 1000 t nil 2 3  ; col1=3, row1=4
-    (kuro--dispatch-mouse-event 1 t)
-    (should (equal sent "\e[<1;3;4M"))))
-
-(ert-deftest kuro-input-mouse-dispatch-routes-to-x10-encoder ()
-  "When kuro--mouse-sgr is nil, dispatch calls kuro--encode-mouse (X10 path)."
-  (kuro-input-mouse-test--with-send 1000 nil nil 0 0
-    (kuro--dispatch-mouse-event 0 t)
-    ;; X10: btn-byte=32, col-byte=33, row-byte=33
-    (should (equal sent (format "\e[M%c%c%c" 32 33 33)))))
+(kuro-input-mouse-test--deftest-dispatch-cases
+ kuro-input-mouse-dispatch-gates-on-mouse-mode
+ kuro-input-mouse-dispatch-nil-btn-is-noop
+ kuro-input-mouse-dispatch-routes-to-sgr-encoder
+ kuro-input-mouse-dispatch-routes-to-x10-encoder)
 
 ;;; Group 10: kuro--encode-mouse — mode values 1002 and 1003
 
-(ert-deftest kuro-input-mouse-mode-1002-enables-encoding ()
-  "kuro--mouse-mode=1002 (button-event) also enables X10 encoding."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1002)
-    (setq-local kuro--mouse-sgr nil)
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 0 0
-      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
-        (should (stringp result))
-        (should (string-prefix-p "\e[M" result))))))
-
-(ert-deftest kuro-input-mouse-mode-1003-enables-encoding ()
-  "kuro--mouse-mode=1003 (any-event) also enables X10 encoding."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1003)
-    (setq-local kuro--mouse-sgr nil)
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 1 1
-      (let ((result (kuro--encode-mouse 'fake-event 0 t)))
-        (should (stringp result))
-        (should (string-prefix-p "\e[M" result))))))
+(kuro-input-mouse-test--deftest-encode-cases
+ kuro-input-mouse-mode-1002-enables-encoding
+ kuro-input-mouse-mode-1003-enables-encoding)
 
 ;;; Group 11: kuro--encode-mouse-sgr — button number encoding
 
-(ert-deftest kuro-input-mouse-encode-sgr-button1-press ()
-  "kuro--encode-mouse-sgr with button=1 embeds 1 in the SGR sequence."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 0 0
-      (should (equal (kuro--encode-mouse-sgr 'fake-event 1 t) "\e[<1;1;1M")))))
-
-(ert-deftest kuro-input-mouse-encode-sgr-button2-press ()
-  "kuro--encode-mouse-sgr with button=2 embeds 2 in the SGR sequence."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 0 0
-      (should (equal (kuro--encode-mouse-sgr 'fake-event 2 t) "\e[<2;1;1M")))))
-
-(ert-deftest kuro-input-mouse-encode-sgr-scroll-up-button64 ()
-  "kuro--encode-mouse-sgr with button=64 encodes scroll-up correctly."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 9 4
-      ;; col1=10, row1=5
-      (should (equal (kuro--encode-mouse-sgr 'fake-event 64 t) "\e[<64;10;5M")))))
-
-(ert-deftest kuro-input-mouse-encode-sgr-scroll-down-button65 ()
-  "kuro--encode-mouse-sgr with button=65 encodes scroll-down correctly."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
-    (kuro-mouse-test--with-event 9 4
-      (should (equal (kuro--encode-mouse-sgr 'fake-event 65 t) "\e[<65;10;5M")))))
+(kuro-input-mouse-test--deftest-encode-cases
+ kuro-input-mouse-encode-sgr-button1-press
+ kuro-input-mouse-encode-sgr-button2-press
+ kuro-input-mouse-encode-sgr-scroll-up-button64
+ kuro-input-mouse-encode-sgr-scroll-down-button65)
 
 (provide 'kuro-input-mouse-test)
 ;;; kuro-input-mouse-test.el ends here

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn test_cub_cursor_backward_clamp() {
     let mut term = TerminalCore::new(24, 80);
@@ -162,7 +164,7 @@ fn test_rep_repeats_last_ascii_char() {
     // Print 'A' then repeat it 4 more times → columns 0..4 all = 'A'
     term.advance(b"A\x1b[4b");
     for col in 0..5 {
-        let ch = term.get_cell(0, col).map(|c| c.char()).unwrap_or('\0');
+        let ch = cell_char(&term, 0, col);
         assert_eq!(ch, 'A', "REP: cell (0,{col}) must be 'A', got {ch:?}");
     }
 }
@@ -172,8 +174,8 @@ fn test_rep_repeats_last_ascii_char() {
 fn test_rep_default_count_is_one() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"X\x1b[b"); // CSI b with no param → default 1
-    let c0 = term.get_cell(0, 0).map(|c| c.char()).unwrap_or('\0');
-    let c1 = term.get_cell(0, 1).map(|c| c.char()).unwrap_or('\0');
+    let c0 = cell_char(&term, 0, 0);
+    let c1 = cell_char(&term, 0, 1);
     assert_eq!(c0, 'X', "REP: first cell must be 'X'");
     assert_eq!(c1, 'X', "REP: second cell must be 'X' (default repeat=1)");
 }
@@ -194,7 +196,7 @@ fn test_rep_repeats_non_ascii_char() {
     // Print '€' (U+20AC, width 1) then repeat 2 more times
     term.advance("€\x1b[2b".as_bytes());
     for col in 0..3 {
-        let ch = term.get_cell(0, col).map(|c| c.char()).unwrap_or('\0');
+        let ch = cell_char(&term, 0, col);
         assert_eq!(ch, '€', "REP non-ASCII: cell (0,{col}) must be '€', got {ch:?}");
     }
 }
@@ -321,23 +323,21 @@ fn test_decera_fills_rectangle_with_spaces() {
     term.advance(b"\x1b[2;5;3;10$z");
     // Row 0 should be untouched: 20 A's
     for col in 0..20 {
-        assert_eq!(term.get_cell(0, col).map(|c| c.char()).unwrap_or('\0'), 'A',
+        assert_eq!(cell_char(&term, 0, col), 'A',
             "row 0 col {col} must be untouched");
     }
     // Row 1 cols 4-9 (0-indexed) should be spaces
     for col in 4..10 {
-        assert_eq!(term.get_cell(1, col).map(|c| c.char()).unwrap_or('\0'), ' ',
+        assert_eq!(cell_char(&term, 1, col), ' ',
             "row 1 col {col} must be erased");
     }
     // Row 1 col 10 (0-indexed, outside rect) should be B
-    assert_eq!(term.get_cell(1, 10).map(|c| c.char()).unwrap_or('\0'), 'B');
+    assert_eq!(cell_char(&term, 1, 10), 'B');
 }
 
 #[test]
 fn test_decera_does_not_panic_out_of_bounds() {
     let mut term = TerminalCore::new(5, 10);
     term.advance(b"\x1b[1;1;999;999$z"); // huge rectangle — must clamp, not panic
-    assert!(term.cursor_row() < 5);
+    assert_cursor_in_bounds(&term);
 }
-
-

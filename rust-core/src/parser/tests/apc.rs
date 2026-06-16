@@ -330,5 +330,8 @@ fn test_apc_payload_one_byte_over_limit_truncates_and_dispatches() {
     );
 }
 
-include!("apc_binary_payload.rs");
-include!("apc_dispatch.rs");
+#[path = "apc/binary_payload.rs"]
+mod binary_payload;
+
+#[path = "apc/dispatch.rs"]
+mod dispatch;

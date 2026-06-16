@@ -31,6 +31,21 @@ fn test_pty_spawn() {
 }
 
 #[test]
+fn test_drop_kills_long_running_child_without_hanging() {
+    let start = std::time::Instant::now();
+    {
+        let mut pty = Pty::spawn("sh", &[], 24, 80).unwrap();
+        pty.write(b"sleep 60\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "dropping a PTY with a long-running foreground child must be bounded"
+    );
+}
+
+#[test]
 fn test_validate_shell_empty_string_rejected() {
     // An empty string should fail because `which` cannot resolve it
     let result = Pty::validate_shell("");
@@ -257,4 +272,5 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     );
 }
 
-include!("posix_env.rs");
+#[path = "posix/env.rs"]
+mod env;

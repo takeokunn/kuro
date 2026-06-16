@@ -1,3 +1,5 @@
+use super::KEYBOARD_FLAGS_STACK_MAX;
+use crate::TerminalCore;
 
 /// Handle Kitty keyboard mode push (CSI > Ps u).
 ///
@@ -8,7 +10,7 @@
 /// - [`handle_kitty_kb_pop`] — restore the previous flags from the stack
 /// - [`handle_kitty_kb_query`] — query the current flags without modifying state
 #[inline]
-pub fn handle_kitty_kb_push(term: &mut crate::TerminalCore, params: &vte::Params) {
+pub fn handle_kitty_kb_push(term: &mut TerminalCore, params: &vte::Params) {
     let flags = params
         .iter()
         .next()
@@ -31,7 +33,7 @@ pub fn handle_kitty_kb_push(term: &mut crate::TerminalCore, params: &vte::Params
 /// - [`handle_kitty_kb_push`] — save the current flags and set new ones
 /// - [`handle_kitty_kb_query`] — query the current flags without modifying state
 #[inline]
-pub fn handle_kitty_kb_pop(term: &mut crate::TerminalCore) {
+pub fn handle_kitty_kb_pop(term: &mut TerminalCore) {
     if let Some(prev) = term.dec_modes.keyboard_flags_stack.pop() {
         term.dec_modes.keyboard_flags = prev;
     } else {
@@ -48,7 +50,7 @@ pub fn handle_kitty_kb_pop(term: &mut crate::TerminalCore) {
 /// - [`handle_kitty_kb_push`] — save the current flags and set new ones
 /// - [`handle_kitty_kb_pop`] — restore the previous flags from the stack
 #[inline]
-pub fn handle_kitty_kb_query(term: &mut crate::TerminalCore) {
+pub fn handle_kitty_kb_query(term: &mut TerminalCore) {
     let response = format!("\x1b[?{}u", term.dec_modes.keyboard_flags);
     term.meta.pending_responses.push(response.into_bytes());
 }
@@ -65,7 +67,7 @@ pub fn handle_kitty_kb_query(term: &mut crate::TerminalCore) {
 ///
 /// See: <https://contour-terminal.org/vt-extensions/color-palette-update-notifications/>
 #[inline]
-pub fn handle_dsr_color_scheme(term: &mut crate::TerminalCore) {
+pub fn handle_dsr_color_scheme(term: &mut TerminalCore) {
     let bytes: &[u8] = if term.meta.color_scheme_dark {
         b"\x1b[?997;1n"
     } else {
@@ -87,7 +89,7 @@ pub fn handle_dsr_color_scheme(term: &mut crate::TerminalCore) {
 /// the requested value (idempotent — repeat calls with the same value are a
 /// no-op and push zero bytes).
 #[inline]
-pub(crate) fn apply_color_scheme(core: &mut crate::TerminalCore, is_dark: bool) -> bool {
+pub(crate) fn apply_color_scheme(core: &mut TerminalCore, is_dark: bool) -> bool {
     let changed = core.meta.color_scheme_dark != is_dark;
     if changed {
         core.meta.color_scheme_dark = is_dark;

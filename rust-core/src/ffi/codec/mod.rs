@@ -41,24 +41,21 @@ mod line;
 
 // Color encoding
 pub use color::{
-    encode_attrs, encode_color, ATTRS_STYLE_SHIFT, ATTRS_UNDERLINE_BIT,
-    COLOR_DEFAULT_SENTINEL, COLOR_INDEXED_MARKER, COLOR_NAMED_MARKER,
-    RGB_G_SHIFT, RGB_R_SHIFT,
+    encode_attrs, encode_color, ATTRS_STYLE_SHIFT, ATTRS_UNDERLINE_BIT, COLOR_DEFAULT_SENTINEL,
+    COLOR_INDEXED_MARKER, COLOR_NAMED_MARKER, RGB_G_SHIFT, RGB_R_SHIFT,
 };
 
 // Line encoding
 pub use line::encode_line;
-pub(crate) use line::{
-    encode_line_into_buf, encode_line_with_pool, EncodePool, EncodedLine,
-};
+pub(crate) use line::{encode_line_into_buf, encode_line_with_pool, EncodePool, EncodedLine};
 
 // Binary frame encoding + hash
-pub(crate) use binary::{
-    compute_row_hash_from_encoded, compute_row_hash_from_pool, encode_screen_binary,
-    BINARY_FORMAT_VERSION,
-};
 #[cfg(test)]
 pub(crate) use binary::compute_row_hash;
+pub(crate) use binary::{
+    compute_row_hash_from_encoded, encode_line_into_buf_and_hash, encode_screen_binary,
+    BINARY_FORMAT_VERSION,
+};
 
 // Hyperlink ranges
 pub use hyperlinks::encode_hyperlink_ranges;

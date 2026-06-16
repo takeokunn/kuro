@@ -2,6 +2,30 @@
 
 use kuro_core::{types::cell::SgrFlags, TerminalCore};
 
+fn cell_char(term: &TerminalCore, row: usize, col: usize) -> char {
+    term.get_cell(row, col)
+        .map(|cell| cell.char())
+        .unwrap_or('\0')
+}
+
+fn assert_cursor_in_bounds(term: &TerminalCore) {
+    let rows = term.rows() as usize;
+    let cols = term.cols() as usize;
+
+    assert!(
+        term.cursor_row() < rows,
+        "cursor row {} must be within screen height {}",
+        term.cursor_row(),
+        rows
+    );
+    assert!(
+        term.cursor_col() < cols,
+        "cursor col {} must be within screen width {}",
+        term.cursor_col(),
+        cols
+    );
+}
+
 #[test]
 fn test_decsc_decrc_saves_and_restores_cursor_position() {
     let mut term = TerminalCore::new(24, 80);
@@ -31,8 +55,7 @@ fn test_cursor_movement_respects_screen_bounds() {
     let mut term = TerminalCore::new(5, 10);
     // Try to move cursor far outside bounds
     term.advance(b"\x1b[999;999H");
-    assert!(term.cursor_row() < 5, "Row must be within 5");
-    assert!(term.cursor_col() < 10, "Col must be within 10");
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -50,14 +73,28 @@ fn test_sgr_true_color_foreground_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[38;2;255;128;0m"); // truecolor orange foreground
                                            // Must not panic, and cursor remains in bounds
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
+}
+
+#[test]
+fn test_large_truecolor_stream_completes() {
+    let mut term = TerminalCore::new(24, 80);
+    let mut payload = Vec::new();
+
+    for i in 1..=500 {
+        let color = i % 256;
+        payload.extend_from_slice(format!("\x1b[38;2;{color};100;200m{i}\x1b[0m\n").as_bytes());
+    }
+
+    term.advance(&payload);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
 fn test_sgr_256_color_foreground_no_panic() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[38;5;196m"); // indexed color 196 (bright red in 256-color)
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -67,7 +104,7 @@ fn test_insert_and_delete_chars_no_panic() {
     term.advance(b"\x1b[1;3H"); // move to row 1, col 3 (1-indexed → row 0, col 2)
     term.advance(b"\x1b[1P"); // DCH: delete 1 char
                               // Must not panic
-    assert!(term.cursor_col() < 80);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -77,7 +114,7 @@ fn test_scroll_up_with_region_no_panic() {
     term.advance(b"\x1b[3;1H"); // move to top of region (1-indexed → row 2, col 0)
     term.advance(b"\x1b[S"); // SU: scroll up
                              // Must not panic, cursor in bounds
-    assert!(term.cursor_row() < 10);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -87,8 +124,7 @@ fn test_complex_sequence_does_not_panic() {
     let init_seq = b"\x1b[?2004h\x1b[?1h\x1b=\x1b[?25h\x1b[?1049h\x1b[22;0;0t";
     term.advance(init_seq);
     // Must not panic, screen in valid state
-    assert!(term.cursor_row() < 24);
-    assert!(term.cursor_col() < 80);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -96,7 +132,7 @@ fn test_osc_title_set() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b]2;hello title\x07"); // OSC 2: set window title
                                              // Must not panic, cursor in bounds
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -135,7 +171,7 @@ fn test_deckpam_deckpnm_no_panic() {
     term.advance(b"\x1b="); // DECKPAM: application keypad
     term.advance(b"\x1b>"); // DECKPNM: normal keypad
                             // Must not panic
-    assert!(term.cursor_row() < 24);
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -146,7 +182,7 @@ fn test_line_feed_scrolls_at_bottom() {
         term.advance(b"\n");
     }
     // Cursor must stay within bounds after scrolling
-    assert!(term.cursor_row() < 5, "Row must stay < 5 after scroll");
+    assert_cursor_in_bounds(&term);
 }
 
 #[test]
@@ -180,8 +216,11 @@ fn test_decaln_fills_screen_with_e_and_homes_cursor() {
     // Every cell in the visible grid must contain 'E'
     for row in 0..4 {
         for col in 0..10 {
-            let ch = term.get_cell(row, col).map(|c| c.char()).unwrap_or('\0');
-            assert_eq!(ch, 'E', "DECALN: cell ({row},{col}) must be 'E', got {ch:?}");
+            let ch = cell_char(&term, row, col);
+            assert_eq!(
+                ch, 'E',
+                "DECALN: cell ({row},{col}) must be 'E', got {ch:?}"
+            );
         }
     }
 }
@@ -194,8 +233,7 @@ fn test_vt52_mode_entry_does_not_panic() {
     // CSI ?2l — reset DECANM (switches to VT52 mode in real hardware;
     // this emulator ignores the mode silently)
     term.advance(b"\x1b[?2l");
-    assert!(term.cursor_row() < 24);
-    assert!(term.cursor_col() < 80);
+    assert_cursor_in_bounds(&term);
 }
 
 /// Character set designation sequences (SCS: `ESC ( B`, `ESC ) 0`, etc.)
@@ -207,8 +245,7 @@ fn test_scs_charset_designation_does_not_panic() {
     term.advance(b"\x1b)0"); // G1 = DEC Special
     term.advance(b"\x1b*B"); // G2 = USASCII
     term.advance(b"\x1b+0"); // G3 = DEC Special
-    assert!(term.cursor_row() < 24);
-    assert!(term.cursor_col() < 80);
+    assert_cursor_in_bounds(&term);
 }
 
 /// NEL (`ESC E`) performs CR + LF (Next Line).  After printing a character
@@ -331,5 +368,8 @@ fn test_decawm_on_restores_wrap() {
 
 /// CUB (CSI n D) moves the cursor left by n columns, clamping at column 0.
 
-include!("include/integration_sequences_part1b.rs");
-include!("include/integration_sequences_part2.rs");
+#[path = "include/integration_sequences_part1b.rs"]
+mod part1b;
+
+#[path = "include/integration_sequences_part2.rs"]
+mod part2;

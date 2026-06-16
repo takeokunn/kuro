@@ -26,7 +26,7 @@
 Set by `kuro-mux--track-window-change' via `window-selection-change-functions'.")
 
 (defun kuro-mux--track-window-change (_frame)
-  "Record the previously focused kuro buffer when window selection changes.
+  "Record the previously focused kuro buffer after window selection.
 Added to `window-selection-change-functions' by `kuro-mux--install-hooks'.
 Uses `old-selected-window', which is only valid inside this hook."
   (let ((old (old-selected-window)))
@@ -44,10 +44,10 @@ Signals `user-error' when there is no recorded previous session or it is dead."
   (interactive)
   (cond
    ((null kuro-mux--last-session)
-    (user-error "kuro-mux: no previous kuro session recorded"))
+    (user-error "Kuro-mux: no previous kuro session recorded"))
    ((not (buffer-live-p kuro-mux--last-session))
     (setq kuro-mux--last-session nil)
-    (user-error "kuro-mux: previous session no longer alive"))
+    (user-error "Kuro-mux: previous session no longer alive"))
    (t
     (switch-to-buffer kuro-mux--last-session))))
 
@@ -65,7 +65,7 @@ otherwise calls `switch-to-buffer'."
          (win (and buf (get-buffer-window buf 'visible))))
     (cond
      ((null buf)
-      (user-error "kuro-mux: no session named %S" name))
+      (user-error "Kuro-mux: no session named %S" name))
      (win
       (select-window win))
      (t
@@ -75,7 +75,8 @@ otherwise calls `switch-to-buffer'."
 ;;;; Splitting
 
 (defmacro kuro--def-mux-split (name split-fn docstring)
-  "Define a kuro-mux split command.
+  "Define NAME as a kuro-mux split command.
+DOCSTRING becomes the generated command docstring.
 SPLIT-FN is called with no arguments to create the new window."
   `(defun ,name (&optional command)
      ,docstring
@@ -147,14 +148,15 @@ When `kuro-mux-kill-confirm' is non-nil, prompts for confirmation first."
      (kill-buffer (current-buffer)))))
 
 (defmacro kuro--def-mux-swap (name window-nav-fn docstring)
-  "Define a kuro-mux pane-swap command.
+  "Define NAME as a kuro-mux pane-swap command.
+DOCSTRING becomes the generated command docstring.
 WINDOW-NAV-FN is called with (selected-window nil \\='visible) to pick the peer."
   `(defun ,name ()
      ,docstring
      (interactive)
      (let ((peer (,window-nav-fn (selected-window) nil 'visible)))
        (if (eq peer (selected-window))
-           (user-error "kuro-mux: only one window visible")
+          (user-error "Kuro-mux: only one window visible")
          (window-swap-states (selected-window) peer)))))
 
 ;;;###autoload
@@ -170,7 +172,7 @@ WINDOW-NAV-FN is called with (selected-window nil \\='visible) to pick the peer.
     (down  . shrink-window)
     (left  . shrink-window-horizontally)
     (right . enlarge-window-horizontally))
-  "Alist mapping resize direction symbols to their window-resize functions.")
+  "Alist mapping resize direction symbols to their `window-resize' functions.")
 
 ;;;###autoload
 (defun kuro-mux-resize-pane (direction &optional delta)
@@ -192,7 +194,7 @@ Analogous to tmux's resize-pane command."
         (cell (assq direction kuro--mux-resize-directions)))
     (if cell
         (funcall (cdr cell) n)
-      (user-error "kuro-mux: invalid direction: %s" direction))))
+      (user-error "Kuro-mux: invalid direction: %s" direction))))
 
 
 (provide 'kuro-mux-windows)

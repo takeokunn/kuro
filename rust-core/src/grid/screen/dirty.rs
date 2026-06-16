@@ -1,6 +1,6 @@
 //! Dirty tracking methods for Screen
 
-use super::{DirtySet as _, Screen};
+use super::{BitVecDirtySet, DirtySet as _, Screen};
 
 impl Screen {
     /// Attach a combining character to the cell at (row, col).
@@ -67,12 +67,10 @@ impl Screen {
     pub fn clear_dirty(&mut self) {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
-                alt.full_dirty = false;
-                alt.dirty_set.clear();
+                Self::clear_dirty_state(&mut alt.full_dirty, &mut alt.dirty_set);
             }
         } else {
-            self.full_dirty = false;
-            self.dirty_set.clear();
+            Self::clear_dirty_state(&mut self.full_dirty, &mut self.dirty_set);
         }
     }
 
@@ -83,58 +81,73 @@ impl Screen {
     /// an existing allocation rather than allocating a fresh `Vec` each frame.
     pub fn take_dirty_lines_into(&mut self, out: &mut Vec<usize>) {
         out.clear();
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_mut() {
-                if alt.full_dirty {
-                    alt.full_dirty = false;
-                    alt.dirty_set.clear();
-                    out.extend(0..alt.rows as usize);
-                    return;
-                }
-                out.extend(alt.dirty_set.iter_ones_direct());
-                alt.dirty_set.clear();
-                return;
-            }
-        }
-        if self.full_dirty {
-            self.full_dirty = false;
-            self.dirty_set.clear();
-            out.extend(0..self.rows as usize);
-        } else {
-            out.extend(self.dirty_set.iter_ones_direct());
-            self.dirty_set.clear();
-        }
+        self.drain_dirty_rows(|dirty_rows| out.extend(dirty_rows));
     }
 
     /// Get dirty lines and clear the dirty set
     pub fn take_dirty_lines(&mut self) -> Vec<usize> {
+        let mut dirty = Vec::new();
+        self.drain_dirty_rows(|dirty_rows| dirty.extend(dirty_rows));
+        dirty
+    }
+
+    #[inline]
+    fn drain_dirty_rows<F>(&mut self, mut emit: F)
+    where
+        F: FnMut(&mut dyn Iterator<Item = usize>),
+    {
         if self.is_alternate_active {
             if let Some(alt) = self.alternate_screen.as_mut() {
-                if alt.full_dirty {
-                    alt.full_dirty = false;
-                    alt.dirty_set.clear();
-                    return (0..alt.rows as usize).collect();
-                }
-                let dirty: Vec<usize> = alt.dirty_set.iter_ones_direct().collect();
-                alt.dirty_set.clear();
-                return dirty;
+                Self::drain_dirty_state(
+                    &mut alt.full_dirty,
+                    &mut alt.dirty_set,
+                    alt.rows as usize,
+                    &mut emit,
+                );
+                return;
             }
         }
+
         // Primary screen (or fallback if is_alternate_active but alternate_screen is None)
-        if self.full_dirty {
-            self.full_dirty = false;
-            self.dirty_set.clear();
-            (0..self.rows as usize).collect()
-        } else {
-            let dirty: Vec<usize> = self.dirty_set.iter_ones_direct().collect();
-            self.dirty_set.clear();
-            dirty
+        Self::drain_dirty_state(
+            &mut self.full_dirty,
+            &mut self.dirty_set,
+            self.rows as usize,
+            &mut emit,
+        );
+    }
+
+    #[inline]
+    fn clear_dirty_state(full_dirty: &mut bool, dirty_set: &mut BitVecDirtySet) {
+        *full_dirty = false;
+        dirty_set.clear();
+    }
+
+    #[inline]
+    fn drain_dirty_state<F>(
+        full_dirty: &mut bool,
+        dirty_set: &mut BitVecDirtySet,
+        rows: usize,
+        emit: &mut F,
+    ) where
+        F: FnMut(&mut dyn Iterator<Item = usize>),
+    {
+        if *full_dirty {
+            *full_dirty = false;
+            dirty_set.clear();
+            let mut dirty_rows = 0..rows;
+            emit(&mut dirty_rows);
+            return;
         }
+
+        {
+            let mut dirty_rows = dirty_set.iter_ones_direct();
+            emit(&mut dirty_rows);
+        }
+        dirty_set.clear();
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    include!("dirty_tests.rs");
-}
+#[path = "dirty/tests.rs"]
+mod tests;

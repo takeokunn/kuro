@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'kuro-config)
+(require 'kuro-keymap)
 (require 'kuro-input-mode-macros)
 
 ;; Functions defined in kuro-input-mode.el.
@@ -48,7 +49,7 @@ history is accessible via \\[previous-history-element] /
 \\[next-history-element].
 
 The current `kuro--line-buffer' is used as the initial contents.
-C-g cancels without sending; the line buffer is cleared in all cases
+Canceling quits without sending; the line buffer is cleared in all cases
 so no stale state accumulates.
 
 Bound to \\[kuro-line-minibuffer-send] in line mode.  When
@@ -78,10 +79,9 @@ Set by `kuro--line-edit-in-buffer' in the edit buffer.")
 Used by `kuro-line-edit-discard' to restore the terminal buffer's line state.")
 
 (defvar kuro--line-edit-keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c C-c") #'kuro-line-edit-send)
-    (define-key map (kbd "C-c C-k") #'kuro-line-edit-discard)
-    map)
+  (kuro--define-keymap
+    ((kbd "C-c C-c") . kuro-line-edit-send)
+    ((kbd "C-c C-k") . kuro-line-edit-discard))
   "Keymap installed in buffers created by `kuro--line-edit-in-buffer'.")
 
 ;;;###autoload
@@ -90,7 +90,7 @@ Used by `kuro-line-edit-discard' to restore the terminal buffer's line state.")
 Created by `kuro--line-edit-in-buffer' (\\[kuro--line-edit-in-buffer] in line mode).
 
 The buffer holds the current line-mode accumulator.  Use any Emacs editing
-commands (`query-replace', M-x, abbrev expansion, company-mode, etc.) then:
+commands such as `query-replace', abbrev expansion, or company-mode, then:
 
 \\[kuro-line-edit-send]    — send the buffer contents as a command to the PTY
 \\[kuro-line-edit-discard] — discard and restore the original line buffer"
@@ -100,15 +100,15 @@ commands (`query-replace', M-x, abbrev expansion, company-mode, etc.) then:
 
 ;;;###autoload
 (defun kuro--line-edit-in-buffer ()
-  "Open the current line-mode accumulator in a full Emacs text buffer (C-x C-e).
+  "Open the current line-mode accumulator in a full Emacs text buffer.
 Creates a dedicated buffer named `*kuro-line-edit: <name>*' pre-filled with
 the current `kuro--line-buffer'.  Full Emacs editing is available.
 
 When done:
-  \\[kuro-line-edit-send]    — send result as a command to the PTY (C-c C-c)
-  \\[kuro-line-edit-discard] — restore original line buffer and close (C-c C-k)
+  \\[kuro-line-edit-send]    — send result as a command to the PTY
+  \\[kuro-line-edit-discard] — restore original line buffer and close
 
-Analogous to bash \\='s `edit-and-execute-command' (C-x C-e)."
+Analogous to bash \\='s `edit-and-execute-command'."
   (interactive)
   (kuro--with-kuro-mode
    (let* ((source (current-buffer))
@@ -145,7 +145,7 @@ Kuro buffer is no longer live."
       (with-current-buffer source
         (kuro--send-key (concat text "\r"))
         (kuro--schedule-immediate-render)
-        (message "kuro: line-edit command sent to PTY")))))
+        (message "Kuro: line-edit command sent to PTY")))))
 
 ;;;###autoload
 (defun kuro-line-edit-discard ()
@@ -157,7 +157,7 @@ Kuro buffer is no longer live."
     (when (buffer-live-p source)
       (with-current-buffer source
         (kuro--line-set-buffer (or original ""))))
-    (message "kuro: line-edit discarded")))
+    (message "Kuro: line-edit discarded")))
 
 
 ;;;; Line mode keymap
@@ -165,8 +165,8 @@ Kuro buffer is no longer live."
 (defvar kuro--line-mode-keymap nil
   "Keymap active in Kuro line mode.
 Inherits from `kuro--keymap' (semi-char) but overrides self-insert, RET,
-DEL/backspace, C-k, and C-g to operate on the local line buffer instead
-of forwarding to the PTY.")
+delete/backspace, line kill, and cancel to operate on the local line
+buffer instead of forwarding to the PTY.")
 
 (defconst kuro--line-mode-bindings
   '(;; commit / abort / newline
@@ -204,13 +204,14 @@ Vector-keyed special bindings ([remap self-insert-command], [return],
 (defun kuro--build-line-mode-keymap ()
   "Build `kuro--line-mode-keymap' from `kuro--keymap'.
 Must be called after `kuro--build-keymap' so the parent is up to date."
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map kuro--keymap)
+  (let ((map (kuro--build-keymap-from-alist kuro--line-mode-bindings
+                                            (lambda (binding)
+                                              (kbd (car binding)))
+                                            #'cdr
+                                            kuro--keymap)))
     (define-key map [remap self-insert-command] #'kuro--line-self-insert)
     (define-key map [return]    #'kuro--line-commit)
     (define-key map [backspace] #'kuro--line-delete)
-    (dolist (b kuro--line-mode-bindings)
-      (define-key map (kbd (car b)) (cdr b)))
     (setq kuro--line-mode-keymap map)
     map))
 
@@ -221,8 +222,10 @@ Must be called after `kuro--build-keymap' so the parent is up to date."
   '((char      . kuro--char-keymap)
     (semi-char . kuro--keymap))
   "Alist mapping non-line input modes to their parent keymap variables.
-Used by `kuro--apply-input-mode' to install the correct keymap for each mode.
-Line mode is absent: it uses a composed keymap via `kuro--build-line-mode-keymap'.")
+Used by `kuro--apply-input-mode' to install the correct keymap for each
+mode.
+Line mode is absent: it uses a composed keymap via
+`kuro--build-line-mode-keymap'.")
 
 (defun kuro--apply-input-mode ()
   "Update the current buffer's effective keymap for `kuro--input-mode'.
@@ -231,7 +234,7 @@ Sets `kuro-mode-map' parent to:
   `semi-char' → `kuro--keymap'       (exceptions removed)
   `line'      → `kuro--line-mode-keymap' as a composed local map
 The mode-line is updated after every switch."
-  (if-let ((entry (assq kuro--input-mode kuro--input-mode-keymaps)))
+  (if-let* ((entry (assq kuro--input-mode kuro--input-mode-keymaps)))
       (progn
         (set-keymap-parent kuro-mode-map (symbol-value (cdr entry)))
         (use-local-map kuro-mode-map))
@@ -244,7 +247,7 @@ The mode-line is updated after every switch."
 ;;;; Public commands
 
 (defmacro kuro--def-input-mode (name mode message &rest pre-apply)
-  "Define a Kuro input-mode switch command.
+  "Define NAME as a Kuro input-mode switch command.
 MODE is the mode symbol to set.  MESSAGE is shown after switching.
 PRE-APPLY forms run between the buffer reset and `kuro--apply-input-mode'."
   `(defun ,name ()

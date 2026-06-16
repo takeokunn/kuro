@@ -6,43 +6,12 @@
 
 ;; --- kuro--keymap-setup-navigation ---
 
-(ert-deftest kuro-input-keymap-setup-navigation-arrow-keys-bound ()
-  "`kuro--keymap-setup-navigation' binds all four arrow keys."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
-    (should (lookup-key km [up]))
-    (should (lookup-key km [down]))
-    (should (lookup-key km [left]))
-    (should (lookup-key km [right]))))
-
-(ert-deftest kuro-input-keymap-setup-navigation-home-end-bound ()
-  "`kuro--keymap-setup-navigation' binds [home] and [end]."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
-    (should (eq (lookup-key km [home]) #'kuro--HOME))
-    (should (eq (lookup-key km [end])  #'kuro--END))))
-
-(ert-deftest kuro-input-keymap-setup-navigation-page-keys-bound ()
-  "`kuro--keymap-setup-navigation' binds [prior] and [next]."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
-    (should (eq (lookup-key km [prior]) #'kuro--PAGE-UP))
-    (should (eq (lookup-key km [next])  #'kuro--PAGE-DOWN))))
-
-(ert-deftest kuro-input-keymap-setup-navigation-insert-delete-bound ()
-  "`kuro--keymap-setup-navigation' binds [insert] and [delete]."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
-    (should (eq (lookup-key km [insert]) #'kuro--INSERT))
-    (should (eq (lookup-key km [delete]) #'kuro--DELETE))))
-
-(ert-deftest kuro-input-keymap-setup-navigation-scrollback-keys-bound ()
-  "`kuro--keymap-setup-navigation' binds [S-prior], [S-next], [S-end]."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
-    (should (eq (lookup-key km [S-prior]) #'kuro-scroll-up))
-    (should (eq (lookup-key km [S-next])  #'kuro-scroll-down))
-    (should (eq (lookup-key km [S-end])   #'kuro-scroll-bottom))))
+(kuro-input-keymap-test--deftest-setup-binding-cases
+ kuro-input-keymap-setup-navigation-arrow-keys-bound
+ kuro-input-keymap-setup-navigation-home-end-bound
+ kuro-input-keymap-setup-navigation-page-keys-bound
+ kuro-input-keymap-setup-navigation-insert-delete-bound
+ kuro-input-keymap-setup-navigation-scrollback-keys-bound)
 
 (ert-deftest kuro-input-keymap-setup-navigation-fkeys-all-bound ()
   "`kuro--keymap-setup-navigation' binds all 12 function keys."
@@ -70,43 +39,13 @@
 
 ;; --- kuro--keymap-setup-mouse ---
 
-(ert-deftest kuro-input-keymap-setup-mouse-down-mouse-1-bound ()
-  "`kuro--keymap-setup-mouse' binds [down-mouse-1] to `kuro--mouse-press'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [down-mouse-1]) #'kuro--mouse-press))))
-
-(ert-deftest kuro-input-keymap-setup-mouse-mouse-1-bound ()
-  "`kuro--keymap-setup-mouse' binds [mouse-1] to `kuro--mouse-release'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [mouse-1]) #'kuro--mouse-release))))
-
-(ert-deftest kuro-input-keymap-setup-mouse-mouse-4-scroll-up-bound ()
-  "`kuro--keymap-setup-mouse' binds [mouse-4] to `kuro--mouse-scroll-up'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [mouse-4]) #'kuro--mouse-scroll-up))))
-
-(ert-deftest kuro-input-keymap-setup-mouse-mouse-5-scroll-down-bound ()
-  "`kuro--keymap-setup-mouse' binds [mouse-5] to `kuro--mouse-scroll-down'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [mouse-5]) #'kuro--mouse-scroll-down))))
-
-(ert-deftest kuro-input-keymap-setup-mouse-all-three-buttons-press-bound ()
-  "`kuro--keymap-setup-mouse' binds [down-mouse-2] and [down-mouse-3] to `kuro--mouse-press'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [down-mouse-2]) #'kuro--mouse-press))
-    (should (eq (lookup-key km [down-mouse-3]) #'kuro--mouse-press))))
-
-(ert-deftest kuro-input-keymap-setup-mouse-all-three-buttons-release-bound ()
-  "`kuro--keymap-setup-mouse' binds [mouse-2] and [mouse-3] to `kuro--mouse-release'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
-    (should (eq (lookup-key km [mouse-2]) #'kuro--mouse-release))
-    (should (eq (lookup-key km [mouse-3]) #'kuro--mouse-release))))
+(kuro-input-keymap-test--deftest-setup-binding-cases
+ kuro-input-keymap-setup-mouse-down-mouse-1-bound
+ kuro-input-keymap-setup-mouse-mouse-1-bound
+ kuro-input-keymap-setup-mouse-mouse-4-scroll-up-bound
+ kuro-input-keymap-setup-mouse-mouse-5-scroll-down-bound
+ kuro-input-keymap-setup-mouse-all-three-buttons-press-bound
+ kuro-input-keymap-setup-mouse-all-three-buttons-release-bound)
 
 (ert-deftest kuro-input-keymap-setup-mouse-all-table-entries-bound ()
   "`kuro--keymap-setup-mouse' installs a live binding for every entry in `kuro--mouse-bindings'."
@@ -117,26 +56,10 @@
 
 ;; --- kuro--keymap-setup-yank ---
 
-(ert-deftest kuro-input-keymap-setup-yank-remap-yank-bound ()
-  "`kuro--keymap-setup-yank' remaps `yank' to `kuro--yank'."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions nil))
-    (kuro--keymap-setup-yank km)
-    (should (eq (lookup-key km [remap yank]) #'kuro--yank))))
-
-(ert-deftest kuro-input-keymap-setup-yank-remap-yank-pop-bound ()
-  "`kuro--keymap-setup-yank' remaps `yank-pop' to `kuro--yank-pop'."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions nil))
-    (kuro--keymap-setup-yank km)
-    (should (eq (lookup-key km [remap yank-pop]) #'kuro--yank-pop))))
-
-(ert-deftest kuro-input-keymap-setup-yank-remap-clipboard-yank-bound ()
-  "`kuro--keymap-setup-yank' remaps `clipboard-yank' to `kuro--yank'."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions nil))
-    (kuro--keymap-setup-yank km)
-    (should (eq (lookup-key km [remap clipboard-yank]) #'kuro--yank))))
+(kuro-input-keymap-test--deftest-setup-binding-cases
+ kuro-input-keymap-setup-yank-remap-yank-bound
+ kuro-input-keymap-setup-yank-remap-yank-pop-bound
+ kuro-input-keymap-setup-yank-remap-clipboard-yank-bound)
 
 (ert-deftest kuro-input-keymap-setup-yank-exception-clears-binding ()
   "`kuro--keymap-apply-exceptions' clears a binding listed in `kuro-keymap-exceptions'.
@@ -172,49 +95,7 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
 
 ;;; Group 17: Shift+Tab and Shift+Return KKP bindings
 
-(ert-deftest kuro-input-keymap--g17-backtab-sends-legacy-without-kkp ()
-  "With keyboard-flags=0, [backtab] sends legacy ESC [ Z."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-              ((symbol-function 'kuro--kkp-flag-p) (lambda (_) nil)))
-      (let ((map (kuro--build-keymap)))
-        (call-interactively (lookup-key map [backtab])))
-      (should (equal sent "\e[Z")))))
-
-(ert-deftest kuro-input-keymap--g17-backtab-sends-kkp-with-disambiguate ()
-  "With KKP DISAMBIGUATE flag, [backtab] sends CSI 9;2u."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-              ((symbol-function 'kuro--kkp-flag-p) (lambda (_) t)))
-      (let ((map (kuro--build-keymap)))
-        (call-interactively (lookup-key map [backtab])))
-      (should (equal sent "\e[9;2u")))))
-
-(ert-deftest kuro-input-keymap--g17-shift-return-sends-cr-without-kkp ()
-  "With keyboard-flags=0, [S-return] sends bare CR."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-              ((symbol-function 'kuro--kkp-flag-p) (lambda (_) nil)))
-      (let ((map (kuro--build-keymap)))
-        (call-interactively (lookup-key map [S-return])))
-      (should (equal sent "\r")))))
-
-(ert-deftest kuro-input-keymap--g17-shift-return-sends-kkp-csi-13-2u ()
-  "With KKP DISAMBIGUATE flag, [S-return] sends CSI 13;2u."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-              ((symbol-function 'kuro--kkp-flag-p) (lambda (_) t)))
-      (let ((map (kuro--build-keymap)))
-        (call-interactively (lookup-key map [S-return])))
-      (should (equal sent "\e[13;2u")))))
+(kuro-input-keymap-test--deftest-shifted-key-send-cases)
 
 (ert-deftest kuro-input-keymap--g17-kkp-arrow-codepoints-constants ()
   "KKP arrow codepoints alist has all four directions."
@@ -258,37 +139,10 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
 
 ;;; Group 19: kuro--def-shifted-key macro — generated commands
 
-(defconst kuro-input-keymap-test--shifted-key-table
-  '((kuro-input-keymap--g19-shifted-tab-kkp
-     kuro--send-shifted-tab  "\e[9;2u"  "\e[Z")
-    (kuro-input-keymap--g19-shifted-return-kkp
-     kuro--send-shifted-return "\e[13;2u" "\r"))
-  "Table: (test-name fn kkp-seq legacy-seq) for kuro--def-shifted-key generated fns.")
+(kuro-input-keymap-test--deftest-generated-shifted-key-cases)
 
-(defmacro kuro-input-keymap-test--def-shifted-key-sends (test-name fn kkp-seq legacy-seq)
-  "Define two tests: KKP path sends KKP-SEQ, legacy path sends LEGACY-SEQ."
-  `(progn
-     (ert-deftest ,test-name ()
-       ,(format "`%s' sends KKP seq when DISAMBIGUATE flag is set." fn)
-       (let ((sent nil))
-         (cl-letf (((symbol-function 'kuro--send-key) (lambda (s) (setq sent s)))
-                   ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-                   ((symbol-function 'kuro--kkp-flag-p) (lambda (_) t)))
-           (funcall #',fn)
-           (should (equal sent ,kkp-seq)))))))
-
-(kuro-input-keymap-test--def-shifted-key-sends
- kuro-input-keymap--g19-shifted-tab-kkp
- kuro--send-shifted-tab "\e[9;2u" "\e[Z")
-
-(kuro-input-keymap-test--def-shifted-key-sends
- kuro-input-keymap--g19-shifted-return-kkp
- kuro--send-shifted-return "\e[13;2u" "\r")
-
-(ert-deftest kuro-input-keymap--g19-shifted-key-table-all-interactive ()
-  "All entries in `kuro-input-keymap-test--shifted-key-table' are interactive commands."
-  (dolist (entry kuro-input-keymap-test--shifted-key-table)
-    (should (commandp (symbol-function (nth 1 entry))))))
+(kuro-input-keymap-test--deftest-generated-shifted-key-interactive
+ kuro-input-keymap--g19-shifted-key-table-all-interactive)
 
 ;;; Group 20: kuro--def-shifted-key macro — structural coverage
 

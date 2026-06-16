@@ -1,40 +1,32 @@
 //! POSIX PTY implementation using nix crate for safe fork/pty operations
 
 mod child;
+mod cleanup;
+mod shell;
 
 // Re-export for unit tests that test the child-env setup directly.
 #[cfg(test)]
 pub(crate) use child::setup_child_env;
 
 use crate::{
-    ffi::error::{invalid_parameter_error, pty_operation_error, pty_spawn_error},
+    ffi::error::{pty_operation_error, pty_spawn_error},
     pty::reader::PtyReader,
     Result,
 };
+use cleanup::{reap_child_until, signal_child_tree, DROP_WAITPID_TIMEOUT_MS};
 use nix::pty::{openpty, OpenptyResult, Winsize};
-use nix::sys::wait::{waitpid, WaitPidFlag};
+use nix::sys::signal::Signal;
 use nix::unistd::{fork, ForkResult, Pid};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
-use std::path::{Path, PathBuf};
+use shell::ShellCommand;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-/// Allowed shells whitelist for security
-const ALLOWED_SHELLS: &[&str] = &["bash", "zsh", "sh", "fish"];
-
 /// Channel capacity for PTY data - prevents unbounded memory growth
 const CHANNEL_CAPACITY: usize = 100;
-
-/// Maximum time (in milliseconds) to wait for a child process to exit after
-/// SIGHUP before escalating to SIGKILL.  Each retry sleeps 10 ms, so this
-/// value divided by 10 gives the number of poll iterations.
-const DROP_WAITPID_TIMEOUT_MS: u64 = 500;
-
-/// Sleep interval between non-blocking waitpid polls during Pty::drop.
-const DROP_WAITPID_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// PTY master handle with proper fork/exec implementation
 pub struct Pty {
@@ -59,21 +51,9 @@ impl Pty {
     /// Search `$PATH` for an executable named `command`.
     ///
     /// Returns the first absolute path found, or `None` if not found.
+    #[cfg(test)]
     fn find_in_path(command: &str) -> Option<PathBuf> {
-        if command.is_empty() {
-            return None;
-        }
-        let path_var = std::env::var("PATH").unwrap_or_default();
-        for dir in path_var.split(':') {
-            if dir.is_empty() {
-                continue;
-            }
-            let candidate = PathBuf::from(dir).join(command);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-        None
+        ShellCommand::find_in_path(command)
     }
 
     /// Validate shell command against whitelist
@@ -84,57 +64,104 @@ impl Pty {
     /// For absolute paths (e.g. NixOS Nix store paths like `/nix/store/…/bin/fish`),
     /// validates existence and executability directly without a PATH lookup.
     /// For short names, resolves via `which` as before.
+    #[cfg(test)]
     fn validate_shell(command: &str) -> Result<PathBuf> {
-        let path = if Path::new(command).is_absolute() {
-            // Absolute path: validate directly without PATH lookup.
-            // This handles NixOS Nix store paths where the Rust process inherits
-            // Emacs's restricted PATH and `which::which` cannot locate the binary.
-            //
-            // Single `metadata()` call — existence is inferred from `Err`, avoiding
-            // a separate `Path::exists()` call (one `stat(2)` instead of two).
-            let p = PathBuf::from(command);
-            let meta = std::fs::metadata(&p).map_err(|_| {
-                invalid_parameter_error("command", "Shell path does not exist or is inaccessible")
-            })?;
-            // Check any execute bit (owner, group, or world).
-            // Note: raw mode bits may differ from effective kernel access for non-owner
-            // users. The kernel provides final enforcement at `execv(2)` time (EACCES).
-            // Nix store paths are world-executable, making this reliable in practice.
-            //
-            // Symlink note: `metadata()` follows symlinks (uses `stat`, not `lstat`),
-            // so this check operates on the final target's permissions. The returned
-            // `PathBuf` is still the original input (symlink or real path), which is
-            // correct — `execv(2)` resolves symlinks itself at execution time.
-            if meta.permissions().mode() & 0o111 == 0 {
-                return Err(invalid_parameter_error(
-                    "command",
-                    "Shell is not executable",
+        ShellCommand::resolve(command).map(ShellCommand::into_path)
+    }
+
+    fn build_spawn_winsize(rows: u16, cols: u16) -> Winsize {
+        Winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        }
+    }
+
+    fn open_spawn_pty(command: &str, rows: u16, cols: u16) -> Result<OpenptyResult> {
+        openpty(Some(&Self::build_spawn_winsize(rows, cols)), None)
+            .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {e}")))
+    }
+
+    fn duplicate_reader_fd(master: &std::fs::File) -> Result<RawFd> {
+        // SAFETY: master.as_raw_fd() is a valid open fd returned by openpty;
+        // libc::dup and libc::fcntl are safe on valid fds; the result is
+        // checked for -1 (error) before any further use.
+        unsafe {
+            // dup3 with O_CLOEXEC is available on macOS via F_DUPFD_CLOEXEC fcntl
+            let fd = libc::dup(master.as_raw_fd());
+            if fd == -1 {
+                return Err(pty_operation_error("dup", "Failed to duplicate master fd"));
+            }
+            // Set FD_CLOEXEC so the fd is closed on exec in child processes
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
+                libc::close(fd);
+                return Err(pty_operation_error(
+                    "fcntl",
+                    "Failed to set FD_CLOEXEC on reader fd",
                 ));
             }
-            p
-        } else {
-            Self::find_in_path(command).ok_or_else(|| {
-                invalid_parameter_error("command", &format!("Shell not found in PATH: {command}"))
-            })?
-        };
-
-        let basename = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| invalid_parameter_error("command", "Invalid shell name"))?;
-
-        if !ALLOWED_SHELLS.contains(&basename) {
-            return Err(invalid_parameter_error(
-                "command",
-                &format!(
-                    "Shell '{}' not allowed. Allowed shells: {}",
-                    basename,
-                    ALLOWED_SHELLS.join(", ")
-                ),
-            ));
+            Ok(fd)
         }
+    }
 
-        Ok(path)
+    fn spawn_reader_thread(
+        reader_file: std::fs::File,
+        sender: std::sync::mpsc::SyncSender<Vec<u8>>,
+        shutdown: Arc<AtomicBool>,
+        process_exited: Arc<AtomicBool>,
+    ) -> thread::JoinHandle<()> {
+        let shutdown_clone = shutdown.clone();
+        let process_exited_clone = process_exited.clone();
+        thread::spawn(move || {
+            PtyReader::read_loop(reader_file, sender, shutdown_clone, process_exited_clone);
+        })
+    }
+
+    fn build_parent_pty(
+        master: std::fs::File,
+        child_pid: Pid,
+        receiver: std::sync::mpsc::Receiver<Vec<u8>>,
+        shutdown: Arc<AtomicBool>,
+        reader_thread: thread::JoinHandle<()>,
+        process_exited: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            master,
+            child_pid,
+            receiver,
+            peek_buffer: std::sync::Mutex::new(None),
+            shutdown,
+            _reader_thread: reader_thread,
+            process_exited,
+        }
+    }
+
+    fn spawn_parent_pty(
+        master: std::fs::File,
+        child_pid: Pid,
+        receiver: std::sync::mpsc::Receiver<Vec<u8>>,
+        sender: std::sync::mpsc::SyncSender<Vec<u8>>,
+        shutdown: Arc<AtomicBool>,
+        reader_file: std::fs::File,
+        process_exited: Arc<AtomicBool>,
+    ) -> Self {
+        let reader_thread = Self::spawn_reader_thread(
+            reader_file,
+            sender,
+            Arc::clone(&shutdown),
+            Arc::clone(&process_exited),
+        );
+
+        Self::build_parent_pty(
+            master,
+            child_pid,
+            receiver,
+            shutdown,
+            reader_thread,
+            process_exited,
+        )
     }
 
     /// Spawn a new PTY with the given shell command and initial terminal dimensions.
@@ -154,93 +181,58 @@ impl Pty {
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
     pub fn spawn(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
         // Validate command against whitelist
-        let shell_path = Self::validate_shell(command)?;
+        let shell = ShellCommand::resolve(command)?;
 
         // Open PTY master/slave pair with the correct initial window size.
         // Setting the winsize here (before fork) ensures the child process sees
         // the correct dimensions from TIOCGWINSZ on its very first query.
-        let winsize = Winsize {
-            ws_row: rows,
-            ws_col: cols,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        let OpenptyResult { master, slave } = openpty(Some(&winsize), None)
-            .map_err(|e| pty_spawn_error(command, &format!("Failed to open PTY: {e}")))?;
+        let OpenptyResult { master, slave } = Self::open_spawn_pty(command, rows, cols)?;
 
         // Create bounded channel for backpressure
         let (sender, receiver) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
         let process_exited = Arc::new(AtomicBool::new(false));
 
-        // Clone master fd for reader thread, with O_CLOEXEC so the fd is
-        // automatically closed in any fork()ed child processes (prevents
-        // child processes from holding the master fd open across sessions).
-        // SAFETY: master.as_raw_fd() is a valid open fd returned by openpty;
-        // libc::dup and libc::fcntl are safe on valid fds; the result is
-        // checked for -1 (error) before any further use.
-        let reader_fd = unsafe {
-            // dup3 with O_CLOEXEC is available on macOS via F_DUPFD_CLOEXEC fcntl
-            let fd = libc::dup(master.as_raw_fd());
-            if fd == -1 {
-                return Err(pty_operation_error("dup", "Failed to duplicate master fd"));
-            }
-            // Set FD_CLOEXEC so the fd is closed on exec in child processes
-            let flags = libc::fcntl(fd, libc::F_GETFD);
-            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
-                libc::close(fd);
-                return Err(pty_operation_error(
-                    "fcntl",
-                    "Failed to set FD_CLOEXEC on reader fd",
-                ));
-            }
-            fd
-        };
-        // SAFETY: reader_fd was obtained from dup above and is valid; File::from_raw_fd
-        // takes ownership; the fd will only be accessed through this File handle.
-        let reader_file = unsafe { std::fs::File::from_raw_fd(reader_fd) };
-
         // Convert master to File for parent
         // SAFETY: master.into_raw_fd() transfers ownership of the valid PTY master fd;
         // File::from_raw_fd takes exclusive ownership; the OwnedFd is consumed.
         let master_file = unsafe { std::fs::File::from_raw_fd(master.into_raw_fd()) };
 
+        // Clone master fd for reader thread, with O_CLOEXEC so the fd is
+        // automatically closed in any fork()ed child processes (prevents
+        // child processes from holding the master fd open across sessions).
+        let reader_fd = Self::duplicate_reader_fd(&master_file)?;
+        // SAFETY: reader_fd was obtained from dup above and is valid; File::from_raw_fd
+        // takes ownership; the fd will only be accessed through this File handle.
+        let reader_file = unsafe { std::fs::File::from_raw_fd(reader_fd) };
+
         // Fork to create child process
         // SAFETY: all shared state (channel sender, Arc clones, reader_fd) is fully set
         // up before forking; the Child branch runs only async-signal-safe code until exec.
         match unsafe { fork() } {
-            Ok(ForkResult::Parent { child }) => {
-                // Parent process: spawn reader thread and return Pty
-                let shutdown_clone = shutdown.clone();
-                let process_exited_clone = process_exited.clone();
-                let reader_thread = thread::spawn(move || {
-                    PtyReader::read_loop(reader_file, sender, shutdown_clone, process_exited_clone);
-                });
-
-                Ok(Self {
-                    master: master_file,
-                    child_pid: child,
-                    receiver,
-                    peek_buffer: std::sync::Mutex::new(None),
-                    shutdown,
-                    _reader_thread: reader_thread,
-                    process_exited,
-                })
-            }
+        Ok(ForkResult::Parent { child }) => Ok(Self::spawn_parent_pty(
+            master_file,
+            child,
+            receiver,
+            sender,
+            shutdown,
+            reader_file,
+            process_exited,
+        )),
             Ok(ForkResult::Child) => {
                 // Child process: delegate all setup to the helper.
                 // If the helper returns Err, the error propagates out of spawn() in the
                 // child process (the parent is in a separate address space and unaffected).
-                child::exec_in_child(
+                child::exec_in_child(child::ChildExecContext {
                     slave,
                     master_file,
                     reader_fd,
-                    &shell_path,
+                    shell_path: shell.as_path(),
                     rows,
                     cols,
                     command,
                     shell_args,
-                )?;
+                })?;
                 // exec_in_child calls execv which replaces the process on success.
                 std::process::exit(1);
             }
@@ -285,6 +277,56 @@ impl Pty {
         // Drain remaining channel data
         while let Ok(data) = self.receiver.try_recv() {
             all_data.extend(data);
+        }
+
+        Ok(all_data)
+    }
+
+    /// Read up to `max_bytes` from the PTY channel without blocking.
+    ///
+    /// Any bytes beyond the limit are kept in `peek_buffer` so a later read can
+    /// resume from the exact split point.  This prevents chatty full-screen TUIs
+    /// from keeping a single render poll inside the channel-drain loop forever.
+    ///
+    /// # Errors
+    /// Never returns an error in the current implementation (channel `try_recv` is infallible after data arrives).
+    pub fn read_limited(&mut self, max_bytes: usize) -> Result<Vec<u8>> {
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut all_data = Vec::with_capacity(max_bytes.min(8192));
+
+        if let Some(mut data) = self
+            .peek_buffer
+            .lock()
+            .expect("peek_buffer lock poisoned")
+            .take()
+        {
+            if data.len() > max_bytes {
+                let overflow = data.split_off(max_bytes);
+                all_data.extend(data);
+                *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(overflow);
+                return Ok(all_data);
+            }
+            all_data.extend(data);
+        }
+
+        while all_data.len() < max_bytes {
+            match self.receiver.try_recv() {
+                Ok(mut data) => {
+                    let remaining = max_bytes - all_data.len();
+                    if data.len() > remaining {
+                        let overflow = data.split_off(remaining);
+                        all_data.extend(data);
+                        *self.peek_buffer.lock().expect("peek_buffer lock poisoned") =
+                            Some(overflow);
+                        break;
+                    }
+                    all_data.extend(data);
+                }
+                Err(_) => break,
+            }
         }
 
         Ok(all_data)
@@ -367,69 +409,34 @@ impl AsRawFd for Pty {
 impl Drop for Pty {
     /// Ensure child process is cleaned up when the Pty is dropped.
     ///
-    /// Strategy: SIGHUP → poll with WNOHANG (up to 500 ms) → SIGKILL → final reap.
-    /// This prevents the blocking waitpid that previously caused `cargo test` hangs
-    /// when a shell child did not exit promptly after SIGHUP.
+    /// Strategy: close the PTY master → SIGHUP process group → bounded WNOHANG
+    /// reap → SIGKILL process group → bounded WNOHANG reap. This avoids an
+    /// unbounded wait when the shell is blocked on a full-screen child process
+    /// that ignores SIGHUP.
     ///
-    /// The reader thread will detect EOF on the master fd (closed by the
-    /// compiler-generated File drop after this function returns) and exit on its own.
+    /// Closing the master first makes the slave side observe hangup/EOF before
+    /// the bounded reap loop starts; the reader thread exits on that same EOF.
     fn drop(&mut self) {
         // Signal the reader thread to stop after its current read returns.
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
-        // Send SIGHUP to the child process so it exits gracefully.
-        if let Err(e) = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGHUP) {
-            // ESRCH = process already exited — not an error worth logging.
-            if e != nix::errno::Errno::ESRCH {
-                eprintln!("[PTY] Drop: failed to send SIGHUP: {e}");
-            }
-            // If the process already exited, still reap to prevent zombie.
+        if let Ok(dev_null) = std::fs::File::open("/dev/null") {
+            let master = std::mem::replace(&mut self.master, dev_null);
+            drop(master);
         }
 
-        // Poll with WNOHANG: give the child up to DROP_WAITPID_TIMEOUT_MS to exit.
-        let max_retries = DROP_WAITPID_TIMEOUT_MS / DROP_WAITPID_POLL_INTERVAL.as_millis() as u64;
-        let mut reaped = false;
-        for _ in 0..max_retries {
-            match waitpid(self.child_pid, Some(WaitPidFlag::WNOHANG)) {
-                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
-                    // Child still running — sleep briefly and retry.
-                    std::thread::sleep(DROP_WAITPID_POLL_INTERVAL);
-                }
-                Ok(_) => {
-                    // Child exited (any terminal status) — successfully reaped.
-                    reaped = true;
-                    break;
-                }
-                Err(nix::errno::Errno::ECHILD) => {
-                    // No such child — already reaped by someone else.
-                    reaped = true;
-                    break;
-                }
-                Err(e) => {
-                    eprintln!("[PTY] Drop: waitpid(WNOHANG) failed: {e}");
-                    reaped = true; // Give up to avoid infinite loop.
-                    break;
-                }
+        signal_child_tree(self.child_pid, Signal::SIGHUP);
+        let timeout = std::time::Duration::from_millis(DROP_WAITPID_TIMEOUT_MS);
+        if !reap_child_until(self.child_pid, timeout) {
+            signal_child_tree(self.child_pid, Signal::SIGKILL);
+            if !reap_child_until(self.child_pid, timeout) {
+                eprintln!("[PTY] Drop: child did not exit after SIGKILL; giving up");
             }
         }
 
-        if !reaped {
-            // Escalate to SIGKILL: the child did not exit after SIGHUP + timeout.
-            let _ = nix::sys::signal::kill(self.child_pid, nix::sys::signal::Signal::SIGKILL);
-            // Final blocking reap — SIGKILL is unconditional, so this returns quickly.
-            match waitpid(self.child_pid, None) {
-                Ok(_) | Err(nix::errno::Errno::ECHILD) => {}
-                Err(e) => {
-                    eprintln!("[PTY] Drop: final waitpid after SIGKILL failed: {e}");
-                }
-            }
-        }
-
-        // The master File is dropped next (by the compiler-generated cleanup),
-        // which closes the master fd.  The reader thread, unblocked by EOF on
-        // the master, will detect the shutdown flag or a channel-send error and
-        // exit on its own.
+        // The reader thread, unblocked by EOF on the master, will detect the
+        // shutdown flag or a channel-send error and exit on its own.
     }
 }
 

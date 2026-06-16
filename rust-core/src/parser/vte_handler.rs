@@ -15,8 +15,11 @@ use unicode_width::UnicodeWidthChar;
 /// Matches xterm's `colorSaveCount` default.
 const PALETTE_STACK_MAX: usize = 10;
 
-include!("vte_handler_esc.rs");
-include!("vte_handler_csi.rs");
+#[path = "vte_handler_esc.rs"]
+mod esc;
+
+#[path = "vte_handler_csi.rs"]
+mod csi;
 
 impl vte::Perform for TerminalCore {
     #[inline]
@@ -24,95 +27,27 @@ impl vte::Perform for TerminalCore {
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
 
-        // Charset translation: apply DEC line drawing substitution if active.
-        // The comparison is nearly always false (branch predictor friendly).
-        let c = if self.active_charset() == crate::types::charset::CharsetType::DecLineDrawing
-            && c.is_ascii()
-        {
-            crate::types::charset::translate_dec_line_drawing(c)
-        } else {
-            c
-        };
-
-        // ASCII fast-path: buffer printable ASCII and defer to batch flush.
-        // Bypassed when IRM (Insert Mode) is active — each character needs
-        // an individual ICH before printing, which requires direct dispatch.
-        if c.is_ascii() && !self.dec_modes.insert_mode {
-            self.print_buf.push(c as u8);
+        let c = self.translate_print_char(c);
+        if self.buffer_ascii_print(c) {
             return;
         }
 
-        // Non-ASCII: flush any buffered ASCII first, then handle this character.
         self.flush_print_buf();
 
-        // Combining characters (Unicode width 0) are attached to the previous cell.
-        // Characters returning `None` from unicode-width (Variation Selectors
-        // U+FE00–U+FE0F, interlinear annotations, tag characters, etc.) that
-        // are not C0/C1 control characters are also treated as combining —
-        // they are effectively zero-width and would otherwise waste a grid cell.
-        let w = UnicodeWidthChar::width(c);
-        if w == Some(0) || (w.is_none() && !c.is_control()) {
-            // Attach to the cell just before the current cursor position
-            let cursor = *self.screen.cursor();
-            let (row, col) = if cursor.col > 0 {
-                (cursor.row, cursor.col - 1)
-            } else if cursor.row > 0 {
-                // Cursor is at column 0; attach to last cell of previous row
-                let prev_row = cursor.row - 1;
-                let last_col = self.screen.cols().saturating_sub(1) as usize;
-                (prev_row, last_col)
-            } else {
-                // No previous cell available; print as standalone character
-                self.screen
-                    .print(c, self.current_attrs, self.dec_modes.auto_wrap);
-                return;
-            };
-            self.screen.attach_combining(row, col, c);
+        let width = UnicodeWidthChar::width(c);
+        if self.handle_combining_char(c, width) {
             return;
         }
 
-        // Capture cursor position before printing so we can stamp the
-        // hyperlink on the correct cell(s) afterward.  Single deref matches
-        // the combining-char path above (line ~48: `let cursor = *self.screen.cursor()`).
         let pre_cursor = *self.screen.cursor();
-        let pre_row = pre_cursor.row;
-        let pre_col = pre_cursor.col;
-
-        // IRM (mode 4): insert one blank before printing (shifts existing content right).
         if self.dec_modes.insert_mode {
             self.screen.insert_chars(1, self.current_attrs);
         }
         self.screen
             .print(c, self.current_attrs, self.dec_modes.auto_wrap);
 
-        // Track for REP (CSI Ps b) — only printable non-combining chars qualify.
         self.last_printed_char = Some(c);
-
-        // Stamp hyperlink on the just-written cell(s) — nearly free
-        // when no hyperlink is active (branch predictor skips).
-        if let Some(uri) = &self.osc_data.hyperlink.uri {
-            let width = w.unwrap_or(1);
-            // The cell was written at (pre_row, pre_col) unless a wide char
-            // at the last column caused a wrap, in which case it's at (new_row, 0).
-            let cursor_after = *self.screen.cursor();
-            let (write_row, write_col) =
-                if cursor_after.row != pre_row || cursor_after.col < pre_col {
-                    // Wrap occurred — cell was placed at start of new row
-                    (cursor_after.row, 0)
-                } else {
-                    (pre_row, pre_col)
-                };
-            if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
-                cell.set_hyperlink_id(Some(Arc::clone(uri)));
-            }
-            // For wide chars, also stamp the placeholder cell.
-            // Reuse `uri' from the outer borrow — no redundant re-lookup needed.
-            if width > 1 {
-                if let Some(cell) = self.screen.get_cell_mut(write_row, write_col + 1) {
-                    cell.set_hyperlink_id(Some(Arc::clone(uri)));
-                }
-            }
-        }
+        self.stamp_printed_hyperlink(pre_cursor, width.unwrap_or(1));
     }
 
     #[inline]
@@ -169,7 +104,7 @@ impl vte::Perform for TerminalCore {
         self.flush_print_buf();
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
-        handle_csi_dispatch(self, params, intermediates, c);
+        csi::handle_csi_dispatch(self, params, intermediates, c);
     }
 
     /// Handle OSC (Operating System Command) sequences from the VTE parser.
@@ -188,7 +123,7 @@ impl vte::Perform for TerminalCore {
         self.flush_print_buf();
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
-        handle_esc_dispatch(self, intermediates, byte);
+        esc::handle_esc_dispatch(self, intermediates, byte);
     }
 
     #[inline]
@@ -213,6 +148,69 @@ impl vte::Perform for TerminalCore {
         self.vte_callback_count += 1;
         self.vte_last_ground = true;
         parser::dcs::dcs_unhook(self);
+    }
+}
+
+impl TerminalCore {
+    #[inline]
+    fn translate_print_char(&self, c: char) -> char {
+        if self.active_charset() == crate::types::charset::CharsetType::DecLineDrawing && c.is_ascii()
+        {
+            crate::types::charset::translate_dec_line_drawing(c)
+        } else {
+            c
+        }
+    }
+
+    #[inline]
+    fn buffer_ascii_print(&mut self, c: char) -> bool {
+        if c.is_ascii() && !self.dec_modes.insert_mode {
+            self.print_buf.push(c as u8);
+            return true;
+        }
+        false
+    }
+
+    #[inline]
+    fn handle_combining_char(&mut self, c: char, width: Option<usize>) -> bool {
+        if width == Some(0) || (width.is_none() && !c.is_control()) {
+            let cursor = *self.screen.cursor();
+            let (row, col) = if cursor.col > 0 {
+                (cursor.row, cursor.col - 1)
+            } else if cursor.row > 0 {
+                let prev_row = cursor.row - 1;
+                let last_col = self.screen.cols().saturating_sub(1) as usize;
+                (prev_row, last_col)
+            } else {
+                self.screen
+                    .print(c, self.current_attrs, self.dec_modes.auto_wrap);
+                return true;
+            };
+            self.screen.attach_combining(row, col, c);
+            return true;
+        }
+        false
+    }
+
+    #[inline]
+    fn stamp_printed_hyperlink(&mut self, pre_cursor: crate::types::cursor::Cursor, width: usize) {
+        if let Some(uri) = &self.osc_data.hyperlink.uri {
+            let cursor_after = *self.screen.cursor();
+            let (write_row, write_col) =
+                if cursor_after.row != pre_cursor.row || cursor_after.col < pre_cursor.col {
+                    (cursor_after.row, 0)
+                } else {
+                    (pre_cursor.row, pre_cursor.col)
+                };
+            if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
+                cell.set_hyperlink_id(Some(Arc::clone(uri)));
+            }
+            if width > 1 {
+                if let Some(cell) = self.screen.get_cell_mut(write_row, write_col + 1) {
+                    cell.set_hyperlink_id(Some(Arc::clone(uri)));
+                }
+            }
+        }
     }
 }
 

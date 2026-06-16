@@ -70,8 +70,7 @@
     (insert "row0\nrow1\nrow2\n")
     (setq kuro--cursor-marker (point-marker))
     ;; row=1, col=2, visible=t, shape=0 → "row1\n" starts at pos 6, col 2 → pos 8
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 2 t 0)))
-              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+    (kuro-render-buffer-cursor-test--with-cursor-stubs '(1 2 t 0)
       (kuro--update-cursor))
     (should (= (marker-position kuro--cursor-marker) 8))))
 
@@ -80,8 +79,7 @@
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 0)))
-              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+    (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 0 nil 0)
       (kuro--update-cursor))
     (should-not cursor-type)))
 
@@ -90,8 +88,7 @@
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 0)))
-              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+    (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 0 t 0)
       (kuro--update-cursor))
     (should cursor-type)))
 
@@ -117,14 +114,13 @@
           kuro--last-cursor-visible t
           kuro--last-cursor-shape   0)
     (let ((apply-calls 0))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 0)))
-                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'kuro--anchor-window-at-pos) #'ignore)
+      (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 0 t 0)
+        (cl-letf (((symbol-function 'kuro--anchor-window-at-pos) #'ignore)
                 ((symbol-function 'kuro--apply-cursor-display)
                  (lambda (_v _s) (cl-incf apply-calls))))
-        (kuro--update-cursor)
-        ;; State unchanged → apply-cursor-display must NOT be called
-        (should (= apply-calls 0))))))
+          (kuro--update-cursor)
+          ;; State unchanged → apply-cursor-display must NOT be called
+          (should (= apply-calls 0)))))))
 
 ;;; Group 17: kuro--scroll-lines — zero-count no-op and multi-step
 ;; ------------------------------------------------------------

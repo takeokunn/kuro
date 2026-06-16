@@ -279,11 +279,11 @@ Verified by asserting the mode-predicate guard independently."
 
 (ert-deftest kuro-el-ext-test--resize-pending-nil-when-initialized-false ()
   "Apply-resize logic returns nil when `initialized' arg is nil, regardless of dims."
-  (should (null (kuro-el-ext-test--apply-resize-logic nil 25 80 24 80))))
+  (should (null (kuro-el-test--apply-resize-logic nil 25 80 24 80))))
 
 (ert-deftest kuro-el-ext-test--resize-pending-cons-carries-exact-values ()
   "The (rows . cols) cons returned by resize logic carries the exact new values."
-  (let ((result (kuro-el-ext-test--apply-resize-logic t 1 1 24 80)))
+  (let ((result (kuro-el-test--apply-resize-logic t 1 1 24 80)))
     (should (= (car result) 1))
     (should (= (cdr result) 1))))
 

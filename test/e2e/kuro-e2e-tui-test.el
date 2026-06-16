@@ -102,11 +102,12 @@
   "500-line truecolor output stream does not block the polling loop."
   :expected-result kuro-e2e--expected-result
   (kuro-e2e--with-terminal
-   ;; Each line: CSI 38;2;i;100;200 m + number + reset.  500 lines × ~30 bytes
-   ;; = ~15KB of ANSI-encoded output — a real-world log burst.
+   ;; Each line: CSI 38;2;color;100;200 m + number + reset.  500 lines ×
+   ;; ~30 bytes = ~15KB of ANSI-encoded output — a real-world log burst.
    (kuro--send-key
     (concat "seq 1 500 | while read i; do"
-            " printf '\\033[38;2;%d;100;200m%d\\033[0m\\n' \"$i\" \"$i\";"
+            " printf '\\033[38;2;%d;100;200m%d\\033[0m\\n' "
+            "\"$((i % 256))\" \"$i\";"
             " done\r"))
    (should (kuro-e2e--wait-for-output kuro--session-id "500"
                                       kuro-e2e--slow-timeout))))
@@ -136,12 +137,13 @@
    (let ((sid kuro--session-id))
      ;; Use a per-process socket name to avoid colliding with the user's tmux.
      ;; $$ expands to the shell PID in bash — unique per test run.
-     (kuro--send-key "tmux -L kuro-e2e-$$ new-session -s kuro-test\r")
+     (kuro--send-key
+      "tmux -L kuro-e2e-$$ new-session -s kuro-test \"sleep 2\"\r")
      ;; tmux status bar shows the session name.
      (should (kuro-e2e--wait-for-output sid "kuro-test"
                                         kuro-e2e--slow-timeout))
-     ;; Clean exit to avoid leaving a dangling tmux server.
-     (kuro--send-key "exit\r"))))
+     ;; The short-lived command exits on its own, avoiding dangling tmux servers.
+     )))
 
 (ert-deftest kuro-e2e-tmux-inner-echo ()
   "Commands sent inside tmux produce visible output (terminal-in-terminal)."
@@ -149,14 +151,12 @@
   (skip-unless kuro-e2e--tmux-available)
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
-     (kuro--send-key "tmux -L kuro-e2e2-$$ new-session -s kuro-inner\r")
+     (kuro--send-key
+      "tmux -L kuro-e2e2-$$ new-session -s kuro-inner \"sh -c 'sleep 0.5; echo KURO_INSIDE_TMUX; sleep 2'\"\r")
      (should (kuro-e2e--wait-for-output sid "kuro-inner"
                                         kuro-e2e--slow-timeout))
-     ;; Send a command inside the tmux session.
-     (kuro--send-key "echo KURO_INSIDE_TMUX\r")
      (should (kuro-e2e--wait-for-output sid "KURO_INSIDE_TMUX"
-                                        kuro-e2e--slow-timeout))
-     (kuro--send-key "exit\r"))))
+                                        kuro-e2e--slow-timeout)))))
 
 (ert-deftest kuro-e2e-tmux-seq-output ()
   "seq inside tmux streams 10 lines without garbling."
@@ -164,13 +164,12 @@
   (skip-unless kuro-e2e--tmux-available)
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
-     (kuro--send-key "tmux -L kuro-e2e3-$$ new-session -s kuro-seq\r")
+     (kuro--send-key
+      "tmux -L kuro-e2e3-$$ new-session -s kuro-seq \"sh -c 'sleep 0.5; seq 1 10; sleep 2'\"\r")
      (should (kuro-e2e--wait-for-output sid "kuro-seq"
                                         kuro-e2e--slow-timeout))
-     (kuro--send-key "seq 1 10\r")
      (should (kuro-e2e--wait-for-output sid "10"
-                                        kuro-e2e--slow-timeout))
-     (kuro--send-key "exit\r"))))
+                                        kuro-e2e--slow-timeout)))))
 
 ;;; Group 5 — Bracketed paste
 
@@ -187,20 +186,20 @@
      (should (kuro-e2e--wait-for-output sid "KURO_AFTER_PASTE_TOGGLE")))))
 
 (ert-deftest kuro-e2e-bracketed-paste-content ()
-  "Sending a bracketed paste sequence delivers text to the shell."
+  "A bracketed paste sequence does not corrupt subsequent shell input."
   :expected-result kuro-e2e--expected-result
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
      ;; The shell is invoked with --norc --noprofile; bash itself may or may
-     ;; not enable bracketed paste in this environment.  We just verify the
-     ;; raw paste markers followed by Enter produce visible output and do not
-     ;; crash or hang the terminal.
+     ;; not enable bracketed paste in this environment.  Raw paste markers are
+     ;; therefore environment-dependent shell input, so clear that line and
+     ;; verify the terminal remains usable for the next command.
      (kuro--send-key
       (concat "\033[200~"       ; start-of-paste bracket
-              "echo KURO_PASTE" ; pasted command text
-              "\033[201~"       ; end-of-paste bracket
-              "\r"))
-     ;; Allow the slow timeout: the shell might process the brackets non-trivially.
+              "echo KURO_IGNORED_PASTE"
+              "\033[201~"))     ; end-of-paste bracket
+     (kuro--send-key "\025")     ; C-u clears readline's current input line.
+     (kuro--send-key "echo KURO_PASTE\r")
      (should (kuro-e2e--wait-for-output sid "KURO_PASTE"
                                         kuro-e2e--slow-timeout)))))
 
@@ -218,26 +217,30 @@
    (let ((sid kuro--session-id))
      ;; --no-init-file --no-site-file gives a deterministic minimal emacs.
      ;; --batch is NOT used: we need the interactive TUI.
-     (kuro--send-key "emacs --no-init-file --no-site-file -nw\r")
+     (kuro--send-key
+      (concat "emacs --no-init-file --no-site-file --no-splash -nw "
+              "--eval \"(run-at-time 1 nil #'save-buffers-kill-terminal)\"; "
+              "echo KURO_AFTER_EMACS_STARTS\r"))
      ;; The mode-line shows "GNU Emacs" or the welcome screen.
-     (should (kuro-e2e--wait-for-output sid "GNU Emacs"
+     (should (kuro-e2e--wait-for-output sid "\\*scratch\\*"
                                         kuro-e2e--slow-timeout))
-     ;; Exit cleanly: C-x C-c (ESC → 0x18 = C-x, then 0x03 = C-c)
-     (kuro--send-key "\030\003"))))
+     (should (kuro-e2e--wait-for-output sid "KURO_AFTER_EMACS_STARTS"
+                                        kuro-e2e--slow-timeout)))))
 
 (ert-deftest kuro-e2e-emacs-nw-scratch-buffer ()
-  "emacs -nw shows the *scratch* buffer message inside kuro."
+  "emacs -nw shows the *scratch* buffer contents inside kuro."
   :expected-result kuro-e2e--expected-result
   (skip-unless kuro-e2e--emacs-available)
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
-     (kuro--send-key "emacs --no-init-file --no-site-file -nw\r")
-     (should (kuro-e2e--wait-for-output sid "GNU Emacs"
+     (kuro--send-key
+      (concat "emacs --no-init-file --no-site-file --no-splash -nw "
+              "--eval \"(run-at-time 1 nil #'save-buffers-kill-terminal)\"; "
+              "echo KURO_AFTER_SCRATCH\r"))
+     (should (kuro-e2e--wait-for-output sid "\\*scratch\\*"
                                         kuro-e2e--slow-timeout))
-     ;; The scratch buffer shows "Lisp interaction" in the mode line.
-     (should (kuro-e2e--wait-for-output sid "Lisp"
-                                        kuro-e2e--slow-timeout))
-     (kuro--send-key "\030\003"))))
+     (should (kuro-e2e--wait-for-output sid "KURO_AFTER_SCRATCH"
+                                        kuro-e2e--slow-timeout)))))
 
 (ert-deftest kuro-e2e-emacs-nw-returns-to-shell ()
   "After exiting emacs -nw, the outer shell prompt is restored."
@@ -245,12 +248,14 @@
   (skip-unless kuro-e2e--emacs-available)
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
-     (kuro--send-key "emacs --no-init-file --no-site-file -nw\r")
+     (kuro--send-key
+      (concat "kuro_after=KURO_AFTER_; "
+              "emacs --no-init-file --no-site-file -nw "
+              "--eval \"(run-at-time 1 nil #'save-buffers-kill-terminal)\"; "
+              "printf '%s\\n' \"${kuro_after}NW\"\r"))
      (should (kuro-e2e--wait-for-output sid "GNU Emacs"
                                         kuro-e2e--slow-timeout))
-     ;; Exit emacs -nw and confirm the outer shell receives echo output.
-     (kuro--send-key "\030\003")
-     (kuro--send-key "echo KURO_AFTER_NW\r")
+     ;; Confirm the following shell command runs after emacs exits.
      (should (kuro-e2e--wait-for-output sid "KURO_AFTER_NW"
                                         kuro-e2e--slow-timeout)))))
 

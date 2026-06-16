@@ -8,6 +8,7 @@ use super::osc_protocol::{
 use std::sync::Arc;
 
 use crate::TerminalCore;
+use crate::types::osc::DefaultColorSlot;
 
 use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_BYTES};
 
@@ -62,18 +63,9 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         }
         // OSC 110/111/112: reset default fg/bg/cursor color to terminal default.
         // Symmetric counterparts to OSC 10/11/12 set/query.
-        b"110" => {
-            core.osc_data.default_fg = None;
-            core.osc_data.default_colors_dirty = true;
-        }
-        b"111" => {
-            core.osc_data.default_bg = None;
-            core.osc_data.default_colors_dirty = true;
-        }
-        b"112" => {
-            core.osc_data.cursor_color = None;
-            core.osc_data.default_colors_dirty = true;
-        }
+        b"110" => core.osc_data.reset_default_color(DefaultColorSlot::Foreground),
+        b"111" => core.osc_data.reset_default_color(DefaultColorSlot::Background),
+        b"112" => core.osc_data.reset_default_color(DefaultColorSlot::Cursor),
         b"51" => handle_osc_51(core, params),
         b"52" => handle_osc_52(core, params),
         b"104" => handle_osc_104(core, params),
@@ -144,10 +136,22 @@ fn handle_osc_8(core: &mut TerminalCore, params: &[&[u8]]) {
 /// - Indices 232–255: Grayscale ramp; value = 8 + 10×(idx−232).
 fn xterm_default_color(idx: usize) -> [u8; 3] {
     const ANSI16: [[u8; 3]; 16] = [
-        [  0,   0,   0], [128,   0,   0], [  0, 128,   0], [128, 128,   0],
-        [  0,   0, 128], [128,   0, 128], [  0, 128, 128], [192, 192, 192],
-        [128, 128, 128], [255,   0,   0], [  0, 255,   0], [255, 255,   0],
-        [  0,   0, 255], [255,   0, 255], [  0, 255, 255], [255, 255, 255],
+        [0, 0, 0],
+        [128, 0, 0],
+        [0, 128, 0],
+        [128, 128, 0],
+        [0, 0, 128],
+        [128, 0, 128],
+        [0, 128, 128],
+        [192, 192, 192],
+        [128, 128, 128],
+        [255, 0, 0],
+        [0, 255, 0],
+        [255, 255, 0],
+        [0, 0, 255],
+        [255, 0, 255],
+        [0, 255, 255],
+        [255, 255, 255],
     ];
     match idx {
         0..=15 => ANSI16[idx],
@@ -156,7 +160,13 @@ fn xterm_default_color(idx: usize) -> [u8; 3] {
             let b = i % 6;
             let g = (i / 6) % 6;
             let r = i / 36;
-            let c = |v: usize| -> u8 { if v == 0 { 0 } else { (55 + 40 * v) as u8 } };
+            let c = |v: usize| -> u8 {
+                if v == 0 {
+                    0
+                } else {
+                    (55 + 40 * v) as u8
+                }
+            };
             [c(r), c(g), c(b)]
         }
         232..=255 => {
@@ -164,6 +174,26 @@ fn xterm_default_color(idx: usize) -> [u8; 3] {
             [v, v, v]
         }
         _ => [0, 0, 0],
+    }
+}
+
+fn parse_osc_palette_index(params: &[&[u8]]) -> Option<usize> {
+    let idx_raw = params.get(1)?;
+    let idx_str = std::str::from_utf8(idx_raw).ok()?;
+    let idx = idx_str.parse::<usize>().ok()?;
+    (idx < 256).then_some(idx)
+}
+
+fn apply_osc_palette_query(core: &mut TerminalCore, idx: usize) {
+    let rgb = core.osc_data.palette[idx].unwrap_or_else(|| xterm_default_color(idx));
+    let resp = format!("\x1b]4;{};{}\x07", idx, encode_color_spec(rgb));
+    core.meta.pending_responses.push(resp.into_bytes());
+}
+
+fn apply_osc_palette_update(core: &mut TerminalCore, idx: usize, spec_raw: &[u8]) {
+    let spec = std::str::from_utf8(spec_raw).unwrap_or("");
+    if let Some(rgb) = parse_color_spec(spec) {
+        core.osc_data.set_palette_entry(idx, rgb);
     }
 }
 
@@ -175,27 +205,20 @@ fn xterm_default_color(idx: usize) -> [u8; 3] {
 /// Sets `palette_dirty = true` on a successful set.
 #[inline]
 fn handle_osc_4(core: &mut TerminalCore, params: &[&[u8]]) {
+    let Some(idx) = parse_osc_palette_index(params) else {
+        return;
+    };
+    let Some(spec_raw) = params.get(2) else {
+        return;
+    };
+
     // OSC 4 - Set/query palette color: OSC 4 ; N ; spec ST
     // params[1] = index, params[2] = "?" or "rgb:..." spec
-    if let (Some(idx_raw), Some(spec_raw)) = (params.get(1), params.get(2)) {
-        let idx_str = std::str::from_utf8(idx_raw).unwrap_or("");
-        if let Ok(idx) = idx_str.parse::<usize>() {
-            if idx < 256 {
-                if *spec_raw == b"?" {
-                    // Query: return the application override if set, else the xterm built-in default.
-                    let rgb = core.osc_data.palette[idx]
-                        .unwrap_or_else(|| xterm_default_color(idx));
-                    let resp = format!("\x1b]4;{};{}\x07", idx, encode_color_spec(rgb));
-                    core.meta.pending_responses.push(resp.into_bytes());
-                } else {
-                    let spec = std::str::from_utf8(spec_raw).unwrap_or("");
-                    if let Some(rgb) = parse_color_spec(spec) {
-                        core.osc_data.palette[idx] = Some(rgb);
-                        core.osc_data.palette_dirty = true;
-                    }
-                }
-            }
-        }
+    if *spec_raw == b"?" {
+        // Query: return the application override if set, else the xterm built-in default.
+        apply_osc_palette_query(core, idx);
+    } else {
+        apply_osc_palette_update(core, idx, spec_raw);
     }
 }
 

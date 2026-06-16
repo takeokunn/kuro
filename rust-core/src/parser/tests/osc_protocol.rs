@@ -5,158 +5,9 @@
 
 use super::*;
 
-// ── Macros ───────────────────────────────────────────────────────────────────
-
-/// Generate an `handle_osc_104` palette-reset test for a single valid index.
-///
-/// Pre-sets `palette[$idx]` to `$init`, calls `handle_osc_104` with that
-/// index, and asserts the entry becomes `None` and `palette_dirty` is `true`.
-macro_rules! test_osc_104_reset_index {
-    ($name:ident, $idx:expr, $init:expr) => {
-        #[test]
-        fn $name() {
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            core.osc_data.palette[$idx] = Some($init);
-            let idx_str = stringify!($idx);
-            let params: &[&[u8]] = &[b"104", idx_str.as_bytes()];
-            super::handle_osc_104(&mut core, params);
-            assert_eq!(
-                core.osc_data().palette[$idx],
-                None,
-                concat!("palette index ", stringify!($idx), " must be reset to None")
-            );
-            assert!(core.osc_data().palette_dirty);
-        }
-    };
-}
-
-/// Generate a `handle_osc_default_colors` query test where the color IS set.
-///
-/// Pre-sets `core.osc_data.$field` to `Color::Rgb($r, $g, $b)`, sends the
-/// query `params = [$osc_num, b"?"]`, and asserts:
-/// - exactly one response is queued
-/// - the response contains the OSC number string and `"rgb:"`
-macro_rules! test_osc_default_colors_query_set {
-    ($name:ident, $osc_num:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
-        #[test]
-        fn $name() {
-            use crate::types::Color;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            core.osc_data.$field = Some(Color::Rgb($r, $g, $b));
-            let params: &[&[u8]] = &[$osc_num, b"?"];
-            super::handle_osc_default_colors(&mut core, params);
-            assert_eq!(core.pending_responses().len(), 1);
-            let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-            let num_str = std::str::from_utf8($osc_num).unwrap();
-            assert!(
-                resp.contains(num_str),
-                "response must contain OSC number {num_str}: got {resp:?}"
-            );
-            assert!(
-                resp.contains("rgb:"),
-                "response must contain rgb: color spec: got {resp:?}"
-            );
-        }
-    };
-}
-
-/// Generate an `encode_color_spec` test: call with `[$r, $g, $b]` and assert
-/// the result equals `$expected`.
-macro_rules! test_encode_color_spec {
-    ($name:ident, [$r:expr, $g:expr, $b:expr], $expected:expr) => {
-        #[test]
-        fn $name() {
-            let result = encode_color_spec([$r, $g, $b]);
-            assert_eq!(result, $expected);
-        }
-    };
-}
-
-/// Generate a `parse_color_spec` success test: call with `$input` and assert
-/// the result equals `Some([$r, $g, $b])`.
-macro_rules! test_parse_color_spec_ok {
-    ($name:ident, $input:expr, [$r:expr, $g:expr, $b:expr]) => {
-        #[test]
-        fn $name() {
-            let result = parse_color_spec($input);
-            assert_eq!(result, Some([$r, $g, $b]));
-        }
-    };
-}
-
-/// Generate a `parse_color_spec` failure test: call with `$input` and assert
-/// the result is `None`.
-macro_rules! test_parse_color_spec_none {
-    ($name:ident, $input:expr) => {
-        #[test]
-        fn $name() {
-            assert_eq!(parse_color_spec($input), None);
-        }
-    };
-}
-
-/// Generate a `handle_osc_133` prompt-mark test.
-///
-/// Sends the one-byte mark `$byte` (e.g. `b"A"`) and asserts that the single
-/// recorded event carries the variant `PromptMark::$variant`.
-macro_rules! test_osc_133_mark {
-    ($name:ident, $byte:expr, $variant:ident) => {
-        #[test]
-        fn $name() {
-            use crate::types::osc::PromptMark;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            let params: &[&[u8]] = &[b"133", $byte];
-            super::handle_osc_133(&mut core, params);
-            assert_eq!(core.osc_data().prompt_marks.len(), 1);
-            assert_eq!(core.osc_data().prompt_marks[0].mark, PromptMark::$variant);
-        }
-    };
-}
-
-/// Generate an `handle_osc_133` `CommandEnd` exit-code test.
-///
-/// Sends `params = [b"133", b"D", $code_bytes]` and asserts the single recorded
-/// event has `mark = CommandEnd` and `exit_code == $expected`.
-/// Use for numeric codes (`b"0"`, `b"127"`, `b"-1"`) and non-numeric (`b"abc"`).
-macro_rules! test_osc_133_exit_code {
-    ($name:ident, $code_bytes:expr, $expected:expr) => {
-        #[test]
-        fn $name() {
-            use crate::types::osc::PromptMark;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            let params: &[&[u8]] = &[b"133", b"D", $code_bytes];
-            super::handle_osc_133(&mut core, params);
-            assert_eq!(core.osc_data().prompt_marks.len(), 1);
-            let ev = &core.osc_data().prompt_marks[0];
-            assert_eq!(ev.mark, PromptMark::CommandEnd);
-            assert_eq!(ev.exit_code, $expected);
-        }
-    };
-}
-
-/// Generate a `handle_osc_default_colors` set test (OSC 10/11/12).
-///
-/// Sends `params = [osc_num, color_spec]`, then asserts:
-/// - `$field` on `osc_data()` equals `Some(Color::Rgb($r, $g, $b))`
-/// - `default_colors_dirty` is `true`
-macro_rules! test_osc_default_colors_set {
-    ($name:ident, $osc_num:expr, $spec:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
-        #[test]
-        fn $name() {
-            use crate::types::Color;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            let params: &[&[u8]] = &[$osc_num, $spec];
-            super::handle_osc_default_colors(&mut core, params);
-            assert_eq!(core.osc_data().$field, Some(Color::Rgb($r, $g, $b)));
-            assert!(core.osc_data().default_colors_dirty);
-        }
-    };
-}
+#[macro_use]
+#[path = "osc_protocol/support.rs"]
+mod support;
 
 // ── encode_color_spec ────────────────────────────────────────────────────────
 
@@ -332,7 +183,7 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     assert!(core.osc_data().palette_dirty);
 }
 
-// ── handle_osc_133 (moved to osc_protocol_osc133.rs) ─────────────────────────
+// ── handle_osc_133 (moved to osc_protocol/osc133.rs) ─────────────────────────
 
 // ── handle_osc_default_colors ─────────────────────────────────────────────────
 
@@ -435,7 +286,10 @@ fn osc51_no_subcommand_param_is_noop() {
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"51"];
     super::handle_osc_51(&mut core, params);
-    assert!(core.osc_data().eval_commands.is_empty(), "no subcommand → no eval command");
+    assert!(
+        core.osc_data().eval_commands.is_empty(),
+        "no subcommand → no eval command"
+    );
 }
 
 /// OSC 51 with `e` subcommand but no command param (`params = ["51","e"]`) is a no-op.
@@ -447,8 +301,23 @@ fn osc51_e_subcommand_no_command_is_noop() {
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"51", b"e"];
     super::handle_osc_51(&mut core, params);
-    assert!(core.osc_data().eval_commands.is_empty(), "e without command → no eval command");
+    assert!(
+        core.osc_data().eval_commands.is_empty(),
+        "e without command → no eval command"
+    );
 }
 
+#[path = "osc_protocol/osc7.rs"]
+mod osc7;
 
-include!("osc_protocol_osc7.rs");
+#[path = "osc_protocol/colors.rs"]
+mod colors;
+
+#[path = "osc_protocol/colors_extra.rs"]
+mod colors_extra;
+
+#[path = "osc_protocol/coverage.rs"]
+mod coverage;
+
+#[path = "osc_protocol/osc133.rs"]
+mod osc133;

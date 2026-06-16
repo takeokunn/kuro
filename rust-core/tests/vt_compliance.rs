@@ -146,7 +146,12 @@ fn vt_dectcem_cursor_visibility() {
     assert!(t.dec_modes().cursor_visible);
 }
 
-vt_dec_toggle!(vt_decckm_app_cursor, b"\x1b[?1h", b"\x1b[?1l", app_cursor_keys);
+vt_dec_toggle!(
+    vt_decckm_app_cursor,
+    b"\x1b[?1h",
+    b"\x1b[?1l",
+    app_cursor_keys
+);
 
 #[test]
 fn vt_decawm_auto_wrap() {
@@ -213,7 +218,12 @@ fn vt_decawm_off_no_wrap() {
     assert_eq!(t.get_cell(0, 4).unwrap().char(), 'H');
 }
 
-vt_dec_toggle!(vt_bracketed_paste, b"\x1b[?2004h", b"\x1b[?2004l", bracketed_paste);
+vt_dec_toggle!(
+    vt_bracketed_paste,
+    b"\x1b[?2004h",
+    b"\x1b[?2004l",
+    bracketed_paste
+);
 
 // === Alt Screen ===
 
@@ -309,6 +319,14 @@ fn da3_with_zero_param() {
     );
 }
 
-include!("include/vt_compliance_device_attrs.rs");
-include!("include/vt_compliance_cursor_movement.rs");
-include!("include/vt_compliance_ext.rs");
+#[path = "include/vt_compliance_device_attrs.rs"]
+mod device_attrs;
+
+#[path = "include/vt_compliance_cursor_movement.rs"]
+mod cursor_movement;
+
+#[path = "include/vt_compliance_save_restore.rs"]
+mod save_restore;
+
+#[path = "include/vt_compliance_ext.rs"]
+mod ext;

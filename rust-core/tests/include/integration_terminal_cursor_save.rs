@@ -1,3 +1,5 @@
+use super::*;
+
 // === flush_print_buf (ASCII batch write) ===
 
 /// Flushing an ASCII buffer of multi-byte printable text must update all cells.
@@ -223,7 +225,7 @@ fn test_flush_print_buf_multi_char_buffer() {
     );
 }
 
-/// OSC 8 hyperlink round-trip: set a URI, verify `osc_data().hyperlink.uri` is set;
+/// OSC 8 hyperlink round-trip: set a URI, verify `osc_data().hyperlink_uri()` is set;
 /// then close the hyperlink and verify the URI is cleared.
 /// Also verifies that cells printed while a hyperlink is active carry the URI.
 #[test]
@@ -234,9 +236,7 @@ fn test_osc8_hyperlink_round_trip() {
     term.advance(b"\x1b]8;id=foo;https://example.com\x07");
     let uri = term
         .osc_data()
-        .hyperlink
-        .uri
-        .as_deref()
+        .hyperlink_uri()
         .expect("hyperlink URI must be set after OSC 8 open");
     assert_eq!(uri, "https://example.com", "URI must match the sent value");
 
@@ -254,7 +254,7 @@ fn test_osc8_hyperlink_round_trip() {
     // Close hyperlink (empty URI)
     term.advance(b"\x1b]8;;\x07");
     assert!(
-        term.osc_data().hyperlink.uri.is_none(),
+        term.osc_data().hyperlink_uri().is_none(),
         "hyperlink URI must be None after OSC 8 close"
     );
 
@@ -275,5 +275,5 @@ fn test_osc8_hyperlink_round_trip() {
 ///
 /// The `TerminalCore` public API exposes `title()` + `title_dirty()`.
 /// This test pins the consume-once semantics: dirty is true exactly until reset.
-
-include!("integration_terminal_cursor_save_part2.rs");
+#[path = "integration_terminal_cursor_save_part2.rs"]
+mod part2;

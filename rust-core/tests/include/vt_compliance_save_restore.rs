@@ -1,3 +1,5 @@
+use super::*;
+
 // === CUU/CUD/CUF/CUB with count 0 (treated as 1) ===
 
 // CUU 0 (CSI 0 A) must move up by 1 (count 0 treated as default=1).

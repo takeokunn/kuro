@@ -153,54 +153,9 @@ because the last inserted line is the partial line at point-max."
 
 ;;; Group 5: kuro--decscusr-to-cursor-type
 
-(ert-deftest kuro-render-buffer-decscusr-0-is-box ()
-  "DECSCUSR 0 (default) returns box cursor."
-  (should (eq (kuro--decscusr-to-cursor-type 0) 'box)))
-
-(ert-deftest kuro-render-buffer-decscusr-1-is-box ()
-  "DECSCUSR 1 (blinking block) returns box cursor."
-  (should (eq (kuro--decscusr-to-cursor-type 1) 'box)))
-
-(ert-deftest kuro-render-buffer-decscusr-2-is-box ()
-  "DECSCUSR 2 (steady block) returns box cursor."
-  (should (eq (kuro--decscusr-to-cursor-type 2) 'box)))
-
-(ert-deftest kuro-render-buffer-decscusr-3-is-hbar ()
-  "DECSCUSR 3 (blinking underline) returns hbar cursor of height 2."
-  (should (equal (kuro--decscusr-to-cursor-type 3) '(hbar . 2))))
-
-(ert-deftest kuro-render-buffer-decscusr-4-is-hbar ()
-  "DECSCUSR 4 (steady underline) returns hbar cursor of height 2."
-  (should (equal (kuro--decscusr-to-cursor-type 4) '(hbar . 2))))
-
-(ert-deftest kuro-render-buffer-decscusr-5-is-bar ()
-  "DECSCUSR 5 (blinking bar/I-beam) returns bar cursor of width 2."
-  (should (equal (kuro--decscusr-to-cursor-type 5) '(bar . 2))))
-
-(ert-deftest kuro-render-buffer-decscusr-6-is-bar ()
-  "DECSCUSR 6 (steady bar/I-beam) returns bar cursor of width 2."
-  (should (equal (kuro--decscusr-to-cursor-type 6) '(bar . 2))))
-
-(ert-deftest kuro-render-buffer-decscusr-unknown-defaults-to-box ()
-  "Unknown DECSCUSR value falls through to box cursor (safe default)."
-  (should (eq (kuro--decscusr-to-cursor-type 99) 'box))
-  (should (eq (kuro--decscusr-to-cursor-type 7) 'box))
-  (should (eq (kuro--decscusr-to-cursor-type -1) 'box)))
-
-(ert-deftest kuro-render-buffer-decscusr-0-and-1-return-same ()
-  "DECSCUSR 0 and 1 are aliases; both return identical cursor types."
-  (should (equal (kuro--decscusr-to-cursor-type 0)
-                 (kuro--decscusr-to-cursor-type 1))))
-
-(ert-deftest kuro-render-buffer-decscusr-3-and-4-return-same ()
-  "DECSCUSR 3 and 4 are aliases; both return identical cursor types."
-  (should (equal (kuro--decscusr-to-cursor-type 3)
-                 (kuro--decscusr-to-cursor-type 4))))
-
-(ert-deftest kuro-render-buffer-decscusr-5-and-6-return-same ()
-  "DECSCUSR 5 and 6 are aliases; both return identical cursor types."
-  (should (equal (kuro--decscusr-to-cursor-type 5)
-                 (kuro--decscusr-to-cursor-type 6))))
+(kuro-render-buffer-test--deftest-decscusr-cases)
+(kuro-render-buffer-test--deftest-decscusr-default-cases)
+(kuro-render-buffer-test--deftest-decscusr-alias-cases)
 
 ;;; Group 6: kuro--grid-col-to-buffer-pos
 
@@ -238,30 +193,7 @@ because the last inserted line is the partial line at point-max."
 
 ;;; Group 7: kuro--apply-cursor-display
 
-(ert-deftest kuro-render-buffer-apply-cursor-display-visible-shape-0 ()
-  "Visible cursor with shape 0 sets cursor-type to box."
-  (kuro-render-buffer-test--with-buffer
-    (kuro--apply-cursor-display t 0)
-    (should (eq cursor-type 'box))))
-
-(ert-deftest kuro-render-buffer-apply-cursor-display-visible-shape-3 ()
-  "Visible cursor with shape 3 (blinking underline) sets hbar cursor."
-  (kuro-render-buffer-test--with-buffer
-    (kuro--apply-cursor-display t 3)
-    (should (equal cursor-type '(hbar . 2)))))
-
-(ert-deftest kuro-render-buffer-apply-cursor-display-hidden ()
-  "Hidden cursor (DECTCEM off) sets cursor-type to nil."
-  (kuro-render-buffer-test--with-buffer
-    (setq-local cursor-type 'box)
-    (kuro--apply-cursor-display nil 0)
-    (should-not cursor-type)))
-
-(ert-deftest kuro-render-buffer-apply-cursor-display-nil-shape-defaults-to-box ()
-  "Nil shape (missing DECSCUSR) defaults to shape 0 (box)."
-  (kuro-render-buffer-test--with-buffer
-    (kuro--apply-cursor-display t nil)
-    (should (eq cursor-type 'box))))
+(kuro-render-buffer-test--deftest-apply-cursor-display-cases)
 
 ;;; Group 8: kuro--update-line-full — row-position cache arithmetic
 

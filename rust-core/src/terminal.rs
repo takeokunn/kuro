@@ -2,7 +2,6 @@
 
 use crate::grid::screen::Screen;
 use crate::parser;
-use crate::parser::apc::ApcScanState;
 use crate::parser::dec_private::DecModes;
 use crate::parser::tabs::TabStops;
 use crate::types;
@@ -237,10 +236,10 @@ impl TerminalCore {
             self.gl_is_g1 = gl;
         }
     }
-
 }
 
-include!("terminal_accessors.rs");
+#[path = "terminal_accessors.rs"]
+mod accessors;
 
 #[cfg(test)]
 mod tests {

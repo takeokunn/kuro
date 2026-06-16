@@ -213,6 +213,13 @@ When BUFFER-NAME is nil, generate a fresh name from `kuro--buffer-name-default'.
 (defvar-local kuro--shell-command nil
   "The shell command used to create this terminal session.")
 
+(defun kuro--initialize-session-buffer (buffer rows cols)
+  "Prepare BUFFER for a session display with ROWS x COLS dimensions."
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t))
+      (kuro--prefill-buffer rows))
+    (kuro--init-session-buffer buffer rows cols)))
+
 (defun kuro--start-session-in-buffer (buffer command)
   "Start COMMAND in BUFFER and initialize the terminal display.
 Returns BUFFER after attempting startup."
@@ -226,11 +233,9 @@ Returns BUFFER after attempting startup."
     ;; (pixel size is unchanged).  Measuring before kuro-mode gives a stale
     ;; row count, causing TUI apps to draw for the wrong terminal size.
     (pcase-let ((`(,rows . ,cols) (kuro--terminal-dimensions)))
-      (let ((inhibit-read-only t))
-        (kuro--prefill-buffer rows))
+      (kuro--initialize-session-buffer buffer rows cols)
       (kuro--setup-shell-integration-env)
       (when (kuro--init command nil rows cols)
-        (kuro--init-session-buffer buffer rows cols)
         (kuro--start-render-loop)
         (kuro--schedule-initial-render buffer)
         (message "Kuro: Started terminal with command: %s" command))))
@@ -250,8 +255,7 @@ Signals on any failure; the caller is responsible for rollback."
     (kuro-core-attach session-id)
     (setq kuro--session-id session-id
           kuro--initialized t)
-    (kuro--prefill-buffer rows)
-    (kuro--init-session-buffer (current-buffer) rows cols)
+    (kuro--initialize-session-buffer (current-buffer) rows cols)
     (kuro--resize rows cols)
     (kuro--start-render-loop)))
 
@@ -385,7 +389,7 @@ Honours `kuro-module-installation-method': symbols in
 `manual' aborts with an error; nil falls through to the interactive prompt.
 Returns non-nil on success; signals an error otherwise."
   (or (kuro--try-load-module)
-      (if-let ((entry (assq kuro-module-installation-method
+      (if-let* ((entry (assq kuro-module-installation-method
                             kuro--module-install-methods)))
           (kuro--install-and-load-module (nth 2 entry) (nth 3 entry))
         (pcase kuro-module-installation-method

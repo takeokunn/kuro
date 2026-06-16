@@ -37,6 +37,7 @@
 (declare-function kuro-mux-resize-pane         "kuro-mux-windows" (direction &optional delta))
 (declare-function kuro-mux-install-mode-line       "kuro-mux"      ())
 (declare-function kuro-mux--track-window-change    "kuro-mux-windows" (_frame))
+(declare-function kuro-mux-save-layout             "kuro-mux-ext2" ())
 (declare-function kuro--activity-notify            "kuro-activity" (title body))
 
 ;; Forward declarations for buffer-local variables defined in kuro-mux.el.
@@ -135,7 +136,7 @@ Signals `user-error' when no session matching NAME is found."
     (if target
         (with-current-buffer target
           (kuro--send-paste-or-raw text))
-      (user-error "kuro-mux: no session named %s" name))))
+      (user-error "Kuro-mux: no session named %s" name))))
 
 
 ;;;; Tab-bar integration
@@ -304,7 +305,7 @@ Analogous to tmux `:monitor-silence N'."
 ;;;; Pipe pane — capture rendered session output to a file
 
 (defun kuro-mux--pipe-pane-watcher (beg end _old-len)
-  "Append newly inserted buffer text to `kuro-mux--pipe-pane-file'.
+  "Append buffer text from BEG to END to `kuro-mux--pipe-pane-file'.
 Called from `after-change-functions' when output piping is active."
   (when (and kuro-mux--pipe-pane-file (< beg end))
     (let ((text (buffer-substring-no-properties beg end)))

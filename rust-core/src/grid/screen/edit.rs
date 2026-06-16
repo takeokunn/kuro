@@ -217,9 +217,5 @@ impl Screen {
 }
 
 #[cfg(test)]
-mod tests {
-    include!("edit_tests.rs");
-
-    include!("edit_pbt.rs");
-
-}
+#[path = "edit/tests.rs"]
+mod tests;

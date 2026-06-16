@@ -14,6 +14,7 @@
 
 (require 'cl-lib)
 (require 'kuro-ffi)
+(require 'kuro-keymap)
 
 ;;; Customization
 
@@ -57,10 +58,9 @@ Group 1 is the file path, group 2 is the line number.")
 ;;; Keymap (defined before functions that reference it)
 
 (defvar kuro--url-keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'kuro-open-url-at-point)
-    (define-key map (kbd "RET") #'kuro-open-url-at-point)
-    map)
+  (kuro--define-keymap
+    ([mouse-1] . kuro-open-url-at-point)
+    ((kbd "RET") . kuro-open-url-at-point))
   "Keymap active on URL overlays.")
 
 ;;; Overlay management
@@ -72,30 +72,31 @@ Group 1 is the file path, group 2 is the line number.")
       (delete-overlay ov)))
   (setq kuro--url-overlays nil))
 
-(defun kuro--make-url-overlay (beg end url)
-  "Create a clickable overlay from BEG to END for URL."
+(defun kuro--make-clickable-overlay (beg end help-echo target-props)
+  "Create a clickable overlay from BEG to END.
+HELP-ECHO is the hover text, and TARGET-PROPS are overlay properties
+that identify the clickable target."
   (let ((ov (make-overlay beg end nil t nil)))
     (overlay-put ov 'kuro-url t)
-    (overlay-put ov 'kuro-url-target url)
+    (dolist (prop target-props)
+      (overlay-put ov (car prop) (cdr prop)))
     (overlay-put ov 'face 'link)
     (overlay-put ov 'mouse-face 'highlight)
-    (overlay-put ov 'help-echo url)
+    (overlay-put ov 'help-echo help-echo)
     (overlay-put ov 'keymap kuro--url-keymap)
     (push ov kuro--url-overlays)
     ov))
 
+(defun kuro--make-url-overlay (beg end url)
+  "Create a clickable overlay from BEG to END for URL."
+  (kuro--make-clickable-overlay beg end url
+                                `((kuro-url-target . ,url))))
+
 (defun kuro--make-file-line-overlay (beg end file line)
   "Create a clickable overlay from BEG to END for FILE at LINE."
-  (let ((ov (make-overlay beg end nil t nil)))
-    (overlay-put ov 'kuro-url t)
-    (overlay-put ov 'kuro-file-target file)
-    (overlay-put ov 'kuro-line-target line)
-    (overlay-put ov 'face 'link)
-    (overlay-put ov 'mouse-face 'highlight)
-    (overlay-put ov 'help-echo (format "%s:%d" file line))
-    (overlay-put ov 'keymap kuro--url-keymap)
-    (push ov kuro--url-overlays)
-    ov))
+  (kuro--make-clickable-overlay beg end (format "%s:%d" file line)
+                                `((kuro-file-target . ,file)
+                                  (kuro-line-target . ,line))))
 
 ;;; Actions
 

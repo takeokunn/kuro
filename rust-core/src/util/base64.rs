@@ -1,6 +1,19 @@
 //! Self-contained RFC 4648 base64 encode/decode (standard alphabet, with padding).
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const INVALID: u8 = 0xFF;
+const PAD: u8 = b'=';
+const DECODE_TABLE: [u8; 256] = build_decode_table();
+
+const fn build_decode_table() -> [u8; 256] {
+    let mut table = [INVALID; 256];
+    let mut i = 0;
+    while i < ALPHABET.len() {
+        table[ALPHABET[i] as usize] = i as u8;
+        i += 1;
+    }
+    table
+}
 
 /// Encode `input` to base64 (standard alphabet, `=` padding).
 pub(crate) fn encode(input: &[u8]) -> String {
@@ -34,64 +47,77 @@ pub(crate) fn encode(input: &[u8]) -> String {
 ///
 /// Whitespace (`\n`, `\r`, ` `) is stripped before decoding.
 pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, DecodeError> {
-    // Build reverse-lookup table: 0xFF = invalid character.
-    let mut table = [0xFFu8; 256];
-    for (i, &c) in ALPHABET.iter().enumerate() {
-        table[c as usize] = i as u8;
-    }
-
-    // Strip whitespace.
-    let filtered: Vec<u8> = input
-        .iter()
-        .copied()
-        .filter(|&b| b != b'\n' && b != b'\r' && b != b' ')
-        .collect();
-
+    let filtered = without_decode_whitespace(input);
     if filtered.is_empty() {
         return Ok(Vec::new());
     }
-
-    if !filtered.len().is_multiple_of(4) {
+    if !filtered.len().is_multiple_of(4) || has_invalid_padding(&filtered) {
         return Err(DecodeError);
     }
 
     let mut out = Vec::with_capacity(filtered.len() / 4 * 3);
     for chunk in filtered.chunks(4) {
-        let c0 = table[chunk[0] as usize];
-        let c1 = table[chunk[1] as usize];
+        decode_quartet(chunk, &mut out)?;
+    }
+    Ok(out)
+}
 
-        if c0 == 0xFF || c1 == 0xFF {
-            return Err(DecodeError);
-        }
+fn without_decode_whitespace(input: &[u8]) -> Vec<u8> {
+    input
+        .iter()
+        .copied()
+        .filter(|&b| !is_decode_whitespace(b))
+        .collect()
+}
 
-        let c2 = if chunk[2] == b'=' {
-            0u8
-        } else {
-            let v = table[chunk[2] as usize];
-            if v == 0xFF {
-                return Err(DecodeError);
-            }
-            v
-        };
-        let c3 = if chunk[3] == b'=' {
-            0u8
-        } else {
-            let v = table[chunk[3] as usize];
-            if v == 0xFF {
-                return Err(DecodeError);
-            }
-            v
-        };
+fn is_decode_whitespace(byte: u8) -> bool {
+    matches!(byte, b'\n' | b'\r' | b' ')
+}
 
-        out.push((c0 << 2) | (c1 >> 4));
-        if chunk[2] != b'=' {
-            out.push((c1 << 4) | (c2 >> 2));
-        }
-        if chunk[3] != b'=' {
+fn has_invalid_padding(input: &[u8]) -> bool {
+    let Some(first_pad) = input.iter().position(|&b| b == PAD) else {
+        return false;
+    };
+    let pad_count = input.len() - first_pad;
+    let pad_offset = first_pad % 4;
+
+    pad_offset < 2 || pad_count > 2 || input[first_pad..].iter().any(|&b| b != PAD)
+}
+
+fn decode_quartet(chunk: &[u8], out: &mut Vec<u8>) -> Result<(), DecodeError> {
+    debug_assert_eq!(chunk.len(), 4);
+
+    let c0 = decode_required(chunk[0])?;
+    let c1 = decode_required(chunk[1])?;
+    let c2 = decode_optional(chunk[2])?;
+    let c3 = decode_optional(chunk[3])?;
+
+    out.push((c0 << 2) | (c1 >> 4));
+    if let Some(c2) = c2 {
+        out.push((c1 << 4) | (c2 >> 2));
+        if let Some(c3) = c3 {
             out.push((c2 << 6) | c3);
         }
     }
-    Ok(out)
+
+    Ok(())
+}
+
+fn decode_required(byte: u8) -> Result<u8, DecodeError> {
+    let value = DECODE_TABLE[byte as usize];
+    if value == INVALID {
+        Err(DecodeError)
+    } else {
+        Ok(value)
+    }
+}
+
+fn decode_optional(byte: u8) -> Result<Option<u8>, DecodeError> {
+    if byte == PAD {
+        Ok(None)
+    } else {
+        decode_required(byte).map(Some)
+    }
 }
 
 /// Error returned when base64 input is malformed.
@@ -105,84 +131,4 @@ impl std::fmt::Display for DecodeError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_encode_empty() {
-        assert_eq!(encode(b""), "");
-    }
-
-    #[test]
-    fn test_encode_one_byte() {
-        // b"M" = 0x4D = 0100_1101; encodes to "TQ=="
-        assert_eq!(encode(b"M"), "TQ==");
-    }
-
-    #[test]
-    fn test_encode_two_bytes() {
-        // b"Ma" encodes to "TWE="
-        assert_eq!(encode(b"Ma"), "TWE=");
-    }
-
-    #[test]
-    fn test_encode_three_bytes() {
-        // b"Man" encodes to "TWFu" (no padding)
-        assert_eq!(encode(b"Man"), "TWFu");
-    }
-
-    #[test]
-    fn test_roundtrip() {
-        let data = b"Hello, world! This is a test of base64 encoding.";
-        let encoded = encode(data);
-        let decoded = decode(encoded.as_bytes()).unwrap();
-        assert_eq!(decoded, data);
-    }
-
-    #[test]
-    fn test_decode_with_padding() {
-        assert_eq!(decode(b"TQ==").unwrap(), b"M");
-        assert_eq!(decode(b"TWE=").unwrap(), b"Ma");
-        assert_eq!(decode(b"TWFu").unwrap(), b"Man");
-    }
-
-    #[test]
-    fn test_decode_invalid() {
-        assert!(decode(b"!!!").is_err());
-    }
-
-    #[test]
-    fn test_decode_empty_input_returns_empty_vec() {
-        // Empty slice skips the length check and returns Ok(vec![])
-        assert_eq!(decode(b"").unwrap(), b"");
-    }
-
-    #[test]
-    fn test_decode_invalid_char_in_valid_length_string() {
-        // "!!!!" is length 4 (passes mod-4 check) but '!' is not in the alphabet.
-        assert!(decode(b"!!!!").is_err());
-    }
-
-    #[test]
-    fn test_decode_strips_whitespace() {
-        // RFC 4648 / xterm practice: newlines and spaces are stripped before decode.
-        let with_newlines = b"TQ\n=\r=";  // "TQ==" with embedded whitespace
-        assert_eq!(decode(with_newlines).unwrap(), b"M");
-    }
-
-    #[test]
-    fn test_decode_error_display() {
-        let msg = format!("{}", DecodeError);
-        assert!(
-            msg.contains("invalid") || msg.contains("base64"),
-            "DecodeError display must mention 'invalid' or 'base64', got: {msg:?}"
-        );
-    }
-
-    #[test]
-    fn test_decode_invalid_c1_byte() {
-        // First byte 'A' maps to 0, but second byte '!' is invalid (0xFF in table).
-        // b"A!AA" is length 4 and first byte is valid — triggers c1 == 0xFF branch.
-        assert!(decode(b"A!AA").is_err());
-    }
-}
+mod tests;

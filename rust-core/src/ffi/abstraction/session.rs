@@ -6,7 +6,7 @@
 
 #[cfg(unix)]
 use crate::pty::Pty;
-use crate::{Result, TerminalCore};
+use crate::TerminalCore;
 
 /// Lifecycle state of a terminal session.
 ///
@@ -28,7 +28,7 @@ pub enum SessionState {
 /// preventing high-throughput TUI apps (cmatrix, btop) from starving the
 /// Emacs event loop.  Any excess data is held in `pending_input` and
 /// processed on the next frame.
-const MAX_BYTES_PER_POLL: usize = 128 * 1024;
+const MAX_BYTES_PER_POLL: usize = 4 * 1024;
 
 /// Terminal session state (shared by all FFI implementations)
 ///
@@ -193,277 +193,24 @@ macro_rules! take_bool_field {
 
 // TerminalSession Facade
 // -----------------------
-// Current public method count: 38.
-// Review trigger at 50+ methods: consider introducing a DecModesView sub-struct
-// to group the 12 mode-query accessor methods (get_mouse_mode, get_app_cursor_keys,
-// get_keyboard_flags, etc.) and reduce the surface area of this facade.
-// All bridge code MUST use these methods; direct `.core.*` access is intentionally
-// blocked by `pub(super)` on the `core` field.
-impl TerminalSession {
-    /// Create a new terminal session
-    ///
-    /// # Errors
-    /// Returns `Err` if the PTY process fails to spawn or the window size cannot be set.
-    pub fn new(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
-        let core = TerminalCore::new(rows, cols);
+// Public methods are split across session_init.rs, session_io.rs, session_view.rs,
+// session_state.rs, and session_osc_modes.rs to keep this file focused on shared
+// helpers and the type definition itself.
+#[path = "session_state.rs"]
+mod state;
 
-        #[cfg(unix)]
-        {
-            // Pty::spawn now takes rows/cols and passes them to openpty so the PTY
-            // is created with the correct window size before the child process starts.
-            // This prevents readline from seeing 0×0 columns on its first TIOCGWINSZ
-            // query, which would otherwise put it into dumb terminal mode (causing
-            // control characters to echo as ^X instead of moving the cursor).
-            let mut pty = Pty::spawn(command, shell_args, rows, cols)?;
-            // Belt-and-suspenders: also call set_winsize after spawn to ensure
-            // the slave-side window size is consistent across platforms.
-            pty.set_winsize(rows, cols)?;
+#[path = "session_osc_modes.rs"]
+mod osc_modes;
 
-            Ok(Self {
-                core,
-                pty: Some(pty),
-                command: command.to_owned(),
-                state: SessionState::Bound,
-                pending_input: Vec::new(),
-                row_hashes: Vec::new(),
-                palette_epoch: 0,
-                was_alt_screen: false,
-                encode_pool: crate::ffi::codec::EncodePool::new(),
-                dirty_scratch: Vec::new(),
-                texts_scratch: Vec::new(),
-                buf_scratch: Vec::new(),
-            })
-        }
+#[path = "session_init.rs"]
+mod init;
 
-        #[cfg(not(unix))]
-        Ok(Self {
-            core,
-            command: command.to_string(),
-            state: SessionState::Bound,
-            row_hashes: Vec::new(),
-            palette_epoch: 0,
-            was_alt_screen: false,
-            encode_pool: crate::ffi::codec::EncodePool::new(),
-            dirty_scratch: Vec::new(),
-            texts_scratch: Vec::new(),
-        })
-    }
+#[path = "session_io.rs"]
+mod io;
 
-    /// Send input to PTY
-    ///
-    /// # Errors
-    /// Returns `Err` if writing to the PTY file descriptor fails.
-    pub fn send_input(&mut self, bytes: &[u8]) -> Result<()> {
-        #[cfg(unix)]
-        if let Some(ref mut pty) = self.pty {
-            pty.write(bytes)?;
-        }
-        #[cfg(not(unix))]
-        let _ = bytes;
-        Ok(())
-    }
-
-    /// Poll for PTY output and update terminal.
-    ///
-    /// Drains the crossbeam channel twice: once for the initial batch, then
-    /// yields the current thread and drains again to catch bytes that the
-    /// reader thread pushed while we were processing the first batch.
-    /// This reduces the chance of rendering a partial screen update when
-    /// a TUI app sends a large escape-sequence burst (e.g. Claude Code
-    /// redrawing all 32 rows on up-arrow).
-    ///
-    /// # Errors
-    /// Returns `Err` if reading from or writing to the PTY file descriptor fails.
-    pub fn poll_output(&mut self) -> Result<()> {
-        #[cfg(unix)]
-        if let Some(ref mut pty) = self.pty {
-            let mut budget = MAX_BYTES_PER_POLL;
-
-            // Drain pending_input from previous frame first
-            if !self.pending_input.is_empty() {
-                let pending = std::mem::take(&mut self.pending_input);
-                advance_with_budget(
-                    &mut self.core,
-                    &pending,
-                    &mut budget,
-                    &mut self.pending_input,
-                );
-            }
-
-            // Drain channel data up to the remaining budget
-            if budget > 0 {
-                let data = pty.read()?;
-                advance_with_budget(&mut self.core, &data, &mut budget, &mut self.pending_input);
-            }
-
-            // Second drain: yield to let the reader thread push any
-            // in-flight data, then drain again.  This coalesces two
-            // chunks that would otherwise require two render cycles.
-            if budget > 0 {
-                std::thread::yield_now();
-                let more = pty.read()?;
-                advance_with_budget(&mut self.core, &more, &mut budget, &mut self.pending_input);
-            }
-
-            // Write any queued responses back to the PTY (e.g. DA1/DA2 replies)
-            for response in self.core.meta.pending_responses.drain(..) {
-                pty.write(&response)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Get dirty lines from screen (text only, no face ranges)
-    pub fn get_dirty_lines(&mut self) -> Vec<(usize, String)> {
-        // Helper: encode a single dirty row as (row, text)
-        fn encode_row(screen: &crate::grid::screen::Screen, row: usize) -> Option<(usize, String)> {
-            screen.get_line(row).map(|line| {
-                // Wide placeholder cells (CellWidth::Wide) are included as ' ' chars,
-                // maintaining the grid_col == buffer_char_offset invariant (Phase 11).
-                let s: String = line
-                    .cells
-                    .iter()
-                    .map(crate::types::cell::Cell::char)
-                    .collect();
-                // NOTE: trailing spaces are intentionally NOT trimmed.
-                // Trimming would cause the Emacs-side cursor clamp
-                // `(min (+ line-start col) line-end)` to place the cursor at
-                // the wrong column when the terminal cursor is inside whitespace
-                // (e.g. after pressing SPC at a bash prompt).
-                (row, s)
-            })
-        }
-
-        // Fast path: full_dirty → iterate 0..rows directly without allocating index Vec
-        if self.core.screen.is_full_dirty() {
-            let rows = self.core.screen.rows() as usize;
-            self.core.screen.clear_dirty();
-            let mut result = Vec::with_capacity(rows);
-            for row in 0..rows {
-                if let Some(entry) = encode_row(&self.core.screen, row) {
-                    result.push(entry);
-                }
-            }
-            return result;
-        }
-
-        let dirty_indices = self.core.screen.take_dirty_lines();
-        let mut result = Vec::with_capacity(dirty_indices.len());
-        for row in dirty_indices {
-            if let Some(entry) = encode_row(&self.core.screen, row) {
-                result.push(entry);
-            }
-        }
-        result
-    }
-
-    /// Encode a `Color` as a `u32` for FFI transfer.
-    ///
-    /// Delegates to [`crate::ffi::codec::encode_color`].
-    #[inline]
-    #[must_use]
-    pub fn encode_color(color: &crate::types::Color) -> u32 {
-        crate::ffi::codec::encode_color(color)
-    }
-
-    /// Encode `SgrAttributes` as a `u64` bitmask for FFI transfer.
-    ///
-    /// Delegates to [`crate::ffi::codec::encode_attrs`].
-    #[inline]
-    #[must_use]
-    pub fn encode_attrs(attrs: &crate::types::cell::SgrAttributes) -> u64 {
-        crate::ffi::codec::encode_attrs(attrs)
-    }
-
-    /// Encode a single line's cells into (row, text, `face_ranges`, `col_to_buf`).
-    ///
-    /// This is a pure function (no `self` dependency) so it can be called
-    /// while holding a shared borrow of the screen — eliminating the need to
-    /// `clone()` the cell slice just to satisfy the borrow checker.
-    ///
-    /// Returns `EncodedLine` where:
-    /// - `text` has wide placeholder cells removed (CJK renders correctly in Emacs)
-    /// - `face_ranges` use buffer offsets (not grid column indices)
-    /// - `col_to_buf[col]` maps grid column to buffer character offset
-    #[must_use]
-    pub fn encode_line_faces(
-        row: usize,
-        cells: &[crate::types::cell::Cell],
-    ) -> crate::ffi::codec::EncodedLine {
-        let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(cells);
-        (row, text, face_ranges, col_to_buf)
-    }
-
-    /// Resize terminal
-    ///
-    /// # Errors
-    /// Returns `Err` if the PTY window-size ioctl fails.
-    pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
-        self.core.resize(rows, cols);
-        // Row hashes are invalidated by a resize because row count / col count
-        // may change, making the old per-row hashes stale.  Truncate to new row
-        // count (in case it shrank) then fill all slots with None.
-        let new_rows = rows as usize;
-        self.row_hashes.truncate(new_rows);
-        self.row_hashes.fill(None);
-        #[cfg(unix)]
-        if let Some(ref mut pty) = self.pty {
-            pty.set_winsize(rows, cols)?;
-        }
-        Ok(())
-    }
-
-    /// Get cursor position
-    #[must_use]
-    pub fn get_cursor(&self) -> (usize, usize) {
-        let c = self.core.screen.cursor();
-        (c.row, c.col)
-    }
-
-    dec_mode_getter!(
-        /// Get cursor visibility (DECTCEM state)
-        fn get_cursor_visible -> bool = cursor_visible
-    );
-
-    /// Get scrollback lines
-    #[must_use]
-    pub fn get_scrollback(&self, max_lines: usize) -> Vec<String> {
-        let lines = self.core.screen.get_scrollback_lines(max_lines);
-        lines.iter().map(std::string::ToString::to_string).collect()
-    }
-
-    /// Clear scrollback buffer
-    pub fn clear_scrollback(&mut self) {
-        self.core.screen.clear_scrollback();
-    }
-
-    /// Set scrollback max lines
-    pub fn set_scrollback_max_lines(&mut self, max_lines: usize) {
-        self.core.screen.set_scrollback_max_lines(max_lines);
-    }
-
-    /// Update the stored Emacs color scheme (`true` = dark, `false` = light).
-    ///
-    /// Returns `true` if the value actually changed, `false` if it was already
-    /// at the requested value (idempotent). When the value changes AND DEC mode
-    /// 2031 is enabled, pushes a `CSI ? 997 ; Ps n` notification onto
-    /// `pending_responses`. See `apply_color_scheme` in `parser::dec_private`.
-    pub fn set_color_scheme(&mut self, is_dark: bool) -> bool {
-        crate::parser::dec_private::apply_color_scheme(&mut self.core, is_dark)
-    }
-
-    /// Return a base64-encoded PNG string for the given image ID.
-    /// Returns an empty string if the image is not found (orphan reference).
-    #[must_use]
-    pub fn get_image_png_base64(&self, image_id: u32) -> String {
-        self.core.screen.get_image_png_base64(image_id)
-    }
-
-}
-
-include!("session_state.rs");
-
-include!("session_osc_modes.rs");
+#[path = "session_view.rs"]
+mod view;
 
 #[cfg(test)]
-include!("session_tests.rs");
+#[path = "session_tests.rs"]
+mod tests;

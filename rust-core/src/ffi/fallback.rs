@@ -379,6 +379,5 @@ impl RawFFI {
 /// ```
 
 #[cfg(test)]
-mod tests {
-    include!("fallback_tests.rs");
-}
+#[path = "fallback_tests.rs"]
+mod tests;

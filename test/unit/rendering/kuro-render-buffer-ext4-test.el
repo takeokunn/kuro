@@ -12,50 +12,9 @@
 
 ;;; Group: kuro--decscusr-to-cursor-type
 
-(ert-deftest kuro-render-buffer-decscusr-shape-0-returns-box ()
-  "Shape 0 (default block) maps to box."
-  (should (eq 'box (kuro--decscusr-to-cursor-type 0))))
-
-(ert-deftest kuro-render-buffer-decscusr-shape-1-returns-box ()
-  "Shape 1 (blinking block alias) maps to box."
-  (should (eq 'box (kuro--decscusr-to-cursor-type 1))))
-
-(ert-deftest kuro-render-buffer-decscusr-shape-3-returns-hbar ()
-  "Shape 3 (blinking underline) maps to hbar."
-  (let ((result (kuro--decscusr-to-cursor-type 3)))
-    (should (consp result))
-    (should (eq (car result) 'hbar))))
-
-(ert-deftest kuro-render-buffer-decscusr-shape-5-returns-bar ()
-  "Shape 5 (blinking bar) maps to bar."
-  (let ((result (kuro--decscusr-to-cursor-type 5)))
-    (should (consp result))
-    (should (eq (car result) 'bar))))
-
-(ert-deftest kuro-render-buffer-decscusr-shape-6-returns-bar ()
-  "Shape 6 (steady bar) maps to bar."
-  (let ((result (kuro--decscusr-to-cursor-type 6)))
-    (should (consp result))
-    (should (eq (car result) 'bar))))
-
-(ert-deftest kuro-render-buffer-decscusr-negative-shape-falls-back-to-box ()
-  "Negative shape falls back to box."
-  (should (eq 'box (kuro--decscusr-to-cursor-type -1))))
-
-(ert-deftest kuro-render-buffer-decscusr-out-of-range-falls-back-to-box ()
-  "Out-of-range shape (> 6) falls back to box."
-  (should (eq 'box (kuro--decscusr-to-cursor-type 7)))
-  (should (eq 'box (kuro--decscusr-to-cursor-type 99))))
-
-(ert-deftest kuro-render-buffer-decscusr-non-integer-falls-back-to-box ()
-  "Non-integer shape falls back to box."
-  (should (eq 'box (kuro--decscusr-to-cursor-type nil)))
-  (should (eq 'box (kuro--decscusr-to-cursor-type "3"))))
-
-(ert-deftest kuro-render-buffer-decscusr-all-valid-shapes-non-nil ()
-  "All valid shapes 0-6 return non-nil cursor-type values."
-  (dotimes (n 7)
-    (should (kuro--decscusr-to-cursor-type n))))
+(kuro-render-buffer-test--deftest-decscusr-shape-kind-cases)
+(kuro-render-buffer-test--deftest-decscusr-fallback-shape-cases)
+(kuro-render-buffer-test--deftest-decscusr-valid-shapes-non-nil)
 
 ;;; Group: kuro--ensure-buffer-row-exists
 

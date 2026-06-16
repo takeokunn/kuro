@@ -47,7 +47,8 @@
 ;;;; Line mode: kill and yank handlers
 
 (defmacro kuro--def-line-kill-word (name skip-past skip-word beg end new-point docstring)
-  "Define a directional word-kill command NAME.
+  "Define NAME as a directional word-kill command.
+DOCSTRING becomes the generated command docstring.
 SKIP-PAST skips non-word chars to the word boundary; SKIP-WORD skips the word.
 BEG and END are the splice range; NEW-POINT is the cursor position after kill.
 All position expressions are evaluated with `p' bound to `kuro--line-point'."
@@ -63,28 +64,28 @@ All position expressions are evaluated with `p' bound to `kuro--line-point'."
 (kuro--def-line-kill-word kuro--line-kill-word
   kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
   p bound p
-  "Kill from `kuro--line-point' to the end of the next word (M-d).")
+  "Kill from `kuro--line-point' to the end of the next word.")
 
 (kuro--def-line-kill-word kuro--line-backward-kill-word
   kuro--line-skip-non-word-bwd kuro--line-skip-word-bwd
   bound p bound
-  "Kill from the start of the previous word to `kuro--line-point' (M-DEL).")
+  "Kill from the start of the previous word to `kuro--line-point'.")
 
 (defun kuro--line-delete-char ()
-  "Delete the character at `kuro--line-point' (C-d, forward delete)."
+  "Delete the character at `kuro--line-point'."
   (interactive)
   (when (< kuro--line-point (length kuro--line-buffer))
     (kuro--with-line-edit-undo
      (kuro--line-splice kuro--line-point (1+ kuro--line-point) "" kuro--line-point))))
 
 (defun kuro--line-kill-to-bol ()
-  "Kill from the beginning of the line to `kuro--line-point' (C-u)."
+  "Kill from the beginning of the line to `kuro--line-point'."
   (interactive)
   (kuro--with-line-edit-undo
    (kuro--line-splice 0 kuro--line-point "" 0)))
 
 (defun kuro--line-transpose-chars ()
-  "Transpose the character before point with the one at point (C-t).
+  "Transpose the character before point with the one at point.
 At end of line, transposes the two characters before point."
   (interactive)
   (let* ((s kuro--line-buffer)
@@ -99,11 +100,11 @@ At end of line, transposes the two characters before point."
                           (min (1+ p) len))))))
 
 (defun kuro--line-yank ()
-  "Yank the most recent kill into the line buffer at `kuro--line-point' (C-y).
+  "Yank the most recent kill into the line buffer at `kuro--line-point'.
 Sets `kuro--line-yank-length' so `kuro--line-yank-pop' can replace the region."
   (interactive)
   (if (null kill-ring)
-      (message "kuro: kill ring is empty")
+      (message "Kuro: kill ring is empty")
     (let* ((text (current-kill 0))
            (p    kuro--line-point))
       (kuro--with-line-edit-undo
@@ -111,13 +112,13 @@ Sets `kuro--line-yank-length' so `kuro--line-yank-pop' can replace the region."
        (setq kuro--line-yank-length (length text))))))
 
 (defun kuro--line-yank-pop ()
-  "Rotate the kill ring and replace the last yank in the line buffer (M-y).
+  "Rotate the kill ring and replace the last yank in the line buffer.
 Only meaningful immediately after `kuro--line-yank' or another
 `kuro--line-yank-pop'.  Signals `user-error' if the previous command was
 neither."
   (interactive)
   (unless (memq last-command '(kuro--line-yank kuro--line-yank-pop))
-    (user-error "kuro: yank-pop requires a previous yank"))
+    (user-error "Kuro: yank-pop requires a previous yank"))
   (let* ((prev-len kuro--line-yank-length)
          (p        kuro--line-point)
          (start    (- p prev-len))
@@ -133,7 +134,7 @@ Trailing whitespace is stripped before splitting so \"git commit \" → \"commit
     (car (last (split-string (string-trim-right s))))))
 
 (defun kuro--line-yank-last-arg ()
-  "Insert the last argument of a previous history entry at point (M-., M-_).
+  "Insert the last argument of a previous history entry at point.
 First invocation: inserts the last whitespace-delimited word of the most
 recent history entry.
 Repeated invocations (when `last-command' is `kuro--line-yank-last-arg'):
@@ -144,7 +145,7 @@ State is reset whenever any other command runs."
   (let* ((hist kuro--line-history)
          (hist-len (length hist)))
     (when (zerop hist-len)
-      (user-error "kuro: no history for yank-last-arg"))
+      (user-error "Kuro: no history for yank-last-arg"))
     (if (eq last-command 'kuro--line-yank-last-arg)
         ;; Cycle: advance to next older entry (capped at oldest)
         (setq kuro--line-yank-last-arg-idx
@@ -155,7 +156,7 @@ State is reset whenever any other command runs."
     (let ((word (kuro--line-last-word
                  (nth kuro--line-yank-last-arg-idx hist))))
       (if (not word)
-          (message "kuro: no last argument in history entry %d"
+          (message "Kuro: no last argument in history entry %d"
                    (1+ kuro--line-yank-last-arg-idx))
         (kuro--line-undo-push)
         ;; Remove previously inserted arg when cycling
@@ -169,10 +170,10 @@ State is reset whenever any other command runs."
          (setq kuro--line-yank-last-arg-len (length word)))))))
 
 (defun kuro--line-unix-word-rubout ()
-  "Kill from `kuro--line-point' backward to the nearest whitespace (C-w).
+  "Kill from `kuro--line-point' backward to the nearest whitespace.
 Uses bash unix-word-rubout semantics: only space/tab delimit tokens, so
 hyphenated words and dotted paths are killed as a single token.  Contrast
-with `kuro--line-backward-kill-word' (M-DEL) which stops at any non-word char."
+with `kuro--line-backward-kill-word', which stops at any non-word char."
   (interactive)
   (let* ((s     kuro--line-buffer)
          (p     kuro--line-point)
@@ -188,7 +189,9 @@ with `kuro--line-backward-kill-word' (M-DEL) which stops at any non-word char."
 ;;;; Line mode: word-case transforms
 
 (defmacro kuro--def-line-word-case (name docstring &rest transform-body)
-  "Define a word-case transform command using `kuro--line-word-bounds-forward'.
+  "Define NAME as a word-case transform command.
+DOCSTRING becomes the generated command docstring.
+Uses `kuro--line-word-bounds-forward' to locate the target word.
 TRANSFORM-BODY is spliced into the concat that builds the replacement word text;
 it receives bindings for S (the line buffer), START, and END."
   `(defun ,name ()
@@ -203,20 +206,20 @@ it receives bindings for S (the line buffer), START, and END."
           (kuro--line-splice start end (concat ,@transform-body) end))))))
 
 (kuro--def-line-word-case kuro--line-upcase-word
-  "Upcase the word from `kuro--line-point' forward (M-u)."
+  "Upcase the word from `kuro--line-point' forward."
   (upcase (substring s start end)))
 
 (kuro--def-line-word-case kuro--line-downcase-word
-  "Downcase the word from `kuro--line-point' forward (M-l)."
+  "Downcase the word from `kuro--line-point' forward."
   (downcase (substring s start end)))
 
 (kuro--def-line-word-case kuro--line-capitalize-word
-  "Capitalize the word from `kuro--line-point' forward (M-c)."
+  "Capitalize the word from `kuro--line-point' forward."
   (upcase   (substring s start (1+ start)))
   (downcase (substring s (1+ start) end)))
 
 (defun kuro--line-transpose-words ()
-  "Transpose the word before `kuro--line-point' with the word after it (M-t).
+  "Transpose the word before `kuro--line-point' with the word after it.
 Point advances to the end of the second word after transposition."
   (interactive)
   (let* ((s        kuro--line-buffer)

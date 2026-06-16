@@ -131,6 +131,57 @@ impl Screen {
         }
     }
 
+    /// Wrap the cursor to the next line and mark the current row as soft-wrapped.
+    #[inline]
+    fn wrap_to_next_line(&mut self, bg: Color, is_primary: bool) {
+        self.mark_cursor_line_wrapped();
+        self.cursor.col = 0;
+        self.line_feed_impl(bg, is_primary);
+    }
+
+    /// Consume a deferred wrap from the previous printable cell.
+    ///
+    /// Returns `true` when the deferred wrap actually advanced to the next line.
+    #[inline]
+    fn consume_pending_wrap(&mut self, bg: Color, is_primary: bool, auto_wrap: bool) -> bool {
+        if !self.cursor.pending_wrap {
+            return false;
+        }
+
+        self.cursor.pending_wrap = false;
+        if auto_wrap {
+            self.wrap_to_next_line(bg, is_primary);
+            return true;
+        }
+
+        false
+    }
+
+    /// Write a printable cell and keep the row dirty state in sync.
+    #[inline]
+    fn place_printed_cell(&mut self, row: usize, col: usize, cell: Cell, width: usize) {
+        if let Some(line) = self.lines.get_mut(row) {
+            line.update_cell_with(col, cell);
+            self.dirty_set.insert(row);
+            if width > 1 && col + 1 < self.cols as usize {
+                line.update_cell_with(
+                    col + 1,
+                    Cell {
+                        width: CellWidth::Wide,
+                        ..Cell::default()
+                    },
+                );
+            }
+        }
+    }
+
+    /// Advance the cursor after printing and apply DECAWM clamping.
+    #[inline]
+    fn advance_print_cursor(&mut self, width: usize, auto_wrap: bool) {
+        self.cursor.col += width;
+        self.clamp_cursor_col_with_pending_wrap(auto_wrap);
+    }
+
     /// Line feed (LF): advances cursor down one row, scrolling up if at the bottom of the scroll region.
     /// Clears pending wrap.  Dispatches to the active screen.
     #[inline]
@@ -151,24 +202,6 @@ impl Screen {
     /// - Any explicit cursor movement clears `pending_wrap` without wrapping.
     #[inline]
     pub fn print(&mut self, c: char, attrs: SgrAttributes, auto_wrap: bool) {
-        // Write CELL at (ROW, COL) on SCREEN, mark dirty, add Wide placeholder if needed.
-        // `macro_rules!` captures `screen` by identifier so type inference works
-        // across both primary and alternate screen paths.
-        macro_rules! place_cell {
-            ($screen:ident, $row:expr, $col:expr, $cell:expr, $width:expr) => {
-                if let Some(line) = $screen.lines.get_mut($row) {
-                    line.update_cell_with($col, $cell);
-                    $screen.dirty_set.insert($row);
-                    if $width > 1 && $col + 1 < $screen.cols as usize {
-                        line.update_cell_with(
-                            $col + 1,
-                            Cell { width: CellWidth::Wide, ..Cell::default() },
-                        );
-                    }
-                }
-            };
-        }
-
         // Compute is_primary BEFORE dispatching so that scroll_up_impl
         // (called from line_feed_impl) sees the correct value even when
         // operating on the alternate screen.
@@ -178,14 +211,7 @@ impl Screen {
         };
 
         // --- Deferred wrap: execute the pending wrap from a previous print ---
-        if screen.cursor.pending_wrap {
-            screen.cursor.pending_wrap = false;
-            if auto_wrap {
-                screen.mark_cursor_line_wrapped();
-                screen.cursor.col = 0;
-                screen.line_feed_impl(attrs.background, is_primary);
-            }
-        }
+        screen.consume_pending_wrap(attrs.background, is_primary, auto_wrap);
 
         let row = screen.cursor.row;
         let col = screen.cursor.col;
@@ -196,25 +222,30 @@ impl Screen {
         } else {
             UnicodeWidthChar::width(c).unwrap_or(1)
         };
-        let cell_width = if width > 1 { CellWidth::Full } else { CellWidth::Half };
+        let cell_width = if width > 1 {
+            CellWidth::Full
+        } else {
+            CellWidth::Half
+        };
 
         if col + width <= screen.cols as usize {
             // Character fits on the current line.
-            place_cell!(screen, row, col, Cell::with_char_and_width(c, attrs, cell_width), width);
-            screen.cursor.col += width;
-            screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
+            screen.place_printed_cell(row, col, Cell::with_char_and_width(c, attrs, cell_width), width);
+            screen.advance_print_cursor(width, auto_wrap);
         } else {
             // Character doesn't fit (wide char at last column) — wrap to next line.
             if auto_wrap {
-                screen.mark_cursor_line_wrapped();
-                screen.cursor.col = 0;
-                screen.line_feed_impl(attrs.background, is_primary);
+                screen.wrap_to_next_line(attrs.background, is_primary);
             }
             if width <= screen.cols as usize {
                 let new_row = screen.cursor.row;
-                place_cell!(screen, new_row, 0, Cell::with_char_and_width(c, attrs, cell_width), width);
-                screen.cursor.col = width;
-                screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
+                screen.place_printed_cell(
+                    new_row,
+                    0,
+                    Cell::with_char_and_width(c, attrs, cell_width),
+                    width,
+                );
+                screen.advance_print_cursor(width, auto_wrap);
             }
         }
     }
@@ -253,15 +284,9 @@ impl Screen {
 
         for &byte in bytes {
             // Handle pending wrap from previous print
-            if screen.cursor.pending_wrap {
-                screen.cursor.pending_wrap = false;
-                if auto_wrap {
-                    screen.mark_cursor_line_wrapped();
-                    screen.cursor.col = 0;
-                    screen.line_feed_impl(attrs.background, is_primary);
-                    // Row changed by line_feed — allow dirty-mark on the new row.
-                    last_marked_dirty_row = usize::MAX;
-                }
+            if screen.consume_pending_wrap(attrs.background, is_primary, auto_wrap) {
+                // Row changed by line_feed — allow dirty-mark on the new row.
+                last_marked_dirty_row = usize::MAX;
             }
 
             let row = screen.cursor.row;
@@ -306,28 +331,12 @@ impl Screen {
                 }
 
                 // Advance cursor
-                screen.cursor.col += 1;
-
-                // Check for pending wrap at end of line
-                screen.clamp_cursor_col_with_pending_wrap(auto_wrap);
+                screen.advance_print_cursor(1, auto_wrap);
             }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::cursor::CursorShape;
-
-    macro_rules! assert_cursor {
-        ($screen:expr, row $r:expr, col $c:expr) => {
-            assert_eq!($screen.cursor().row, $r, "cursor.row mismatch");
-            assert_eq!($screen.cursor().col, $c, "cursor.col mismatch");
-        };
-    }
-
-    include!("cursor_tests.rs");
-    include!("cursor_tests2.rs");
-    include!("cursor_pbt.rs");
-}
+#[path = "cursor/tests.rs"]
+mod tests;

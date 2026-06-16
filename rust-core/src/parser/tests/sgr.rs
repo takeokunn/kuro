@@ -6,46 +6,9 @@
 use super::*;
 use crate::types::cell::SgrFlags;
 
-/// Generate a turn-on / turn-off pair for an SGR flag attribute.
-///
-/// Pattern:
-/// 1. Send `$on_seq` — assert `term.current_attrs.flags.contains(SgrFlags::$flag)` is true.
-/// 2. Send `$on_seq` then `$off_seq` — assert the flag is false.
-///
-/// Usage:
-/// ```text
-/// test_sgr_flag!(on_name, off_name, on_seq, off_seq, FLAG, off_msg)
-/// ```
-/// `FLAG` is a `SgrFlags` variant identifier (e.g. `BOLD`, `ITALIC`).
-macro_rules! test_sgr_flag {
-    (
-        $on_name:ident,
-        $off_name:ident,
-        $on_seq:expr,
-        $off_seq:expr,
-        $flag:ident,
-        $off_msg:expr
-    ) => {
-        #[test]
-        fn $on_name() {
-            let mut term = crate::TerminalCore::new(24, 80);
-            term.advance($on_seq);
-            assert!(term.current_attrs.flags.contains(SgrFlags::$flag));
-        }
-
-        #[test]
-        fn $off_name() {
-            let mut term = crate::TerminalCore::new(24, 80);
-            term.advance($on_seq);
-            assert!(term.current_attrs.flags.contains(SgrFlags::$flag));
-            term.advance($off_seq);
-            assert!(
-                !term.current_attrs.flags.contains(SgrFlags::$flag),
-                $off_msg
-            );
-        }
-    };
-}
+#[macro_use]
+#[path = "sgr/support.rs"]
+mod support;
 
 // Bold: SGR 1 on / SGR 22 off
 test_sgr_flag!(
@@ -295,4 +258,14 @@ fn test_sgr_truecolor_overflow_truncates_to_u8() {
     );
 }
 
-include!("sgr_ext.rs");
+#[path = "sgr/ext.rs"]
+mod ext;
+
+#[path = "sgr/color.rs"]
+mod color;
+
+#[path = "sgr/edge_cases.rs"]
+mod edge_cases;
+
+#[path = "sgr/apply_attrs.rs"]
+mod apply_attrs;

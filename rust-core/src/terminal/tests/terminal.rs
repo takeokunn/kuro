@@ -260,6 +260,14 @@ fn test_deckpam_toggle_sequence() {
     );
 }
 
+#[path = "terminal/part2.rs"]
+mod part2;
 
-include!("terminal_part2.rs");
-include!("terminal_ext.rs");
+#[path = "terminal/ext.rs"]
+mod ext;
+
+#[path = "terminal/ext2.rs"]
+mod ext2;
+
+#[path = "terminal/ext3.rs"]
+mod ext3;

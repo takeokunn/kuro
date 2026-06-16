@@ -52,30 +52,26 @@ length 3; after one tick written-len goes from 0 to 1, substring = first char."
           kuro--typewriter-current-text "日本語"
           kuro--typewriter-current-text-len 3
           kuro--typewriter-written-len 0)
-    (let ((last-written nil))
-      (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
-                 (lambda (_row text) (setq last-written text))))
-        (kuro--typewriter-tick)
-        (should (= kuro--typewriter-written-len 1))
-        (should (equal last-written "日"))))))
+    (kuro-typewriter-test--with-write-partial-log write-calls
+      (kuro--typewriter-tick)
+      (kuro-typewriter-test--assert-state 0 "日本語" 1 nil)
+      (should (equal write-calls '((0 . "日")))))))
 
 (ert-deftest kuro-typewriter-tick-long-string-char-by-char ()
   "kuro--typewriter-tick handles a 10-character string; each tick advances by 1."
   (kuro-typewriter-test--with-buffer
-    (let ((text "0123456789")
-          (tick-count 0))
+    (let ((text "0123456789"))
       (insert (concat text "\n"))
       (setq kuro--typewriter-current-row 0
             kuro--typewriter-current-text text
             kuro--typewriter-current-text-len (length text)
             kuro--typewriter-written-len 0)
-      (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
-                 (lambda (_row _text) (cl-incf tick-count))))
+      (kuro-typewriter-test--with-write-partial-log write-calls
         ;; 10 ticks to fully write the row
         (dotimes (_ 10)
           (kuro--typewriter-tick))
-        (should (= tick-count 10))
-        (should (= kuro--typewriter-written-len 10))))))
+        (should (= (length write-calls) 10))
+        (kuro-typewriter-test--assert-state 0 text 10 nil)))))
 
 ;;; Group 12: typewriter + streaming interaction (pure state logic)
 
@@ -86,17 +82,15 @@ length 3; after one tick written-len goes from 0 to 1, substring = first char."
     ;; Enqueue item directly
     (kuro--typewriter-enqueue 0 "hi")
     ;; queue-next must dequeue on first tick (no current row set)
-    (let ((written-texts nil))
-      (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
-                 (lambda (_row text) (push text written-texts))))
-        ;; Tick 1: queue-next dequeues, no write yet
-        (kuro--typewriter-tick)
-        (should (null written-texts))
-        (should (equal kuro--typewriter-current-text "hi"))
-        ;; Tick 2: writes first character "h"
-        (kuro--typewriter-tick)
-        (should (equal (car written-texts) "h"))
-        (should (= kuro--typewriter-written-len 1))))))
+    (kuro-typewriter-test--with-write-partial-log write-calls
+      ;; Tick 1: queue-next dequeues, no write yet
+      (kuro--typewriter-tick)
+      (should (null write-calls))
+      (kuro-typewriter-test--assert-state 0 "hi" 0 nil)
+      ;; Tick 2: writes first character "h"
+      (kuro--typewriter-tick)
+      (should (equal write-calls '((0 . "h"))))
+      (kuro-typewriter-test--assert-state 0 "hi" 1 nil))))
 
 (ert-deftest kuro-typewriter-enqueue-multiple-then-drain-two-rows ()
   "Enqueue two rows and verify that draining sets up both correctly in order."
@@ -173,19 +167,14 @@ arguments to `run-with-timer', so the timer fires at a constant rate."
     (let ((kuro-typewriter-effect t)
           (kuro-typewriter-chars-per-second 30)
           (captured nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay repeat fn)
-                   (setq captured (list delay repeat fn))
-                   'fake-timer)))
+      (kuro-typewriter-test--with-timer-stub captured
         (kuro--start-typewriter-timer)
         (should captured)
-        (let ((delay  (nth 0 captured))
-              (repeat (nth 1 captured)))
-          ;; Both must be equal and = 1.0/30
-          (should (floatp delay))
-          (should (floatp repeat))
-          (should (< (abs (- delay repeat)) 1e-10))
-          (should (< (abs (- delay (/ 1.0 30))) 1e-10)))))))
+        ;; Both must be equal and = 1.0/30
+        (should (floatp (nth 0 captured)))
+        (should (floatp (nth 1 captured)))
+        (should (< (abs (- (nth 0 captured) (nth 1 captured))) 1e-10))
+        (should (< (abs (- (nth 0 captured) (/ 1.0 30))) 1e-10))))))
 
 (ert-deftest kuro-typewriter-start-timer-callback-is-function ()
   "kuro--start-typewriter-timer passes a callable function as the timer callback."
@@ -193,11 +182,9 @@ arguments to `run-with-timer', so the timer fires at a constant rate."
     (let ((kuro-typewriter-effect t)
           (kuro-typewriter-chars-per-second 60)
           (captured-fn nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat fn)
-                   (setq captured-fn fn)
-                   'fake-timer)))
+      (kuro-typewriter-test--with-timer-stub captured
         (kuro--start-typewriter-timer)
+        (setq captured-fn (nth 2 captured))
         (should (functionp captured-fn))))))
 
 ;;; Group 14 — kuro--typewriter-write-partial: buffer boundary and empty-buffer edge cases
@@ -266,11 +253,9 @@ Verify that the lambda closed over `buf' is the buffer in which start was called
            (kuro-typewriter-chars-per-second 60)
            (captured-fn nil)
            (outer-buf (current-buffer)))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat fn)
-                   (setq captured-fn fn)
-                   'fake-timer)))
+      (kuro-typewriter-test--with-timer-stub captured
         (kuro--start-typewriter-timer)
+        (setq captured-fn (nth 2 captured))
         (should (functionp captured-fn))
         ;; Invoke the callback in a different temp buffer; it should
         ;; execute kuro--typewriter-tick in outer-buf (which is live).
@@ -288,11 +273,9 @@ Verify that the lambda closed over `buf' is the buffer in which start was called
     (let ((kuro-typewriter-effect t)
           (kuro-typewriter-chars-per-second 1)
           (captured-delay nil))
-      (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (delay _repeat _fn)
-                   (setq captured-delay delay)
-                   'fake-timer)))
+      (kuro-typewriter-test--with-timer-stub captured
         (kuro--start-typewriter-timer)
+        (setq captured-delay (nth 0 captured))
         (should (floatp captured-delay))
         (should (< (abs (- captured-delay 1.0)) 1e-10))))))
 

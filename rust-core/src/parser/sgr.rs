@@ -243,11 +243,11 @@ pub(crate) fn apply_sgr_attrs(attrs: &mut SgrAttributes, groups: &[&[u16]]) {
                     attrs.underline_style = UnderlineStyle::Straight;
                 }
             }
-            5  => attrs.flags.insert(SgrFlags::BLINK_SLOW),
-            6  => attrs.flags.insert(SgrFlags::BLINK_FAST),
-            7  => attrs.flags.insert(SgrFlags::INVERSE),
-            8  => attrs.flags.insert(SgrFlags::HIDDEN),
-            9  => attrs.flags.insert(SgrFlags::STRIKETHROUGH),
+            5 => attrs.flags.insert(SgrFlags::BLINK_SLOW),
+            6 => attrs.flags.insert(SgrFlags::BLINK_FAST),
+            7 => attrs.flags.insert(SgrFlags::INVERSE),
+            8 => attrs.flags.insert(SgrFlags::HIDDEN),
+            9 => attrs.flags.insert(SgrFlags::STRIKETHROUGH),
             21 => attrs.underline_style = UnderlineStyle::Double,
             22 => {
                 attrs.flags.remove(SgrFlags::BOLD);
@@ -262,14 +262,14 @@ pub(crate) fn apply_sgr_attrs(attrs: &mut SgrAttributes, groups: &[&[u16]]) {
             27 => attrs.flags.remove(SgrFlags::INVERSE),
             28 => attrs.flags.remove(SgrFlags::HIDDEN),
             29 => attrs.flags.remove(SgrFlags::STRIKETHROUGH),
-            30..=37  => attrs.foreground = named_color_from_offset(param - 30),
+            30..=37 => attrs.foreground = named_color_from_offset(param - 30),
             38 => {
                 if let Some(c) = parse_color_from_subparams(groups, &mut i, group) {
                     attrs.foreground = c;
                 }
             }
             39 => attrs.foreground = Color::Default,
-            40..=47  => attrs.background = named_color_from_offset(param - 40),
+            40..=47 => attrs.background = named_color_from_offset(param - 40),
             48 => {
                 if let Some(c) = parse_color_from_subparams(groups, &mut i, group) {
                     attrs.background = c;
@@ -283,19 +283,30 @@ pub(crate) fn apply_sgr_attrs(attrs: &mut SgrAttributes, groups: &[&[u16]]) {
                     attrs.underline_color = c;
                 }
             }
-            59  => attrs.underline_color = Color::Default,
-            73  => { attrs.superscript = true;  attrs.subscript = false; }
-            74  => { attrs.superscript = false; attrs.subscript = false; }
-            75  => { attrs.subscript = true;    attrs.superscript = false; }
-            90..=97   => attrs.foreground = bright_named_color_from_offset(param - 90),
+            59 => attrs.underline_color = Color::Default,
+            73 => {
+                attrs.superscript = true;
+                attrs.subscript = false;
+            }
+            74 => {
+                attrs.superscript = false;
+                attrs.subscript = false;
+            }
+            75 => {
+                attrs.subscript = true;
+                attrs.superscript = false;
+            }
+            90..=97 => attrs.foreground = bright_named_color_from_offset(param - 90),
             100..=107 => attrs.background = bright_named_color_from_offset(param - 100),
             _ => {}
         }
     }
 }
 
+#[path = "sgr_serialize.rs"]
+mod serialize;
 
-include!("sgr_serialize.rs");
+pub(crate) use serialize::serialize_sgr;
 
 #[cfg(test)]
 #[path = "tests/sgr.rs"]

@@ -67,28 +67,7 @@ impl KittyParams {
     pub fn parse(header: &[u8]) -> Self {
         let mut params = Self::default();
         for kv in header.split(|&b| b == b',') {
-            if kv.len() < 3 || kv[1] != b'=' {
-                continue;
-            }
-            let key = kv[0] as char;
-            let val = &kv[2..];
-            match key {
-                'a' => params.action = val.first().map(|&b| b as char),
-                'f' => params.format = parse_u32(val),
-                't' => params.transmission = val.first().map(|&b| b as char),
-                's' => params.width = parse_u32(val),
-                'v' => params.height = parse_u32(val),
-                'i' => params.image_id = parse_u32(val),
-                'p' => params.placement_id = parse_u32(val),
-                'm' => params.more = val.first().copied() == Some(b'1'),
-                'q' => params.quiet = parse_u32(val).unwrap_or(0) as u8,
-                'c' => params.columns = parse_u32(val),
-                'r' => params.rows = parse_u32(val),
-                'X' => params.x_offset = parse_u32(val).unwrap_or(0),
-                'Y' => params.y_offset = parse_u32(val).unwrap_or(0),
-                'd' => params.delete_sub = val.first().map(|&b| b as char),
-                _ => {} // unknown key — silently ignore
-            }
+            apply_kitty_param(&mut params, kv);
         }
         params
     }
@@ -97,6 +76,69 @@ impl KittyParams {
 #[inline]
 fn parse_u32(bytes: &[u8]) -> Option<u32> {
     std::str::from_utf8(bytes).ok()?.parse().ok()
+}
+
+#[inline]
+fn first_char(bytes: &[u8]) -> Option<char> {
+    bytes.first().copied().map(char::from)
+}
+
+#[inline]
+fn split_kitty_param_pair(kv: &[u8]) -> Option<(char, &[u8])> {
+    if kv.len() < 3 || kv[1] != b'=' {
+        return None;
+    }
+    Some((kv[0] as char, &kv[2..]))
+}
+
+#[inline]
+fn set_kitty_char_param(slot: &mut Option<char>, val: &[u8]) {
+    *slot = first_char(val);
+}
+
+#[inline]
+fn set_kitty_u32_param(slot: &mut Option<u32>, val: &[u8]) {
+    *slot = parse_u32(val);
+}
+
+#[inline]
+fn set_kitty_u8_param(slot: &mut u8, val: &[u8]) {
+    *slot = parse_u32(val).unwrap_or(0) as u8;
+}
+
+#[inline]
+fn set_kitty_bool_param(slot: &mut bool, val: &[u8]) {
+    *slot = val.first().copied() == Some(b'1');
+}
+
+#[inline]
+fn set_kitty_u32_or_zero_param(slot: &mut u32, val: &[u8]) {
+    *slot = parse_u32(val).unwrap_or(0);
+}
+
+#[inline]
+fn apply_kitty_param(params: &mut KittyParams, kv: &[u8]) {
+    let Some((key, val)) = split_kitty_param_pair(kv) else {
+        return;
+    };
+
+    match key {
+        'a' => set_kitty_char_param(&mut params.action, val),
+        'f' => set_kitty_u32_param(&mut params.format, val),
+        't' => set_kitty_char_param(&mut params.transmission, val),
+        's' => set_kitty_u32_param(&mut params.width, val),
+        'v' => set_kitty_u32_param(&mut params.height, val),
+        'i' => set_kitty_u32_param(&mut params.image_id, val),
+        'p' => set_kitty_u32_param(&mut params.placement_id, val),
+        'm' => set_kitty_bool_param(&mut params.more, val),
+        'q' => set_kitty_u8_param(&mut params.quiet, val),
+        'c' => set_kitty_u32_param(&mut params.columns, val),
+        'r' => set_kitty_u32_param(&mut params.rows, val),
+        'X' => set_kitty_u32_or_zero_param(&mut params.x_offset, val),
+        'Y' => set_kitty_u32_or_zero_param(&mut params.y_offset, val),
+        'd' => set_kitty_char_param(&mut params.delete_sub, val),
+        _ => {}
+    }
 }
 
 /// A finalized, decoded Kitty Graphics command ready for dispatch to `GraphicsStore`
@@ -153,6 +195,11 @@ pub struct KittyChunkState {
     pub data: Vec<u8>,
 }
 
+struct KittyPayload {
+    params: KittyParams,
+    data: Vec<u8>,
+}
+
 /// Process a complete APC payload (everything between `ESC _ G` and `ESC \`).
 ///
 /// `chunk_state` is the persistent multi-chunk state from `TerminalCore`.
@@ -164,100 +211,203 @@ pub fn process_apc_payload(
     payload: &[u8],
     chunk_state: &mut Option<KittyChunkState>,
 ) -> Option<KittyCommand> {
-    // Split at ';' to separate key=value header from base64 payload
-    let (header, b64_data) = payload.iter().position(|&b| b == b';').map_or_else(
-        || (payload, &[][..]),
-        |pos| (&payload[..pos], &payload[pos + 1..]),
-    );
-
+    let (header, b64_data) = split_apc_payload(payload);
     let params = KittyParams::parse(header);
 
-    // Only 'd' (direct/inline) transmission is supported
-    let transmission = params.transmission.unwrap_or('d');
-    if transmission != 'd' {
-        // File/shared-memory transfer not supported — silently ignore
-        *chunk_state = None;
-        return None;
-    }
-
-    // Base64 decode the payload
-    let decoded = if b64_data.is_empty() {
-        Vec::new()
-    } else if let Ok(d) = crate::util::base64::decode(b64_data) {
-        d
-    } else {
-        // Malformed base64 — discard entire sequence including any chunk state
-        *chunk_state = None;
-        return None;
-    };
-
-    if params.more {
-        // m=1: accumulate this chunk and wait for more
-        match chunk_state.as_mut() {
-            None => {
-                // First chunk: initialize state with these params
-                if decoded.len() <= MAX_CHUNK_DATA_BYTES {
-                    *chunk_state = Some(KittyChunkState {
-                        params,
-                        data: decoded,
-                    });
-                }
-            }
-            Some(state) => {
-                // Subsequent chunk: append decoded data (check size limit)
-                if state.data.len() + decoded.len() <= MAX_CHUNK_DATA_BYTES {
-                    state.data.extend_from_slice(&decoded);
-                } else {
-                    // Accumulated data exceeds limit — discard entire sequence
-                    *chunk_state = None;
-                    return None;
-                }
-            }
-        }
-        return None; // Not complete yet
-    }
-
-    // m=0 or absent: this is the final (or only) chunk
-    let (final_params, final_data) = if let Some(mut state) = chunk_state.take() {
-        // Combine accumulated data with this final chunk
-        state.data.extend_from_slice(&decoded);
-        (state.params, state.data)
-    } else {
-        // Single-chunk sequence
-        (params, decoded)
-    };
-
-    build_command(final_params, final_data)
+    finalize_apc_payload(params, b64_data, chunk_state).and_then(|payload| {
+        build_command(payload.params, payload.data)
+    })
 }
 
-/// Decode raw payload bytes according to the Kitty format code.
-///
-/// Returns `(pixels, format, pixel_width, pixel_height)` or `None` on error.
-/// For raw formats (24/32), zero dimensions are treated as malformed.
-#[inline]
-fn decode_pixel_data(
-    raw_data: Vec<u8>,
-    params: &KittyParams,
-) -> Option<(Vec<u8>, ImageFormat, u32, u32)> {
-    let format_code = params.format.unwrap_or(FORMAT_RGBA);
-    let (pixels, format) = match format_code {
-        FORMAT_RGB => (raw_data, ImageFormat::Rgb),
-        FORMAT_RGBA => (raw_data, ImageFormat::Rgba),
-        FORMAT_PNG => match decode_png(&raw_data) {
-            Ok((p, fmt)) => (p, fmt),
-            Err(_) => return None, // corrupt PNG — silently discard
-        },
-        _ => return None, // unknown format — silently discard
-    };
+fn split_apc_payload(payload: &[u8]) -> (&[u8], &[u8]) {
+    payload.iter().position(|&b| b == b';').map_or_else(
+        || (payload, &[][..]),
+        |pos| (&payload[..pos], &payload[pos + 1..]),
+    )
+}
 
+fn finalize_apc_payload(
+    params: KittyParams,
+    b64_data: &[u8],
+    chunk_state: &mut Option<KittyChunkState>,
+) -> Option<KittyPayload> {
+    if params.transmission.unwrap_or('d') != 'd' {
+        *chunk_state = None;
+        return None;
+    }
+
+    let decoded = decode_apc_payload_data(b64_data)?;
+
+    if params.more {
+        accumulate_apc_chunk(params, decoded, chunk_state)?;
+        return None;
+    } else {
+        Some(finish_apc_payload(params, decoded, chunk_state))
+    }
+}
+
+fn decode_apc_payload_data(b64_data: &[u8]) -> Option<Vec<u8>> {
+    if b64_data.is_empty() {
+        Some(Vec::new())
+    } else {
+        crate::util::base64::decode(b64_data).ok()
+    }
+}
+
+fn accumulate_apc_chunk(
+    params: KittyParams,
+    decoded: Vec<u8>,
+    chunk_state: &mut Option<KittyChunkState>,
+) -> Option<()> {
+    match chunk_state {
+        None => start_apc_chunk(params, decoded, chunk_state),
+        Some(_) => extend_apc_chunk(decoded, chunk_state),
+    }
+}
+
+fn start_apc_chunk(
+    params: KittyParams,
+    decoded: Vec<u8>,
+    chunk_state: &mut Option<KittyChunkState>,
+) -> Option<()> {
+    if decoded.len() > MAX_CHUNK_DATA_BYTES {
+        *chunk_state = None;
+        return None;
+    }
+
+    *chunk_state = Some(KittyChunkState {
+        params,
+        data: decoded,
+    });
+    Some(())
+}
+
+fn extend_apc_chunk(decoded: Vec<u8>, chunk_state: &mut Option<KittyChunkState>) -> Option<()> {
+    let state = chunk_state.as_mut()?;
+
+    if state.data.len() + decoded.len() > MAX_CHUNK_DATA_BYTES {
+        *chunk_state = None;
+        return None;
+    }
+
+    state.data.extend_from_slice(&decoded);
+    Some(())
+}
+
+fn finish_apc_payload(
+    params: KittyParams,
+    decoded: Vec<u8>,
+    chunk_state: &mut Option<KittyChunkState>,
+) -> KittyPayload {
+    if let Some(mut state) = chunk_state.take() {
+        state.data.extend_from_slice(&decoded);
+        KittyPayload {
+            params: state.params,
+            data: state.data,
+        }
+    } else {
+        KittyPayload {
+            params,
+            data: decoded,
+        }
+    }
+}
+
+#[inline]
+fn resolve_kitty_image_payload(
+    raw_data: Vec<u8>,
+    format_code: u32,
+) -> Option<(Vec<u8>, ImageFormat)> {
+    match format_code {
+        FORMAT_RGB => Some((raw_data, ImageFormat::Rgb)),
+        FORMAT_RGBA => Some((raw_data, ImageFormat::Rgba)),
+        FORMAT_PNG => decode_png(&raw_data).ok(),
+        _ => None,
+    }
+}
+
+#[inline]
+fn require_kitty_image_dimensions(params: &KittyParams, format_code: u32) -> Option<(u32, u32)> {
     let pixel_width = params.width.unwrap_or(0);
     let pixel_height = params.height.unwrap_or(0);
-    // For raw pixel formats, zero dimensions indicate a malformed command
     if format_code != FORMAT_PNG && (pixel_width == 0 || pixel_height == 0) {
         return None;
     }
+    Some((pixel_width, pixel_height))
+}
 
-    Some((pixels, format, pixel_width, pixel_height))
+#[inline]
+fn decode_pixel_data(raw_data: Vec<u8>, params: &KittyParams) -> Option<KittyImagePayload> {
+    let format_code = params.format.unwrap_or(FORMAT_RGBA);
+    let (pixels, format) = resolve_kitty_image_payload(raw_data, format_code)?;
+    let (pixel_width, pixel_height) = require_kitty_image_dimensions(params, format_code)?;
+
+    Some(KittyImagePayload {
+        pixels,
+        format,
+        pixel_width,
+        pixel_height,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct KittyImagePayload {
+    pixels: Vec<u8>,
+    format: ImageFormat,
+    pixel_width: u32,
+    pixel_height: u32,
+}
+
+fn build_kitty_transmit_command(
+    params: KittyParams,
+    payload: KittyImagePayload,
+    display: bool,
+) -> KittyCommand {
+    if display {
+        KittyCommand::TransmitAndDisplay {
+            image_id: params.image_id,
+            pixels: payload.pixels,
+            format: payload.format,
+            pixel_width: payload.pixel_width,
+            pixel_height: payload.pixel_height,
+            columns: params.columns,
+            rows: params.rows,
+            placement_id: params.placement_id,
+        }
+    } else {
+        KittyCommand::Transmit {
+            image_id: params.image_id,
+            pixels: payload.pixels,
+            format: payload.format,
+            pixel_width: payload.pixel_width,
+            pixel_height: payload.pixel_height,
+            placement_id: params.placement_id,
+        }
+    }
+}
+
+fn build_kitty_place_command(params: KittyParams) -> Option<KittyCommand> {
+    let image_id = params.image_id?;
+    Some(KittyCommand::Place {
+        image_id,
+        placement_id: params.placement_id,
+        columns: params.columns,
+        rows: params.rows,
+    })
+}
+
+fn build_kitty_delete_command(params: KittyParams) -> KittyCommand {
+    KittyCommand::Delete {
+        delete_sub: params.delete_sub.unwrap_or('a'),
+        image_id: params.image_id,
+        placement_id: params.placement_id,
+    }
+}
+
+fn build_kitty_query_command(params: KittyParams) -> KittyCommand {
+    KittyCommand::Query {
+        image_id: params.image_id,
+    }
 }
 
 /// Build a `KittyCommand` from finalized params and decoded (non-base64) payload.
@@ -266,57 +416,23 @@ fn build_command(params: KittyParams, raw_data: Vec<u8>) -> Option<KittyCommand>
 
     match action {
         't' | 'T' => {
-            let (pixels, format, pixel_width, pixel_height) = decode_pixel_data(raw_data, &params)?;
-
-            if action == 't' {
-                Some(KittyCommand::Transmit {
-                    image_id: params.image_id,
-                    pixels,
-                    format,
-                    pixel_width,
-                    pixel_height,
-                    placement_id: params.placement_id,
-                })
-            } else {
-                Some(KittyCommand::TransmitAndDisplay {
-                    image_id: params.image_id,
-                    pixels,
-                    format,
-                    pixel_width,
-                    pixel_height,
-                    columns: params.columns,
-                    rows: params.rows,
-                    placement_id: params.placement_id,
-                })
-            }
+            let payload = decode_pixel_data(raw_data, &params)?;
+            Some(build_kitty_transmit_command(
+                params,
+                payload,
+                action == 'T',
+            ))
         }
-        'p' => {
-            let image_id = params.image_id?;
-            Some(KittyCommand::Place {
-                image_id,
-                placement_id: params.placement_id,
-                columns: params.columns,
-                rows: params.rows,
-            })
-        }
-        'd' => {
-            let delete_sub = params.delete_sub.unwrap_or('a');
-            Some(KittyCommand::Delete {
-                delete_sub,
-                image_id: params.image_id,
-                placement_id: params.placement_id,
-            })
-        }
-        'q' => Some(KittyCommand::Query {
-            image_id: params.image_id,
-        }),
+        'p' => build_kitty_place_command(params),
+        'd' => Some(build_kitty_delete_command(params)),
+        'q' => Some(build_kitty_query_command(params)),
         'f' => {
             // Animation frames: not supported in Phase 15
             #[cfg(debug_assertions)]
             eprintln!("[kuro] kitty animation frames not supported (a=f)");
             None
         }
-        _ => None, // unknown action — silently discard
+        _ => None,
     }
 }
 

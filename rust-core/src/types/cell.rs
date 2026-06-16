@@ -261,14 +261,42 @@ pub struct Cell {
 }
 
 impl Cell {
+    #[inline]
+    fn grapheme_from_char(c: char) -> CompactString {
+        let mut buf = [0u8; 4];
+        CompactString::new(c.encode_utf8(&mut buf))
+    }
+
+    #[inline]
+    fn empty_extras() -> Box<CellExtras> {
+        Box::new(CellExtras {
+            hyperlink_id: None,
+            image_id: None,
+        })
+    }
+
+    #[inline]
+    fn update_extras<T>(
+        extras: &mut Option<Box<CellExtras>>,
+        id: Option<T>,
+        can_clear: impl FnOnce(&CellExtras) -> bool,
+        set_field: impl FnOnce(&mut CellExtras, Option<T>),
+    ) {
+        if id.is_none() && extras.as_ref().is_none_or(|e| can_clear(e)) {
+            *extras = None;
+            return;
+        }
+
+        let extras = extras.get_or_insert_with(Self::empty_extras);
+        set_field(extras, id);
+    }
+
     /// Create a new cell with the given character
     #[inline]
     #[must_use]
     pub fn new(c: char) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
             extras: None,
@@ -279,10 +307,8 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_char_and_width(c: char, attrs: SgrAttributes, width: CellWidth) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs,
             width,
             extras: None,
@@ -293,10 +319,8 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs,
             width: CellWidth::Half,
             extras: None,
@@ -328,38 +352,17 @@ impl Cell {
     /// Set hyperlink ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_hyperlink_id(&mut self, id: Option<Arc<str>>) {
-        if id.is_none() && self.extras.as_ref().is_none_or(|e| e.image_id.is_none()) {
-            self.extras = None;
-        } else {
-            let extras = self.extras.get_or_insert_with(|| {
-                Box::new(CellExtras {
-                    hyperlink_id: None,
-                    image_id: None,
-                })
-            });
+        Self::update_extras(&mut self.extras, id, |e| e.image_id.is_none(), |extras, id| {
             extras.hyperlink_id = id;
-        }
+        });
     }
 
     /// Set image ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_image_id(&mut self, id: Option<u32>) {
-        if id.is_none()
-            && self
-                .extras
-                .as_ref()
-                .is_none_or(|e| e.hyperlink_id.is_none())
-        {
-            self.extras = None;
-        } else {
-            let extras = self.extras.get_or_insert_with(|| {
-                Box::new(CellExtras {
-                    hyperlink_id: None,
-                    image_id: None,
-                })
-            });
+        Self::update_extras(&mut self.extras, id, |e| e.hyperlink_id.is_none(), |extras, id| {
             extras.image_id = id;
-        }
+        });
     }
 
     /// Append a combining character to this cell's grapheme cluster.
@@ -417,4 +420,5 @@ impl PartialEq for Cell {
 }
 
 #[cfg(test)]
-include!("cell_tests.rs");
+#[path = "cell/tests.rs"]
+mod tests;

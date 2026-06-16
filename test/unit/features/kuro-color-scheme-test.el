@@ -17,43 +17,7 @@
 ;;; Code:
 
 (require 'ert)
-(require 'cl-lib)
-
-;;; ── Bootstrap load-path and stubs ───────────────────────────────────────────
-
-(let* ((this-dir (file-name-directory
-                  (or load-file-name buffer-file-name default-directory)))
-       (unit-dir (expand-file-name "../" this-dir))
-       (el-core  (expand-file-name "../../emacs-lisp/core" this-dir))
-       (el-feat  (expand-file-name "../../emacs-lisp/features" this-dir))
-       (el-ffi   (expand-file-name "../../emacs-lisp/ffi" this-dir))
-       (el-faces (expand-file-name "../../emacs-lisp/faces" this-dir)))
-  (dolist (d (list unit-dir el-core el-feat el-ffi el-faces))
-    (add-to-list 'load-path d t)))
-
-;; Canonical FFI stubs cover most kuro-core-* symbols.
-(require 'kuro-test-stubs)
-
-;; The defun under test (Rust-side; absent in the test environment).
-(unless (fboundp 'kuro-core-set-color-scheme)
-  (fset 'kuro-core-set-color-scheme (lambda (&rest _) nil)))
-
-(require 'kuro-config)
-(require 'kuro-color-scheme)
-
-;;; ── Helpers ─────────────────────────────────────────────────────────────────
-
-(defmacro kuro-color-scheme-test--with-stubbed-set (binding &rest body)
-  "Stub `kuro-core-set-color-scheme' to BINDING (a lambda) while running BODY."
-  (declare (indent 1))
-  `(cl-letf (((symbol-function 'kuro-core-set-color-scheme) ,binding))
-     ,@body))
-
-(defmacro kuro-color-scheme-test--with-fake-buffers (buffers &rest body)
-  "Stub `kuro--kuro-buffers' to return BUFFERS while running BODY."
-  (declare (indent 1))
-  `(cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () ,buffers)))
-     ,@body))
+(require 'kuro-color-scheme-test-support)
 
 ;;; ── Group 1 (L): kuro--color-scheme-luminance ───────────────────────────────
 
@@ -75,45 +39,30 @@
 
 ;;; ── Group 2 (D): kuro--color-scheme-detect-dark-p ───────────────────────────
 
-(ert-deftest kuro-color-scheme-detect-dark-from-frame-mode-dark ()
-  "D1: frame-background-mode=dark forces t regardless of bg."
-  (cl-letf (((symbol-function 'frame-parameter)
-             (lambda (_f _p) 'dark))
-            ((symbol-function 'face-attribute)
-             (lambda (&rest _) "#ffffff")))
-    (should (kuro--color-scheme-detect-dark-p))))
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-from-frame-mode-dark
+ "D1: frame-background-mode=dark forces t regardless of bg."
+ 'dark "#ffffff" t)
 
-(ert-deftest kuro-color-scheme-detect-dark-from-frame-mode-light ()
-  "D2: frame-background-mode=light forces nil regardless of bg."
-  (cl-letf (((symbol-function 'frame-parameter)
-             (lambda (_f _p) 'light))
-            ((symbol-function 'face-attribute)
-             (lambda (&rest _) "#000000")))
-    (should-not (kuro--color-scheme-detect-dark-p))))
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-from-frame-mode-light
+ "D2: frame-background-mode=light forces nil regardless of bg."
+ 'light "#000000" nil)
 
-(ert-deftest kuro-color-scheme-detect-dark-unspecified-bg-falls-back ()
-  "D3: nil mode + unspecified bg → conservative t."
-  (cl-letf (((symbol-function 'frame-parameter)
-             (lambda (_f _p) nil))
-            ((symbol-function 'face-attribute)
-             (lambda (&rest _) 'unspecified)))
-    (should (kuro--color-scheme-detect-dark-p))))
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-unspecified-bg-falls-back
+ "D3: nil mode + unspecified bg → conservative t."
+ nil 'unspecified t)
 
-(ert-deftest kuro-color-scheme-detect-dark-light-bg-via-luminance ()
-  "D4: nil mode + #f0f0f0 background (Y ≈ 0.94) → nil (light)."
-  (cl-letf (((symbol-function 'frame-parameter)
-             (lambda (_f _p) nil))
-            ((symbol-function 'face-attribute)
-             (lambda (&rest _) "#f0f0f0")))
-    (should-not (kuro--color-scheme-detect-dark-p))))
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-light-bg-via-luminance
+ "D4: nil mode + #f0f0f0 background (Y ≈ 0.94) → nil (light)."
+ nil "#f0f0f0" nil)
 
-(ert-deftest kuro-color-scheme-detect-dark-dark-bg-via-luminance ()
-  "D5: nil mode + #1e1e1e background (Y ≈ 0.013) → t (dark)."
-  (cl-letf (((symbol-function 'frame-parameter)
-             (lambda (_f _p) nil))
-            ((symbol-function 'face-attribute)
-             (lambda (&rest _) "#1e1e1e")))
-    (should (kuro--color-scheme-detect-dark-p))))
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-dark-bg-via-luminance
+ "D5: nil mode + #1e1e1e background (Y ≈ 0.013) → t (dark)."
+ nil "#1e1e1e" t)
 
 ;;; ── Group 3 (G): kuro--color-scheme-install-hook ────────────────────────────
 
@@ -164,15 +113,11 @@
 (ert-deftest kuro-color-scheme-refresh-pushes-to-live-session ()
   "R1: refresh with one stubbed live session calls the FFI once with (id, dark)."
   (let ((calls nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 42)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (id dark) (push (cons id dark) calls))
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda (&rest _) t)))
-              (kuro-color-scheme-refresh))))))
+    (kuro-color-scheme-test--with-session-buffer 42
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (cons id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro-color-scheme-refresh))))
     (should (= 1 (length calls)))
     (should (equal (car calls) '(42 . t)))))
 
@@ -188,15 +133,11 @@
 (ert-deftest kuro-color-scheme-refresh-light-theme-passes-nil ()
   "R3: refresh with a light theme propagates is-dark=nil to Rust."
   (let ((calls nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 7)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (id dark) (push (cons id dark) calls))
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda (&rest _) nil)))
-              (kuro-color-scheme-refresh))))))
+    (kuro-color-scheme-test--with-session-buffer 7
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (cons id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark nil
+          (kuro-color-scheme-refresh))))
     (should (equal (car calls) '(7 . nil)))))
 
 (ert-deftest kuro-color-scheme-refresh-skips-buffers-without-session-id ()
@@ -226,18 +167,15 @@ the user next switches themes — visible bug for users enabling the
 feature mid-session."
   (let ((calls 0)
         (enable-theme-functions nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 1)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (&rest _) (cl-incf calls))
-            (unwind-protect
-                (progn
-                  (kuro--color-scheme-install-hook)
-                  (should (>= calls 1)))
-              (remove-hook 'enable-theme-functions
-                           #'kuro--color-scheme-schedule))))))))
+    (kuro-color-scheme-test--with-session-buffer 1
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (&rest _) (cl-incf calls))
+        (unwind-protect
+            (progn
+              (kuro--color-scheme-install-hook)
+              (should (>= calls 1)))
+          (remove-hook 'enable-theme-functions
+                       #'kuro--color-scheme-schedule))))))
 
 (ert-deftest kuro-color-scheme-install-hook-idempotent ()
   "C5: calling install twice leaves exactly one copy of the schedule fn
@@ -281,16 +219,12 @@ falls back to t (dark).  Covers the `(if y (< y 0.5) t)' nil-y branch."
 on the second call is nil (the Rust side reports no-op via nil).  This pins
 the behavior so we notice if the contract changes."
   (let ((returns nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 99)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (&rest _) nil)
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda (&rest _) t)))
-              (push (kuro-color-scheme-refresh) returns)
-              (push (kuro-color-scheme-refresh) returns))))))
+    (kuro-color-scheme-test--with-session-buffer 99
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (&rest _) nil)
+        (kuro-color-scheme-test--with-detected-dark t
+          (push (kuro-color-scheme-refresh) returns)
+          (push (kuro-color-scheme-refresh) returns))))
     (should (= 2 (length returns)))
     ;; The second (most recently pushed) call's FFI invocation returns nil.
     (should-not (car returns))))
@@ -334,60 +268,44 @@ the behavior so we notice if the contract changes."
 (ert-deftest kuro-color-scheme-apply-now-direct-push-to-session ()
   "A2: `kuro--color-scheme-apply-now' calls FFI with session id and dark flag."
   (let ((calls nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 99)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (id dark) (push (list id dark) calls))
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda () t)))
-              (kuro--color-scheme-apply-now))))))
+    (kuro-color-scheme-test--with-session-buffer 99
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro--color-scheme-apply-now))))
     (should (= 1 (length calls)))
     (should (equal (car calls) '(99 t)))))
 
 (ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-nil-session-id ()
   "A3: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is nil."
   (let ((calls nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id nil)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (id dark) (push (list id dark) calls))
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda () t)))
-              (kuro--color-scheme-apply-now))))))
+    (kuro-color-scheme-test--with-session-buffer nil
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro--color-scheme-apply-now))))
     (should (null calls))))
 
 (ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-zero-session-id ()
   "A4: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is 0."
   (let ((calls nil))
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (setq-local kuro--session-id 0)
-        (kuro-color-scheme-test--with-fake-buffers (list buf)
-          (kuro-color-scheme-test--with-stubbed-set
-              (lambda (id dark) (push (list id dark) calls))
-            (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                       (lambda () nil)))
-              (kuro--color-scheme-apply-now))))))
+    (kuro-color-scheme-test--with-session-buffer 0
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark nil
+          (kuro--color-scheme-apply-now))))
     (should (null calls))))
 
 (ert-deftest kuro-color-scheme-apply-now-swallows-ffi-error ()
   "A5: `kuro--color-scheme-apply-now' swallows FFI errors via ignore-errors."
-  (with-temp-buffer
-    (let ((buf (current-buffer)))
-      (setq-local kuro--session-id 7)
-      (kuro-color-scheme-test--with-fake-buffers (list buf)
-        (kuro-color-scheme-test--with-stubbed-set
-            (lambda (_id _dark) (error "FFI failure"))
-          (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
-                     (lambda () t)))
-            ;; Must not propagate the error.
-            (should-not (condition-case err
-                            (progn (kuro--color-scheme-apply-now) nil)
-                          (error err)))))))))
+  (kuro-color-scheme-test--with-session-buffer 7
+    (kuro-color-scheme-test--with-stubbed-set
+        (lambda (_id _dark) (error "FFI failure"))
+      (kuro-color-scheme-test--with-detected-dark t
+        ;; Must not propagate the error.
+        (should-not (condition-case err
+                        (progn (kuro--color-scheme-apply-now) nil)
+                      (error err)))))))
 
 (provide 'kuro-color-scheme-test)
 

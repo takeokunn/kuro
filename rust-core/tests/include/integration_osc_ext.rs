@@ -1,3 +1,5 @@
+use super::*;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OSC 133 shell integration — prompt mark round-trip
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7,7 +9,7 @@ fn osc133_prompt_marks_are_recorded() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]133;A\x07"); // PromptStart
     t.advance(b"\x1b]133;B\x07"); // PromptEnd
-    let marks = &t.osc_data().prompt_marks;
+    let marks = t.osc_data().prompt_marks();
     assert_eq!(marks.len(), 2, "OSC 133 A and B must both be recorded");
 }
 
@@ -55,7 +57,7 @@ fn osc133_mark_round_trip_via_prompt_marks() {
     // Send PromptStart and PromptEnd
     t.advance(b"\x1b]133;A\x07");
     t.advance(b"\x1b]133;B\x07");
-    let marks = &t.osc_data().prompt_marks;
+    let marks = t.osc_data().prompt_marks();
     assert_eq!(marks.len(), 2, "Two OSC 133 marks must be recorded");
 }
 
@@ -66,11 +68,11 @@ fn osc7_cwd_round_trip() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]7;file://localhost/home/user/projects\x07");
     assert_eq!(
-        t.osc_data().cwd.as_deref(),
+        t.osc_data().cwd(),
         Some("/home/user/projects"),
         "OSC 7 must store the path component in osc_data().cwd"
     );
-    assert!(t.osc_data().cwd_dirty, "cwd_dirty must be set after OSC 7");
+    assert!(t.osc_data().cwd_dirty(), "cwd_dirty must be set after OSC 7");
 }
 
 /// OSC 7 with a path containing special characters must be stored verbatim
@@ -81,7 +83,7 @@ fn osc7_cwd_with_spaces_percent_encoded() {
     // Spaces are percent-encoded in the URL; the handler stores the raw path
     t.advance(b"\x1b]7;file://localhost/home/user/my%20project\x07");
     assert_eq!(
-        t.osc_data().cwd.as_deref(),
+        t.osc_data().cwd(),
         Some("/home/user/my%20project"),
         "OSC 7 must store percent-encoded path verbatim"
     );
@@ -93,7 +95,7 @@ fn osc7_non_file_scheme_is_rejected() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]7;https://example.com/\x07");
     assert!(
-        t.osc_data().cwd.is_none(),
+        t.osc_data().cwd().is_none(),
         "OSC 7 with non-file:// scheme must not be stored"
     );
 }
@@ -132,10 +134,10 @@ fn osc110_resets_default_fg_to_none() {
     let mut t = common::new_terminal();
     // Set fg to a color first (OSC 10 ; rgb:ff/00/00)
     t.advance(b"\x1b]10;rgb:ff/00/00\x07");
-    assert!(t.osc_data().default_fg.is_some(), "default_fg must be Some after OSC 10");
+    assert!(t.osc_data().default_fg().is_some(), "default_fg must be Some after OSC 10");
     // Now reset via OSC 110
     t.advance(b"\x1b]110\x07");
-    assert!(t.osc_data().default_fg.is_none(), "default_fg must be None after OSC 110");
+    assert!(t.osc_data().default_fg().is_none(), "default_fg must be None after OSC 110");
 }
 
 /// OSC 111 resets the default background color to None.
@@ -143,9 +145,9 @@ fn osc110_resets_default_fg_to_none() {
 fn osc111_resets_default_bg_to_none() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]11;rgb:00/ff/00\x07");
-    assert!(t.osc_data().default_bg.is_some(), "default_bg must be Some after OSC 11");
+    assert!(t.osc_data().default_bg().is_some(), "default_bg must be Some after OSC 11");
     t.advance(b"\x1b]111\x07");
-    assert!(t.osc_data().default_bg.is_none(), "default_bg must be None after OSC 111");
+    assert!(t.osc_data().default_bg().is_none(), "default_bg must be None after OSC 111");
 }
 
 /// OSC 112 resets the cursor color to None.
@@ -153,16 +155,16 @@ fn osc111_resets_default_bg_to_none() {
 fn osc112_resets_cursor_color_to_none() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]12;rgb:00/00/ff\x07");
-    assert!(t.osc_data().cursor_color.is_some(), "cursor_color must be Some after OSC 12");
+    assert!(t.osc_data().cursor_color().is_some(), "cursor_color must be Some after OSC 12");
     t.advance(b"\x1b]112\x07");
-    assert!(t.osc_data().cursor_color.is_none(), "cursor_color must be None after OSC 112");
+    assert!(t.osc_data().cursor_color().is_none(), "cursor_color must be None after OSC 112");
 }
 
 /// OSC 110 on an already-unset fg is a no-op (must not panic).
 #[test]
 fn osc110_on_already_none_fg_is_noop() {
     let mut t = common::new_terminal();
-    assert!(t.osc_data().default_fg.is_none());
+    assert!(t.osc_data().default_fg().is_none());
     t.advance(b"\x1b]110\x07");
-    assert!(t.osc_data().default_fg.is_none());
+    assert!(t.osc_data().default_fg().is_none());
 }

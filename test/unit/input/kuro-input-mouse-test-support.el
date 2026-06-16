@@ -2,9 +2,7 @@
 
 ;;; Commentary:
 
-;; Shared test support for kuro-input-mouse unit tests.
-;; This file centralizes the event stubs and helper macros used by the split
-;; mouse test files.
+;; Compatibility entrypoint for the split mouse input test helpers.
 
 ;;; Code:
 
@@ -25,79 +23,10 @@
 (unless (fboundp 'kuro--update-scroll-indicator)
   (defalias 'kuro--update-scroll-indicator (lambda () nil)))
 
+(require 'cl-lib)
 (require 'kuro-input-mouse)
-
-(defmacro kuro-input-mouse-test--with-send (mode sgr pixel col row &rest body)
-  "Execute BODY with mouse stubs installed and `sent' bound."
-  (declare (indent 5))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
-     (let ((sent nil))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (setq sent s)))
-                 ((symbol-function 'event-start)
-                  (lambda (_ev) 'fake-pos))
-                 ((symbol-function 'posn-col-row)
-                  (lambda (_pos) (cons ,col ,row)))
-                 ((symbol-function 'posn-x-y)
-                  (lambda (_pos) (cons ,col ,row))))
-         ,@body))))
-
-(defmacro kuro-input-mouse-test--with-send-and-type (mode sgr pixel col row event-type &rest body)
-  "Like `kuro-input-mouse-test--with-send' but stubs `event-basic-type'."
-  (declare (indent 6))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
-     (let ((sent nil))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (setq sent s)))
-                 ((symbol-function 'event-basic-type)
-                  (lambda (_ev) ,event-type))
-                 ((symbol-function 'event-start)
-                  (lambda (_ev) 'fake-pos))
-                 ((symbol-function 'posn-col-row)
-                  (lambda (_pos) (cons ,col ,row)))
-                 ((symbol-function 'posn-x-y)
-                  (lambda (_pos) (cons ,col ,row))))
-         ,@body))))
-
-(defmacro kuro-mouse-test--with-event (col row &rest body)
-  "Execute BODY with event position functions stubbed for COL and ROW."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function 'event-start)
-               (lambda (_ev) 'fake-pos))
-              ((symbol-function 'posn-col-row)
-               (lambda (_pos) (cons ,col ,row)))
-              ((symbol-function 'posn-x-y)
-               (lambda (_pos) (cons ,col ,row))))
-     ,@body))
-
-(defmacro kuro-mouse-test--with-encode-buffer (mode sgr pixel col row &rest body)
-  "Temp buffer with mouse MODE/SGR/PIXEL and event position COL/ROW; run BODY."
-  (declare (indent 5))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
-     (kuro-mouse-test--with-event ,col ,row
-       ,@body)))
-
-(defmacro kuro-mouse-test--full-stub (col row btn-type &rest body)
-  "Stub all event functions and run BODY with COL/ROW position and BTN-TYPE basic type."
-  (declare (indent 3))
-  `(cl-letf (((symbol-function 'event-start)
-               (lambda (_ev) 'fake-pos))
-              ((symbol-function 'event-basic-type)
-               (lambda (_ev) ,btn-type))
-              ((symbol-function 'posn-col-row)
-               (lambda (_pos) (cons ,col ,row)))
-              ((symbol-function 'posn-x-y)
-               (lambda (_pos) (cons ,col ,row))))
-     ,@body))
+(require 'kuro-input-mouse-test-cases)
+(require 'kuro-input-mouse-test-macros)
 
 (provide 'kuro-input-mouse-test-support)
 

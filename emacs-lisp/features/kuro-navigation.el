@@ -77,7 +77,8 @@ to the exact buffer position corresponding to grid row ROW."
   (forward-line row))
 
 (defun kuro--find-mark-in-direction (direction type-pred)
-  "Return the nearest entry in `kuro--prompt-positions' matching TYPE-PRED in DIRECTION.
+  "Return nearest prompt entry matching TYPE-PRED in DIRECTION.
+Search `kuro--prompt-positions' around point.
 DIRECTION is `previous' (towards the top) or `next' (towards the bottom).
 TYPE-PRED is called with each entry and must return non-nil for a match.
 Returns the closest matching entry to point, or nil when none is found."
@@ -95,6 +96,7 @@ Returns the closest matching entry to point, or nil when none is found."
 
 (defmacro kuro--def-navigator (name type-pred on-found on-miss docstring)
   "Define NAME as a directional navigator over `kuro--prompt-positions'.
+DOCSTRING becomes the generated function docstring.
 TYPE-PRED filters entries.  ON-FOUND runs with `target' bound to the entry,
 ON-MISS runs with `direction' still in scope when no match is found."
   `(defun ,name (direction)
@@ -111,7 +113,8 @@ ON-MISS runs with `direction' still in scope when no match is found."
   "Navigate to the nearest prompt-start in DIRECTION (`previous' or `next').")
 
 (defmacro kuro--def-nav-cmd (name nav-fn direction docstring)
-  "Define an interactive navigation command NAME.
+  "Define NAME as an interactive navigation command.
+DOCSTRING becomes the generated command docstring.
 Calls NAV-FN with DIRECTION (a quoted symbol) on invocation."
   `(defun ,name () ,docstring (interactive) (,nav-fn ',direction)))
 
@@ -175,7 +178,7 @@ point."
                   (line-beginning-position) (line-end-position)))))
 
 (defun kuro--command-history-entries ()
-  "Return completed command records from OSC 133 marks, oldest first.
+  "Return completed command records from OSC 133 data, oldest first.
 Each record is (ROW EXIT TEXT): ROW is the prompt-start row (0-based), EXIT
 the integer exit code (or nil when the shell did not report one), and TEXT
 the trimmed prompt-line text (prompt plus the typed command).  Commands are
@@ -203,7 +206,7 @@ formed by pairing each `prompt-start' mark with the next `command-end'."
 
 ;;;###autoload
 (defun kuro-command-history ()
-  "Jump to a past shell command chosen by completion (OSC 133 marks).
+  "Jump to a past shell command chosen from OSC 133 data.
 Each completed command is presented newest-first, annotated with its exit
 status (✓ success, ✗N failure, · unknown).  Selecting one moves point to
 that command's prompt and recenters.  Requires OSC 133 shell integration;
@@ -218,7 +221,7 @@ messages and does nothing when no command history is available."
                                 (cons (kuro--command-history-label exit text) row)))
                             (nreverse entries)))
              (choice (completing-read "Command: " cands nil t)))
-        (when-let ((row (cdr (assoc choice cands))))
+        (when-let* ((row (cdr (assoc choice cands))))
           (kuro--goto-prompt-row row)
           (recenter))))))
 

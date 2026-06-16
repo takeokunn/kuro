@@ -24,6 +24,7 @@
 (require 'kuro-ffi)
 (require 'kuro-input-mouse)
 (require 'kuro-input-paste)
+(require 'kuro-keymap)
 
 ;; Forward references: these functions are defined in kuro-input.el, which is
 ;; loaded before kuro-input-keymap.el at runtime.  declare-function silences
@@ -89,17 +90,14 @@
   ;; [return] and (kbd "C-m") are both ?\r (ASCII 13) in terminal semantics.
   ;; [tab] and (kbd "C-i") are both ?\t.
   ;; [backspace] is DEL (127); (kbd "C-h") is BS (8) — both must work.
-  (define-key map [return]    #'kuro--RET)
-  (define-key map (kbd "C-m") #'kuro--RET)
-  (define-key map [tab]       #'kuro--TAB)
-  (define-key map (kbd "C-i") #'kuro--TAB)
-  (define-key map [backspace] #'kuro--DEL)
+  (kuro--bind-keys map #'kuro--RET [return] (kbd "C-m"))
+  (kuro--bind-keys map #'kuro--TAB [tab] (kbd "C-i"))
+  (kuro--bind-keys map #'kuro--DEL [backspace] (kbd "C-h") (kbd "DEL"))
   ;; C-h must also send DEL (127) — in terminals, backspace sends 127 and C-h
   ;; also traditionally sends 127 (or 8 depending on stty).  Sending 127 is
   ;; the modern default that matches xterm/kitty.
-  (define-key map (kbd "C-h") #'kuro--DEL)
   ;; DEL (127) — same as [backspace]; some terminals send this for C-?
-  (define-key map (kbd "DEL") #'kuro--DEL))
+  )
 
 (defconst kuro--ctrl-key-table
   ;; (KBD-STRING . CTRL-BYTE): CTRL-BYTE = ASCII code 1-31.
@@ -113,27 +111,32 @@
     ("C-\\" . 28) ("C-]"  . 29) ("C-_"  . 31))
   "Mapping of Emacs Ctrl+key strings to their ASCII control-byte values.
 Each entry is (KBD-STRING . CTRL-BYTE).  The ctrl byte for a letter is
-\\(logand char 31\\): values range from 1 (Control-A) to 26 (Control-Z).
+  \\(logand char 31\\): values range from 1 (Control-A) to 26 (Control-Z).
 The kuro-mode prefix key is intentionally absent from this map.")
+
+(defun kuro--bind-ctrl-key (map key byte)
+  "Bind KEY in MAP to send CTRL-BYTE to the PTY."
+  (define-key map (kbd key)
+    (lambda () (interactive) (kuro--send-ctrl byte))))
+
+(defun kuro--send-escape ()
+  "Send Escape to the PTY, preserving KKP disambiguation when enabled."
+  (interactive)
+  (if (not (zerop (logand kuro--keyboard-flags #x01)))
+      (progn (kuro--send-key "\e[27;1u") (kuro--schedule-immediate-render))
+    (kuro--send-ctrl 27)))
 
 (defun kuro--keymap-setup-ctrl (map)
   "Add Ctrl+letter bindings to MAP, forwarding each to the PTY as control byte.
 Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
   (dolist (entry kuro--ctrl-key-table)
-    (let ((key  (car entry))
-          (byte (cdr entry)))
-      (define-key map (kbd key)
-        (lambda () (interactive) (kuro--send-ctrl byte)))))
+    (kuro--bind-ctrl-key map (car entry) (cdr entry)))
   ;; C-v: scroll-aware — scrolls when in scrollback, sends ctrl byte when at live view.
   (define-key map (kbd "C-v") #'kuro--scroll-aware-ctrl-v)
   ;; ESC must use [escape] (not kbd "ESC") to avoid shadowing all ESC-prefixed bindings.
   ;; With KKP DISAMBIGUATE (0x01): send CSI 27;1u so the app sees an unambiguous Escape
   ;; event, rather than a bare \e that could be mistaken as the start of an escape sequence.
-  (define-key map [escape]
-    (lambda () (interactive)
-      (if (not (zerop (logand kuro--keyboard-flags #x01)))
-          (progn (kuro--send-key "\e[27;1u") (kuro--schedule-immediate-render))
-        (kuro--send-ctrl 27)))))
+  (define-key map [escape] #'kuro--send-escape))
 
 (defun kuro--send-meta-backspace ()
   "Send ESC+DEL (Meta-Backspace) to the PTY.
@@ -141,6 +144,26 @@ This is the standard control sequence for `backward-kill-word' in readline/bash.
   (interactive)
   (kuro--send-key (string ?\e ?\x7f))
   (kuro--schedule-immediate-render))
+
+(defun kuro--bind-meta-key (map key char)
+  "Bind KEY and its ESC-prefix fallback to a meta sender for CHAR."
+  (let ((command (lambda () (interactive) (kuro--send-meta char))))
+    (define-key map key command)
+    (define-key map (vector ?\e char) command)))
+
+(defun kuro--meta-exception-char (exc)
+  "Return the single-character Meta suffix from EXC, or nil."
+  (when (and (string-prefix-p "M-" exc)
+             (= (length exc) 3))
+    (aref exc 2)))
+
+(defun kuro--keymap-clear-exception (map exc)
+  "Unbind EXC in MAP and clear its ESC-prefix fallback when applicable."
+  (ignore-errors
+    (define-key map (kbd exc) nil)
+    (let ((char (kuro--meta-exception-char exc)))
+      (when char
+        (define-key map (vector ?\e char) nil)))))
 
 (defconst kuro--meta-punct-bindings
   '(("M-." . ?.) ("M-<" . ?<) ("M->" . ?>)
@@ -171,33 +194,20 @@ Use (kbd (format \"M-%c\" char)) — this produces the correct event descriptor
 in both terminal and GUI Emacs.  (vector (list \='meta char)) is NOT equivalent
 and would be silently ignored in GUI frames."
   ;; Bind ALL M-a … M-z, M-A … M-Z, M-0 … M-9 via loop.
+  ;; The helper also installs the ESC-prefix fallback used by terminal Meta keys.
   (dolist (char (append (number-sequence ?a ?z) (number-sequence ?A ?Z)
                         (number-sequence ?0 ?9)))
-    (let ((c char))
-      (define-key map (kbd (format "M-%c" c))
-        (lambda () (interactive) (kuro--send-meta c)))))
-
-  ;; ESC + letter two-key fallback (macOS: Option key sends ESC prefix, not Meta).
-  ;; We cannot use (kbd "ESC %c") after [escape] is bound as a single key,
-  ;; so we use the raw two-character vector form instead: [\e ?x].
-  ;; This registers "ESC followed by letter" as a distinct two-event sequence.
-  (dolist (char (append (number-sequence ?a ?z) (number-sequence ?A ?Z)))
-    (let ((c char))
-      (define-key map (vector ?\e c)
-        (lambda () (interactive) (kuro--send-meta c)))))
+    (kuro--bind-meta-key map (kbd (format "M-%c" char)) char))
 
   ;; Keys outside the a-z/A-Z/0-9 ranges — not covered by the dolist above.
   (dolist (entry kuro--meta-punct-bindings)
-    (let ((c (cdr entry)))
-      (define-key map (kbd (car entry))
-        (lambda () (interactive) (kuro--send-meta c)))))
+    (kuro--bind-meta-key map (kbd (car entry)) (cdr entry)))
   ;; M-v: scroll-aware — scrolls when in scrollback, sends ESC+v when at live view.
-  (define-key map (kbd "M-v") #'kuro--scroll-aware-meta-v)
-  (define-key map (vector ?\e ?v) #'kuro--scroll-aware-meta-v)
+  (kuro--bind-keys map #'kuro--scroll-aware-meta-v (kbd "M-v") (vector ?\e ?v))
   ;; M-DEL — delete word backward (sends ESC + DEL = ESC + 127)
-  (define-key map (kbd "M-DEL")        #'kuro--send-meta-backspace)
-  ;; M-<backspace> — same as M-DEL on many keyboards
-  (define-key map (kbd "M-<backspace>") #'kuro--send-meta-backspace))
+  (kuro--bind-keys map #'kuro--send-meta-backspace
+                   (kbd "M-DEL")
+                   (kbd "M-<backspace>")))
 
 (defconst kuro--xterm-modifier-codes
   '((S . 2) (M . 3) (C . 5))
@@ -243,8 +253,10 @@ Covers arrow keys, home/end/page/insert/delete, and scrollback viewport.
 Applied by `kuro--keymap-setup-navigation'.")
 
 (defmacro kuro--def-shifted-key (name kkp-seq legacy-seq docstring)
-  "Define NAME as an interactive key-sender dispatching on KKP DISAMBIGUATE flag.
-Sends KKP-SEQ when the flag is active, LEGACY-SEQ otherwise, then schedules render."
+  "Define NAME as an interactive key-sender dispatching on KKP state.
+DOCSTRING becomes the generated command docstring.
+Sends KKP-SEQ when the flag is active, or LEGACY-SEQ otherwise.
+Then schedule a render."
   `(defun ,name ()
      ,docstring
      (interactive)
@@ -252,6 +264,25 @@ Sends KKP-SEQ when the flag is active, LEGACY-SEQ otherwise, then schedules rend
                          ,kkp-seq
                        ,legacy-seq))
      (kuro--schedule-immediate-render)))
+
+(defun kuro--send-modifier-arrow (xterm-seq kkp-cp kkp-mod)
+  "Return a command that sends XTERM-SEQ or the matching KKP sequence."
+  (lambda ()
+    (interactive)
+    (if (and kkp-cp (kuro--kkp-flag-p kuro--kkp-all-escape))
+        (kuro--send-key (format "\e[%d;%du" kkp-cp kkp-mod))
+      (kuro--send-key xterm-seq))
+    (kuro--schedule-immediate-render)))
+
+(defun kuro--bind-modifier-arrow (map mod-sym dir xterm-mod final-byte)
+  "Bind a modifier+arrow event in MAP for MOD-SYM and DIR."
+  (let* ((event    (intern (format "%s-%s" mod-sym dir)))
+         (xterm-seq (format "\e[1;%d%c" xterm-mod final-byte))
+         ;; KKP wire modifier: shift=1→2, alt=2→3, ctrl=4→5
+         (kkp-mod  (1+ xterm-mod))
+         (kkp-cp   (cdr (assq dir kuro--kkp-arrow-codepoints))))
+    (define-key map (vector event)
+      (kuro--send-modifier-arrow xterm-seq kkp-cp kkp-mod))))
 
 (kuro--def-shifted-key kuro--send-shifted-tab
   "\e[9;2u" "\e[Z"
@@ -264,34 +295,22 @@ Sends KKP-SEQ when the flag is active, LEGACY-SEQ otherwise, then schedules rend
 (defun kuro--keymap-setup-navigation (map)
   "Add arrow, home, end, page, function key and modifier+arrow bindings to MAP."
   ;; Static navigation keys: arrows, home/end/page/insert/delete, scrollback
-  (pcase-dolist (`(,key . ,cmd) kuro--nav-key-bindings)
-    (define-key map key cmd))
+  (kuro--bind-key-alist map kuro--nav-key-bindings
+                        (lambda (binding) (car binding))
+                        #'cdr)
 
   ;; Function keys F1–F12
-  (dolist (entry kuro--fkey-handlers)
-    (define-key map (vector (car entry)) (cdr entry)))
+  (kuro--bind-key-alist map kuro--fkey-handlers
+                        (lambda (binding) (vector (car binding)))
+                        #'cdr)
 
   ;; Modifier + arrow keys: xterm CSI 1;Nm sequences (or KKP with flag 0x08)
   (dolist (mod kuro--xterm-modifier-codes)
     (dolist (arrow kuro--xterm-arrow-codes)
-      (let* ((dir      (car arrow))
-             (mod-sym  (car mod))
-             (xterm-mod (cdr mod))
-             (event    (intern (format "%s-%s" mod-sym dir)))
-             (xterm-seq (format "\e[1;%d%c" xterm-mod (cdr arrow)))
-             ;; KKP wire modifier: shift=1→2, alt=2→3, ctrl=4→5
-             (kkp-mod  (1+ xterm-mod))
-             (kkp-cp   (cdr (assq dir kuro--kkp-arrow-codepoints))))
-        (define-key map (vector event)
-          (lambda () (interactive)
-            (if (and kkp-cp (kuro--kkp-flag-p kuro--kkp-all-escape))
-                (kuro--send-key (format "\e[%d;%du" kkp-cp kkp-mod))
-              (kuro--send-key xterm-seq))
-            (kuro--schedule-immediate-render))))))
+      (kuro--bind-modifier-arrow map (car mod) (car arrow) (cdr mod) (cdr arrow))))
 
   ;; Shift+Tab: [backtab] (X11) and [S-tab] (some terminals) are the same event.
-  (define-key map [backtab] #'kuro--send-shifted-tab)
-  (define-key map [S-tab]   #'kuro--send-shifted-tab)
+  (kuro--bind-keys map #'kuro--send-shifted-tab [backtab] [S-tab])
   ;; Shift+Return: legacy = CR; KKP = CSI 13;2u
   (define-key map [S-return] #'kuro--send-shifted-return))
 
@@ -309,8 +328,9 @@ Applied by `kuro--keymap-setup-mouse'.")
 
 (defun kuro--keymap-setup-mouse (map)
   "Add mouse event bindings to MAP using `kuro--mouse-bindings'."
-  (pcase-dolist (`(,key . ,cmd) kuro--mouse-bindings)
-    (define-key map key cmd)))
+  (kuro--bind-key-alist map kuro--mouse-bindings
+                        (lambda (binding) (car binding))
+                        #'cdr))
 
 (defconst kuro--yank-bindings
   '((yank          . kuro--yank)
@@ -326,26 +346,17 @@ Applied by `kuro--keymap-setup-yank'.")
 Remaps `yank', `yank-pop', and `clipboard-yank' (Cmd+V on macOS)
 all to `kuro--yank' / `kuro--yank-pop' so paste always goes through the PTY
 with optional bracketed-paste wrapping."
-  (dolist (b kuro--yank-bindings)
-    (define-key map (vector 'remap (car b)) (cdr b))))
+  (kuro--bind-key-alist map kuro--yank-bindings
+                        (lambda (binding) (vector 'remap (car binding)))
+                        #'cdr))
 
 (defun kuro--keymap-apply-exceptions (map)
   "Remove exception keys from MAP per `kuro-keymap-exceptions'.
-Keys in `kuro-keymap-exceptions' are unbound so they fall through
-to the standard Emacs global keymap (e.g. M-x, C-g, C-x).
+Keys in `kuro-keymap-exceptions' fall through to the standard Emacs
+global keymap.
 Called on the semi-char keymap; NOT called when building the char keymap."
   (dolist (exc (bound-and-true-p kuro-keymap-exceptions))
-    (condition-case nil
-        (progn
-          (define-key map (kbd exc) nil)
-          ;; For M-* keys also clear the ESC+char two-key fallback used on
-          ;; macOS where the Option key sends an ESC prefix instead of Meta.
-          (when (string-prefix-p "M-" exc)
-            (let* ((rest (substring exc 2))
-                   (char (and (= (length rest) 1) (aref rest 0))))
-              (when char
-                (define-key map (vector ?\e char) nil)))))
-      (error nil))))
+    (kuro--keymap-clear-exception map exc)))
 
 
 ;;; Keymap Variables

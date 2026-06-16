@@ -1,5 +1,7 @@
 // Viewport, PTY-liveness, and session lifecycle accessors for TerminalSession.
-// Included by session.rs via `include!()`.
+
+use super::{SessionState, TerminalSession};
+
 impl TerminalSession {
     take_vec_field!(
         /// Drain and return all pending image placement notifications.

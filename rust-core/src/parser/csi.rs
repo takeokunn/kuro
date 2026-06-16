@@ -22,19 +22,19 @@ use crate::types::cursor::CursorShape;
 #[inline]
 pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c: char) {
     match c {
-        'H' => csi_cup(term, params), // CUP - Cursor Position
-        'A' => csi_cuu(term, params), // CUU - Cursor Up
-        'B' => csi_cud(term, params), // CUD - Cursor Down
-        'C' => csi_cuf(term, params), // CUF - Cursor Forward
-        'D' => csi_cub(term, params), // CUB - Cursor Back
-        'E' => csi_cnl(term, params), // CNL - Cursor Next Line
-        'F' => csi_cpl(term, params), // CPL - Cursor Previous Line
-        'd' => csi_vpa(term, params), // VPA - Vertical Position Absolute
+        'H' => csi_cup(term, params),       // CUP - Cursor Position
+        'A' => csi_cuu(term, params),       // CUU - Cursor Up
+        'B' => csi_cud(term, params),       // CUD - Cursor Down
+        'C' => csi_cuf(term, params),       // CUF - Cursor Forward
+        'D' => csi_cub(term, params),       // CUB - Cursor Back
+        'E' => csi_cnl(term, params),       // CNL - Cursor Next Line
+        'F' => csi_cpl(term, params),       // CPL - Cursor Previous Line
+        'd' => csi_vpa(term, params),       // VPA - Vertical Position Absolute
         'G' | '`' => csi_cha(term, params), // CHA / HPA — both move to absolute column
-        'f' => csi_hvp(term, params), // HVP - Horizontal and Vertical Position
-        'n' => csi_dsr(term, params), // DSR - Device Status Report
-        'a' => csi_cuf(term, params), // HPR - Horizontal Position Relative (≡ CUF)
-        'e' => csi_cud(term, params), // VPR - Vertical Position Relative (≡ CUD)
+        'f' => csi_hvp(term, params),       // HVP - Horizontal and Vertical Position
+        'n' => csi_dsr(term, params),       // DSR - Device Status Report
+        'a' => csi_cuf(term, params),       // HPR - Horizontal Position Relative (≡ CUF)
+        'e' => csi_cud(term, params),       // VPR - Vertical Position Relative (≡ CUD)
         _ => {}
     }
 }
@@ -52,6 +52,39 @@ macro_rules! csi_param1 {
                 .max(1),
         )
     };
+}
+
+fn xtwinops_param1(params: &vte::Params) -> u16 {
+    params
+        .iter()
+        .next()
+        .and_then(|p| p.first().copied())
+        .unwrap_or(0)
+}
+
+fn build_xtwinops_size_report(op: u16, rows: usize, cols: usize) -> Option<Vec<u8>> {
+    match op {
+        14 => Some(b"\x1b[4;0;0t".to_vec()),
+        18 => Some(format!("\x1b[8;{rows};{cols}t").into_bytes()),
+        19 => Some(format!("\x1b[9;{rows};{cols}t").into_bytes()),
+        _ => None,
+    }
+}
+
+fn apply_xtwinops_title_stack(term: &mut crate::TerminalCore, op: u16) {
+    match op {
+        // XTPUSHTITLE — save current title; second param selects what to save:
+        //   0 = icon+window title, 1 = icon, 2 = window title. We treat all as window title.
+        22 => term.meta.title_stack.push(term.meta.title.clone()),
+        // XTPOPTITLE — restore title from stack; same sub-param semantics as above.
+        23 => {
+            if let Some(saved) = term.meta.title_stack.pop() {
+                term.meta.title = saved;
+                term.meta.title_dirty = true;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// CUP - Cursor Position (CSI H)
@@ -157,91 +190,49 @@ fn csi_dsr(term: &mut crate::TerminalCore, params: &vte::Params) {
     }
 }
 
-/// VPA - Vertical Position Absolute (CSI d)
-///
-/// Move cursor to the specified row (1-indexed).
-/// Column position is unchanged.
-/// When DECOM (origin mode) is active, row is relative to scroll region top.
-#[inline]
-fn csi_vpa(term: &mut crate::TerminalCore, params: &vte::Params) {
-    // VPA takes a 1-indexed row parameter
-    let row = params
+fn csi_param_zero_based(params: &vte::Params, index: usize) -> usize {
+    params
         .iter()
-        .next()
+        .nth(index)
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1) as usize; // Convert to 0-indexed
+        .saturating_sub(1) as usize
+}
 
-    let target_row = if term.dec_modes.origin_mode {
-        // In origin mode, row is relative to scroll region top
-        let scroll_top = term.screen.get_scroll_region().top;
-        let scroll_bottom = term.screen.get_scroll_region().bottom;
-        (scroll_top + row).min(scroll_bottom.saturating_sub(1))
+fn csi_origin_row(term: &crate::TerminalCore, row: usize) -> usize {
+    if term.dec_modes.origin_mode {
+        let scroll_region = term.screen.get_scroll_region();
+        (scroll_region.top + row).min(scroll_region.bottom.saturating_sub(1))
     } else {
         row
-    };
+    }
+}
+
+fn csi_vpa(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let row = csi_param_zero_based(params, 0);
+    let target_row = csi_origin_row(term, row);
 
     // Move cursor to absolute row, keep current column
     term.screen
         .move_cursor(target_row, term.screen.cursor().col);
 }
 
-/// CHA - Character Position Absolute (CSI G)
-///
-/// Move cursor to the specified column (1-indexed).
-/// Row position is unchanged.
-#[inline]
 fn csi_cha(term: &mut crate::TerminalCore, params: &vte::Params) {
-    // CHA takes a 1-indexed column parameter
-    let col = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1); // Convert to 0-indexed
+    let col = csi_param_zero_based(params, 0);
 
     // Move cursor to absolute column, keep current row
     term.screen
         .move_cursor(term.screen.cursor().row, col as usize);
 }
 
-/// HVP - Horizontal and Vertical Position (CSI f)
-///
-/// Move cursor to the specified row and column (1-indexed).
-/// This is functionally identical to CUP (CSI H).
-/// When DECOM (origin mode) is active, coordinates are relative to scroll region.
-#[inline]
 fn csi_hvp(term: &mut crate::TerminalCore, params: &vte::Params) {
-    // HVP takes row, column parameters (both 1-indexed)
-    let row = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1) as usize; // Convert to 0-indexed
-    let col = params
-        .iter()
-        .nth(1)
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1) as usize; // Convert to 0-indexed
-
-    let (target_row, target_col) = if term.dec_modes.origin_mode {
-        // In origin mode, coordinates are relative to scroll region
-        let scroll_top = term.screen.get_scroll_region().top;
-        let scroll_bottom = term.screen.get_scroll_region().bottom;
-        let abs_row = (scroll_top + row).min(scroll_bottom.saturating_sub(1));
-        (abs_row, col)
-    } else {
-        (row, col)
-    };
+    let row = csi_param_zero_based(params, 0);
+    let col = csi_param_zero_based(params, 1);
+    let target_row = csi_origin_row(term, row);
 
     // Move cursor to absolute position
-    term.screen.move_cursor(target_row, target_col);
+    term.screen.move_cursor(target_row, col);
 }
 
 /// DECSCUSR - Set Cursor Style (CSI Ps SP q)
@@ -286,36 +277,14 @@ pub fn handle_decscusr(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// - `Ps` 23 → XTPOPTITLE: pop window title from stack and apply it
 #[inline]
 pub fn handle_xtwinops(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let op = params
-        .iter()
-        .next()
-        .and_then(|p| p.first().copied())
-        .unwrap_or(0);
+    let op = xtwinops_param1(params);
     let rows = term.screen.rows();
     let cols = term.screen.cols();
-    match op {
-        14 => term.meta.pending_responses.push(b"\x1b[4;0;0t".to_vec()),
-        18 => term
-            .meta
-            .pending_responses
-            .push(format!("\x1b[8;{rows};{cols}t").into_bytes()),
-        19 => term
-            .meta
-            .pending_responses
-            .push(format!("\x1b[9;{rows};{cols}t").into_bytes()),
-        // XTPUSHTITLE — save current title; second param selects what to save:
-        //   0 = icon+window title, 1 = icon, 2 = window title. We treat all as window title.
-        22 => term.meta.title_stack.push(term.meta.title.clone()),
-        // XTPOPTITLE — restore title from stack; same sub-param semantics as above.
-        23 => {
-            if let Some(saved) = term.meta.title_stack.pop() {
-                term.meta.title = saved;
-                term.meta.title_dirty = true;
-            }
-        }
-        // All other XTWINOPS: intentionally ignored (see fn docs).
-        _ => {}
+    if let Some(response) = build_xtwinops_size_report(op, rows.into(), cols.into()) {
+        term.meta.pending_responses.push(response);
+        return;
     }
+    apply_xtwinops_title_stack(term, op);
 }
 
 /// DECREQTPARM — Request Terminal Parameters (CSI Ps x).

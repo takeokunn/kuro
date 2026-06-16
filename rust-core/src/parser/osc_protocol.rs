@@ -1,7 +1,9 @@
 //! Protocol-specific OSC handlers: OSC 52 (clipboard), OSC 104 (palette reset),
 //! OSC 133 (prompt marks), OSC 10/11/12 (default colors), OSC 1337 (iTerm2 images).
 
+use super::limits::NOTIFICATION_MAX_BYTES;
 use crate::TerminalCore;
+use crate::types::osc::{DefaultColorSlot, Notification};
 
 /// Decode a `params` slot as UTF-8, returning `""` on failure.
 ///
@@ -72,6 +74,15 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
     }
 }
 
+fn default_color_slot(osc_num: &[u8]) -> Option<DefaultColorSlot> {
+    match osc_num {
+        b"10" => Some(DefaultColorSlot::Foreground),
+        b"11" => Some(DefaultColorSlot::Background),
+        b"12" => Some(DefaultColorSlot::Cursor),
+        _ => None,
+    }
+}
+
 /// Handle OSC 51 — Emacs eval command request.
 /// Stores the command string for Elisp-side whitelist filtering.
 pub(crate) fn handle_osc_51(core: &mut TerminalCore, params: &[&[u8]]) {
@@ -111,8 +122,25 @@ pub(crate) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
     }
 }
 
-/// Maximum byte length for a notification title or body (DoS prevention).
-const NOTIFICATION_MAX_BYTES: usize = 4096;
+fn build_notification(title_raw: Option<&[u8]>, body_raw: &[u8]) -> Option<Notification> {
+    if body_raw.is_empty() || body_raw.len() > NOTIFICATION_MAX_BYTES {
+        return None;
+    }
+    if let Some(title_raw) = title_raw {
+        if title_raw.len() > NOTIFICATION_MAX_BYTES {
+            return None;
+        }
+        Some(Notification {
+            title: (!title_raw.is_empty()).then(|| String::from_utf8_lossy(title_raw).into_owned()),
+            body: String::from_utf8_lossy(body_raw).into_owned(),
+        })
+    } else {
+        Some(Notification {
+            title: None,
+            body: String::from_utf8_lossy(body_raw).into_owned(),
+        })
+    }
+}
 
 /// Handle OSC 9 — desktop notification, iTerm2 form (`OSC 9 ; <body> ST`).
 ///
@@ -124,13 +152,8 @@ pub(crate) fn handle_osc_9(core: &mut TerminalCore, params: &[&[u8]]) {
         return;
     }
     if let Some(body_raw) = params.get(1) {
-        if !body_raw.is_empty() && body_raw.len() <= NOTIFICATION_MAX_BYTES {
-            core.osc_data
-                .notifications
-                .push(crate::types::osc::Notification {
-                    title: None,
-                    body: String::from_utf8_lossy(body_raw).into_owned(),
-                });
+        if let Some(notification) = build_notification(None, body_raw) {
+            core.osc_data.notifications.push(notification);
         }
     }
 }
@@ -147,80 +170,40 @@ pub(crate) fn handle_osc_777(core: &mut TerminalCore, params: &[&[u8]]) {
     }
     let title_raw: &[u8] = params.get(2).copied().unwrap_or(b"");
     let body_raw: &[u8] = params.get(3).copied().unwrap_or(b"");
-    if body_raw.is_empty()
-        || body_raw.len() > NOTIFICATION_MAX_BYTES
-        || title_raw.len() > NOTIFICATION_MAX_BYTES
-    {
-        return;
+    if let Some(notification) = build_notification(Some(title_raw), body_raw) {
+        core.osc_data.notifications.push(notification);
     }
-    let title =
-        (!title_raw.is_empty()).then(|| String::from_utf8_lossy(title_raw).into_owned());
-    core.osc_data
-        .notifications
-        .push(crate::types::osc::Notification {
-            title,
-            body: String::from_utf8_lossy(body_raw).into_owned(),
-        });
 }
 
 /// Handle OSC 104 — Reset color palette.
 pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
     if let Some(idx_raw) = params.get(1) {
         if idx_raw.is_empty() {
-            // Reset all palette entries
-            for entry in &mut core.osc_data.palette {
-                *entry = None;
-            }
+            core.osc_data.clear_palette();
         } else {
             let idx_str = osc_param_str!(params, 1);
             if let Ok(idx) = idx_str.parse::<usize>() {
                 if idx < 256 {
-                    core.osc_data.palette[idx] = None;
+                    core.osc_data.clear_palette_entry(idx);
                 }
             }
         }
     } else {
-        // No argument: reset all
-        for entry in &mut core.osc_data.palette {
-            *entry = None;
-        }
+        core.osc_data.clear_palette();
     }
     core.osc_data.palette_dirty = true;
 }
 
-/// Handle OSC 133 — Shell integration prompt marks.
-///
-/// See: <https://gitlab.freedesktop.org/Per_Bothner/specifications/-/blob/master/proposals/semantic-prompts.md>
 pub(crate) fn handle_osc_133(core: &mut TerminalCore, params: &[&[u8]]) {
-    if let Some(mark_raw) = params.get(1) {
-        let mark = match mark_raw.first() {
-            Some(b'A') => Some(crate::types::osc::PromptMark::PromptStart),
-            Some(b'B') => Some(crate::types::osc::PromptMark::PromptEnd),
-            Some(b'C') => Some(crate::types::osc::PromptMark::CommandStart),
-            Some(b'D') => Some(crate::types::osc::PromptMark::CommandEnd),
-            _ => None,
-        };
-        if let Some(m) = mark {
-            // Cap pending prompt_marks to prevent a runaway shell from
-            // OOM-ing the host Emacs. Excess marks are silently dropped.
-            if core.osc_data.prompt_marks.len() >= crate::parser::limits::MAX_PENDING_PROMPT_MARKS {
-                return;
-            }
-            let extras = parse_osc133_extras(params, &m);
-            let cursor = *core.screen.cursor();
-            core.osc_data
-                .prompt_marks
-                .push(crate::types::osc::PromptMarkEvent {
-                    mark: m,
-                    row: cursor.row,
-                    col: cursor.col,
-                    exit_code: extras.exit_code,
-                    aid: extras.aid,
-                    duration_ms: extras.duration_ms,
-                    err_path: extras.err_path,
-                });
-        }
-    }
+    let Some(mark_raw) = params.get(1) else {
+        return;
+    };
+
+    let Some(mark) = crate::types::osc::PromptMark::from_osc_133_mark(*mark_raw.first().unwrap_or(&0)) else {
+        return;
+    };
+
+    handle_osc_133_mark(core, mark, params);
 }
 
 /// Result of parsing OSC 133 extras (params beyond the mark letter).
@@ -253,61 +236,130 @@ fn is_printable_aid(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| (0x21..=0x7E).contains(&b))
 }
 
-/// Hard cap on `duration=` value (one year in ms). Rejects ridiculous values
-/// from a shell supplying an attacker-controlled or buggy duration. Clamps
-/// to `None` rather than saturating so the consumer sees "not provided"
-/// rather than a misleading huge integer.
-const MAX_PROMPT_DURATION_MS: u64 = 365 * 24 * 3600 * 1000;
+#[inline]
+fn queue_prompt_mark_event(core: &mut TerminalCore, event: crate::types::osc::PromptMarkEvent) {
+    core.osc_data
+        .push_prompt_mark(event, crate::parser::limits::MAX_PENDING_PROMPT_MARKS);
+}
 
-/// Extras (`aid=`, `duration=`, `err=`) extension spec:
-/// <https://iterm2.com/documentation-shell-integration.html> and
-/// <https://ghostty.org/docs/vt/osc/osc-133>.
+#[inline]
+fn handle_osc_133_mark(
+    core: &mut TerminalCore,
+    mark: crate::types::osc::PromptMark,
+    params: &[&[u8]],
+) {
+    let extras = parse_osc133_extras(params, &mark);
+    let event = build_prompt_mark_event(core, mark, extras);
+    queue_prompt_mark_event(core, event);
+}
+
+#[inline]
+fn parse_osc133_positional_exit_code(
+    mark: &crate::types::osc::PromptMark,
+    param_index: usize,
+    raw: &str,
+) -> Option<i32> {
+    if matches!(mark, crate::types::osc::PromptMark::CommandEnd)
+        && param_index == 2
+        && !raw.contains('=')
+    {
+        return raw.parse().ok();
+    }
+
+    None
+}
+
+#[inline]
+fn parse_osc133_extra_item(
+    extras: &mut Osc133Extras,
+    mark: &crate::types::osc::PromptMark,
+    index: usize,
+    raw: &[u8],
+) {
+    let s = match std::str::from_utf8(raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    if let Some(exit_code) = parse_osc133_positional_exit_code(mark, index, s) {
+        extras.exit_code = Some(exit_code);
+        return;
+    }
+
+    if let Some((key, value)) = s.split_once('=') {
+        apply_osc133_extra_pair(extras, key, value);
+    }
+}
+
+#[inline]
+fn apply_osc133_aid(extras: &mut Osc133Extras, value: &str) {
+    use super::limits::OSC133_MAX_AID_BYTES;
+
+    // Silent drop on oversize OR non-printable-ASCII (`[!-~]+`).
+    // Empty `aid=` round-trips as Some("") so consumers can distinguish
+    // "absent" from "explicitly empty"; only non-empty values must satisfy
+    // the printable predicate.
+    if value.len() <= OSC133_MAX_AID_BYTES && (value.is_empty() || is_printable_aid(value)) {
+        extras.aid = Some(value.to_string());
+    }
+}
+
+#[inline]
+fn apply_osc133_duration(extras: &mut Osc133Extras, value: &str) {
+    use super::limits::MAX_PROMPT_DURATION_MS;
+
+    extras.duration_ms = value
+        .parse::<u64>()
+        .ok()
+        .filter(|ms| *ms <= MAX_PROMPT_DURATION_MS);
+}
+
+#[inline]
+fn apply_osc133_err_path(extras: &mut Osc133Extras, value: &str) {
+    use super::limits::OSC133_MAX_ERR_PATH_BYTES;
+
+    // Silent drop on oversize or control-char injection.
+    // `err_path` is UTF-8-tolerant (paths may contain non-ASCII).
+    if value.len() <= OSC133_MAX_ERR_PATH_BYTES && !has_control_bytes(value) {
+        extras.err_path = Some(value.to_string());
+    }
+}
+
+#[inline]
+fn apply_osc133_extra_pair(extras: &mut Osc133Extras, key: &str, value: &str) {
+    match key {
+        "aid" => apply_osc133_aid(extras, value),
+        "duration" => apply_osc133_duration(extras, value),
+        "err" => apply_osc133_err_path(extras, value),
+        _ => {}
+    }
+}
+
 #[inline]
 fn parse_osc133_extras(params: &[&[u8]], mark: &crate::types::osc::PromptMark) -> Osc133Extras {
-    use super::limits::{OSC133_MAX_AID_BYTES, OSC133_MAX_ERR_PATH_BYTES};
-
     let mut extras = Osc133Extras::default();
     // params[0] = "133", params[1] = mark letter; params[2..] are extras.
     for (i, raw) in params.iter().enumerate().skip(2) {
-        let s = match std::str::from_utf8(raw) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        // First extra on D (CommandEnd) mark is the exit code (positional, no '=').
-        if matches!(mark, crate::types::osc::PromptMark::CommandEnd) && i == 2 && !s.contains('=') {
-            extras.exit_code = s.parse().ok();
-            continue;
-        }
-        // kv pair.
-        if let Some((k, v)) = s.split_once('=') {
-            match k {
-                "aid" => {
-                    // Silent drop on oversize OR non-printable-ASCII (`[!-~]+`).
-                    // Empty `aid=` round-trips as Some("") so consumers can
-                    // distinguish "absent" from "explicitly empty"; only
-                    // non-empty values must satisfy the printable predicate.
-                    if v.len() <= OSC133_MAX_AID_BYTES && (v.is_empty() || is_printable_aid(v)) {
-                        extras.aid = Some(v.to_string());
-                    }
-                }
-                "duration" => {
-                    extras.duration_ms = v
-                        .parse::<u64>()
-                        .ok()
-                        .filter(|ms| *ms <= MAX_PROMPT_DURATION_MS);
-                }
-                "err" => {
-                    // Silent drop on oversize or control-char injection.
-                    // `err_path` is UTF-8-tolerant (paths may contain non-ASCII).
-                    if v.len() <= OSC133_MAX_ERR_PATH_BYTES && !has_control_bytes(v) {
-                        extras.err_path = Some(v.to_string());
-                    }
-                }
-                _ => {} // unknown, ignore
-            }
-        }
+        parse_osc133_extra_item(&mut extras, mark, i, raw);
     }
     extras
+}
+
+fn build_prompt_mark_event(
+    core: &TerminalCore,
+    mark: crate::types::osc::PromptMark,
+    extras: Osc133Extras,
+) -> crate::types::osc::PromptMarkEvent {
+    let cursor = *core.screen.cursor();
+    crate::types::osc::PromptMarkEvent::new(
+        mark,
+        cursor.row,
+        cursor.col,
+        extras.exit_code,
+        extras.aid,
+        extras.duration_ms,
+        extras.err_path,
+    )
 }
 
 /// Handle OSC 10/11/12 — Set/query default fg/bg/cursor color.
@@ -315,37 +367,49 @@ pub(crate) fn handle_osc_default_colors(core: &mut TerminalCore, params: &[&[u8]
     if let Some(spec_raw) = params.get(1) {
         let osc_num = params[0];
         if *spec_raw == b"?" {
-            // Query: respond with current color
-            let (color_opt, num_str) = match osc_num {
-                b"10" => (&core.osc_data.default_fg, "10"),
-                b"11" => (&core.osc_data.default_bg, "11"),
-                b"12" => (&core.osc_data.cursor_color, "12"),
-                _ => return,
-            };
-            let rgb = match color_opt {
-                Some(crate::types::Color::Rgb(r, g, b)) => [*r, *g, *b],
-                _ => [128, 128, 128], // default grey if unset
-            };
-            let resp = format!("\x1b]{};{}\x07", num_str, encode_color_spec(rgb));
-            core.meta.pending_responses.push(resp.into_bytes());
+            handle_osc_default_color_query(core, osc_num);
         } else {
             let spec = osc_param_str!(params, 1);
-            if let Some([r, g, b]) = parse_color_spec(spec) {
-                let color = Some(crate::types::Color::Rgb(r, g, b));
-                match osc_num {
-                    b"10" => core.osc_data.default_fg = color,
-                    b"11" => core.osc_data.default_bg = color,
-                    b"12" => core.osc_data.cursor_color = color,
-                    _ => {}
-                }
-                core.osc_data.default_colors_dirty = true;
-            }
+            handle_osc_default_color_set(core, osc_num, spec);
         }
     }
 }
 
+fn handle_osc_default_color_query(core: &mut TerminalCore, osc_num: &[u8]) {
+    let Some(slot) = default_color_slot(osc_num) else {
+        return;
+    };
+    emit_default_color_query(core, osc_num, slot);
+}
+
+fn handle_osc_default_color_set(core: &mut TerminalCore, osc_num: &[u8], spec: &str) {
+    apply_default_color_update(core, osc_num, spec);
+}
+
+fn emit_default_color_query(core: &mut TerminalCore, osc_num: &[u8], slot: DefaultColorSlot) {
+    let rgb = core.osc_data.default_color_rgb(slot);
+    let resp = format!("\x1b]{};{}\x07", osc_num.escape_ascii(), encode_color_spec(rgb));
+    core.meta.pending_responses.push(resp.into_bytes());
+}
+
+fn apply_default_color_update(core: &mut TerminalCore, osc_num: &[u8], spec: &str) {
+    if let Some([r, g, b]) = parse_color_spec(spec) {
+        let color = Some(crate::types::Color::Rgb(r, g, b));
+        if let Some(slot) = default_color_slot(osc_num) {
+            core.osc_data.set_default_color(slot, color);
+        } else {
+            core.osc_data.default_colors_dirty = true;
+        }
+    }
+}
+
+#[path = "osc_iterm2_impls.rs"]
+mod iterm2;
+
+#[cfg(test)]
+pub(crate) use iterm2::{decode_iterm2_image, parse_iterm2_params};
+pub(crate) use iterm2::handle_osc_1337;
+
 #[cfg(test)]
 #[path = "tests/osc_protocol.rs"]
 mod tests;
-
-include!("osc_iterm2_impls.rs");

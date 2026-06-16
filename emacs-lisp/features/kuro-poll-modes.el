@@ -99,8 +99,8 @@ See `kuro--mode-poll-cadence' and `kuro--osc-rare-poll-cadence'.")
 ;;; Tier-2: rare OSC events
 
 (defun kuro--poll-osc-events ()
-  "Poll rare OSC events: palette (OSC 4), default colors (OSC 10/11/12),
-desktop notifications (OSC 9 / OSC 777).
+  "Poll rare OSC events.
+This includes palette, default-color, and desktop-notification events.
 Called every `kuro--osc-rare-poll-cadence' frames.  At 30 fps this fires
 approximately once per second.  Changes occur at user-action timescale
 \(theme switch, startup), so a ~1 second lag is invisible."
@@ -172,7 +172,8 @@ Functions on this hook are called from the render-cycle timer context.
 Avoid blocking operations; use `run-with-timer 0' for deferred work.")
 
 (defun kuro--run-command-complete-hook (marks)
-  "Fire `kuro-on-command-complete-functions' for each command-end mark in MARKS."
+  "Run `kuro-on-command-complete-functions' for command-end entries.
+MARKS is the OSC 133 marker list to inspect."
   (when kuro-on-command-complete-functions
     (let ((visible (and (get-buffer-window (current-buffer) t) t)))
       (dolist (mark marks)
@@ -187,7 +188,7 @@ Avoid blocking operations; use `run-with-timer 0' for deferred work.")
 
 (defun kuro--poll-prompt-mark-updates ()
   "Merge pending OSC 133 prompt mark into `kuro--prompt-positions'."
-  (when-let ((marks (kuro--poll-prompt-marks)))
+  (when-let* ((marks (kuro--poll-prompt-marks)))
     (kuro--update-prompt-status marks)
     (kuro--run-command-complete-hook marks)
     (setq kuro--prompt-positions
@@ -250,11 +251,11 @@ Drains the action queue from `kuro--poll-clipboard-actions' and dispatches:
 `kuro--get-terminal-modes' acquires one Mutex instead of seven separate
 acquisitions.  Must remain first in `kuro--tier1-poll-fns' so it runs before
 any poll that reads mode variables populated by `kuro--apply-terminal-modes'."
-  (when-let ((modes (kuro--get-terminal-modes)))
+  (when-let* ((modes (kuro--get-terminal-modes)))
     (kuro--apply-terminal-modes modes)))
 
 (defconst kuro--tier1-poll-fns
-  '(kuro--poll-terminal-mode-state  ; consolidated FFI — must stay first
+  '(kuro--poll-terminal-mode-state  ; consolidated FFI - must stay first
     kuro--poll-cwd
     kuro--handle-clipboard-actions
     kuro--poll-prompt-mark-updates
@@ -262,8 +263,9 @@ any poll that reads mode variables populated by `kuro--apply-terminal-modes'."
     kuro--poll-image-events
     kuro--apply-hyperlink-ranges
     kuro--check-process-exit)
-  "Tier-1 poll functions called in order every `kuro--mode-poll-cadence' frames.
-Add new shell-interaction-timescale polls here; the dispatch loop needs no changes.")
+  "Tier-1 poll functions called at the configured poll cadence.
+Add new shell-interaction-timescale polls here; the dispatch loop needs
+no changes.")
 
 ;;; Tier-1 consolidated dispatcher
 

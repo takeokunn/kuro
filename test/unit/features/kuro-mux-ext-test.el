@@ -6,25 +6,14 @@
 (require 'kuro-config)
 (require 'kuro-mux)
 (require 'kuro-mux-ext)
+(require 'kuro-mux-ext-test-support)
 
 (unless (fboundp 'kuro-mode)
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
-(defmacro kuro-mux-ext-test--with-buf (&rest body)
-  "Run BODY in a fresh kuro-mode buffer, cleaned up on exit."
-  `(let ((buf (generate-new-buffer " *kuro-ext-test*")))
-     (unwind-protect
-         (with-current-buffer buf
-           (kuro-mode)
-           ,@body)
-       (when (buffer-live-p buf) (kill-buffer buf)))))
-
+(kuro-mux-ext-test--deftest-interactive-commands)
 
 ;;; Group 55 — kuro-mux-break-pane
-
-(ert-deftest kuro-mux-ext-break-pane-is-interactive ()
-  "`kuro-mux-break-pane' is an interactive command."
-  (should (commandp #'kuro-mux-break-pane)))
 
 (ert-deftest kuro-mux-ext-break-pane-creates-frame ()
   "`kuro-mux-break-pane' calls `make-frame' and `switch-to-buffer'."
@@ -51,10 +40,6 @@
 
 ;;; Group 56 — kuro-mux-join-pane
 
-(ert-deftest kuro-mux-ext-join-pane-is-interactive ()
-  "`kuro-mux-join-pane' is an interactive command."
-  (should (commandp #'kuro-mux-join-pane)))
-
 (ert-deftest kuro-mux-ext-join-pane-errors-on-dead-buffer ()
   "`kuro-mux-join-pane' signals user-error when the named buffer is not live."
   (should-error (kuro-mux-join-pane " *no-such-buf-xyz-ext*") :type 'user-error))
@@ -78,10 +63,6 @@
 
 
 ;;; Group 57 — kuro-mux-rename + kuro-mux--name-lighter
-
-(ert-deftest kuro-mux-ext-rename-is-interactive ()
-  "`kuro-mux-rename' is an interactive command."
-  (should (commandp #'kuro-mux-rename)))
 
 (ert-deftest kuro-mux-ext-rename-sets-name ()
   "`kuro-mux-rename' sets `kuro-mux--name' to the provided name."
@@ -115,10 +96,6 @@
 
 
 ;;; Group 58 — kuro-mux-send-to-session
-
-(ert-deftest kuro-mux-ext-send-to-session-is-interactive ()
-  "`kuro-mux-send-to-session' is an interactive command."
-  (should (commandp #'kuro-mux-send-to-session)))
 
 (ert-deftest kuro-mux-ext-send-to-session-sends-to-target ()
   "`kuro-mux-send-to-session' calls `kuro--send-paste-or-raw' in the target buffer."
@@ -185,29 +162,7 @@
 
 ;;; Group 60 — kuro-mux--auto-save-on-exit
 
-(ert-deftest kuro-mux-ext-auto-save-on-exit-noop-when-disabled ()
-  "`kuro-mux--auto-save-on-exit' does nothing when `kuro-mux-auto-save-layout' is nil."
-  (let ((kuro-mux-auto-save-layout nil) saved)
-    (cl-letf (((symbol-function 'kuro-mux--live-sessions) (lambda () '(x)))
-              ((symbol-function 'kuro-mux-save-layout) (lambda () (setq saved t))))
-      (kuro-mux--auto-save-on-exit)
-      (should-not saved))))
-
-(ert-deftest kuro-mux-ext-auto-save-on-exit-noop-when-no-sessions ()
-  "`kuro-mux--auto-save-on-exit' does nothing when there are no live sessions."
-  (let ((kuro-mux-auto-save-layout t) saved)
-    (cl-letf (((symbol-function 'kuro-mux--live-sessions) (lambda () nil))
-              ((symbol-function 'kuro-mux-save-layout) (lambda () (setq saved t))))
-      (kuro-mux--auto-save-on-exit)
-      (should-not saved))))
-
-(ert-deftest kuro-mux-ext-auto-save-on-exit-saves-when-enabled-and-sessions ()
-  "`kuro-mux--auto-save-on-exit' calls `kuro-mux-save-layout' when enabled + sessions present."
-  (let ((kuro-mux-auto-save-layout t) saved)
-    (cl-letf (((symbol-function 'kuro-mux--live-sessions) (lambda () '(x)))
-              ((symbol-function 'kuro-mux-save-layout) (lambda () (setq saved t))))
-      (kuro-mux--auto-save-on-exit)
-      (should saved))))
+(kuro-mux-ext-test--deftest-auto-save-on-exit)
 
 
 ;;; Group 61 — kuro-mux--activity-watcher
@@ -249,10 +204,6 @@
 
 ;;; Group 62 — kuro-mux-monitor-activity-toggle
 
-(ert-deftest kuro-mux-ext-monitor-activity-toggle-is-interactive ()
-  "`kuro-mux-monitor-activity-toggle' is an interactive command."
-  (should (commandp #'kuro-mux-monitor-activity-toggle)))
-
 (ert-deftest kuro-mux-ext-monitor-activity-toggle-on ()
   "`kuro-mux-monitor-activity-toggle' enables monitoring when currently off."
   (kuro-mux-ext-test--with-buf
@@ -275,10 +226,6 @@
 
 
 ;;; Group 63 — kuro-mux-monitor-silence
-
-(ert-deftest kuro-mux-ext-monitor-silence-is-interactive ()
-  "`kuro-mux-monitor-silence' is an interactive command."
-  (should (commandp #'kuro-mux-monitor-silence)))
 
 (ert-deftest kuro-mux-ext-monitor-silence-enables ()
   "`kuro-mux-monitor-silence' sets seconds and adds hook when SECONDS > 0."
@@ -306,10 +253,6 @@
 
 
 ;;; Group 64 — kuro-mux--pipe-pane-watcher + kuro-mux-pipe-pane
-
-(ert-deftest kuro-mux-ext-pipe-pane-is-interactive ()
-  "`kuro-mux-pipe-pane' is an interactive command."
-  (should (commandp #'kuro-mux-pipe-pane)))
 
 (ert-deftest kuro-mux-ext-pipe-pane-watcher-noop-when-no-file ()
   "`kuro-mux--pipe-pane-watcher' is a no-op when `kuro-mux--pipe-pane-file' is nil."
@@ -380,50 +323,7 @@
 
 ;;; Group 66 — kuro-mux--tab-bar-update active path
 
-(ert-deftest kuro-mux-ext-tab-bar-update-creates-tab-for-new-session ()
-  "`kuro-mux--tab-bar-update' calls `tab-bar-new-tab' when a session has no existing tab."
-  (let ((new-tab-created nil)
-        (real-fboundp (symbol-function 'fboundp)))
-    (with-temp-buffer
-      (let ((sess-buf (current-buffer)))
-        (cl-letf (((symbol-function 'fboundp)
-                   (lambda (sym)
-                     (if (memq sym '(tab-bar-tabs tab-bar-select-tab-by-name tab-bar-rename-tab))
-                         t
-                       (funcall real-fboundp sym))))
-                  ((symbol-function 'tab-bar-mode) #'ignore)
-                  ((symbol-function 'kuro-mux--live-sessions) (lambda () (list sess-buf)))
-                  ((symbol-function 'kuro-mux--session-display-name)
-                   (lambda (_) "test-session"))
-                  ((symbol-function 'tab-bar-tabs) (lambda () '()))
-                  ((symbol-function 'tab-bar-new-tab)
-                   (lambda () (setq new-tab-created t)))
-                  ((symbol-function 'switch-to-buffer) #'ignore)
-                  ((symbol-function 'tab-bar-rename-tab) #'ignore))
-          (kuro-mux--tab-bar-update)
-          (should new-tab-created))))))
-
-(ert-deftest kuro-mux-ext-tab-bar-update-skips-existing-tab ()
-  "`kuro-mux--tab-bar-update' does not call `tab-bar-new-tab' when a matching tab already exists."
-  (let ((new-tab-created nil)
-        (real-fboundp (symbol-function 'fboundp)))
-    (with-temp-buffer
-      (let ((sess-buf (current-buffer)))
-        (cl-letf (((symbol-function 'fboundp)
-                   (lambda (sym)
-                     (if (memq sym '(tab-bar-tabs tab-bar-select-tab-by-name))
-                         t
-                       (funcall real-fboundp sym))))
-                  ((symbol-function 'tab-bar-mode) #'ignore)
-                  ((symbol-function 'kuro-mux--live-sessions) (lambda () (list sess-buf)))
-                  ((symbol-function 'kuro-mux--session-display-name)
-                   (lambda (_) "test-session"))
-                  ((symbol-function 'tab-bar-tabs)
-                   (lambda () (list (list (cons 'name "test-session")))))
-                  ((symbol-function 'tab-bar-new-tab)
-                   (lambda () (setq new-tab-created t))))
-          (kuro-mux--tab-bar-update)
-          (should-not new-tab-created))))))
+(kuro-mux-ext-test--deftest-tab-bar-updates)
 
 (provide 'kuro-mux-ext-test)
 ;;; kuro-mux-ext-test.el ends here

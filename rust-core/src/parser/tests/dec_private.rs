@@ -300,4 +300,11 @@ macro_rules! test_dec_mode_via_advance {
     };
 }
 
-include!("dec_private_ext.rs");
+#[path = "dec_private/ext.rs"]
+mod ext;
+
+#[path = "dec_private/kitty_keyboard.rs"]
+mod kitty_keyboard;
+
+#[path = "dec_private/edge.rs"]
+mod edge;

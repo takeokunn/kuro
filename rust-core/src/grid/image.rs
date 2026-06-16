@@ -216,9 +216,8 @@ impl GraphicsStore {
 
     /// Delete placements matching both image ID and placement ID (Kitty `a=d,p=`)
     pub fn delete_by_placement(&mut self, image_id: u32, placement_id: u32) {
-        self.placements.retain(|p| {
-            !(p.image_id == image_id && p.placement_id == Some(placement_id))
-        });
+        self.placements
+            .retain(|p| !(p.image_id == image_id && p.placement_id == Some(placement_id)));
     }
 
     /// Delete all placements whose top-left row equals `row` (Kitty `a=d,d=y`)
@@ -233,4 +232,5 @@ impl GraphicsStore {
 }
 
 #[cfg(test)]
-include!("image_tests.rs");
+#[path = "image/tests.rs"]
+mod tests;

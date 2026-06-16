@@ -11,38 +11,7 @@
 
 ;;; Group 13: EA-Ambiguous char-width — kuro--setup-char-width-table spot checks
 
-(defconst kuro-char-width-test--setup-width-table
-  '((kuro-faces-test--char-width-table-box-drawing-start    #x2500 1)
-    (kuro-faces-test--char-width-table-box-drawing-end      #x257F 1)
-    (kuro-faces-test--char-width-table-block-elements-start #x2580 1)
-    (kuro-faces-test--char-width-table-block-elements-end   #x259F 1)
-    (kuro-faces-test--char-width-table-arrows-start         #x2190 1)
-    (kuro-faces-test--char-width-table-arrows-end           #x21FF 1)
-    (kuro-faces-test--char-width-table-math-operators       #x2200 1)
-    (kuro-faces-test--char-width-table-geometric-shapes     #x25A0 1)
-    (kuro-faces-test--char-width-table-braille-start        #x2800 1)
-    (kuro-faces-test--char-width-table-braille-end          #x28FF 1))
-  "Table of (test-name codepoint expected-width) for char-width spot checks after
-`kuro--setup-char-width-table'.  Add new EA-Ambiguous boundary codepoints here.")
-
-(defmacro kuro-char-width-test--def-setup-width (test-name char expected)
-  "Define a test asserting CHAR has char-width EXPECTED after `kuro--setup-char-width-table'."
-  `(ert-deftest ,test-name ()
-     ,(format "U+%04X has char-width %d after kuro--setup-char-width-table." char expected)
-     (with-temp-buffer
-       (kuro--setup-char-width-table)
-       (should (= ,expected (char-width ,char))))))
-
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-box-drawing-start    #x2500 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-box-drawing-end      #x257F 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-block-elements-start #x2580 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-block-elements-end   #x259F 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-arrows-start         #x2190 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-arrows-end           #x21FF 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-math-operators       #x2200 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-geometric-shapes     #x25A0 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-braille-start        #x2800 1)
-(kuro-char-width-test--def-setup-width kuro-faces-test--char-width-table-braille-end          #x28FF 1)
+(kuro-char-width-test--deftest-setup-widths)
 
 (ert-deftest kuro-faces-test--char-width-table-misc-symbols ()
   "U+2600 (BLACK SUN WITH RAYS) is width 1 after setup.
@@ -129,38 +98,7 @@ kuro--char-width-1-ranges (EA-Ambiguous); the width-1 pass must win."
 
 ;;; Group 14: kuro--apply-char-width-overrides
 
-(defconst kuro-char-width-test--override-range-table
-  '((kuro-faces-test--apply-overrides-arrows           "Arrows"           (#x2190 . #x21FF))
-    (kuro-faces-test--apply-overrides-math-operators   "Math Operators"   (#x2200 . #x22FF))
-    (kuro-faces-test--apply-overrides-misc-technical   "Misc Technical"   (#x2300 . #x23FF))
-    (kuro-faces-test--apply-overrides-box-drawing      "Box Drawings"     (#x2500 . #x257F))
-    (kuro-faces-test--apply-overrides-block-elements   "Block Elements"   (#x2580 . #x259F))
-    (kuro-faces-test--apply-overrides-geometric-shapes "Geometric Shapes" (#x25A0 . #x25FF))
-    (kuro-faces-test--apply-overrides-misc-symbols     "Misc Symbols"     (#x2600 . #x26FF))
-    (kuro-faces-test--apply-overrides-dingbats         "Dingbats"         (#x2700 . #x27BF))
-    (kuro-faces-test--apply-overrides-braille          "Braille"          (#x2800 . #x28FF)))
-  "Table of (test-name description range) for `kuro--apply-char-width-overrides'.
-Mirrors the 9 entries in `kuro--ea-range-probe-table'.  All ranges must map to width 1.")
-
-(defmacro kuro-char-width-test--def-override-range (test-name desc range)
-  "Define a test that `kuro--apply-char-width-overrides' sets RANGE to width 1."
-  `(ert-deftest ,test-name ()
-     ,(format "kuro--apply-char-width-overrides sets %s to width 1." desc)
-     (with-temp-buffer
-       (make-local-variable 'char-width-table)
-       (setq char-width-table (copy-sequence char-width-table))
-       (kuro--apply-char-width-overrides)
-       (should (= 1 (char-table-range char-width-table ',range))))))
-
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-arrows           "Arrows"           (#x2190 . #x21FF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-math-operators   "Math Operators"   (#x2200 . #x22FF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-misc-technical   "Misc Technical"   (#x2300 . #x23FF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-box-drawing      "Box Drawings"     (#x2500 . #x257F))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-block-elements   "Block Elements"   (#x2580 . #x259F))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-geometric-shapes "Geometric Shapes" (#x25A0 . #x25FF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-misc-symbols     "Misc Symbols"     (#x2600 . #x26FF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-dingbats         "Dingbats"         (#x2700 . #x27BF))
-(kuro-char-width-test--def-override-range kuro-faces-test--apply-overrides-braille          "Braille"          (#x2800 . #x28FF))
+(kuro-char-width-test--deftest-override-ranges)
 
 (ert-deftest kuro-faces-test--apply-overrides-all-ranges-covered ()
   "kuro--apply-char-width-overrides sets every entry in kuro--char-width-overrides to 1."

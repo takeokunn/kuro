@@ -20,7 +20,7 @@
 ;;
 ;; # Multi-session support
 ;;
-;; Each buffer has a `kuro--session-id' (a non-negative integer) set by
+;; Each buffer has a positive `kuro--session-id' set by
 ;; `kuro--init' (which allocates a new ID via an atomic counter) or by
 ;; `kuro-attach' (which restores an existing ID for a detached session).
 ;; Per-session FFI calls pass this ID as their first argument so that
@@ -121,7 +121,7 @@ session state independently.  When nil, all FFI calls are suppressed.")
 (kuro--defvar-permanent-local kuro--session-id 0
   "Session ID returned by `kuro-core-init'.
 Buffer-local so each kuro buffer routes FFI calls to its own session.
-The first session gets ID 0; subsequent sessions get incrementing integers.")
+Real session IDs are positive; 0 means no session has been assigned.")
 
 (kuro--defvar-permanent-local kuro--col-to-buf-map (make-hash-table :test 'eql)
   "Per-row mapping of grid column → buffer char offset.
@@ -202,7 +202,7 @@ ROWS and COLS specify the initial terminal dimensions.  When omitted,
 `kuro--default-rows' and `kuro--default-cols' are used.  Callers should always
 pass the actual window dimensions so full-screen programs start with the correct
 geometry and do not suffer a SIGWINCH race on their first render.
-Returns the session ID (a non-negative integer) on success, nil otherwise."
+Returns the session ID (a positive integer) on success, nil otherwise."
   (interactive "sShell command: ")
   (condition-case err
       (let* ((r (or rows kuro--default-rows))

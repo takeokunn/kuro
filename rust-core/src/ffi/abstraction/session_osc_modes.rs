@@ -1,5 +1,7 @@
 // OSC data accessors and DEC mode getters for TerminalSession.
-// Included by session.rs via `include!()`.
+
+use super::TerminalSession;
+
 impl TerminalSession {
     dec_mode_getter!(
         /// Get mouse pixel mode state (?1016)

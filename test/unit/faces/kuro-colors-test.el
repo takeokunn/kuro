@@ -44,10 +44,7 @@
 (ert-deftest kuro-colors--named-colors-contains-all-16-keys ()
   "kuro--named-colors must contain all 16 expected ANSI color name keys."
   (kuro--rebuild-named-colors)
-  (dolist (key '("black" "red" "green" "yellow"
-                 "blue" "magenta" "cyan" "white"
-                 "bright-black" "bright-red" "bright-green" "bright-yellow"
-                 "bright-blue" "bright-magenta" "bright-cyan" "bright-white"))
+  (dolist (key (kuro-colors-test--color-names))
     (should (gethash key kuro--named-colors))))
 
 (ert-deftest kuro-colors--named-colors-bright-black-key ()
@@ -132,11 +129,7 @@
 
 (ert-deftest kuro-colors--all-defcustoms-are-hex-strings ()
   "All 16 kuro-color-* defcustom defaults must be 6-digit hex strings."
-  (dolist (sym '(kuro-color-black kuro-color-red kuro-color-green kuro-color-yellow
-                 kuro-color-blue kuro-color-magenta kuro-color-cyan kuro-color-white
-                 kuro-color-bright-black kuro-color-bright-red kuro-color-bright-green
-                 kuro-color-bright-yellow kuro-color-bright-blue kuro-color-bright-magenta
-                 kuro-color-bright-cyan kuro-color-bright-white))
+  (kuro-colors-test--dolist-color-symbol (sym)
     (let ((val (symbol-value sym)))
       (should (stringp val))
       (should (string-match-p kuro--hex-color-regexp val)))))

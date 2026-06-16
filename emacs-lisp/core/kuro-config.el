@@ -51,6 +51,10 @@
   "Return non-nil if VAL is a positive integer (> 0)."
   (and (integerp val) (> val 0)))
 
+(defsubst kuro--positive-integer-error (var value)
+  "Return a validation error for VAR holding VALUE."
+  (format "%s: must be a positive integer, got: %s" var value))
+
 (defmacro kuro--broadcast-to-buffers (fn &rest args)
   "When FN is bound, call (FN ARGS...) in every live kuro-mode buffer."
   `(when (fboundp ',fn)
@@ -65,7 +69,8 @@
        ,@body)))
 
 (defmacro kuro--with-mode (mode msg &rest body)
-  "Execute BODY only when `derived-mode-p' MODE, signaling user-error MSG otherwise."
+  "Execute BODY only when `derived-mode-p' MODE.
+Signal user-error MSG otherwise."
   `(if (derived-mode-p ',mode)
        (progn ,@body)
      (user-error ,msg)))
@@ -77,7 +82,25 @@
 (defmacro kuro--check-positive-integer (var errors)
   "Push an error string onto ERRORS if VAR is not a positive integer."
   `(unless (kuro--positive-integer-p ,var)
-     (push (format "%s: must be a positive integer, got: %s" ',var ,var) ,errors)))
+     (push (kuro--positive-integer-error ',var ,var) ,errors)))
+
+(defmacro kuro--check-positive-integer-symbol (var errors)
+  "Push an error onto ERRORS if symbol VAR is not bound to a positive integer."
+  `(let* ((sym ,var)
+          (val (symbol-value sym)))
+     (unless (kuro--positive-integer-p val)
+       (push (kuro--positive-integer-error sym val) ,errors))))
+
+(defmacro kuro--check-positive-integer-vars (vars errors)
+  "Push validation errors onto ERRORS for every symbol in VARS."
+  `(dolist (var ,vars)
+     (kuro--check-positive-integer-symbol var ,errors)))
+
+(defmacro kuro--check-optional-positive-integer-vars (vars errors)
+  "Push validation errors onto ERRORS for non-nil symbols in VARS."
+  `(dolist (var ,vars)
+     (when (symbol-value var)
+       (kuro--check-positive-integer-symbol var ,errors))))
 
 (defmacro kuro--check-hex-color (var errors)
   "Push an error string onto ERRORS if VAR is not a 6-digit hex color string."
@@ -377,6 +400,16 @@ The value is converted to Emacs face :height units (* 10 value)."
 
 ;;; Validation
 
+(defconst kuro--positive-integer-config-vars
+  '(kuro-scrollback-size
+    kuro-frame-rate
+    kuro-tui-frame-rate)
+  "Kuro config variables that must always hold positive integers.")
+
+(defconst kuro--optional-positive-integer-config-vars
+  '(kuro-font-size)
+  "Kuro config variables that may be nil or a positive integer.")
+
 (defun kuro--validate-config ()
   "Validate all Kuro configuration settings.
 Returns a list of error description strings.
@@ -386,11 +419,9 @@ An empty list indicates that all settings are valid."
                 (string-empty-p kuro-shell)
                 (executable-find kuro-shell))
       (push (format "kuro-shell: executable not found: %s" kuro-shell) errors))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (kuro--check-positive-integer kuro-frame-rate errors)
-    (kuro--check-positive-integer kuro-tui-frame-rate errors)
-    (when kuro-font-size
-      (kuro--check-positive-integer kuro-font-size errors))
+    (kuro--check-positive-integer-vars kuro--positive-integer-config-vars errors)
+    (kuro--check-optional-positive-integer-vars
+     kuro--optional-positive-integer-config-vars errors)
     (dolist (color-var kuro--color-defcustom-vars)
       (kuro--check-hex-color color-var errors))
     (nreverse errors)))

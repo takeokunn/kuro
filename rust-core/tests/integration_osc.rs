@@ -40,12 +40,12 @@ macro_rules! assert_osc133_cycle {
         let mut t = common::new_terminal();
         t.advance($seq);
         assert_eq!(
-            t.osc_data().prompt_marks.len(),
+            t.osc_data().prompt_marks().len(),
             $expected_count,
             "{}: expected {} prompt marks, got {}",
             $label,
             $expected_count,
-            t.osc_data().prompt_marks.len()
+            t.osc_data().prompt_marks().len()
         );
     }};
 }
@@ -59,7 +59,7 @@ fn osc4_set_palette_color() {
     let mut t = common::new_terminal();
     // OSC 4 ; 1 ; rgb:ff/00/00 BEL — set palette index 1 to red
     t.advance(b"\x1b]4;1;rgb:ff/00/00\x07");
-    let palette = &t.osc_data().palette;
+    let palette = t.osc_data().palette();
     assert_eq!(
         palette[1],
         Some([0xff, 0x00, 0x00]),
@@ -72,7 +72,7 @@ fn osc4_set_palette_color_4digit_hex() {
     let mut t = common::new_terminal();
     // 4-digit hex per channel: rgb:ffff/0000/0000 → [255, 0, 0]
     t.advance(b"\x1b]4;2;rgb:ffff/0000/0000\x07");
-    let palette = &t.osc_data().palette;
+    let palette = t.osc_data().palette();
     assert_eq!(
         palette[2],
         Some([0xff, 0x00, 0x00]),
@@ -114,10 +114,10 @@ fn osc4_set_marks_palette_dirty() {
 fn osc104_reset_specific_index() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]4;10;rgb:aa/bb/cc\x07"); // set index 10
-    assert!(t.osc_data().palette[10].is_some());
+    assert!(t.osc_data().palette()[10].is_some());
     t.advance(b"\x1b]104;10\x07"); // reset index 10 only
     assert!(
-        t.osc_data().palette[10].is_none(),
+        t.osc_data().palette()[10].is_none(),
         "OSC 104;N should reset specific palette index"
     );
 }
@@ -129,9 +129,7 @@ fn osc104_reset_all() {
     t.advance(b"\x1b]4;1;rgb:00/ff/00\x07");
     t.advance(b"\x1b]104\x07"); // reset all
     assert!(
-        t.osc_data()
-            .palette
-            .iter()
+        t.osc_data().palette().iter()
             .all(std::option::Option::is_none),
         "OSC 104 with no args must reset all palette entries"
     );
@@ -147,11 +145,11 @@ fn osc10_set_default_fg_color() {
     t.advance(b"\x1b]10;rgb:ff/80/00\x07"); // set fg to orange
     let osc = t.osc_data();
     assert!(
-        osc.default_fg.is_some(),
+        osc.default_fg().is_some(),
         "default_fg should be set after OSC 10"
     );
     assert_eq!(
-        osc.default_fg,
+        osc.default_fg(),
         Some(kuro_core::Color::Rgb(0xff, 0x80, 0x00)),
         "default_fg should be Rgb(255, 128, 0)"
     );
@@ -163,11 +161,11 @@ fn osc11_set_default_bg_color() {
     t.advance(b"\x1b]11;rgb:1e/1e/2e\x07"); // Catppuccin Mocha base
     let osc = t.osc_data();
     assert!(
-        osc.default_bg.is_some(),
+        osc.default_bg().is_some(),
         "default_bg should be set after OSC 11"
     );
     assert_eq!(
-        osc.default_bg,
+        osc.default_bg(),
         Some(kuro_core::Color::Rgb(0x1e, 0x1e, 0x2e))
     );
 }
@@ -177,9 +175,9 @@ fn osc12_set_cursor_color() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]12;rgb:ff/ff/ff\x07");
     let osc = t.osc_data();
-    assert!(osc.cursor_color.is_some());
+    assert!(osc.cursor_color().is_some());
     assert_eq!(
-        osc.cursor_color,
+        osc.cursor_color(),
         Some(kuro_core::Color::Rgb(0xff, 0xff, 0xff))
     );
 }
@@ -231,7 +229,7 @@ fn osc10_hash_color_format() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]10;#ff8000\x07");
     assert_eq!(
-        t.osc_data().default_fg,
+        t.osc_data().default_fg(),
         Some(kuro_core::Color::Rgb(0xff, 0x80, 0x00)),
         "#RRGGBB format should parse correctly"
     );
@@ -279,5 +277,8 @@ fn iterm2_osc1337_invalid_base64_does_not_panic() {
     assert!(t.cursor_row() < 24);
 }
 
-include!("include/integration_osc_ext.rs");
-include!("include/integration_osc_cwd.rs");
+#[path = "include/integration_osc_ext.rs"]
+mod ext;
+
+#[path = "include/integration_osc_cwd.rs"]
+mod cwd;

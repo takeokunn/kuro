@@ -13,19 +13,18 @@
     (insert "line\n")
     (setq kuro--cursor-marker (copy-marker (point-min)))
     (let ((apply-calls 0))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () nil))
-                ((symbol-function 'kuro--apply-cursor-display)
-                 (lambda (_v _s) (cl-incf apply-calls))))
-        (kuro--update-cursor)
-        (should (= apply-calls 0))))))
+      (kuro-render-buffer-cursor-test--with-cursor-stubs nil
+        (cl-letf (((symbol-function 'kuro--apply-cursor-display)
+                   (lambda (_v _s) (cl-incf apply-calls))))
+          (kuro--update-cursor)
+          (should (= apply-calls 0)))))))
 
 (ert-deftest kuro-render-buffer-ext2-update-cursor-updates-cached-row-col ()
   "kuro--update-cursor updates kuro--last-cursor-row and kuro--last-cursor-col on change."
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "row0\nrow1\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 3 t 0)))
-              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+    (kuro-render-buffer-cursor-test--with-cursor-stubs '(1 3 t 0)
       (kuro--update-cursor))
     (should (eql kuro--last-cursor-row 1))
     (should (eql kuro--last-cursor-col 3))))
@@ -35,8 +34,7 @@
   (kuro-render-buffer-cursor-test--with-buffer
     (insert "line\n")
     (setq kuro--cursor-marker (point-marker))
-    (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 nil 5)))
-              ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+    (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 0 nil 5)
       (kuro--update-cursor))
     (should (eq kuro--last-cursor-visible nil))
     (should (eql kuro--last-cursor-shape 5))))
@@ -54,15 +52,14 @@ to prevent Emacs' native redisplay from drifting between render cycles."
           kuro--last-cursor-shape   0)
     (let ((anchor-calls 0)
           (apply-calls 0))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 2 t 0)))
-                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'kuro--anchor-window-at-pos)
-                 (lambda (_win _pos) (cl-incf anchor-calls)))
-                ((symbol-function 'kuro--apply-cursor-display)
-                 (lambda (_v _s) (cl-incf apply-calls))))
-        (kuro--update-cursor)
-        (should (= anchor-calls 1))
-        (should (= apply-calls 0))))))
+      (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 2 t 0)
+        (cl-letf (((symbol-function 'kuro--anchor-window-at-pos)
+                   (lambda (_win _pos) (cl-incf anchor-calls)))
+                  ((symbol-function 'kuro--apply-cursor-display)
+                   (lambda (_v _s) (cl-incf apply-calls))))
+          (kuro--update-cursor)
+          (should (= anchor-calls 1))
+          (should (= apply-calls 0)))))))
 
 (ert-deftest kuro-render-buffer-ext2-update-cursor-unchanged-uses-marker-position ()
   "When cursor is unchanged and marker exists, anchor receives marker position.
@@ -76,15 +73,14 @@ kuro--grid-col-to-buffer-pos must NOT be called — the marker is the fast path.
           kuro--last-cursor-shape   0)
     (let ((anchor-pos nil)
           (grid-col-calls 0))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(1 1 t 0)))
-                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'kuro--anchor-window-at-pos)
-                 (lambda (_win pos) (setq anchor-pos pos)))
-                ((symbol-function 'kuro--grid-col-to-buffer-pos)
-                 (lambda (_r _c) (cl-incf grid-col-calls) 99)))
-        (kuro--update-cursor)
-        (should (= anchor-pos 8))
-        (should (= grid-col-calls 0))))))
+      (kuro-render-buffer-cursor-test--with-cursor-stubs '(1 1 t 0)
+        (cl-letf (((symbol-function 'kuro--anchor-window-at-pos)
+                   (lambda (_win pos) (setq anchor-pos pos)))
+                  ((symbol-function 'kuro--grid-col-to-buffer-pos)
+                   (lambda (_r _c) (cl-incf grid-col-calls) 99)))
+          (kuro--update-cursor)
+          (should (= anchor-pos 8))
+          (should (= grid-col-calls 0)))))))
 
 (ert-deftest kuro-render-buffer-ext2-update-cursor-unchanged-falls-back-without-marker ()
   "When cursor is unchanged but marker is nil, anchor uses grid-col-to-buffer-pos."
@@ -96,14 +92,13 @@ kuro--grid-col-to-buffer-pos must NOT be called — the marker is the fast path.
           kuro--last-cursor-visible t
           kuro--last-cursor-shape   0)
     (let ((anchor-pos nil))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 3 t 0)))
-                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'kuro--anchor-window-at-pos)
-                 (lambda (_win pos) (setq anchor-pos pos)))
-                ((symbol-function 'kuro--grid-col-to-buffer-pos)
-                 (lambda (_r _c) 42)))
-        (kuro--update-cursor)
-        (should (= anchor-pos 42))))))
+      (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 3 t 0)
+        (cl-letf (((symbol-function 'kuro--anchor-window-at-pos)
+                   (lambda (_win pos) (setq anchor-pos pos)))
+                  ((symbol-function 'kuro--grid-col-to-buffer-pos)
+                   (lambda (_r _c) 42)))
+          (kuro--update-cursor)
+          (should (= anchor-pos 42)))))))
 
 (ert-deftest kuro-render-buffer-ext2-update-cursor-partial-cache-miss-triggers-update ()
   "kuro--update-cursor updates when only shape changes (partial cache miss)."
@@ -115,66 +110,19 @@ kuro--grid-col-to-buffer-pos must NOT be called — the marker is the fast path.
           kuro--last-cursor-visible t
           kuro--last-cursor-shape   0)   ; shape was 0, now 2
     (let ((apply-calls 0))
-      (cl-letf (((symbol-function 'kuro--get-cursor-state) (lambda () '(0 0 t 2)))
-                ((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'kuro--apply-cursor-display)
-                 (lambda (_v _s) (cl-incf apply-calls))))
-        (kuro--update-cursor)
-        (should (= apply-calls 1))))))
+      (kuro-render-buffer-cursor-test--with-cursor-stubs '(0 0 t 2)
+        (cl-letf (((symbol-function 'kuro--apply-cursor-display)
+                   (lambda (_v _s) (cl-incf apply-calls))))
+          (kuro--update-cursor)
+          (should (= apply-calls 1)))))))
 
 ;;; Group 22: kuro--decscusr-cursor-types — data vector + kuro--decscusr-to-cursor-type
 
-(ert-deftest kuro-render-buffer-ext2-decscusr-cursor-types-is-vector ()
-  (should (vectorp kuro--decscusr-cursor-types)))
-
-(ert-deftest kuro-render-buffer-ext2-decscusr-cursor-types-length-7 ()
-  (should (= 7 (length kuro--decscusr-cursor-types))))
-
-(ert-deftest kuro-render-buffer-ext2-decscusr-cursor-types-index-0-is-box ()
-  (should (eq 'box (aref kuro--decscusr-cursor-types 0))))
-
-(ert-deftest kuro-render-buffer-ext2-decscusr-cursor-types-index-3-is-hbar ()
-  (should (equal '(hbar . 2) (aref kuro--decscusr-cursor-types 3))))
-
-(ert-deftest kuro-render-buffer-ext2-decscusr-cursor-types-index-5-is-bar ()
-  (should (equal '(bar . 2) (aref kuro--decscusr-cursor-types 5))))
+(kuro-render-buffer-test--deftest-decscusr-cursor-type-vector-cases)
 
 ;;; Group 23: kuro--cursor-state-changed-p + kuro--cache-cursor-state
 
-(ert-deftest kuro-render-buffer-ext2-cursor-state-changed-p-returns-nil-when-same ()
-  (let ((kuro--last-cursor-row 0)
-        (kuro--last-cursor-col 0)
-        (kuro--last-cursor-visible t)
-        (kuro--last-cursor-shape 0))
-    (should-not (kuro--cursor-state-changed-p 0 0 t 0))))
-
-(ert-deftest kuro-render-buffer-ext2-cursor-state-changed-p-returns-t-when-row-differs ()
-  (let ((kuro--last-cursor-row 0)
-        (kuro--last-cursor-col 0)
-        (kuro--last-cursor-visible t)
-        (kuro--last-cursor-shape 0))
-    (should (kuro--cursor-state-changed-p 1 0 t 0))))
-
-(ert-deftest kuro-render-buffer-ext2-cursor-state-changed-p-returns-t-when-col-differs ()
-  (let ((kuro--last-cursor-row 0)
-        (kuro--last-cursor-col 0)
-        (kuro--last-cursor-visible t)
-        (kuro--last-cursor-shape 0))
-    (should (kuro--cursor-state-changed-p 0 1 t 0))))
-
-(ert-deftest kuro-render-buffer-ext2-cursor-state-changed-p-returns-t-when-visible-differs ()
-  (let ((kuro--last-cursor-row 0)
-        (kuro--last-cursor-col 0)
-        (kuro--last-cursor-visible t)
-        (kuro--last-cursor-shape 0))
-    (should (kuro--cursor-state-changed-p 0 0 nil 0))))
-
-(ert-deftest kuro-render-buffer-ext2-cursor-state-changed-p-returns-t-when-shape-differs ()
-  (let ((kuro--last-cursor-row 0)
-        (kuro--last-cursor-col 0)
-        (kuro--last-cursor-visible t)
-        (kuro--last-cursor-shape 0))
-    (should (kuro--cursor-state-changed-p 0 0 t 1))))
+(kuro-render-buffer-test--deftest-cursor-state-changed-cases)
 
 (ert-deftest kuro-render-buffer-ext2-cache-cursor-state-updates-all-four-vars ()
   (let ((kuro--last-cursor-row 0)
@@ -320,23 +268,7 @@ This tests the lightweight equality guard."
 
 ;;; kuro--cache-cursor-state structural tests (Group 23 ext.)
 
-(ert-deftest kuro-render-buffer-cache-cursor-state-expands-to-setq ()
-  "`kuro--cache-cursor-state' single-step expands to a `setq' form."
-  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
-    (should (eq (car exp) 'setq))))
-
-(ert-deftest kuro-render-buffer-cache-cursor-state-first-target-is-cursor-row ()
-  "`kuro--cache-cursor-state' first assignment target is `kuro--last-cursor-row'."
-  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
-    (should (eq (cadr exp) 'kuro--last-cursor-row))))
-
-(ert-deftest kuro-render-buffer-cache-cursor-state-sets-all-four-vars ()
-  "`kuro--cache-cursor-state' expansion assigns all four cursor cache variables."
-  (let ((exp (macroexpand-1 '(kuro--cache-cursor-state r c v s))))
-    (should (memq 'kuro--last-cursor-row     exp))
-    (should (memq 'kuro--last-cursor-col     exp))
-    (should (memq 'kuro--last-cursor-visible exp))
-    (should (memq 'kuro--last-cursor-shape   exp))))
+(kuro-render-buffer-test--deftest-cache-cursor-state-expansion-cases)
 
 (provide 'kuro-render-buffer-test-2)
 

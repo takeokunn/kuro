@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'kuro-ffi-osc)
+(require 'kuro-keymap)
 
 (declare-function kuro--row-position "kuro-render-buffer" (row))
 
@@ -25,12 +26,22 @@
 (defvar-local kuro--hyperlink-overlays nil
   "List of active hyperlink overlays in this buffer.")
 
-(defvar kuro--hyperlink-keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'kuro-open-hyperlink-at-point)
-    (define-key map (kbd "RET") #'kuro-open-hyperlink-at-point)
-    map)
+(defconst kuro--hyperlink-keymap
+  (kuro--define-keymap
+    ([mouse-1] . kuro-open-hyperlink-at-point)
+    ((kbd "RET") . kuro-open-hyperlink-at-point))
   "Keymap for hyperlink overlays.")
+
+(defmacro kuro--make-hyperlink-overlay (beg end uri)
+  "Create a clickable hyperlink overlay from BEG to END for URI."
+  `(let ((ov (make-overlay ,beg ,end nil t nil)))
+     (overlay-put ov 'face 'kuro-hyperlink)
+     (overlay-put ov 'kuro-hyperlink-uri ,uri)
+     (overlay-put ov 'mouse-face 'highlight)
+     (overlay-put ov 'help-echo ,uri)
+     (overlay-put ov 'keymap kuro--hyperlink-keymap)
+     (push ov kuro--hyperlink-overlays)
+     ov))
 
 (defconst kuro--hyperlink-allowed-schemes '("https" "http" "ftp" "ftps" "mailto")
   "URI schemes permitted for OSC 8 hyperlink navigation.
@@ -39,15 +50,15 @@ and OS-registered protocol handlers.")
 
 (defun kuro--uri-scheme-allowed-p (uri)
   "Return non-nil if URI has a permitted scheme."
-  (when-let ((scheme (and (string-match "\\`\\([a-zA-Z][a-zA-Z0-9+.-]*\\):" uri)
+  (when-let* ((scheme (and (string-match "\\`\\([a-zA-Z][a-zA-Z0-9+.-]*\\):" uri)
                           (downcase (match-string 1 uri)))))
     (member scheme kuro--hyperlink-allowed-schemes)))
 
 (defun kuro-open-hyperlink-at-point ()
   "Open the OSC 8 hyperlink at point using `browse-url'."
   (interactive)
-  (when-let ((ov (car (overlays-at (point)))))
-    (when-let ((uri (overlay-get ov 'kuro-hyperlink-uri)))
+  (when-let* ((ov (car (overlays-at (point)))))
+    (when-let* ((uri (overlay-get ov 'kuro-hyperlink-uri)))
       (if (kuro--uri-scheme-allowed-p uri)
           (browse-url uri)
         (message "kuro: blocked hyperlink with disallowed scheme: %s"
@@ -68,16 +79,10 @@ offsets within the row text.  Overlays are created with the
       (kuro--clear-hyperlink-overlays)
       (dolist (entry ranges)
         (pcase-let ((`(,row ,start ,end ,uri) entry))
-          (when-let ((row-pos (kuro--row-position row)))
+          (when-let* ((row-pos (kuro--row-position row)))
             (let* ((beg (+ row-pos start))
-                   (e   (+ row-pos end))
-                   (ov  (make-overlay beg e nil t nil)))
-              (overlay-put ov 'face 'kuro-hyperlink)
-              (overlay-put ov 'kuro-hyperlink-uri uri)
-              (overlay-put ov 'mouse-face 'highlight)
-              (overlay-put ov 'help-echo uri)
-              (overlay-put ov 'keymap kuro--hyperlink-keymap)
-              (push ov kuro--hyperlink-overlays))))))))
+                   (e   (+ row-pos end)))
+              (kuro--make-hyperlink-overlay beg e uri))))))))
 
 (provide 'kuro-hyperlinks)
 

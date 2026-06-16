@@ -1,3 +1,5 @@
+use super::*;
+
 // === DECSC/DECRC ===
 
 #[test]
@@ -84,8 +86,8 @@ fn vt_kitty_keyboard_query() {
 fn vt_osc7_cwd() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;file://localhost/tmp/test\x07");
-    assert_eq!(t.osc_data().cwd, Some("/tmp/test".to_owned()));
-    assert!(t.osc_data().cwd_dirty);
+    assert_eq!(t.osc_data().cwd(), Some("/tmp/test"));
+    assert!(t.osc_data().cwd_dirty());
 }
 
 #[test]
@@ -93,18 +95,18 @@ fn vt_osc8_hyperlink() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
+        t.osc_data().hyperlink_uri(),
         Some("https://example.com")
     );
     t.advance(b"\x1b]8;;\x07");
-    assert!(t.osc_data().hyperlink.uri.is_none());
+    assert!(t.osc_data().hyperlink_uri().is_none());
 }
 
 #[test]
 fn vt_osc133_prompt_marks() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]133;A\x07");
-    assert_eq!(t.osc_data().prompt_marks.len(), 1);
+    assert_eq!(t.osc_data().prompt_marks().len(), 1);
 }
 
 // === DEC mode 2031 — Color Scheme Notifications (Contour/Ghostty) ===

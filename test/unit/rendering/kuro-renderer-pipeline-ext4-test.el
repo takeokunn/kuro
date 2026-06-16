@@ -87,36 +87,7 @@
         ;; pending is drained even when not initialized
         (should-not kuro--resize-pending)))))
 
-(defconst kuro-renderer-pipeline-ext3-test--resize-skips-zero-table
-  '((test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-rows  (0  . 80))
-    (test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-cols  (24 . 0)))
-  "Table of (test-name pending-dims) where kuro--handle-pending-resize must NOT call resize.")
-
-(defmacro kuro-renderer-pipeline-ext3-test--def-resize-skips-zero (test-name pending-dims)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--handle-pending-resize' skips resize for pending=%s." pending-dims)
-     (kuro-renderer-pipeline-resize-test--with-buffer
-       (setq kuro--resize-pending ',pending-dims)
-       (let ((resize-called nil))
-         (cl-letf (((symbol-function 'kuro--resize)
-                    (lambda (_r _c) (setq resize-called t))))
-           (kuro--handle-pending-resize)
-           (should-not resize-called))))))
-
-(kuro-renderer-pipeline-ext3-test--def-resize-skips-zero test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-rows  (0  . 80))
-(kuro-renderer-pipeline-ext3-test--def-resize-skips-zero test-kuro-pipeline-ext3-handle-pending-resize-skips-zero-cols  (24 . 0))
-
-(ert-deftest kuro-renderer-pipeline-ext3-test--all-resize-skips-zero-correct ()
-  "All entries in `kuro-renderer-pipeline-ext3-test--resize-skips-zero-table' skip resize."
-  (dolist (entry kuro-renderer-pipeline-ext3-test--resize-skips-zero-table)
-    (pcase-let ((`(,_name ,pending-dims) entry))
-      (kuro-renderer-pipeline-resize-test--with-buffer
-        (setq kuro--resize-pending pending-dims)
-        (let ((resize-called nil))
-          (cl-letf (((symbol-function 'kuro--resize)
-                     (lambda (_r _c) (setq resize-called t))))
-            (kuro--handle-pending-resize)
-            (should-not resize-called)))))))
+(kuro-renderer-pipeline-test--deftest-resize-skips-zero-cases)
 
 (ert-deftest test-kuro-pipeline-ext3-handle-pending-resize-adds-buffer-lines ()
   "Resizing from 10 to 15 rows inserts 5 newlines at end of buffer."
@@ -154,38 +125,53 @@
         (kuro--handle-pending-resize))
       (should (= (1- (line-number-at-pos (point-max))) 15)))))
 
+(ert-deftest kuro-renderer-pipeline-pending-resize-valid-p-table ()
+  "`kuro--pending-resize-valid-p' follows initialization and positive dimension rules."
+  (dolist (entry kuro-renderer-pipeline-test--pending-resize-validity-cases)
+    (pcase-let ((`((,initialized ,rows ,cols) . ,expected) entry))
+      (let ((kuro--initialized initialized))
+        (if expected
+            (should (kuro--pending-resize-valid-p rows cols))
+          (should-not (kuro--pending-resize-valid-p rows cols)))))))
+
+(kuro-renderer-pipeline-test--deftest-row-count-cases)
+
+(ert-deftest kuro-renderer-pipeline-reset-render-state-after-resize-resets-local-state ()
+  "`kuro--reset-render-state-after-resize' updates dimensions and invalidates caches."
+  (kuro-renderer-pipeline-resize-test--with-buffer
+    (puthash 0 [0] kuro--col-to-buf-map)
+    (setq kuro--last-cursor-row 1
+          kuro--last-cursor-col 2
+          kuro--last-cursor-visible t
+          kuro--last-cursor-shape 'block)
+    (let ((resize-args nil)
+          (init-row-args nil))
+      (cl-letf (((symbol-function 'kuro--resize)
+                 (lambda (rows cols) (setq resize-args (list rows cols))))
+                ((symbol-function 'kuro--init-row-positions)
+                 (lambda (rows) (setq init-row-args rows))))
+        (kuro--reset-render-state-after-resize 32 120)
+        (should (equal resize-args '(32 120)))
+        (should (= init-row-args 32))
+        (should (= kuro--last-rows 32))
+        (should (= kuro--last-cols 120))
+        (should (= (hash-table-count kuro--col-to-buf-map) 0))
+        (should-not kuro--last-cursor-row)
+        (should-not kuro--last-cursor-col)
+        (should-not kuro--last-cursor-visible)
+        (should-not kuro--last-cursor-shape)))))
+
+(ert-deftest kuro-renderer-pipeline-with-render-buffer-mutation-expands-to-let ()
+  "`kuro--with-render-buffer-mutation' expands to a `let' with mutation bindings."
+  (let* ((exp (macroexpand-1 '(kuro--with-render-buffer-mutation (ignore))))
+         (binding-names (mapcar #'car (cadr exp))))
+    (should (eq (car exp) 'let))
+    (should (memq 'inhibit-read-only binding-names))
+    (should (memq 'inhibit-modification-hooks binding-names))))
+
 ;;; Group 22: kuro--with-render-env macro
 
-(defconst kuro-renderer-pipeline-ext3-test--render-env-gc-table
-  '((kuro-renderer-pipeline-ext3-with-render-env-sets-gc-threshold
-     gc-cons-threshold  kuro--render-gc-threshold)
-    (kuro-renderer-pipeline-ext3-with-render-env-sets-gc-percentage
-     gc-cons-percentage kuro--render-gc-percentage))
-  "Table of (test-name gc-var expected-const) for `kuro--with-render-env' GC bindings.")
-
-(defmacro kuro-renderer-pipeline-ext3-test--def-render-env-gc (test-name gc-var expected-const)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--with-render-env' binds %s to %s." gc-var expected-const)
-     (let (captured)
-       (kuro--with-render-env
-         (setq captured ,gc-var))
-       (should (= captured ,expected-const)))))
-
-(kuro-renderer-pipeline-ext3-test--def-render-env-gc
- kuro-renderer-pipeline-ext3-with-render-env-sets-gc-threshold
- gc-cons-threshold  kuro--render-gc-threshold)
-(kuro-renderer-pipeline-ext3-test--def-render-env-gc
- kuro-renderer-pipeline-ext3-with-render-env-sets-gc-percentage
- gc-cons-percentage kuro--render-gc-percentage)
-
-(ert-deftest kuro-renderer-pipeline-ext3-test--all-render-env-gc-bindings-correct ()
-  "All entries in `kuro-renderer-pipeline-ext3-test--render-env-gc-table' bind correctly."
-  (dolist (entry kuro-renderer-pipeline-ext3-test--render-env-gc-table)
-    (pcase-let ((`(,_name ,gc-var ,expected-const) entry))
-      (let (captured)
-        (kuro--with-render-env
-          (setq captured (symbol-value gc-var)))
-        (should (= captured (symbol-value expected-const)))))))
+(kuro-renderer-pipeline-test--deftest-render-env-gc-cases)
 
 (ert-deftest kuro-renderer-pipeline-ext3-with-render-env-returns-body-value ()
   "`kuro--with-render-env' propagates the return value of BODY."

@@ -93,12 +93,12 @@ Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
 
 (defconst kuro--mouse-button-alist
   '((mouse-1 . 0) (mouse-2 . 1) (mouse-3 . 2))
-  "Alist mapping mouse button event-basic-type symbols to PTY button indices.")
+  "Alist mapping mouse button `event-basic-type' symbols to PTY indices.")
 
 (defmacro kuro--def-mouse-cmd (name btn-form press doc)
   "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to PTY.
 BTN-FORM is evaluated at call time: a literal integer for scroll commands, or an
-alist-get expression over `event-basic-type' for button commands.
+`alist-get' expression over `event-basic-type' for button commands.
 PRESS is t for press events, nil for release.
 DOC is the docstring for the generated command."
   `(defun ,name ()

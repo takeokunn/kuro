@@ -137,11 +137,11 @@ Requires `tar' in PATH.  Emacs is unresponsive during the download."
          (tarball (format "libkuro_core-%s-%s.tar.gz" ver platform))
          (url (format "%s/v%s/%s" kuro-module-release-base-url ver tarball))
          (sha-url (format "%s.sha256" url))
-         (target-dir (kuro-module--target-path))
          (tar-bin (executable-find "tar")))
     (unless tar-bin
       (error "Kuro: `tar' executable not found in PATH"))
-    (let ((tmp-file (make-temp-file "kuro-module-" nil ".tar.gz")))
+    (let ((target-dir (kuro-module--target-path))
+          (tmp-file (make-temp-file "kuro-module-" nil ".tar.gz")))
       (unwind-protect
           (progn
             (message "Kuro: fetching checksum from %s" sha-url)
@@ -277,10 +277,9 @@ so the path prefix is ../../target/release/."
                         (locate-library "kuro-module")
                         buffer-file-name)))
     (when this-file
-      (kuro--module-try
-       (expand-file-name
-        (format "../../target/release/%s" lib-name)
-        (file-name-directory this-file))))))
+      (expand-file-name
+       (format "../../target/release/%s" lib-name)
+       (file-name-directory this-file)))))
 
 (defconst kuro-module--search-tiers
   '(kuro-module--tier-custom

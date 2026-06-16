@@ -35,6 +35,7 @@
 (require 'kuro-config)
 (require 'kuro-poll-modes)
 (require 'kuro-prompt-status)
+(require 'kuro-keymap)
 (require 'tabulated-list)
 
 (declare-function kuro--ring-pending-bell "kuro-renderer" ())
@@ -63,8 +64,8 @@ The notification is fired only when the kuro buffer is not visible and
   :group 'kuro-activity)
 
 (defcustom kuro-activity-notify-on-bell t
-  "When non-nil, escalate BEL from a non-visible kuro buffer to a desktop
-notification.  Supplements the standard `ring-bell-function' so the user
+  "Escalate BEL from a non-visible kuro buffer to a desktop notification.
+When non-nil, supplements the standard `ring-bell-function' so the user
 sees the alert even when the kuro buffer is in a background window."
   :type 'boolean
   :group 'kuro-activity)
@@ -129,6 +130,7 @@ nil → \"\", 0 → \" ✓\", nonzero → \" ✗ (exit N)\"."
                                             _aid _err-path
                                             buffer-visible-p)
   "Notify when a long command finishes in a background kuro session.
+EXIT-CODE is included in the notification status suffix when available.
 Called by `kuro-on-command-complete-functions'.
 
 Fires when ALL conditions hold:
@@ -202,13 +204,16 @@ Has no effect when point is not on a list entry."
       (setq kuro-activity--log (delq entry kuro-activity--log))
       (tabulated-list-delete-entry))))
 
+(defconst kuro-activity-list-mode-bindings
+  '(("g" . tabulated-list-revert)
+    ("d" . kuro-activity-list-delete-entry)
+    ("c" . kuro-activity-clear)
+    ("q" . quit-window)))
+
 (defvar kuro-activity-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "g") #'tabulated-list-revert)
-    (define-key map (kbd "d") #'kuro-activity-list-delete-entry)
-    (define-key map (kbd "c") #'kuro-activity-clear)
-    (define-key map (kbd "q") #'quit-window)
-    map)
+  (kuro--build-keymap-from-alist kuro-activity-list-mode-bindings
+                                 (lambda (binding) (kbd (car binding)))
+                                 #'cdr)
   "Keymap for `kuro-activity-list-mode'.")
 
 (defconst kuro-activity--list-columns

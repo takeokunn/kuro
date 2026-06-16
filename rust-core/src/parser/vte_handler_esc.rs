@@ -1,6 +1,9 @@
+use crate::parser;
+use crate::TerminalCore;
+
 /// Dispatch body for ESC sequences — extracted from `esc_dispatch` to keep vte_handler.rs ≤ 500L.
 #[inline]
-fn handle_esc_dispatch(term: &mut TerminalCore, intermediates: &[u8], byte: u8) {
+pub(super) fn handle_esc_dispatch(term: &mut TerminalCore, intermediates: &[u8], byte: u8) {
     match (intermediates, byte) {
         ([], b'7') => term.save_cursor(), // DECSC: Save cursor position and attributes
         ([], b'8') => term.restore_cursor(), // DECRC: Restore cursor position and attributes

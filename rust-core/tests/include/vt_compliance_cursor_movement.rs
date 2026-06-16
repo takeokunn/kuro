@@ -1,3 +1,5 @@
+use super::*;
+
 // === CSI s / CSI u — ANSI Save/Restore Cursor ===
 
 #[test]
@@ -357,5 +359,3 @@ fn vt_fullwidth_char_is_double_width() {
         "cell (0,0) must hold the fullwidth character"
     );
 }
-
-include!("vt_compliance_save_restore.rs");

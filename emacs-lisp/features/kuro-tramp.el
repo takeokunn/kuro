@@ -38,7 +38,7 @@ Common choices: \"ssh\", \"scp\", \"rsync\"."
   "Apply CWD from OSC 7, constructing a Tramp path if hostname is remote.
 Called from the tier-1 poll instead of the plain `kuro--poll-cwd' when
 Tramp integration is desired."
-  (when-let ((cwd (kuro--get-cwd)))
+  (when-let* ((cwd (kuro--get-cwd)))
     (when (and (stringp cwd) (not (string-empty-p cwd)))
       (let ((host (kuro--get-cwd-host)))
         (setq default-directory

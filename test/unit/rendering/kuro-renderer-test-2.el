@@ -174,72 +174,11 @@ Verification: after a second install the old timer is no longer in `timer-list'.
 
 ;;; Group 13: kuro--reset-cursor-cache macro
 
-(ert-deftest kuro-renderer-reset-cursor-cache-clears-all-four-fields ()
-  "kuro--reset-cursor-cache sets all four cursor cache vars to nil."
-  (with-temp-buffer
-    (let ((kuro--last-cursor-row    5)
-          (kuro--last-cursor-col    10)
-          (kuro--last-cursor-visible t)
-          (kuro--last-cursor-shape  'box))
-      (kuro--reset-cursor-cache)
-      (should (null kuro--last-cursor-row))
-      (should (null kuro--last-cursor-col))
-      (should (null kuro--last-cursor-visible))
-      (should (null kuro--last-cursor-shape)))))
-
-(ert-deftest kuro-renderer-reset-cursor-cache-idempotent ()
-  "Calling kuro--reset-cursor-cache twice is safe and keeps all vars nil."
-  (with-temp-buffer
-    (let ((kuro--last-cursor-row    3)
-          (kuro--last-cursor-col    7)
-          (kuro--last-cursor-visible t)
-          (kuro--last-cursor-shape  '(hbar . 2)))
-      (kuro--reset-cursor-cache)
-      (kuro--reset-cursor-cache)
-      (should (null kuro--last-cursor-row))
-      (should (null kuro--last-cursor-col))
-      (should (null kuro--last-cursor-visible))
-      (should (null kuro--last-cursor-shape)))))
-
-(ert-deftest kuro-renderer-reset-cursor-cache-already-nil-is-noop ()
-  "kuro--reset-cursor-cache with all fields already nil does not error."
-  (with-temp-buffer
-    (let (kuro--last-cursor-row
-          kuro--last-cursor-col
-          kuro--last-cursor-visible
-          kuro--last-cursor-shape)
-      (should-not (condition-case err
-                      (progn (kuro--reset-cursor-cache) nil)
-                    (error err))))))
+(kuro-renderer-test--deftest-reset-cursor-cache-cases)
 
 ;;; Group 14: kuro--sanitize-title edge cases
 
-(ert-deftest kuro-renderer-sanitize-title-strips-rlm ()
-  "kuro--sanitize-title strips U+200F RIGHT-TO-LEFT MARK."
-  (should (equal (kuro--sanitize-title (concat "a" "\u200f" "b")) "ab")))
-
-(ert-deftest kuro-renderer-sanitize-title-strips-null-byte ()
-  "kuro--sanitize-title strips embedded null bytes (U+0000)."
-  (should (equal (kuro--sanitize-title (concat "a" (string 0) "b")) "ab")))
-
-(ert-deftest kuro-renderer-sanitize-title-strips-tab ()
-  "kuro--sanitize-title strips TAB (U+0009, a C0 control char)."
-  (should (equal (kuro--sanitize-title (concat "a" (string 9) "b")) "ab")))
-
-(ert-deftest kuro-renderer-sanitize-title-all-bidi-overrides ()
-  "kuro--sanitize-title strips the full U+202A-U+202E bidi override range."
-  (dolist (cp '(#x202a #x202b #x202c #x202d #x202e))
-    (should (equal (kuro--sanitize-title (concat "x" (string cp) "y")) "xy"))))
-
-(ert-deftest kuro-renderer-sanitize-title-all-isolates ()
-  "kuro--sanitize-title strips the full U+2066-U+2069 directional isolate range."
-  (dolist (cp '(#x2066 #x2067 #x2068 #x2069))
-    (should (equal (kuro--sanitize-title (concat "x" (string cp) "y")) "xy"))))
-
-(ert-deftest kuro-renderer-sanitize-title-preserves-unicode-non-bidi ()
-  "kuro--sanitize-title passes through harmless non-ASCII Unicode unchanged."
-  (should (equal (kuro--sanitize-title "日本語") "日本語"))
-  (should (equal (kuro--sanitize-title "émoji 🎉") "émoji 🎉")))
+(kuro-renderer-test--deftest-sanitize-title-edge-cases)
 
 (ert-deftest test-kuro-update-line-full-nil-col-to-buf-removes-stale ()
   "Nil col-to-buf removes stale mapping from hash table."

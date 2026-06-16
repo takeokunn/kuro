@@ -1,0 +1,333 @@
+// ── New edge-case tests + previously untested modes ──────────────────────────
+// `test_dec_mode_via_advance!` is defined in the parent module.
+
+// ── DEC ?5 screen_reverse ────────────────────────────────────────────────────
+test_dec_mode_via_advance!(
+    test_screen_reverse_set_and_clear,
+    b"\x1b[?5h",
+    b"\x1b[?5l",
+    screen_reverse
+);
+
+// ── DEC ?12 cursor-blink toggle ───────────────────────────────────────────────
+
+#[test]
+fn test_dec12_set_makes_cursor_blink_variant() {
+    // ?12h toggles the current cursor shape to its blinking counterpart.
+    // Default shape is BlinkingBlock, so set should keep it blinking.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Switch to steady block first via DECSCUSR 2
+    term.advance(b"\x1b[2 q");
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::SteadyBlock
+    );
+    // ?12h: steady → blinking
+    term.advance(b"\x1b[?12h");
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::BlinkingBlock,
+        "?12h on SteadyBlock must produce BlinkingBlock"
+    );
+}
+
+#[test]
+fn test_dec12_reset_makes_cursor_steady_variant() {
+    // ?12l toggles blinking → steady.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Default shape is BlinkingBlock; ?12l must switch to SteadyBlock.
+    term.advance(b"\x1b[?12l");
+    assert_eq!(
+        term.dec_modes.cursor_shape,
+        crate::types::cursor::CursorShape::SteadyBlock,
+        "?12l on BlinkingBlock must produce SteadyBlock"
+    );
+}
+
+// ── DEC ?40/?45/?66/?80 simple boolean toggles ────────────────────────────────
+test_dec_mode_via_advance!(
+    test_allow_deccolm_set_and_clear,
+    b"\x1b[?40h",
+    b"\x1b[?40l",
+    allow_deccolm
+);
+test_dec_mode_via_advance!(
+    test_reverse_wraparound_set_and_clear,
+    b"\x1b[?45h",
+    b"\x1b[?45l",
+    reverse_wraparound
+);
+// DEC ?66 DECNKM aliases `app_keypad`.
+test_dec_mode_via_advance!(
+    test_decnkm_mode66_set_and_clear,
+    b"\x1b[?66h",
+    b"\x1b[?66l",
+    app_keypad
+);
+test_dec_mode_via_advance!(
+    test_sixel_display_mode_set_and_clear,
+    b"\x1b[?80h",
+    b"\x1b[?80l",
+    sixel_display_mode
+);
+
+// ── ANSI IRM (CSI 4 h/l) + LNM (CSI 20 h/l) ─────────────────────────────────
+test_dec_mode_via_advance!(
+    test_ansi_irm_insert_mode_set_and_clear,
+    b"\x1b[4h",
+    b"\x1b[4l",
+    insert_mode
+);
+test_dec_mode_via_advance!(
+    test_ansi_lnm_newline_mode_set_and_clear,
+    b"\x1b[20h",
+    b"\x1b[20l",
+    newline_mode
+);
+
+#[test]
+fn test_ansi_decrqm_irm_reports_correct_status() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Query IRM (mode 4) when reset → status 2
+    term.advance(b"\x1b[4$p");
+    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r0, "\x1b[4;2$y", "IRM query (reset) must report status 2");
+    term.meta.pending_responses.clear();
+    // Set IRM then query → status 1
+    term.advance(b"\x1b[4h");
+    term.advance(b"\x1b[4$p");
+    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r1, "\x1b[4;1$y", "IRM query (set) must report status 1");
+}
+
+#[test]
+fn test_ansi_decrqm_lnm_reports_correct_status() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // LNM reset → status 2
+    term.advance(b"\x1b[20$p");
+    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r0, "\x1b[20;2$y", "LNM query (reset) must report status 2");
+    term.meta.pending_responses.clear();
+    // Set LNM, query → status 1
+    term.advance(b"\x1b[20h");
+    term.advance(b"\x1b[20$p");
+    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(r1, "\x1b[20;1$y", "LNM query (set) must report status 1");
+}
+
+#[test]
+fn test_ansi_decrqm_unknown_mode_reports_zero() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[99$p"); // mode 99 is not implemented
+    let r = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    assert_eq!(
+        r, "\x1b[99;0$y",
+        "ANSI DECRQM for unknown mode must report status 0"
+    );
+}
+
+// ── Original edge cases ───────────────────────────────────────────────────────
+
+#[test]
+fn test_decom_cursor_moves_to_scroll_region_top_on_set() {
+    // Setting DECOM (?6) must move the cursor to the top of the scroll region,
+    // not just flip the origin_mode bit.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Set a scroll region (rows 3–20, 0-indexed) via DECSTBM
+    term.advance(b"\x1b[4;20r"); // CSI 4 ; 20 r — sets scroll region rows 3..19
+                                 // Move cursor away first
+    term.advance(b"\x1b[10;5H");
+    // Enable DECOM — must move cursor to scroll-region top (row 3)
+    term.advance(b"\x1b[?6h");
+    assert_eq!(
+        term.screen.cursor().col,
+        0,
+        "DECOM set must reset cursor col to 0"
+    );
+    let top = term.screen.get_scroll_region().top;
+    assert_eq!(
+        term.screen.cursor().row,
+        top,
+        "DECOM set must move cursor to scroll-region top"
+    );
+}
+
+#[test]
+fn test_decom_cursor_moves_to_absolute_home_on_reset() {
+    // Resetting DECOM (?6) must move cursor to absolute (0,0).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?6h"); // enable DECOM
+    term.advance(b"\x1b[5;5H"); // move cursor somewhere
+    term.advance(b"\x1b[?6l"); // disable DECOM — cursor must go to (0,0)
+    assert_eq!(
+        term.screen.cursor().row,
+        0,
+        "DECOM reset must move cursor to row 0"
+    );
+    assert_eq!(
+        term.screen.cursor().col,
+        0,
+        "DECOM reset must move cursor to col 0"
+    );
+}
+
+#[test]
+fn test_alt_screen_double_exit_is_noop() {
+    // Exiting the alternate screen when already on primary must not panic or
+    // corrupt state.  The guard `1049 if term.dec_modes.alternate_screen` in
+    // `apply_mode_reset` prevents the switch from firing twice.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1049h"); // enter alt screen
+    term.advance(b"\x1b[?1049l"); // exit alt screen
+    term.advance(b"\x1b[?1049l"); // exit again — must be a no-op
+    assert!(
+        !term.dec_modes.alternate_screen,
+        "alternate_screen must be false after double exit"
+    );
+}
+
+#[test]
+fn test_sync_output_reset_marks_all_dirty() {
+    // Resetting synchronized output (?2026) must call mark_all_dirty().
+    // We cannot observe the dirty bits directly in this test, but we can
+    // verify the round-trip doesn't panic and the flag is cleared.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?2026h"); // enable sync output
+    assert!(term.dec_modes.synchronized_output);
+    term.advance(b"\x1b[?2026l"); // disable — must call mark_all_dirty()
+    assert!(
+        !term.dec_modes.synchronized_output,
+        "synchronized_output must be cleared"
+    );
+}
+
+#[test]
+fn test_decscusr_block_blinking_0_and_1() {
+    // DECSCUSR 0 and 1 both select blinking-block cursor shape.
+    // Must not panic; terminal remains usable.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[0 q"); // blinking block (default)
+    term.advance(b"\x1b[1 q"); // blinking block (explicit)
+    assert!(term.screen.cursor().col < 80, "cursor must stay in bounds");
+}
+
+#[test]
+fn test_decscusr_steady_block_2() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[2 q"); // steady block
+    assert!(term.screen.cursor().row < 24);
+}
+
+#[test]
+fn test_decscusr_out_of_range_7_no_panic() {
+    // DECSCUSR with Ps=7 (out of standard 0–6 range) must not panic.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[7 q");
+    assert!(term.screen.cursor().row < 24);
+}
+
+#[test]
+fn test_kitty_kb_push_pop_restores_previous_non_zero() {
+    // Push flags=7 on top of already-set flags=3.
+    // After pop, flags must return to 3 (not 0).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[>3u"); // push: save 0, current=3
+    assert_eq!(term.dec_modes.keyboard_flags, 3);
+    term.advance(b"\x1b[>7u"); // push: save 3, current=7
+    assert_eq!(term.dec_modes.keyboard_flags, 7);
+    term.advance(b"\x1b[<u"); // pop: restore 3
+    assert_eq!(
+        term.dec_modes.keyboard_flags, 3,
+        "pop must restore the most-recently-pushed value (3)"
+    );
+    assert_eq!(term.dec_modes.keyboard_flags_stack.len(), 1);
+}
+
+#[test]
+fn test_decrqm_multi_param_queues_multiple_responses() {
+    // Sending two separate DECRQM queries in sequence must produce two entries
+    // in pending_responses (one per query).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?25$p"); // query cursor visible (default=set → status 1)
+    term.advance(b"\x1b[?1049$p"); // query alt screen (default=reset → status 2)
+    assert_eq!(
+        term.meta.pending_responses.len(),
+        2,
+        "two DECRQM queries must produce two responses"
+    );
+    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
+    let r1 = String::from_utf8(term.meta.pending_responses[1].clone()).unwrap();
+    assert_eq!(r0, "\x1b[?25;1$y");
+    assert_eq!(r1, "\x1b[?1049;2$y");
+}
+
+#[test]
+fn test_decrqm_alt_screen_47_reports_reset_then_set() {
+    // Mode 47 is a settable alternate-screen variant; DECRQM must report its
+    // real state (2 = reset on primary, 1 = set on alt), not 0 (unrecognised).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?47$p"); // default: primary screen → reset
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?47;2$y",
+        "DECRQM 47 on the primary screen must report status 2 (reset)"
+    );
+    term.meta.pending_responses.clear();
+    term.advance(b"\x1b[?47h"); // enter alternate screen
+    term.advance(b"\x1b[?47$p");
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?47;1$y",
+        "DECRQM 47 on the alternate screen must report status 1 (set)"
+    );
+}
+
+#[test]
+fn test_decrqm_alt_screen_1047_is_queryable() {
+    // Mode 1047 was settable but not queryable before — must no longer
+    // report status 0 (unrecognised).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1047$p");
+    assert_eq!(
+        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
+        "\x1b[?1047;2$y",
+        "DECRQM 1047 must report reset (2), not unrecognised (0)"
+    );
+}
+
+#[test]
+fn test_alt_screen_47_reset_noop_when_already_primary() {
+    // CSI ? 47 l when already on the primary screen must not panic or switch.
+    // The guard `47 | 1047 if term.dec_modes.alternate_screen` prevents the
+    // switch from firing when not in alternate screen.
+    let mut term = crate::TerminalCore::new(24, 80);
+    assert!(
+        !term.dec_modes.alternate_screen,
+        "precondition: primary screen"
+    );
+    term.advance(b"\x1b[?47l"); // reset 47 — no-op (guard not satisfied)
+    assert!(
+        !term.dec_modes.alternate_screen,
+        "alternate_screen must still be false after spurious ?47l"
+    );
+}
+
+#[test]
+fn test_alt_screen_1047_reset_noop_when_already_primary() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1047l"); // reset without being in alt screen
+    assert!(!term.dec_modes.alternate_screen);
+}
+
+#[test]
+fn test_sync_output_2026_reset_noop_when_not_active() {
+    // CSI ? 2026 l when synchronized_output is already false must not
+    // call mark_all_dirty (no observable effect) and must not panic.
+    let mut term = crate::TerminalCore::new(24, 80);
+    assert!(
+        !term.dec_modes.synchronized_output,
+        "precondition: synchronized_output is false"
+    );
+    term.advance(b"\x1b[?2026l"); // reset — guard `2026 if synchronized_output` not satisfied
+    assert!(!term.dec_modes.synchronized_output);
+}

@@ -49,7 +49,7 @@ single push to all live Kuro sessions."
   "Return Rec.709 relative luminance (0..1) for HEX-OR-NAME, or nil on failure.
 Uses `color-values' to normalize to 0-1 RGB, then
 Y = 0.2126 R + 0.7152 G + 0.0722 B."
-  (when-let ((rgb (ignore-errors (color-values hex-or-name))))
+  (when-let* ((rgb (ignore-errors (color-values hex-or-name))))
     (cl-destructuring-bind (r g b) (mapcar (lambda (c) (/ c 65535.0)) rgb)
       (+ (* 0.2126 r) (* 0.7152 g) (* 0.0722 b)))))
 

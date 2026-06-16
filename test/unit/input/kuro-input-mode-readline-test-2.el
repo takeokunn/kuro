@@ -95,32 +95,7 @@
    (kuro--line-abort)
    (should (null kuro--line-undo-stack))))
 
-(defconst kuro-input-mode-readline-test--line-keymap-bindings-table
-  '(;; Group 26 — undo
-    (kuro-input-mode-test-keymap-C-slash-undo         "C-/"  kuro--line-undo)
-    (kuro-input-mode-test-keymap-C-underscore-undo    "C-_"  kuro--line-undo)
-    ;; Group 27 — history search
-    (kuro-input-mode-test-keymap-C-r-history-search   "C-r"  kuro--line-history-search)
-    ;; Group 31 — iter-28 readline commands
-    (kuro-input-mode-test-keymap-C-w-unix-word-rubout "C-w"  kuro--line-unix-word-rubout)
-    (kuro-input-mode-test-keymap-M-u-upcase-word      "M-u"  kuro--line-upcase-word)
-    (kuro-input-mode-test-keymap-M-l-downcase-word    "M-l"  kuro--line-downcase-word)
-    (kuro-input-mode-test-keymap-M-c-capitalize-word  "M-c"  kuro--line-capitalize-word)
-    (kuro-input-mode-test-keymap-C-p-history-prev     "C-p"  kuro--line-history-prev)
-    (kuro-input-mode-test-keymap-C-n-history-next     "C-n"  kuro--line-history-next)
-    (kuro-input-mode-test-keymap-M-t-transpose-words  "M-t"  kuro--line-transpose-words))
-  "Table of (test-name key-str fn-symbol) for kuro--line-mode-keymap bindings.")
-
-(defmacro kuro-input-mode-readline-test--def-line-keymap (test-name key-str fn-symbol)
-  `(ert-deftest ,test-name ()
-     ,(format "Line keymap binds %S to `%s'." key-str fn-symbol)
-     (kuro-input-mode-test--with-buffer
-      (kuro--build-keymap)
-      (kuro--build-line-mode-keymap)
-      (should (eq (lookup-key kuro--line-mode-keymap (kbd ,key-str)) #',fn-symbol)))))
-
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-slash-undo         "C-/"  kuro--line-undo)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-underscore-undo    "C-_"  kuro--line-undo)
+(kuro-input-mode-readline-test--deftest-line-keymaps)
 
 (ert-deftest kuro-input-mode-test-undo-all-keymap-bindings-correct ()
   "Every entry in `kuro-input-mode-readline-test--line-keymap-bindings-table' binds correctly."
@@ -213,131 +188,20 @@
        (kuro--line-history-search)
        (should (string= captured-initial "git"))))))
 
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-r-history-search "C-r" kuro--line-history-search)
-
 ;;; Group 28 — kuro--line-unix-word-rubout (C-w)
 
-(ert-deftest kuro-input-mode-test-unix-word-rubout-kills-to-whitespace ()
-  "C-w kills backward to the nearest space, treating hyphens as word chars."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "git commit-amend")
-   (setq kuro--line-point 16)
-   (kuro--line-unix-word-rubout)
-   (should (string= kuro--line-buffer "git "))
-   (should (= kuro--line-point 4))))
-
-(ert-deftest kuro-input-mode-test-unix-word-rubout-skips-trailing-spaces ()
-  "C-w skips whitespace before the token to kill."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "foo   ")
-   (setq kuro--line-point 6)
-   (kuro--line-unix-word-rubout)
-   (should (string= kuro--line-buffer ""))
-   (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-test-unix-word-rubout-at-bol-is-noop ()
-  "C-w at beginning of line leaves the buffer unchanged."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "hello")
-   (setq kuro--line-point 0)
-   (kuro--line-unix-word-rubout)
-   (should (string= kuro--line-buffer "hello"))
-   (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-test-unix-word-rubout-keeps-text-after-point ()
-  "C-w does not disturb text after point."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "rm -rf /tmp/foo bar")
-   (setq kuro--line-point 15)
-   (kuro--line-unix-word-rubout)
-   (should (string= kuro--line-buffer "rm -rf  bar"))
-   (should (= kuro--line-point 7))))
+(kuro-input-mode-readline-test--deftest-command-line-cases
+ kuro-input-mode-readline-test--unix-word-rubout-cases)
 
 ;;; Group 29 — word case operations (M-u, M-l, M-c)
 
-(ert-deftest kuro-input-mode-test-upcase-word-from-point ()
-  "M-u upcases the next word and advances point to word end."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "hello world")
-   (setq kuro--line-point 6)
-   (kuro--line-upcase-word)
-   (should (string= kuro--line-buffer "hello WORLD"))
-   (should (= kuro--line-point 11))))
-
-(ert-deftest kuro-input-mode-test-downcase-word-from-point ()
-  "M-l downcases the next word and advances point to word end."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "HELLO WORLD")
-   (setq kuro--line-point 6)
-   (kuro--line-downcase-word)
-   (should (string= kuro--line-buffer "HELLO world"))
-   (should (= kuro--line-point 11))))
-
-(ert-deftest kuro-input-mode-test-capitalize-word-from-point ()
-  "M-c capitalizes the next word: first char upper, rest lower."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "HELLO wOrLd")
-   (setq kuro--line-point 6)
-   (kuro--line-capitalize-word)
-   (should (string= kuro--line-buffer "HELLO World"))
-   (should (= kuro--line-point 11))))
-
-(ert-deftest kuro-input-mode-test-upcase-word-skips-leading-punct ()
-  "M-u skips non-word chars before the word."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "  hello")
-   (setq kuro--line-point 0)
-   (kuro--line-upcase-word)
-   (should (string= kuro--line-buffer "  HELLO"))
-   (should (= kuro--line-point 7))))
-
-(ert-deftest kuro-input-mode-test-word-case-at-eol-is-noop ()
-  "Case commands at EOL where no word follows are no-ops."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "done")
-   (setq kuro--line-point 4)
-   (kuro--line-upcase-word)
-   (should (string= kuro--line-buffer "done"))
-   (should (= kuro--line-point 4))))
+(kuro-input-mode-readline-test--deftest-command-line-cases
+ kuro-input-mode-readline-test--word-case-cases)
 
 ;;; Group 30 — kuro--line-transpose-words (M-t)
 
-(ert-deftest kuro-input-mode-test-transpose-words-basic ()
-  "M-t swaps word before point with word after point."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "foo bar baz")
-   (setq kuro--line-point 7)
-   (kuro--line-transpose-words)
-   (should (string= kuro--line-buffer "foo baz bar"))
-   (should (= kuro--line-point 11))))
-
-(ert-deftest kuro-input-mode-test-transpose-words-point-in-space ()
-  "M-t with point in whitespace between words still transposes them."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "alpha beta")
-   (setq kuro--line-point 5)
-   (kuro--line-transpose-words)
-   (should (string= kuro--line-buffer "beta alpha"))
-   (should (= kuro--line-point 10))))
-
-(ert-deftest kuro-input-mode-test-transpose-words-no-second-word-is-noop ()
-  "M-t at end of last word does not modify the buffer."
-  (kuro-input-mode-test--with-edit
-   (setq kuro--line-buffer "only")
-   (setq kuro--line-point 4)
-   (kuro--line-transpose-words)
-   (should (string= kuro--line-buffer "only"))
-   (should (= kuro--line-point 4))))
-
-;;; Group 31 — keymap bindings for iter-28 commands
-
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-w-unix-word-rubout "C-w"  kuro--line-unix-word-rubout)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-u-upcase-word      "M-u"  kuro--line-upcase-word)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-l-downcase-word    "M-l"  kuro--line-downcase-word)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-c-capitalize-word  "M-c"  kuro--line-capitalize-word)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-p-history-prev     "C-p"  kuro--line-history-prev)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-C-n-history-next     "C-n"  kuro--line-history-next)
-(kuro-input-mode-readline-test--def-line-keymap kuro-input-mode-test-keymap-M-t-transpose-words  "M-t"  kuro--line-transpose-words)
+(kuro-input-mode-readline-test--deftest-command-line-cases
+ kuro-input-mode-readline-test--transpose-word-cases)
 
 ;;; Group 32 — kuro--def-line-kill-word macro structural coverage
 
@@ -368,40 +232,8 @@
 
 ;;; Group 33 — kuro--line-kill-to-bol and kuro--line-kill-line edge cases
 
-(ert-deftest kuro-input-mode-test-line-kill-to-bol-at-bol-is-noop ()
-  "`kuro--line-kill-to-bol' with point at BOL leaves buffer and point unchanged."
-  (kuro-input-mode-test--with-line "git" 0
-   (kuro--line-kill-to-bol)
-   (should (string= kuro--line-buffer "git"))
-   (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-test-line-kill-to-bol-at-eol-kills-all ()
-  "`kuro--line-kill-to-bol' with point at EOL clears the entire buffer."
-  (kuro-input-mode-test--with-line "git" 3
-   (kuro--line-kill-to-bol)
-   (should (string= kuro--line-buffer ""))
-   (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-test-line-kill-line-from-middle ()
-  "`kuro--line-kill-line' kills from point to EOL; point stays at kill position."
-  (kuro-input-mode-test--with-line "git status" 4
-   (kuro--line-kill-line)
-   (should (string= kuro--line-buffer "git "))
-   (should (= kuro--line-point 4))))
-
-(ert-deftest kuro-input-mode-test-line-kill-line-from-bol-kills-all ()
-  "`kuro--line-kill-line' from BOL empties the buffer."
-  (kuro-input-mode-test--with-line "git" 0
-   (kuro--line-kill-line)
-   (should (string= kuro--line-buffer ""))
-   (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-test-line-kill-line-at-eol-is-noop ()
-  "`kuro--line-kill-line' with point at EOL leaves buffer unchanged."
-  (kuro-input-mode-test--with-line "git" 3
-   (kuro--line-kill-line)
-   (should (string= kuro--line-buffer "git"))
-   (should (= kuro--line-point 3))))
+(kuro-input-mode-readline-test--deftest-command-line-cases
+ kuro-input-mode-readline-test--line-kill-cases)
 
 (provide 'kuro-input-mode-readline-test-2)
 

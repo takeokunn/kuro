@@ -70,6 +70,46 @@ fn poll_binary_direct(
     .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error(context)))
 }
 
+/// Build an Emacs proper list from a double-ended iterator in reverse order.
+#[inline]
+fn build_emacs_list_from_rev<'e, I, T, F>(
+    env: &'e Env,
+    items: I,
+    mut build_item: F,
+) -> EmacsResult<Value<'e>>
+where
+    I: IntoIterator<Item = T>,
+    I::IntoIter: DoubleEndedIterator,
+    F: FnMut(&'e Env, T) -> EmacsResult<Value<'e>>,
+{
+    let mut list = false.into_lisp(env)?;
+    for item in items.into_iter().rev() {
+        let value = build_item(env, item)?;
+        list = env.cons(value, list)?;
+    }
+    Ok(list)
+}
+
+/// Build an Emacs vector from an iterator of values.
+#[inline]
+fn build_emacs_vector_from_iter<'e, I, T, F>(
+    env: &'e Env,
+    len: usize,
+    init: Value<'e>,
+    items: I,
+    mut build_item: F,
+) -> EmacsResult<Value<'e>>
+where
+    I: IntoIterator<Item = T>,
+    F: FnMut(&'e Env, T) -> EmacsResult<Value<'e>>,
+{
+    let vec = env.make_vector(len, init)?;
+    for (idx, item) in items.into_iter().enumerate() {
+        vec.set(idx, build_item(env, item)?)?;
+    }
+    vec.into_lisp(env)
+}
+
 /// Poll for terminal updates and return dirty lines
 #[defun]
 #[expect(
@@ -90,16 +130,11 @@ fn kuro_core_poll_updates(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> 
     .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error("panic in poll_updates")));
 
     match result {
-        Ok(dirty_lines) => {
-            let mut list = false.into_lisp(env)?;
-            for (line_no, text) in dirty_lines.into_iter().rev() {
-                let line_no_val = (line_no as i64).into_lisp(env)?;
-                let text_val = text.into_lisp(env)?;
-                let pair = env.cons(line_no_val, text_val)?;
-                list = env.cons(pair, list)?;
-            }
-            Ok(list)
-        }
+        Ok(dirty_lines) => build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
+            let line_no_val = (line_no as i64).into_lisp(env)?;
+            let text_val = text.into_lisp(env)?;
+            env.cons(line_no_val, text_val)
+        }),
         Err(e) => emit_error(env, &e),
     }
 }
@@ -129,60 +164,48 @@ fn kuro_core_poll_updates_with_faces(env: &Env, session_id: u64) -> EmacsResult<
     let result = poll_encoded_lines(session_id, "panic in poll_updates_with_faces");
 
     match result {
-        Ok(lines) => {
-            let mut list = false.into_lisp(env)?;
-            for (line_no, text, face_ranges, col_to_buf) in lines.into_iter().rev() {
-                let line_no_val = (line_no as i64).into_lisp(env)?;
-                let text_val = text.into_lisp(env)?;
+        Ok(lines) => build_emacs_list_from_rev(env, lines, |env, (line_no, text, face_ranges, col_to_buf)| {
+            let line_no_val = (line_no as i64).into_lisp(env)?;
+            let text_val = text.into_lisp(env)?;
 
-                // Convert face ranges to Emacs list of flat (start-buf end-buf fg bg flags) lists
-                // NOTE: start/end are now buffer offsets (not grid column indices)
-                let mut face_list = false.into_lisp(env)?;
-                for (start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
-                    let start_val = (start_buf as i64).into_lisp(env)?;
-                    let end_val = (end_buf as i64).into_lisp(env)?;
-                    let fg_val = i64::from(fg).into_lisp(env)?;
-                    let bg_val = i64::from(bg).into_lisp(env)?;
-                    let flags_val = (flags as i64).into_lisp(env)?;
-                    let ul_color_val = i64::from(ul_color).into_lisp(env)?;
+            // Convert face ranges to Emacs list of flat (start end fg bg flags ul-color) lists.
+            let face_list = build_emacs_list_from_rev(env, face_ranges, |env, (
+                start_buf,
+                end_buf,
+                fg,
+                bg,
+                flags,
+                ul_color,
+            )| {
+                let start_val = (start_buf as i64).into_lisp(env)?;
+                let end_val = (end_buf as i64).into_lisp(env)?;
+                let fg_val = i64::from(fg).into_lisp(env)?;
+                let bg_val = i64::from(bg).into_lisp(env)?;
+                let flags_val = (flags as i64).into_lisp(env)?;
+                let ul_color_val = i64::from(ul_color).into_lisp(env)?;
 
-                    // Build flat proper list: (start end fg bg flags ul_color)
-                    let nil = false.into_lisp(env)?;
-                    let range_list = env.cons(ul_color_val, nil)?;
-                    let range_list = env.cons(flags_val, range_list)?;
-                    let range_list = env.cons(bg_val, range_list)?;
-                    let range_list = env.cons(fg_val, range_list)?;
-                    let range_list = env.cons(end_val, range_list)?;
-                    let range_list = env.cons(start_val, range_list)?;
-                    face_list = env.cons(range_list, face_list)?;
-                }
+                let nil = false.into_lisp(env)?;
+                let range_list = env.cons(ul_color_val, nil)?;
+                let range_list = env.cons(flags_val, range_list)?;
+                let range_list = env.cons(bg_val, range_list)?;
+                let range_list = env.cons(fg_val, range_list)?;
+                let range_list = env.cons(end_val, range_list)?;
+                env.cons(start_val, range_list)
+            })?;
 
-                // Build col_to_buf as Emacs vector for cursor placement.
-                // When col_to_buf is empty (ASCII fast path from encode_line),
-                // return an empty Emacs vector instead of nil so the Elisp
-                // (puthash row #() kuro--col-to-buf-map) overwrites any stale
-                // CJK mapping for this row, letting the identity fallback apply.
-                let col_to_buf_len = col_to_buf.len();
-                let col_to_buf_vec = if col_to_buf_len == 0 {
-                    // Single make_vector(0) call instead of N+1 calls for ASCII lines.
-                    env.make_vector(0, false.into_lisp(env)?)?
-                } else {
-                    let v = env.make_vector(col_to_buf_len, false.into_lisp(env)?)?;
-                    for (i, &offset) in col_to_buf.iter().enumerate() {
-                        v.set(i, (offset as i64).into_lisp(env)?)?;
-                    }
-                    v
-                };
+            // Build col_to_buf as Emacs vector for cursor placement.
+            let col_to_buf_vec = build_emacs_vector_from_iter(
+                env,
+                col_to_buf.len(),
+                false.into_lisp(env)?,
+                col_to_buf,
+                |env, offset| (offset as i64).into_lisp(env),
+            )?;
 
-                let line_pair = env.cons(line_no_val, text_val)?;
-                // line_tuple = ((line_no . text) face_ranges... col_to_buf_vec)
-                // We wrap as: ((line_no . text) . (face_list . col_to_buf_vec))
-                let line_data = env.cons(line_pair, face_list)?;
-                let line_with_ctb = env.cons(line_data, col_to_buf_vec)?;
-                list = env.cons(line_with_ctb, list)?;
-            }
-            Ok(list)
-        }
+            let line_pair = env.cons(line_no_val, text_val)?;
+            let line_data = env.cons(line_pair, face_list)?;
+            env.cons(line_data, col_to_buf_vec)
+        }),
         Err(e) => emit_error(env, &e),
     }
 }
@@ -208,13 +231,13 @@ fn kuro_core_poll_updates_binary(env: &Env, session_id: u64) -> EmacsResult<Valu
                 return false.into_lisp(env);
             }
             let bytes = crate::ffi::codec::encode_screen_binary(&lines);
-            // Build an Emacs vector of fixnums (one element per byte).
-            // O(1) aref on the Elisp side; no unsafe required.
-            let vec = env.make_vector(bytes.len(), 0i64.into_lisp(env)?)?;
-            for (i, &byte) in bytes.iter().enumerate() {
-                vec.set(i, i64::from(byte).into_lisp(env)?)?;
-            }
-            vec.into_lisp(env)
+            build_emacs_vector_from_iter(
+                env,
+                bytes.len(),
+                0i64.into_lisp(env)?,
+                bytes,
+                |env, byte| i64::from(byte).into_lisp(env),
+            )
         }
         Err(e) => emit_error(env, &e),
     }
@@ -255,18 +278,20 @@ fn kuro_core_poll_updates_binary_with_strings(
                 return false.into_lisp(env);
             }
 
-            // Build the native-string vector: one Emacs string per dirty row.
-            let strings_vec = env.make_vector(texts.len(), false.into_lisp(env)?)?;
-            for (i, text) in texts.iter().enumerate() {
-                strings_vec.set(i, text.as_str().into_lisp(env)?)?;
-            }
-
-            // Binary face/col-to-buf frame (text_byte_len = 0 per row) — encoded
-            // directly without intermediate Vec<EncodedLine> allocation.
-            let bytes_vec = env.make_vector(bytes.len(), 0i64.into_lisp(env)?)?;
-            for (i, &byte) in bytes.iter().enumerate() {
-                bytes_vec.set(i, i64::from(byte).into_lisp(env)?)?;
-            }
+            let strings_vec = build_emacs_vector_from_iter(
+                env,
+                texts.len(),
+                false.into_lisp(env)?,
+                texts,
+                |env, text| text.as_str().into_lisp(env),
+            )?;
+            let bytes_vec = build_emacs_vector_from_iter(
+                env,
+                bytes.len(),
+                0i64.into_lisp(env)?,
+                bytes,
+                |env, byte| i64::from(byte).into_lisp(env),
+            )?;
 
             env.cons(strings_vec, bytes_vec)
         }
@@ -295,12 +320,7 @@ fn kuro_core_get_scrollback(
         })
         .unwrap_or_default();
 
-    let mut list = false.into_lisp(env)?;
-    for line in scrollback_lines.into_iter().rev() {
-        let line_val = line.into_lisp(env)?;
-        list = env.cons(line_val, list)?;
-    }
-    Ok(list)
+    build_emacs_list_from_rev(env, scrollback_lines, |env, line| line.into_lisp(env))
 }
 
 /// Clear scrollback buffer

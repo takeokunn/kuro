@@ -294,5 +294,8 @@ fn test_scrollback_max_lines_respected() {
     );
 }
 
-include!("include/integration_terminal_advanced.rs");
-include!("include/integration_terminal_cursor_save.rs");
+#[path = "include/integration_terminal_advanced.rs"]
+mod advanced;
+
+#[path = "include/integration_terminal_cursor_save.rs"]
+mod cursor_save;

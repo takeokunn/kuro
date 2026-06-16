@@ -12,23 +12,11 @@
 ;; The `kuro--init' call is the branch point: non-nil triggers render loop
 ;; startup; nil silently skips it.  All FFI + render deps are mocked.
 
-(defmacro kuro-lifecycle-ext2-test-6--with-stubs (init-result &rest body)
-  "Stub `kuro--start-session-in-buffer' dependencies for BODY.
-INIT-RESULT is the value `kuro--init' should return."
-  `(cl-letf (((symbol-function 'kuro--terminal-dimensions)         (lambda ()      '(24 . 80)))
-             ((symbol-function 'kuro--prefill-buffer)              #'ignore)
-             ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
-             ((symbol-function 'kuro--init)                        (lambda (&rest _) ,init-result))
-             ((symbol-function 'kuro--init-session-buffer)         #'ignore)
-             ((symbol-function 'kuro--start-render-loop)           #'ignore)
-             ((symbol-function 'kuro--schedule-initial-render)     #'ignore))
-     ,@body))
-
 (ert-deftest kuro-lifecycle--start-session-in-buffer-returns-buffer ()
   "`kuro--start-session-in-buffer' always returns the buffer argument."
   (let ((buf (get-buffer-create " *kuro-ssb-ret*")))
     (unwind-protect
-        (kuro-lifecycle-ext2-test-6--with-stubs nil
+        (kuro-lifecycle-test--with-start-session-stubs nil
           (should (eq buf (kuro--start-session-in-buffer buf "bash"))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
@@ -36,7 +24,7 @@ INIT-RESULT is the value `kuro--init' should return."
   "`kuro--start-session-in-buffer' sets `kuro--shell-command' to COMMAND in the buffer."
   (let ((buf (get-buffer-create " *kuro-ssb-cmd*")))
     (unwind-protect
-        (kuro-lifecycle-ext2-test-6--with-stubs nil
+        (kuro-lifecycle-test--with-start-session-stubs nil
           (kuro--start-session-in-buffer buf "fish")
           (should (equal (buffer-local-value 'kuro--shell-command buf) "fish")))
       (when (buffer-live-p buf) (kill-buffer buf)))))
@@ -46,16 +34,11 @@ INIT-RESULT is the value `kuro--init' should return."
   (let ((buf (get-buffer-create " *kuro-ssb-init-arg*"))
         (init-cmd :not-called))
     (unwind-protect
-        (cl-letf (((symbol-function 'kuro--terminal-dimensions)         (lambda ()      '(24 . 80)))
-                  ((symbol-function 'kuro--prefill-buffer)              #'ignore)
-                  ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
-                  ((symbol-function 'kuro--init)
-                   (lambda (cmd &rest _) (setq init-cmd cmd) nil))
-                  ((symbol-function 'kuro--init-session-buffer)         #'ignore)
-                  ((symbol-function 'kuro--start-render-loop)           #'ignore)
-                  ((symbol-function 'kuro--schedule-initial-render)     #'ignore))
-          (kuro--start-session-in-buffer buf "zsh")
-          (should (equal init-cmd "zsh")))
+        (kuro-lifecycle-test--with-start-session-stubs nil
+          (cl-letf (((symbol-function 'kuro--init)
+                     (lambda (cmd &rest _) (setq init-cmd cmd) nil)))
+            (kuro--start-session-in-buffer buf "zsh")
+            (should (equal init-cmd "zsh"))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kuro-lifecycle--start-session-in-buffer-calls-init-session-buffer-on-success ()
@@ -63,16 +46,11 @@ INIT-RESULT is the value `kuro--init' should return."
   (let ((buf (get-buffer-create " *kuro-ssb-isb*"))
         (isb-called nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'kuro--terminal-dimensions)         (lambda ()      '(24 . 80)))
-                  ((symbol-function 'kuro--prefill-buffer)              #'ignore)
-                  ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
-                  ((symbol-function 'kuro--init)                        (lambda (&rest _) t))
-                  ((symbol-function 'kuro--init-session-buffer)
-                   (lambda (&rest _) (setq isb-called t)))
-                  ((symbol-function 'kuro--start-render-loop)           #'ignore)
-                  ((symbol-function 'kuro--schedule-initial-render)     #'ignore))
-          (kuro--start-session-in-buffer buf "bash")
-          (should isb-called))
+        (kuro-lifecycle-test--with-start-session-stubs t
+          (cl-letf (((symbol-function 'kuro--init-session-buffer)
+                     (lambda (&rest _) (setq isb-called t))))
+            (kuro--start-session-in-buffer buf "bash")
+            (should isb-called)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kuro-lifecycle--start-session-in-buffer-skips-render-on-init-failure ()
@@ -80,16 +58,11 @@ INIT-RESULT is the value `kuro--init' should return."
   (let ((buf (get-buffer-create " *kuro-ssb-skip*"))
         (render-started nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'kuro--terminal-dimensions)         (lambda ()      '(24 . 80)))
-                  ((symbol-function 'kuro--prefill-buffer)              #'ignore)
-                  ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
-                  ((symbol-function 'kuro--init)                        (lambda (&rest _) nil))
-                  ((symbol-function 'kuro--init-session-buffer)         #'ignore)
-                  ((symbol-function 'kuro--start-render-loop)
-                   (lambda () (setq render-started t)))
-                  ((symbol-function 'kuro--schedule-initial-render)     #'ignore))
-          (kuro--start-session-in-buffer buf "bash")
-          (should-not render-started))
+        (kuro-lifecycle-test--with-start-session-stubs nil
+          (cl-letf (((symbol-function 'kuro--start-render-loop)
+                     (lambda () (setq render-started t))))
+            (kuro--start-session-in-buffer buf "bash")
+            (should-not render-started)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kuro-lifecycle--start-session-in-buffer-schedules-render-with-buffer ()
@@ -97,16 +70,11 @@ INIT-RESULT is the value `kuro--init' should return."
   (let ((buf (get-buffer-create " *kuro-ssb-sched*"))
         (scheduled-for :not-called))
     (unwind-protect
-        (cl-letf (((symbol-function 'kuro--terminal-dimensions)         (lambda ()      '(24 . 80)))
-                  ((symbol-function 'kuro--prefill-buffer)              #'ignore)
-                  ((symbol-function 'kuro--setup-shell-integration-env) #'ignore)
-                  ((symbol-function 'kuro--init)                        (lambda (&rest _) t))
-                  ((symbol-function 'kuro--init-session-buffer)         #'ignore)
-                  ((symbol-function 'kuro--start-render-loop)           #'ignore)
-                  ((symbol-function 'kuro--schedule-initial-render)
-                   (lambda (b) (setq scheduled-for b))))
-          (kuro--start-session-in-buffer buf "bash")
-          (should (eq scheduled-for buf)))
+        (kuro-lifecycle-test--with-start-session-stubs t
+          (cl-letf (((symbol-function 'kuro--schedule-initial-render)
+                     (lambda (b) (setq scheduled-for b))))
+            (kuro--start-session-in-buffer buf "bash")
+            (should (eq scheduled-for buf))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 

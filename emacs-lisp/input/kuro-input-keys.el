@@ -146,7 +146,7 @@ can distinguish Ctrl+I from Tab, Ctrl+M from Enter, etc."
 (defun kuro--alt-modified (char)
   "Send Alt+CHAR.
 With KKP DISAMBIGUATE flag (0x01), encodes as CSI char;3u so the app
-receives unambiguous Alt+key events (no ESC-prefix ambiguity).
+receives unambiguous Alt+key events without escape-prefix ambiguity.
 Without KKP, sends the legacy ESC prefix followed by CHAR."
   (interactive "nChar: ")
   (if (kuro--kkp-flag-p kuro--kkp-disambiguate)

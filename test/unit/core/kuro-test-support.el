@@ -56,14 +56,6 @@ Returns the value that `kuro--resize-pending' would be set to, or nil."
      (use-local-map kuro-mode-map)
      ,@body))
 
-(defun kuro-el-ext-test--apply-resize-logic (initialized new-rows new-cols last-rows last-cols)
-  "Evaluate the resize-pending predicate used inside `kuro--window-size-change'.
-Returns the value that `kuro--resize-pending' would be set to, or nil."
-  (when (and initialized
-             (or (/= new-rows last-rows)
-                 (/= new-cols last-cols)))
-    (cons new-rows new-cols)))
-
 (defmacro kuro-copy-mode-test--with-prompt-overlays (positions &rest body)
   "Evaluate BODY in a temp buffer that has `kuro-prompt-status' overlays at POSITIONS."
   (declare (indent 1))

@@ -1,5 +1,7 @@
 // ── iTerm2 OSC 1337 helpers ───────────────────────────────────────────────────
 
+use crate::TerminalCore;
+
 /// Parsed key=value parameters from an iTerm2 `File=…` header.
 pub(crate) struct Iterm2Params {
     /// `inline=1` — render image inline in the terminal.
@@ -88,7 +90,10 @@ pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)>
 
 /// Handle OSC 1337 — iTerm2 inline images.
 pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
-    let rest = osc_param_str!(params, 1);
+    let rest = params
+        .get(1)
+        .and_then(|raw| std::str::from_utf8(raw).ok())
+        .unwrap_or("");
     let Some(stripped) = rest.strip_prefix("File=") else {
         return;
     };

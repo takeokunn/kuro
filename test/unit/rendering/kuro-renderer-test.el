@@ -39,97 +39,11 @@
 
 ;;; Group 1: kuro--sanitize-title
 
-(ert-deftest kuro-renderer-sanitize-title-clean-ascii ()
-  "Clean ASCII strings pass through unchanged."
-  (should (equal (kuro--sanitize-title "bash") "bash"))
-  (should (equal (kuro--sanitize-title "vim - file.txt") "vim - file.txt")))
-
-(ert-deftest kuro-renderer-sanitize-title-strips-control-chars ()
-  "Control characters (U+0000-U+001F, U+007F) are stripped."
-  ;; Use string constructor to avoid string-literal escaping ambiguity.
-  (should (equal (kuro--sanitize-title (concat "a" (string 1) "b"))   "ab"))  ; U+0001
-  (should (equal (kuro--sanitize-title (concat "a" (string #x1f) "b")) "ab")) ; U+001F
-  (should (equal (kuro--sanitize-title (concat "a" (string #x7f) "b")) "ab")) ; U+007F
-  (should (equal (kuro--sanitize-title (concat "a" (string #x1b) "b")) "ab")) ; ESC
-  )
-
-(ert-deftest kuro-renderer-sanitize-title-strips-bidi-overrides ()
-  "Unicode bidi override codepoints (U+202A-U+202E) are stripped."
-  (should (equal (kuro--sanitize-title (concat "a" "\u202e" "b")) "ab"))
-  (should (equal (kuro--sanitize-title (concat "a" "\u202a" "b")) "ab")))
-
-(ert-deftest kuro-renderer-sanitize-title-strips-isolates ()
-  "Unicode directional isolates (U+2066-U+2069) are stripped."
-  (should (equal (kuro--sanitize-title (concat "a" "\u2066" "b")) "ab"))
-  (should (equal (kuro--sanitize-title (concat "a" "\u2069" "b")) "ab")))
-
-(ert-deftest kuro-renderer-sanitize-title-empty-string ()
-  "Empty string remains empty."
-  (should (equal (kuro--sanitize-title "") "")))
-
-(ert-deftest kuro-renderer-sanitize-title-mixed-content ()
-  "Normal chars around control chars: control chars stripped, rest preserved."
-  (should (equal (kuro--sanitize-title "vim\x00\x1b[31m file.txt") "vim[31m file.txt")))
+(kuro-renderer-test--deftest-sanitize-title-base-cases)
 
 ;;; Group 2: kuro--update-line-full
 
-(ert-deftest kuro-renderer-update-line-replaces-content ()
-  "kuro--update-line-full replaces the text on the specified row."
-  (kuro-renderer-test--with-buffer
-    (insert "original\nsecond\n")
-    (kuro--update-line-full 0 "replaced" nil nil)
-    (goto-char (point-min))
-    (should (looking-at "replaced\n"))))
-
-(ert-deftest kuro-renderer-update-line-preserves-other-lines ()
-  "kuro--update-line-full does not affect other rows."
-  (kuro-renderer-test--with-buffer
-    (insert "line0\nline1\nline2\n")
-    (kuro--update-line-full 0 "updated" nil nil)
-    (goto-char (point-min))
-    (forward-line 1)
-    (should (looking-at "line1\n"))
-    (forward-line 1)
-    (should (looking-at "line2\n"))))
-
-(ert-deftest kuro-renderer-update-line-appends-newline ()
-  "kuro--update-line-full always appends a newline after the text."
-  (kuro-renderer-test--with-buffer
-    (insert "old\n")
-    (kuro--update-line-full 0 "new" nil nil)
-    (goto-char (point-min))
-    (should (looking-at "new\n"))))
-
-(ert-deftest kuro-renderer-update-line-empty-text ()
-  "kuro--update-line-full with empty string produces a lone newline on the row."
-  (kuro-renderer-test--with-buffer
-    (insert "content\n")
-    (kuro--update-line-full 0 "" nil nil)
-    (goto-char (point-min))
-    (should (looking-at "\n"))))
-
-(ert-deftest kuro-renderer-update-line-unicode ()
-  "kuro--update-line-full handles multi-byte Unicode content correctly."
-  (kuro-renderer-test--with-buffer
-    (insert "old\n")
-    (kuro--update-line-full 0 "日本語テスト" nil nil)
-    (goto-char (point-min))
-    (should (looking-at "日本語テスト\n"))))
-
-(ert-deftest kuro-renderer-update-line-preserves-line-count ()
-  "kuro--update-line-full preserves the total number of lines."
-  (kuro-renderer-test--with-buffer
-    (insert "a\nb\nc\n")
-    (kuro--update-line-full 1 "B" nil nil)
-    (should (= (count-lines (point-min) (point-max)) 3))))
-
-(ert-deftest kuro-renderer-update-line-nil-text-is-noop ()
-  "kuro--update-line-full with nil text is a no-op (guard clause)."
-  (kuro-renderer-test--with-buffer
-    (insert "keep\n")
-    (kuro--update-line-full 0 nil nil nil)
-    (goto-char (point-min))
-    (should (looking-at "keep\n"))))
+(kuro-renderer-test--deftest-update-line-full-cases)
 
 ;;; Group 3: kuro--update-cursor
 
@@ -217,47 +131,7 @@
 
 ;;; Group 6: kuro--apply-title-update
 
-(ert-deftest kuro-renderer-apply-title-update-renames-buffer ()
-  "kuro--apply-title-update renames the buffer to *kuro: <title>* format."
-  (kuro-renderer-test--with-title-stub "vim"
-    (kuro--apply-title-update)
-    (should (string-match-p "\\*kuro: vim\\*" (buffer-name)))))
-
-(ert-deftest kuro-renderer-apply-title-update-sanitizes-title ()
-  "kuro--apply-title-update sanitizes the title (strips control chars)."
-  ;; ESC and bracket should be stripped; result: "bash[31m"
-  (kuro-renderer-test--with-title-stub (concat "bash" (string #x1b) "[31m")
-    (kuro--apply-title-update)
-    (should (string-match-p "\\*kuro: bash\\[31m\\*" (buffer-name)))))
-
-(ert-deftest kuro-renderer-apply-title-update-noop-on-nil-title ()
-  "kuro--apply-title-update does not rename when FFI returns nil."
-  (kuro-renderer-test--with-title-stub nil
-    (let ((name-before (buffer-name)))
-      (kuro--apply-title-update)
-      (should (equal (buffer-name) name-before)))))
-
-(ert-deftest kuro-renderer-apply-title-update-noop-on-empty-title ()
-  "kuro--apply-title-update does not rename when FFI returns an empty string."
-  (kuro-renderer-test--with-title-stub ""
-    (let ((name-before (buffer-name)))
-      (kuro--apply-title-update)
-      (should (equal (buffer-name) name-before)))))
-
-(ert-deftest kuro-renderer-apply-title-update-sets-frame-name ()
-  "kuro--apply-title-update sets the frame name via set-frame-parameter."
-  (kuro-renderer-helpers-test--with-buffer
-    (let ((frame-name-set nil))
-      (cl-letf (((symbol-function 'kuro--get-and-clear-title)
-                 (lambda () "htop"))
-                ((symbol-function 'get-buffer-window)
-                 (lambda (_buf _all) (selected-window)))
-                ((symbol-function 'set-frame-parameter)
-                 (lambda (_frame param val)
-                   (when (eq param 'name)
-                     (setq frame-name-set val)))))
-        (kuro--apply-title-update)
-        (should (equal frame-name-set "htop"))))))
+(kuro-renderer-test--deftest-apply-title-update-cases)
 
 ;;; Group 7: kuro--process-scroll-events
 
@@ -313,112 +187,7 @@
 
 ;;; Group 9: kuro--update-tui-streaming-timer (TUI streaming timer management)
 
-(ert-deftest kuro-renderer-update-tui-increments-frame-count-when-full-dirty ()
-  "kuro--update-tui-streaming-timer increments kuro--tui-mode-frame-count on full-dirty frames."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 0
-          kuro--last-dirty-count 20)
-    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
-      (kuro--update-tui-streaming-timer)
-      (should (= kuro--tui-mode-frame-count 1)))))
-
-(ert-deftest kuro-renderer-update-tui-resets-count-when-below-threshold ()
-  "kuro--update-tui-streaming-timer resets frame count when dirty-row fraction is below threshold."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 3
-          kuro--last-dirty-count 5)
-    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
-      (kuro--update-tui-streaming-timer)
-      (should (= kuro--tui-mode-frame-count 0)))))
-
-(ert-deftest kuro-renderer-update-tui-stops-idle-timer-at-threshold ()
-  "kuro--update-tui-streaming-timer calls kuro--stop-stream-idle-timer when threshold is reached."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count (1- kuro--tui-mode-threshold)
-          kuro--last-dirty-count 20)
-    (let ((stop-called nil)
-          (switch-rate nil))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
-                 (lambda () (setq stop-called t)))
-                ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
-                ((symbol-function 'kuro--switch-render-timer)
-                 (lambda (rate) (setq switch-rate rate))))
-        (kuro--update-tui-streaming-timer)
-        (should stop-called)
-        (should (= kuro--tui-mode-frame-count kuro--tui-mode-threshold))
-        (should kuro--tui-mode-active)
-        (should (= switch-rate kuro-tui-frame-rate))))))
-
-(ert-deftest kuro-renderer-update-tui-restarts-idle-timer-on-tui-exit ()
-  "kuro--update-tui-streaming-timer calls kuro--start-stream-idle-timer when leaving TUI mode."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count kuro--tui-mode-threshold
-          kuro--tui-mode-active t
-          kuro--last-dirty-count 5)
-    (let ((start-called nil)
-          (switch-rate nil))
-      (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-                ((symbol-function 'kuro--start-stream-idle-timer)
-                 (lambda () (setq start-called t)))
-                ((symbol-function 'kuro--switch-render-timer)
-                 (lambda (rate) (setq switch-rate rate))))
-        (kuro--update-tui-streaming-timer)
-        (should start-called)
-        (should (= kuro--tui-mode-frame-count 0))
-        (should-not kuro--tui-mode-active)
-        (should (= switch-rate kuro-frame-rate))))))
-
-(ert-deftest kuro-renderer-update-tui-noop-when-streaming-mode-disabled ()
-  "kuro--update-tui-streaming-timer is a no-op when kuro-streaming-latency-mode is nil."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro-streaming-latency-mode nil
-          kuro--last-rows 24
-          kuro--tui-mode-frame-count 0
-          kuro--last-dirty-count 20)
-    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer)
-               (lambda () (error "should not be called")))
-              ((symbol-function 'kuro--start-stream-idle-timer)
-               (lambda () (error "should not be called")))
-              ((symbol-function 'kuro--switch-render-timer)
-               (lambda (_rate) (error "should not be called"))))
-      (should-not (condition-case err
-                      (progn (kuro--update-tui-streaming-timer) nil)
-                    (error err)))
-      (should (= kuro--tui-mode-frame-count 0)))))
-
-(ert-deftest kuro-renderer-update-tui-noop-when-last-rows-zero ()
-  "kuro--update-tui-streaming-timer is a no-op when kuro--last-rows is 0."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 0
-          kuro--tui-mode-frame-count 0
-          kuro--last-dirty-count 20)
-    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
-      (kuro--update-tui-streaming-timer)
-      (should (= kuro--tui-mode-frame-count 0)))))
-
-(ert-deftest kuro-renderer-update-tui-noop-on-zero-dirty ()
-  "kuro--update-tui-streaming-timer handles zero dirty rows without error."
-  (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--last-rows 24
-          kuro--tui-mode-frame-count 0
-          kuro--last-dirty-count 0)
-    (cl-letf (((symbol-function 'kuro--stop-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--start-stream-idle-timer) (lambda () nil))
-              ((symbol-function 'kuro--switch-render-timer) (lambda (_rate) nil)))
-      (should-not (condition-case err
-                      (progn (kuro--update-tui-streaming-timer) nil)
-                    (error err)))
-      (should (= kuro--tui-mode-frame-count 0)))))
+(kuro-renderer-test--deftest-update-tui-streaming-timer-cases)
 
 (provide 'kuro-renderer-test)
 ;;; kuro-renderer-test.el ends here

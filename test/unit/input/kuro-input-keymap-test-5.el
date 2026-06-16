@@ -18,7 +18,9 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
      (cl-letf (((symbol-function 'kuro--send-key)
                 (lambda (s) (push s sent)))
                ((symbol-function 'kuro--schedule-immediate-render)
-                (lambda () nil)))
+                (lambda () nil))
+               ((symbol-function 'kuro--kkp-flag-p)
+                (lambda (_) nil)))
        (funcall binding))
      (car sent)))
 
@@ -36,12 +38,17 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
      ,(format "%s-%s sends %S." mod dir expected)
      (should (equal (kuro-keymap-test--modifier-arrow-seq ,mod ,dir) ,expected))))
 
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-shift-up-sends-csi-1-2A   S up    "\e[1;2A")
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-ctrl-right-sends-csi-1-5C C right "\e[1;5C")
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-meta-down-sends-csi-1-3B  M down  "\e[1;3B")
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-ctrl-left-sends-csi-1-5D  C left  "\e[1;5D")
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-shift-down-sends-csi-1-2B S down  "\e[1;2B")
-(kuro-input-keymap-test--def-modifier-arrow kuro-input-keymap-meta-right-sends-csi-1-3C M right "\e[1;3C")
+(defmacro kuro-input-keymap-test--deftest-modifier-arrows ()
+  "Define modifier+arrow tests from `kuro-input-keymap-test--modifier-arrow-table'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,mod ,dir ,expected) entry))
+            `(kuro-input-keymap-test--def-modifier-arrow
+              ,test-name ,mod ,dir ,expected)))
+        kuro-input-keymap-test--modifier-arrow-table)))
+
+(kuro-input-keymap-test--deftest-modifier-arrows)
 
 (ert-deftest kuro-input-keymap-test--all-modifier-arrows-send-correct-csi ()
   "All kuro-input-keymap-test--modifier-arrow-table entries send the expected CSI sequence."
@@ -55,7 +62,9 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
         (cl-letf (((symbol-function 'kuro--send-key)
                    (lambda (s) (push s sent)))
                   ((symbol-function 'kuro--schedule-immediate-render)
-                   (lambda () nil)))
+                   (lambda () nil))
+                  ((symbol-function 'kuro--kkp-flag-p)
+                   (lambda (_) nil)))
           (funcall binding))
         (should (equal (car sent) expected))))))
 
@@ -74,9 +83,17 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
      (let ((map (kuro-keymap-test--built-map)))
        (should (eq (lookup-key map [remap ,orig-fn]) #',remap-fn)))))
 
-(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-yank-remap           yank           kuro--yank)
-(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-yank-pop-remap       yank-pop       kuro--yank-pop)
-(kuro-input-keymap-test--def-yank-remap kuro-input-keymap-build-has-clipboard-yank-remap clipboard-yank kuro--yank)
+(defmacro kuro-input-keymap-test--deftest-yank-remaps ()
+  "Define yank remap tests from `kuro-input-keymap-test--yank-remap-table'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,orig-fn ,remap-fn) entry))
+            `(kuro-input-keymap-test--def-yank-remap
+              ,test-name ,orig-fn ,remap-fn)))
+        kuro-input-keymap-test--yank-remap-table)))
+
+(kuro-input-keymap-test--deftest-yank-remaps)
 
 (ert-deftest kuro-input-keymap-test--all-yank-remaps-correct ()
   "All kuro-input-keymap-test--yank-remap-table entries are wired correctly."
@@ -125,9 +142,17 @@ kuro--schedule-immediate-render stubbed, and captures the sent string."
      ,(format "kuro--meta-punct-bindings: %S → ?%c." key-str char)
      (should (= (cdr (assoc ,key-str kuro--meta-punct-bindings)) ,char))))
 
-(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-dot       "M-." ?.)
-(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-slash      "M-/" ?/)
-(kuro-input-keymap-test--def-meta-punct-spot kuro-input-keymap-meta-punct-spot-check-underscore "M-_" ?_)
+(defmacro kuro-input-keymap-test--deftest-meta-punct-spots ()
+  "Define meta punctuation spot tests from `kuro-input-keymap-test--meta-punct-spot-table'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key-str ,char) entry))
+            `(kuro-input-keymap-test--def-meta-punct-spot
+              ,test-name ,key-str ,char)))
+        kuro-input-keymap-test--meta-punct-spot-table)))
+
+(kuro-input-keymap-test--deftest-meta-punct-spots)
 
 (ert-deftest kuro-input-keymap-test--all-meta-punct-spots-correct ()
   "All kuro-input-keymap-test--meta-punct-spot-table entries map to the expected char."

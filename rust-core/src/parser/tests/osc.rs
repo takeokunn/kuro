@@ -324,4 +324,5 @@ fn test_osc4_query_palette_entry() {
     );
 }
 
-include!("osc_edge_cases.rs");
+#[path = "osc/edge_cases.rs"]
+mod edge_cases;

@@ -197,8 +197,8 @@ No-ops with a message when the stack is empty."
 
 (defun kuro--line-mode-update-display ()
   "Refresh the line-mode input overlay at the Emacs cursor position.
-The overlay uses an after-string so the terminal buffer is never modified
-(it remains read-only).  The cursor position `kuro--line-point' is shown
+The overlay uses an after-string, so the terminal buffer remains read-only.
+The cursor position `kuro--line-point' is shown
 as a cursor-face block; characters before and after use underline."
   (when (overlayp kuro--line-overlay)
     (delete-overlay kuro--line-overlay)
@@ -242,7 +242,7 @@ minibuffer context where it operates correctly."
       (kuro--line-mode-update-display))))
 
 (defun kuro--line-quoted-insert ()
-  "Read the next key literally and insert it into the line buffer (C-q).
+  "Read the next key literally and insert it into the line buffer.
 Mirrors readline / Emacs `quoted-insert': the following keystroke — or an
 octal/hex/decimal code accepted by `read-quoted-char' — is inserted
 verbatim at `kuro--line-point'.  This lets you embed control characters
@@ -263,7 +263,7 @@ line-mode editing commands."
      (kuro--line-splice (1- kuro--line-point) kuro--line-point "" (1- kuro--line-point)))))
 
 (defun kuro--line-newline ()
-  "Insert a literal newline into the line buffer without sending (C-o).
+  "Insert a literal newline into the line buffer without sending.
 Lets you compose a multi-line command — a for-loop, a heredoc body, a
 pasted block — entirely within line mode, then dispatch the whole thing to
 the PTY at once with RET.  The embedded newlines are sent verbatim ahead of

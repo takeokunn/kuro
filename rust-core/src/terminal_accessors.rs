@@ -1,5 +1,12 @@
 // Accessors, queries, soft_reset, and reset for TerminalCore.
-// Included by terminal.rs via `include!()`.
+
+use super::TerminalCore;
+use crate::parser;
+use crate::parser::apc::ApcScanState;
+use crate::parser::dec_private::DecModes;
+use crate::parser::tabs::TabStops;
+use crate::types;
+
 impl TerminalCore {
     // === Public accessors for integration tests ===
     // Note: current_bold/italic/underline expose internal SGR state for testing.
@@ -103,7 +110,7 @@ impl TerminalCore {
             .map(|line| {
                 line.cells
                     .iter()
-                    .map(super::types::cell::Cell::char)
+                    .map(types::cell::Cell::char)
                     .collect()
             })
             .collect()

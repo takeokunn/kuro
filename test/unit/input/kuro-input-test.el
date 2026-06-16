@@ -240,19 +240,6 @@ The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ rema
 
 ;;; Group 18: kuro-scroll-up / kuro-scroll-down / kuro-scroll-bottom
 
-(defmacro kuro-input-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
-                                              get-offset-fn &rest body)
-  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
-  (declare (indent 3))
-  `(with-temp-buffer
-     (setq-local kuro--initialized t
-                 kuro--scroll-offset 0)
-     (cl-letf (((symbol-function 'kuro--scroll-up)    ,scroll-up-fn)
-               ((symbol-function 'kuro--scroll-down)  ,scroll-down-fn)
-               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
-               ((symbol-function 'kuro--render-cycle) #'ignore))
-       ,@body)))
-
 (ert-deftest kuro-input-scroll-up-calls-ffi ()
   "kuro-scroll-up calls kuro--scroll-up with window-body-height lines."
   (let ((up-called-with nil))

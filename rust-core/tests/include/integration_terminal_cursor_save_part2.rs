@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn test_title_dirty_flag_clears_after_reset() {
     let mut term = TerminalCore::new(24, 80);
@@ -61,7 +63,7 @@ fn test_scrollback_cleared_by_ed3_not_reset() {
 /// `set_default_bg_color` (via OSC 11) persists across a `resize`.
 ///
 /// After setting a custom default background via OSC 11 and then resizing
-/// the terminal, `osc_data().default_bg` must still hold the colour.
+/// the terminal, `osc_data().default_bg()` must still hold the colour.
 #[test]
 fn test_default_bg_color_persists_across_resize() {
     let mut term = TerminalCore::new(24, 80);
@@ -70,16 +72,16 @@ fn test_default_bg_color_persists_across_resize() {
     // Format: OSC 11 ; rgb:RRRR/GGGG/BBBB BEL
     term.advance(b"\x1b]11;rgb:ff/00/7f\x07");
     assert!(
-        term.osc_data().default_bg.is_some(),
+        term.osc_data().default_bg().is_some(),
         "default_bg must be set after OSC 11"
     );
-    let bg_before = term.osc_data().default_bg;
+    let bg_before = term.osc_data().default_bg();
 
     // Resize — must not clear the custom colour
     term.resize(20, 60);
 
     assert_eq!(
-        term.osc_data().default_bg,
+        term.osc_data().default_bg(),
         bg_before,
         "default_bg must persist across resize"
     );

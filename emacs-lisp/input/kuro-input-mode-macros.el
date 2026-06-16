@@ -52,9 +52,11 @@ Encodes the invariant: every edit ends with a display update (CPS continuation).
   `(progn (kuro--line-undo-push) ,@body (kuro--line-mode-update-display)))
 
 (defmacro kuro--def-line-nav (name docstring &rest body)
-  "Define a line-mode cursor-movement command.
+  "Define NAME as a line-mode cursor-movement command.
+DOCSTRING becomes the generated command docstring.
 BODY runs unconditionally; `kuro--line-mode-update-display' is the
 CPS continuation."
+  (declare (indent 1))
   `(defun ,name ()
      ,docstring
      (interactive)

@@ -1,3 +1,8 @@
+use super::dirty_viewport_support::{
+    assert_scrollback_non_empty, make_viewport_session, scrollback_batch,
+};
+use super::TerminalSession;
+
 // ---------------------------------------------------------------------------
 // viewport_scroll_up additional tests
 // ---------------------------------------------------------------------------
@@ -5,16 +10,9 @@
 /// `viewport_scroll_up(3)` increases `scroll_offset` to 3 after scrollback exists.
 #[test]
 fn test_viewport_scroll_up_from_scrollback() {
-    let mut session = make_session();
-    // Scroll 5 lines into scrollback by printing 5*24 lines (each batch pushes 24 rows off).
-    for _ in 0..5 {
-        let newlines = b"\n".repeat(24);
-        session.core.advance(&newlines);
-    }
-    assert!(
-        session.core.screen.scrollback_line_count > 0,
-        "scrollback must be non-empty before scroll_up"
-    );
+    let mut session = make_viewport_session();
+    scrollback_batch(&mut session, 5);
+    assert_scrollback_non_empty(&session, "scrollback must be non-empty before scroll_up");
     session.viewport_scroll_up(3);
     assert_eq!(
         session.scroll_offset(),
@@ -26,12 +24,8 @@ fn test_viewport_scroll_up_from_scrollback() {
 /// `viewport_scroll_up(9999)` clamps the offset at `scrollback_line_count`.
 #[test]
 fn test_viewport_scroll_up_clamped_at_max() {
-    let mut session = make_session();
-    // Fill scrollback with plenty of lines.
-    for _ in 0..10 {
-        let newlines = b"\n".repeat(24);
-        session.core.advance(&newlines);
-    }
+    let mut session = make_viewport_session();
+    scrollback_batch(&mut session, 10);
     let max = session.core.screen.scrollback_line_count;
     assert!(max > 0, "scrollback must be non-empty before clamping test");
     session.viewport_scroll_up(9999);
@@ -45,12 +39,8 @@ fn test_viewport_scroll_up_clamped_at_max() {
 /// `viewport_scroll_up(2)` then `viewport_scroll_down(2)` returns offset to 0.
 #[test]
 fn test_viewport_scroll_up_then_down_restores_live() {
-    let mut session = make_session();
-    // Push scrollback.
-    for _ in 0..5 {
-        let newlines = b"\n".repeat(24);
-        session.core.advance(&newlines);
-    }
+    let mut session = make_viewport_session();
+    scrollback_batch(&mut session, 5);
     session.viewport_scroll_up(2);
     assert_eq!(
         session.scroll_offset(),
@@ -72,7 +62,7 @@ fn test_viewport_scroll_up_then_down_restores_live() {
 /// `get_synchronized_output` returns `false` on a fresh session.
 #[test]
 fn test_get_synchronized_output_initially_false() {
-    let session = make_session();
+    let session = make_viewport_session();
     assert!(
         !session.get_synchronized_output(),
         "get_synchronized_output must return false on a fresh session"
@@ -82,7 +72,7 @@ fn test_get_synchronized_output_initially_false() {
 /// `get_synchronized_output` returns `true` after `CSI ?2026h`.
 #[test]
 fn test_get_synchronized_output_true_after_mode_set() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.core.advance(b"\x1b[?2026h");
     assert!(
         session.get_synchronized_output(),
@@ -93,7 +83,7 @@ fn test_get_synchronized_output_true_after_mode_set() {
 /// `get_synchronized_output` returns `false` after set then reset with `CSI ?2026l`.
 #[test]
 fn test_get_synchronized_output_false_after_mode_reset() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.core.advance(b"\x1b[?2026h");
     assert!(
         session.get_synchronized_output(),
@@ -113,7 +103,7 @@ fn test_get_synchronized_output_false_after_mode_reset() {
 /// `get_mouse_pixel` returns `false` on a fresh session.
 #[test]
 fn test_get_mouse_pixel_initially_false() {
-    let session = make_session();
+    let session = make_viewport_session();
     assert!(
         !session.get_mouse_pixel(),
         "get_mouse_pixel must return false on a fresh session"
@@ -123,7 +113,7 @@ fn test_get_mouse_pixel_initially_false() {
 /// `get_mouse_pixel` returns `true` after `CSI ?1016h`.
 #[test]
 fn test_get_mouse_pixel_true_after_mode_1016() {
-    let mut session = make_session();
+    let mut session = make_viewport_session();
     session.core.advance(b"\x1b[?1016h");
     assert!(
         session.get_mouse_pixel(),
@@ -213,15 +203,12 @@ fn test_encode_line_faces_bold_cell_encodes_flag_in_attrs() {
 // set_detached / set_bound: direct state-transition unit tests
 // ---------------------------------------------------------------------------
 
-/// A fresh session via `make_session()` is Bound, so `is_detached()` returns false.
+/// A fresh session via `make_viewport_session()` is Bound, so `is_detached()` returns false.
 #[test]
 fn test_is_detached_false_on_fresh_session() {
-    let session = make_session();
+    let session = make_viewport_session();
     assert!(
         !session.is_detached(),
         "is_detached() must return false on a freshly constructed (Bound) session"
     );
 }
-
-
-include!("tests_unit_dirty_viewport2.rs");

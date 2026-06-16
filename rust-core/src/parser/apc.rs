@@ -21,13 +21,6 @@ pub enum ApcScanState {
     AfterApcEsc,
 }
 
-/// Run the APC pre-scanner and advance the VTE parser.
-///
-/// This uses a hybrid approach for APC (Kitty Graphics) handling:
-/// 1. Fast path: If no ESC byte (0x1B) is present AND we're not in an APC sequence,
-///    skip the APC pre-scanner entirely (contains-based fast-path check)
-/// 2. Slow path: Run the APC state machine only when ESC is detected or we're mid-sequence
-/// 3. Always run the vte parser for all other terminal sequences
 pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // --- Hybrid APC pre-scanner for Kitty Graphics ---
     // Only run the byte-by-byte scanner if:
@@ -36,62 +29,8 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     //
     // This optimization provides 2-4x throughput improvement for plain text
     // (no escape sequences) which is common in typical terminal output.
-    let has_esc = bytes.contains(&0x1B);
-    let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
-
-    // Quick bail-out: when starting Idle and the buffer contains no '_' byte,
-    // no APC start sequence (ESC _) can exist, so skip the byte-by-byte
-    // scanner entirely.  This is the common case for CSI/OSC-heavy TUI output
-    // where ESC bytes are frequent but APC sequences are absent.
-    if in_apc_sequence || (has_esc && bytes.contains(&b'_')) {
-        for &byte in bytes {
-            match (core.kitty.apc_state, byte) {
-                // Idle: watch for ESC
-                (ApcScanState::Idle, 0x1B) => {
-                    core.kitty.apc_state = ApcScanState::AfterEsc;
-                }
-                (ApcScanState::Idle, _) => {}
-                // AfterEsc: ESC + '_' starts APC; anything else resets
-                (ApcScanState::AfterEsc, b'_') => {
-                    core.kitty.apc_buf.clear();
-                    core.kitty.apc_state = ApcScanState::InApc;
-                }
-                (ApcScanState::AfterEsc, _) => {
-                    core.kitty.apc_state = ApcScanState::Idle;
-                }
-                // InApc: accumulate bytes (with size cap); ESC may be start of ST
-                (ApcScanState::InApc, 0x1B) => {
-                    core.kitty.apc_state = ApcScanState::AfterApcEsc;
-                }
-                (ApcScanState::InApc, b) => {
-                    if core.kitty.apc_buf.len() < MAX_APC_PAYLOAD_BYTES {
-                        core.kitty.apc_buf.push(b);
-                    }
-                    // If over limit, keep state but drop byte (truncate silently)
-                }
-                // AfterApcEsc: '\\' completes the APC (ESC \\ = ST); else keep accumulating
-                (ApcScanState::AfterApcEsc, b'\\') => {
-                    // APC complete — dispatch if it starts with 'G' (Kitty Graphics).
-                    // Take the buffer out to avoid copying potentially-large image payloads;
-                    // core.kitty.apc_buf becomes an empty Vec (retains capacity on return).
-                    let mut buf = std::mem::take(&mut core.kitty.apc_buf);
-                    if buf.first() == Some(&b'G') {
-                        dispatch_kitty_apc(core, &buf[1..]);
-                    }
-                    buf.clear();
-                    core.kitty.apc_buf = buf; // return capacity to the pool
-                    core.kitty.apc_state = ApcScanState::Idle;
-                }
-                (ApcScanState::AfterApcEsc, b) => {
-                    // False ESC — add ESC + this byte back and stay in InApc
-                    if core.kitty.apc_buf.len() + 2 <= MAX_APC_PAYLOAD_BYTES {
-                        core.kitty.apc_buf.push(0x1B);
-                        core.kitty.apc_buf.push(b);
-                    }
-                    core.kitty.apc_state = ApcScanState::InApc;
-                }
-            }
-        }
+    if should_scan_apc_bytes(core, bytes) {
+        scan_apc_bytes(core, bytes);
     }
 
     // --- ASCII fast-path + vte parser ---
@@ -99,18 +38,77 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
     // runs of printable ASCII bytes (0x20-0x7E) and handle them directly via
     // Screen::print_ascii_run(), bypassing VTE's per-byte state machine dispatch.
     // Only non-ASCII or escape-containing segments are forwarded to VTE.
-    let mut pos = 0;
+    let pos = advance_ascii_fast_path(core, bytes);
 
-    // ASCII fast-path: scan for printable ASCII run at start of buffer.
-    // Disabled when a non-ASCII charset (e.g. DEC line drawing) is active,
-    // since those bytes need per-character translation via VTE print().
-    // Disabled when IRM (Insert Mode) is active — each character must be
-    // individually inserted via ICH before printing, which is incompatible
-    // with batch print_ascii_run.
+    // Feed remaining bytes (if any) to VTE
+    advance_vte_parser(core, bytes, pos);
+    // If pos == bytes.len(), entire buffer was ASCII — parser_in_ground stays true
+}
+
+fn should_scan_apc_bytes(core: &TerminalCore, bytes: &[u8]) -> bool {
+    let has_esc = bytes.contains(&0x1B);
+    let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
+
+    in_apc_sequence || (has_esc && bytes.contains(&b'_'))
+}
+
+fn scan_apc_bytes(core: &mut TerminalCore, bytes: &[u8]) {
+    for &byte in bytes {
+        match (core.kitty.apc_state, byte) {
+            // Idle: watch for ESC
+            (ApcScanState::Idle, 0x1B) => {
+                core.kitty.apc_state = ApcScanState::AfterEsc;
+            }
+            (ApcScanState::Idle, _) => {}
+            // AfterEsc: ESC + '_' starts APC; anything else resets
+            (ApcScanState::AfterEsc, b'_') => {
+                core.kitty.apc_buf.clear();
+                core.kitty.apc_state = ApcScanState::InApc;
+            }
+            (ApcScanState::AfterEsc, _) => {
+                core.kitty.apc_state = ApcScanState::Idle;
+            }
+            // InApc: accumulate bytes (with size cap); ESC may be start of ST
+            (ApcScanState::InApc, 0x1B) => {
+                core.kitty.apc_state = ApcScanState::AfterApcEsc;
+            }
+            (ApcScanState::InApc, b) => {
+                if core.kitty.apc_buf.len() < MAX_APC_PAYLOAD_BYTES {
+                    core.kitty.apc_buf.push(b);
+                }
+                // If over limit, keep state but drop byte (truncate silently)
+            }
+            // AfterApcEsc: '\\' completes the APC (ESC \\ = ST); else keep accumulating
+            (ApcScanState::AfterApcEsc, b'\\') => {
+                // APC complete — dispatch if it starts with 'G' (Kitty Graphics).
+                // Take the buffer out to avoid copying potentially-large image payloads;
+                // core.kitty.apc_buf becomes an empty Vec (retains capacity on return).
+                let mut buf = std::mem::take(&mut core.kitty.apc_buf);
+                if buf.first() == Some(&b'G') {
+                    dispatch_kitty_apc(core, &buf[1..]);
+                }
+                buf.clear();
+                core.kitty.apc_buf = buf; // return capacity to the pool
+                core.kitty.apc_state = ApcScanState::Idle;
+            }
+            (ApcScanState::AfterApcEsc, b) => {
+                // False ESC — add ESC + this byte back and stay in InApc
+                if core.kitty.apc_buf.len() + 2 <= MAX_APC_PAYLOAD_BYTES {
+                    core.kitty.apc_buf.push(0x1B);
+                    core.kitty.apc_buf.push(b);
+                }
+                core.kitty.apc_state = ApcScanState::InApc;
+            }
+        }
+    }
+}
+
+fn advance_ascii_fast_path(core: &mut TerminalCore, bytes: &[u8]) -> usize {
     if core.parser_in_ground
         && core.active_charset() == crate::types::charset::CharsetType::Ascii
         && !core.dec_modes.insert_mode
     {
+        let mut pos = 0;
         while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
             pos += 1;
         }
@@ -126,47 +124,170 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
             if core.osc_data.hyperlink.uri.is_some() {
                 core.stamp_hyperlink_on_last_n_cells(pos);
             }
-            // After printing ASCII, parser is still in Ground (we didn't touch VTE)
         }
+        pos
+    } else {
+        0
+    }
+}
+
+fn advance_vte_parser(core: &mut TerminalCore, bytes: &[u8], pos: usize) {
+    if pos >= bytes.len() {
+        return;
     }
 
-    // Feed remaining bytes (if any) to VTE
-    if pos < bytes.len() {
-        core.vte_callback_count = 0;
-        core.vte_last_ground = false;
+    core.vte_callback_count = 0;
+    core.vte_last_ground = false;
 
-        let mut parser = core.parser.take().expect("parser must be present");
-        parser.advance(core, &bytes[pos..]);
-        core.parser = Some(parser);
+    let mut parser = core.parser.take().expect("parser must be present");
+    parser.advance(core, &bytes[pos..]);
+    core.parser = Some(parser);
 
-        // Flush any remaining buffered ASCII from VTE print() callbacks
-        core.flush_print_buf();
+    // Flush any remaining buffered ASCII from VTE print() callbacks
+    core.flush_print_buf();
 
-        // Update Ground-state tracking based on VTE callback observations
-        if core.vte_callback_count == 0 {
-            // VTE processed bytes without dispatching — mid-sequence
-            core.parser_in_ground = false;
-        } else {
-            core.parser_in_ground = core.vte_last_ground;
-        }
+    // Update Ground-state tracking based on VTE callback observations
+    if core.vte_callback_count == 0 {
+        // VTE processed bytes without dispatching — mid-sequence
+        core.parser_in_ground = false;
+    } else {
+        core.parser_in_ground = core.vte_last_ground;
     }
-    // If pos == bytes.len(), entire buffer was ASCII — parser_in_ground stays true
+}
+fn build_kitty_image_data(
+    pixels: Vec<u8>,
+    format: crate::parser::kitty::ImageFormat,
+    pixel_width: u32,
+    pixel_height: u32,
+) -> crate::grid::screen::ImageData {
+    crate::grid::screen::ImageData {
+        pixels,
+        format,
+        pixel_width,
+        pixel_height,
+    }
+}
+
+fn build_kitty_image_placement(
+    cursor: crate::types::cursor::Cursor,
+    image_id: u32,
+    placement_id: Option<u32>,
+    columns: Option<u32>,
+    rows: Option<u32>,
+) -> crate::grid::screen::ImagePlacement {
+    crate::grid::screen::ImagePlacement {
+        image_id,
+        placement_id,
+        row: cursor.row,
+        col: cursor.col,
+        display_cols: columns.unwrap_or(1),
+        display_rows: rows.unwrap_or(1),
+    }
+}
+
+fn store_kitty_image(
+    core: &mut TerminalCore,
+    image_id: Option<u32>,
+    pixels: Vec<u8>,
+    format: crate::parser::kitty::ImageFormat,
+    pixel_width: u32,
+    pixel_height: u32,
+) -> u32 {
+    let data = build_kitty_image_data(pixels, format, pixel_width, pixel_height);
+    core.screen.active_graphics_mut().store_image(image_id, data)
+}
+
+fn add_kitty_placement(
+    core: &mut TerminalCore,
+    placement: crate::grid::screen::ImagePlacement,
+) {
+    if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
+        core.kitty.pending_image_notifications.push(notif);
+    }
+}
+
+fn handle_kitty_transmit(
+    core: &mut TerminalCore,
+    image_id: Option<u32>,
+    pixels: Vec<u8>,
+    format: crate::parser::kitty::ImageFormat,
+    pixel_width: u32,
+    pixel_height: u32,
+) {
+    let _ = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
+}
+
+fn handle_kitty_transmit_and_display(
+    core: &mut TerminalCore,
+    image_id: Option<u32>,
+    pixels: Vec<u8>,
+    format: crate::parser::kitty::ImageFormat,
+    pixel_width: u32,
+    pixel_height: u32,
+    columns: Option<u32>,
+    rows: Option<u32>,
+    placement_id: Option<u32>,
+) {
+    let actual_id = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
+    let cursor = *core.screen.cursor();
+    let placement = build_kitty_image_placement(cursor, actual_id, placement_id, columns, rows);
+    add_kitty_placement(core, placement);
+}
+
+fn handle_kitty_place(
+    core: &mut TerminalCore,
+    image_id: u32,
+    placement_id: Option<u32>,
+    columns: Option<u32>,
+    rows: Option<u32>,
+) {
+    let cursor = *core.screen.cursor();
+    let placement = build_kitty_image_placement(cursor, image_id, placement_id, columns, rows);
+    add_kitty_placement(core, placement);
+}
+
+fn handle_kitty_delete(
+    core: &mut TerminalCore,
+    delete_sub: char,
+    image_id: Option<u32>,
+    placement_id: Option<u32>,
+) {
+    let cursor = *core.screen.cursor();
+    let graphics = core.screen.active_graphics_mut();
+
+    match delete_sub {
+        'a' | 'A' => graphics.clear_all_placements(),
+        'i' | 'I' => {
+            if let Some(id) = image_id {
+                graphics.delete_by_id(id);
+            }
+        }
+        'p' | 'P' => {
+            if let (Some(id), Some(pid)) = (image_id, placement_id) {
+                graphics.delete_by_placement(id, pid);
+            }
+        }
+        'x' | 'X' => graphics.delete_by_col(cursor.col),
+        'y' | 'Y' => graphics.delete_by_row(cursor.row),
+        _ => {}
+    }
+}
+
+fn handle_kitty_query(core: &mut TerminalCore, image_id: Option<u32>) {
+    let id_part = image_id.map(|id| format!(",i={id}")).unwrap_or_default();
+    let response = format!("\x1b_Ga=q{id_part};OK\x1b\\");
+    core.meta.pending_responses.push(response.into_bytes());
 }
 
 #[cfg(test)]
 #[path = "tests/apc.rs"]
 mod tests;
 
-/// Dispatch a fully assembled Kitty Graphics APC payload.
-///
-/// `payload` is everything after the leading 'G' byte (i.e., the key=value header
-/// and optional base64 data, separated by ';').
 pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
-    use crate::grid::screen::{ImageData, ImagePlacement};
     use crate::parser::kitty::{process_apc_payload, KittyCommand};
 
     let Some(cmd) = process_apc_payload(payload, &mut core.kitty.kitty_chunk) else {
-        return; // more chunks incoming, or malformed
+        return;
     };
 
     match cmd {
@@ -178,17 +299,8 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             pixel_height,
             ..
         } => {
-            let data = ImageData {
-                pixels,
-                format,
-                pixel_width,
-                pixel_height,
-            };
-            core.screen
-                .active_graphics_mut()
-                .store_image(image_id, data);
+            handle_kitty_transmit(core, image_id, pixels, format, pixel_width, pixel_height);
         }
-
         KittyCommand::TransmitAndDisplay {
             image_id,
             pixels,
@@ -199,80 +311,35 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             rows,
             placement_id,
         } => {
-            let data = ImageData {
+            handle_kitty_transmit_and_display(
+                core,
+                image_id,
                 pixels,
                 format,
                 pixel_width,
                 pixel_height,
-            };
-            let actual_id = core
-                .screen
-                .active_graphics_mut()
-                .store_image(image_id, data);
-            let cursor = *core.screen.cursor();
-            let placement = ImagePlacement {
-                image_id: actual_id,
+                columns,
+                rows,
                 placement_id,
-                row: cursor.row,
-                col: cursor.col,
-                display_cols: columns.unwrap_or(1),
-                display_rows: rows.unwrap_or(1),
-            };
-            if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-                core.kitty.pending_image_notifications.push(notif);
-            }
+            );
         }
-
         KittyCommand::Place {
             image_id,
             placement_id,
             columns,
             rows,
         } => {
-            let cursor = *core.screen.cursor();
-            let placement = ImagePlacement {
-                image_id,
-                placement_id,
-                row: cursor.row,
-                col: cursor.col,
-                display_cols: columns.unwrap_or(1),
-                display_rows: rows.unwrap_or(1),
-            };
-            if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-                core.kitty.pending_image_notifications.push(notif);
-            }
+            handle_kitty_place(core, image_id, placement_id, columns, rows);
         }
-
         KittyCommand::Delete {
             delete_sub,
             image_id,
             placement_id,
         } => {
-            let cursor = *core.screen.cursor();
-            let graphics = core.screen.active_graphics_mut();
-            match delete_sub {
-                'a' | 'A' => graphics.clear_all_placements(),
-                'i' | 'I' => {
-                    if let Some(id) = image_id {
-                        graphics.delete_by_id(id);
-                    }
-                }
-                'p' | 'P' => {
-                    if let (Some(id), Some(pid)) = (image_id, placement_id) {
-                        graphics.delete_by_placement(id, pid);
-                    }
-                }
-                'x' | 'X' => graphics.delete_by_col(cursor.col),
-                'y' | 'Y' => graphics.delete_by_row(cursor.row),
-                _ => {}
-            }
+            handle_kitty_delete(core, delete_sub, image_id, placement_id);
         }
-
         KittyCommand::Query { image_id } => {
-            // Respond with "OK" status using existing pending_responses mechanism
-            let id_part = image_id.map(|id| format!(",i={id}")).unwrap_or_default();
-            let response = format!("\x1b_Ga=q{id_part};OK\x1b\\");
-            core.meta.pending_responses.push(response.into_bytes());
+            handle_kitty_query(core, image_id);
         }
     }
 }

@@ -85,11 +85,9 @@
                    kuro--typewriter-current-row kuro--typewriter-current-text
                    (kuro--typewriter-written-len 0))
                (kuro--typewriter-enqueue 0 "hello")
-               (cl-letf (((symbol-function 'run-with-timer)
-                          (lambda (_delay _repeat fn)
-                            (setq ,captured-fn-sym fn)
-                            'fake-timer)))
-                 (kuro--start-typewriter-timer))))
+               (kuro-typewriter-test--with-timer-stub timer-args
+                 (kuro--start-typewriter-timer)
+                 (setq ,captured-fn-sym (nth 2 timer-args)))))
          (kill-buffer buf)))
      ,@body))
 
@@ -120,12 +118,10 @@
           (kuro--typewriter-current-text "hi")
           (kuro--typewriter-written-len 2)   ; fully written
           (kuro--typewriter-queue nil))
-      (cl-letf (((symbol-function 'kuro--typewriter-write-partial)
-                 (lambda (_row _text) (error "must not write"))))
+      (kuro-typewriter-test--with-write-partial-log write-calls
         (kuro--typewriter-tick)
-        (should (null kuro--typewriter-current-row))
-        (should (null kuro--typewriter-current-text))
-        (should (= kuro--typewriter-written-len 0))))))
+        (should (null write-calls))
+        (kuro-typewriter-test--assert-state nil nil 0 nil)))))
 
 (provide 'kuro-typewriter-keys-test)
 

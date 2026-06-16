@@ -83,46 +83,7 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
                     (progn (kuro--setup-fontset) nil)
                   (error err)))))
 
-(defconst kuro-char-width-test--detect-nerd-font-table
-  '((kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
-     ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
-     "Symbols Nerd Font Mono")
-    (kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
-     ("DejaVu Sans Mono" "Hack Nerd Font Mono")
-     "Hack Nerd Font Mono")
-    (kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
-     ("DejaVu Sans Mono" "Hack Nerd Font")
-     "Hack Nerd Font")
-    (kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
-     ("DejaVu Sans Mono" "Consolas" "Courier New")
-     nil))
-  "Table: (test-name fonts expected) for kuro--detect-nerd-font priority dispatch.")
-
-(defmacro kuro-char-width-test--def-detect-nerd-font (test-name fonts expected)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--detect-nerd-font' with fonts %S → %S." fonts expected)
-     (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-               ((symbol-function 'font-family-list) (lambda () ',fonts)))
-       ,(if expected
-            `(should (equal (kuro--detect-nerd-font) ,expected))
-          `(should-not (kuro--detect-nerd-font))))))
-
-(kuro-char-width-test--def-detect-nerd-font
- kuro-faces-test--detect-nerd-font-prefers-symbols-nerd-font-mono
- ("DejaVu Sans Mono" "Symbols Nerd Font Mono" "SomeOther Nerd Font")
- "Symbols Nerd Font Mono")
-(kuro-char-width-test--def-detect-nerd-font
- kuro-faces-test--detect-nerd-font-fallback-to-other-nerd-mono
- ("DejaVu Sans Mono" "Hack Nerd Font Mono")
- "Hack Nerd Font Mono")
-(kuro-char-width-test--def-detect-nerd-font
- kuro-faces-test--detect-nerd-font-fallback-to-nerd-font
- ("DejaVu Sans Mono" "Hack Nerd Font")
- "Hack Nerd Font")
-(kuro-char-width-test--def-detect-nerd-font
- kuro-faces-test--detect-nerd-font-nil-when-no-nerd-fonts
- ("DejaVu Sans Mono" "Consolas" "Courier New")
- nil)
+(kuro-char-width-test--deftest-detect-nerd-fonts)
 
 (ert-deftest kuro-char-width-test--all-detect-nerd-font-cases-correct ()
   "Invariant: every detect-nerd-font table entry returns the expected result."
@@ -136,29 +97,7 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
 
 ;;; Group 22: char-width-table data integrity
 
-(defconst kuro-char-width-test--width-invariant-table
-  '(;; Variation Selectors (FE00-FE0F): zero width
-    (kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
-    (kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
-    ;; Nerd Font PUA (E000-F8FF): width 1
-    (kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
-    (kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
-    ;; Supplementary Nerd Font PUA (F0000): width 1
-    (kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1))
-  "Table of (test-name codepoint expected-width) for kuro--setup-char-width-table invariants.")
-
-(defmacro kuro-char-width-test--def-width-invariant (test-name codepoint expected-width)
-  `(ert-deftest ,test-name ()
-     ,(format "kuro--setup-char-width-table: char-width #x%X => %d." codepoint expected-width)
-     (with-temp-buffer
-       (kuro--setup-char-width-table)
-       (should (= ,expected-width (char-width ,codepoint))))))
-
-(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe00-is-0  #xFE00  0)
-(kuro-char-width-test--def-width-invariant kuro-faces-test--variation-selector-fe0f-is-0  #xFE0F  0)
-(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-e000-is-1            #xE000  1)
-(kuro-char-width-test--def-width-invariant kuro-faces-test--pua-nerd-f8ff-is-1            #xF8FF  1)
-(kuro-char-width-test--def-width-invariant kuro-faces-test--supplementary-pua-f0000-is-1  #xF0000 1)
+(kuro-char-width-test--deftest-width-invariants)
 
 (ert-deftest kuro-char-width-test--all-width-invariants-correct ()
   "Every entry in `kuro-char-width-test--width-invariant-table' has the expected char-width."
@@ -190,27 +129,7 @@ EA-Ambiguous codepoints that also appear in the emoji block are pinned to 1."
       (kuro--refine-glyph-widths)
       (should-not probe-called))))
 
-(defconst kuro-char-width-test--refine-redraw-table
-  '((test-kuro-refine-glyph-widths-calls-redraw-when-changed  t   t)
-    (test-kuro-refine-glyph-widths-no-redraw-when-unchanged   nil nil))
-  "Table: (test-name rescale-result redraw-expected?) for kuro--refine-glyph-widths redraw dispatch.")
-
-(defmacro kuro-char-width-test--def-refine-redraw (test-name rescale redraw)
-  `(ert-deftest ,test-name ()
-     ,(format "`kuro--refine-glyph-widths' rescale=%s → redraw=%s." rescale redraw)
-     (let (redraw-called)
-       (cl-letf (((symbol-function 'display-graphic-p) (lambda () t))
-                 ((symbol-function 'frame-char-width)  (lambda () 8))
-                 ((symbol-function 'frame-char-height) (lambda () 16))
-                 ((symbol-function 'kuro--rescale-font-for-glyph) (lambda (&rest _) ,rescale))
-                 ((symbol-function 'redraw-display) (lambda () (setq redraw-called t))))
-         (kuro--refine-glyph-widths)
-         ,(if redraw '(should redraw-called) '(should-not redraw-called))))))
-
-(kuro-char-width-test--def-refine-redraw
- test-kuro-refine-glyph-widths-calls-redraw-when-changed t t)
-(kuro-char-width-test--def-refine-redraw
- test-kuro-refine-glyph-widths-no-redraw-when-unchanged nil nil)
+(kuro-char-width-test--deftest-refine-redraws)
 
 (ert-deftest kuro-char-width-test--all-refine-redraw-cases-correct ()
   "Invariant: every refine-redraw table entry produces the expected redraw behavior."

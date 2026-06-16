@@ -49,8 +49,7 @@ fn test_already_initialized() {
     // First initialization should succeed
     let result1 = initialize((29, 1));
     assert!(
-        result1.is_ok()
-            || matches!(result1, Err(KuroError::Init(InitError::AlreadyInitialized)))
+        result1.is_ok() || matches!(result1, Err(KuroError::Init(InitError::AlreadyInitialized)))
     );
 
     // Second initialization should fail

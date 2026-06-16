@@ -71,7 +71,7 @@ Returns the evaluation result, or nil if blocked."
   "Poll and process pending OSC 51 eval commands.
 Each command is filtered through `kuro-eval-command-whitelist' before
 evaluation.  Blocked commands are silently dropped."
-  (when-let ((commands (kuro--poll-eval-commands)))
+  (when-let* ((commands (kuro--poll-eval-commands)))
     (dolist (cmd commands)
       (kuro--eval-osc51-command cmd))))
 

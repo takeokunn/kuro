@@ -23,7 +23,8 @@
 (require 'kuro-overlays)
 
 (declare-function kuro--clear-row-image-overlays "kuro-overlays" (row))
-(declare-function kuro--call-with-normalized-ffi-face-range "kuro-overlays" (range line-start line-end continuation))
+(declare-function kuro--remove-blink-overlay-from-lists "kuro-overlays" (ov))
+(declare-function kuro--filter-overlays "kuro-overlays" (overlays predicate &optional on-delete))
 (defvar kuro--has-images nil
   "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--blink-overlays-by-row nil
@@ -61,6 +62,39 @@ Saves and restores point via `save-excursion'."
          (inhibit-modification-hooks t))
      (save-excursion
        ,@body)))
+
+(defmacro kuro--with-current-render-row (row &rest body)
+  "Bind `kuro--current-render-row' to ROW while executing BODY.
+Restores the previous render row even if BODY signals, so callers do not need
+to manage the sentinel manually."
+  `(let ((kuro--current-render-row ,row))
+     (unwind-protect
+         (progn ,@body)
+       (setq kuro--current-render-row -1))))
+
+(defmacro kuro--with-rewritten-line (row text col-to-buf &rest body)
+  "Rewrite ROW with TEXT, then execute BODY with updated line bounds.
+Stores COL-TO-BUF before the rewrite, refreshes the row-position cache after
+the insert, and binds `line-start' and `new-line-end' for BODY so callers can
+focus on the post-rewrite work.  BODY runs inside `kuro--with-buffer-edit'."
+  (declare (indent 4))
+  `(progn
+     (kuro--store-col-to-buf ,row ,col-to-buf)
+     (kuro--with-buffer-edit
+       (kuro--ensure-buffer-row-exists ,row)
+       (let* ((line-start (point))
+              (old-end (line-end-position))
+              (old-len (- old-end line-start)))
+         (kuro--clear-row-overlays ,row old-end)
+         (delete-region line-start old-end)
+         (insert ,text)
+         ;; Capture the replacement extent once so post-rewrite helpers share it.
+         ;; `line-end-position' is recomputed after insert to account for
+         ;; multibyte text.
+         (let ((new-line-end (line-end-position)))
+           (kuro--update-row-position-cache-after-line-change
+            ,row old-len (- new-line-end line-start) new-line-end)
+           ,@body)))))
 
 ;;; Row position cache helpers
 
@@ -131,41 +165,36 @@ dirty row (3,600 saved calls/sec at 30 rows × 120fps).
 Must be called before the line text is replaced (uses pre-replace line-end)."
   (when kuro--blink-overlays
     (let ((line-end-before (1+ (or pre-end (line-end-position)))))
-      (if (and row (hash-table-p kuro--blink-overlays-by-row))
+        (if (and row (hash-table-p kuro--blink-overlays-by-row))
           ;; Fast path: only scan overlays on this specific row.
           (let ((row-ovs (gethash row kuro--blink-overlays-by-row)))
             (when row-ovs
-              (dolist (ov row-ovs)
-                (when (and (overlay-buffer ov)
-                           (>= (overlay-start ov) line-start)
-                           (<= (overlay-end ov) line-end-before))
-                  (delete-overlay ov)
-                  (setq kuro--blink-overlays (delq ov kuro--blink-overlays))
-                  ;; Maintain typed sub-lists; overlay-get on a deleted overlay
-                  ;; is safe (properties survive delete-overlay).
-                  (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
-                      (setq kuro--blink-overlays-slow
-                            (delq ov kuro--blink-overlays-slow))
-                    (setq kuro--blink-overlays-fast
-                          (delq ov kuro--blink-overlays-fast)))))
+              (kuro--filter-overlays
+               row-ovs
+               (lambda (ov)
+                 (and (overlay-buffer ov)
+                      (>= (overlay-start ov) line-start)
+                      (<= (overlay-end ov) line-end-before)))
+               #'kuro--remove-blink-overlay-from-lists)
               (remhash row kuro--blink-overlays-by-row)))
         ;; Fallback: full scan when row unavailable.
-        ;; Rebuild typed sub-lists in the same pass to keep them in sync.
-        (let ((remaining nil)
+        ;; Rebuild typed sub-lists from the surviving overlays to keep them in sync.
+        (let ((remaining (kuro--filter-overlays
+                          kuro--blink-overlays
+                          (lambda (ov)
+                            (and (overlay-buffer ov)
+                                 (>= (overlay-start ov) line-start)
+                                 (<= (overlay-end ov) line-end-before)))
+                          #'kuro--remove-blink-overlay-from-lists))
               (remaining-slow nil)
               (remaining-fast nil))
-          (dolist (ov kuro--blink-overlays)
-            (if (and (overlay-buffer ov)
-                     (>= (overlay-start ov) line-start)
-                     (<= (overlay-end ov) line-end-before))
-                (delete-overlay ov)
-              (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
-                  (push ov remaining-slow)
-                (push ov remaining-fast))
-              (push ov remaining)))
-          (setq kuro--blink-overlays      (nreverse remaining)
-                kuro--blink-overlays-slow remaining-slow
-                kuro--blink-overlays-fast remaining-fast))))))
+          (dolist (ov remaining)
+            (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
+                (push ov remaining-slow)
+              (push ov remaining-fast)))
+          (setq kuro--blink-overlays      remaining
+                kuro--blink-overlays-slow (nreverse remaining-slow)
+                kuro--blink-overlays-fast (nreverse remaining-fast)))))))
 
 (defsubst kuro--apply-face-ranges (face-ranges line-start line-end)
   "Apply FACE-RANGES to the line bounded by LINE-START and LINE-END.
@@ -186,24 +215,16 @@ the old dotimes variant — eliminates ~21,600 integer multiplies/sec.
 `(when face-ranges ...)' nil guard avoids `(length nil)' + `<' on the ~50%
 of plain-text rows with no face data — saves ~1,800 function calls/sec."
   (when face-ranges
-    (let ((len (length face-ranges))
-          (base 0))
-      (while (< base len)
-      (let* ((b1        (1+ base))
-             (b2        (1+ b1))
-             (b3        (1+ b2))
-             (b4        (1+ b3))
-             (b5        (1+ b4))
-             (start-pos (min (+ line-start (aref face-ranges base)) line-end))
-             (end-pos   (min (+ line-start (aref face-ranges b1))   line-end)))
-        (when (> end-pos start-pos)
-          (kuro--apply-ffi-face-at
-           start-pos end-pos
-           (aref face-ranges b2)
-           (aref face-ranges b3)
-           (aref face-ranges b4)
-           (aref face-ranges b5)))
-        (setq base (1+ b5)))))))
+    (cl-loop for base from 0 below (length face-ranges) by 6
+             do (kuro--call-with-normalized-ffi-face-range
+                 (vector (aref face-ranges base)
+                         (aref face-ranges (1+ base))
+                         (aref face-ranges (+ base 2))
+                         (aref face-ranges (+ base 3))
+                         (aref face-ranges (+ base 4))
+                         (aref face-ranges (+ base 5)))
+                 line-start line-end
+                 #'kuro--apply-ffi-face-at))))
 
 (defun kuro--update-row-position-cache-after-line-change (row old-len new-len new-line-end)
   "Refresh cached row positions after replacing ROW from OLD-LEN to NEW-LEN.
@@ -315,27 +336,11 @@ single-pass when N rows are dirty.
 Critical: `line-end' is recomputed with `(line-end-position)' AFTER the
 delete+insert so face ranges use the new content offsets, not cached old ones."
   (when (and row text)
-    (kuro--store-col-to-buf row col-to-buf)
-    (kuro--with-buffer-edit
-      (kuro--ensure-buffer-row-exists row)
-      (let* ((line-start (point))
-             (old-end (line-end-position))
-             (old-len (- old-end line-start)))
-        (kuro--clear-row-overlays row old-end)
-        (delete-region line-start old-end)
-        (insert text)
-        ;; Capture new line-end once; used for both face application and cache update.
-        ;; Derive new-len from buffer positions (character units) rather than
-        ;; (length text) which returns byte-count for multibyte strings, causing
-        ;; wrong deltas in kuro--row-positions for CJK/emoji rows.
-        (let ((new-line-end (line-end-position)))
-          (kuro--update-row-position-cache-after-line-change row old-len (- new-line-end line-start) new-line-end)
-          ;; Bind current row so kuro--apply-blink-overlay can skip line-number-at-pos.
-          (setq kuro--current-render-row row)
-          ;; line-end MUST be recomputed after insert: multi-byte text means
-          ;; (+ line-start (length text)) would be wrong.
-          (kuro--apply-face-ranges face-ranges line-start new-line-end)
-          (setq kuro--current-render-row -1))))))
+    (kuro--with-rewritten-line row text col-to-buf
+      ;; Bind current row so `kuro--apply-blink-overlay' can skip
+      ;; `line-number-at-pos' while the post-rewrite face ranges are applied.
+      (kuro--with-current-render-row row
+        (kuro--apply-face-ranges face-ranges line-start new-line-end)))))
 
 (require 'kuro-render-cursor)
 

@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'kuro-faces-color-test-support)
+(require 'kuro-colors-test-support)
 
 ;;; Group 1: kuro--ffi-color-default sentinel
 
@@ -42,8 +43,7 @@
 
 (ert-deftest kuro-faces-color--ansi-color-names-normal-colors ()
   "Indices 0-7 must be the standard ANSI names (no 'bright-' prefix)."
-  (let ((expected ["black" "red" "green" "yellow"
-                   "blue" "magenta" "cyan" "white"]))
+  (let ((expected (kuro-colors-test--color-name-subvector 0 8)))
     (dotimes (i 8)
       (should (string= (aref kuro--ansi-color-names i)
                        (aref expected i))))))
@@ -54,8 +54,7 @@
 
 (ert-deftest kuro-faces-color--ansi-color-names-bright-colors ()
   "Indices 8-15 must be the bright ANSI names with 'bright-' prefix."
-  (let ((expected ["bright-black" "bright-red" "bright-green" "bright-yellow"
-                   "bright-blue" "bright-magenta" "bright-cyan" "bright-white"]))
+  (let ((expected (kuro-colors-test--color-name-subvector 8 16)))
     (dotimes (i 8)
       (should (string= (aref kuro--ansi-color-names (+ 8 i))
                        (aref expected i))))))

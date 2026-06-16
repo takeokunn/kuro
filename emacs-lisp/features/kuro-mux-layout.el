@@ -117,10 +117,10 @@ layouts.  All visible kuro buffers are gathered first, the frame is
 collapsed to one window, then re-split.  Analogous to tmux select-layout."
   (interactive (list (completing-read "Layout: " kuro-mux-layouts nil t)))
   (unless (member layout kuro-mux-layouts)
-    (user-error "kuro-mux: unknown layout: %s" layout))
+    (user-error "Kuro-mux: unknown layout: %s" layout))
   (let ((buffers (kuro-mux--visible-session-buffers)))
     (when (length< buffers 1)
-      (user-error "kuro-mux: no visible kuro panes to lay out"))
+      (user-error "Kuro-mux: no visible kuro panes to lay out"))
     (delete-other-windows)
     (let ((win (selected-window)))
       (set-window-buffer win (car buffers))

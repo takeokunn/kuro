@@ -131,6 +131,14 @@ Called from `kill-buffer-hook'."
         (seq-filter #'buffer-live-p kuro-mux--sessions))
   kuro-mux--sessions)
 
+(defun kuro-mux--for-each-live-session (fn &optional exclude)
+  "Call FN for each live kuro session buffer.
+Skip EXCLUDE when non-nil.  FN receives a live buffer and runs in the
+current buffer context of the caller."
+  (dolist (buf (kuro-mux--live-sessions))
+    (unless (eq buf exclude)
+      (funcall fn buf))))
+
 (defun kuro-mux--session-display-name (buf)
   "Return a display name for kuro buffer BUF.
 Prefers `kuro-mux--name' when set, falls back to the buffer name."
@@ -150,7 +158,8 @@ Prefers `kuro-mux--name' when set, falls back to the buffer name."
   (kuro-mux--next-buffer buf (reverse sessions)))
 
 (defmacro kuro--def-mux-nav (name nav-fn docstring)
-  "Define a kuro-mux session cycle command.
+  "Define NAME as a kuro-mux session cycle command.
+DOCSTRING becomes the generated command docstring.
 NAV-FN is called with (current-buffer sessions) to pick the target buffer."
   `(defun ,name ()
      ,docstring
@@ -191,13 +200,13 @@ With prefix argument or when called interactively, use `completing-read'."
 (defun kuro-mux--session-index ()
   "Return the 1-indexed position of the current buffer in the session registry.
 Returns nil when the current buffer is not registered with kuro-mux."
-  (when-let ((pos (seq-position (kuro-mux--live-sessions) (current-buffer))))
+  (when-let* ((pos (seq-position (kuro-mux--live-sessions) (current-buffer))))
     (1+ pos)))
 
 (defun kuro-mux--mode-line-segment ()
   "Return a mode-line string showing the current session's index as [N/M].
 Returns an empty string when the buffer is not in the kuro-mux registry."
-  (if-let ((idx   (kuro-mux--session-index))
+  (if-let* ((idx   (kuro-mux--session-index))
            (total (length (kuro-mux--live-sessions))))
       (format " [%d/%d]" idx total)
     ""))
@@ -210,7 +219,7 @@ session slot and M is the total number of live sessions."
   :group 'kuro)
 
 (defun kuro-mux--buffer-mode-line-setup ()
-  "Append the kuro-mux session-index segment to this buffer's mode-line-format.
+  "Append the kuro-mux session-index segment to this buffer's `mode-line-format'.
 Idempotent: repeated calls do not add duplicate segments."
   (make-local-variable 'mode-line-format)
   (let ((seg '(:eval (kuro-mux--mode-line-segment))))
@@ -222,9 +231,10 @@ Idempotent: repeated calls do not add duplicate segments."
 Adds `kuro-mux--buffer-mode-line-setup' to `kuro-mode-hook' and calls it
 immediately on every already-live kuro session."
   (add-hook 'kuro-mode-hook #'kuro-mux--buffer-mode-line-setup)
-  (dolist (buf (kuro-mux--live-sessions))
-    (with-current-buffer buf
-      (kuro-mux--buffer-mode-line-setup))))
+  (kuro-mux--for-each-live-session
+   (lambda (buf)
+     (with-current-buffer buf
+       (kuro-mux--buffer-mode-line-setup)))))
 
 ;;;###autoload
 (defun kuro-mux-other-window ()
@@ -236,9 +246,9 @@ in `next-window' order.  Analogous to tmux prefix + o (next pane)."
          (next (cadr (memq (selected-window) kuro-wins))))
     (cond
      ((length< kuro-wins 1)
-      (user-error "kuro-mux: no visible kuro panes"))
+      (user-error "Kuro-mux: no visible kuro panes"))
      ((length< kuro-wins 2)
-      (user-error "kuro-mux: only one visible kuro pane"))
+      (user-error "Kuro-mux: only one visible kuro pane"))
      (t
       (select-window (or next (car kuro-wins)))))))
 
@@ -253,7 +263,7 @@ Order follows `window-list' (top-to-bottom, then left-to-right)."
 
 ;;;###autoload
 (defun kuro-mux-rotate-panes (&optional backward)
-  "Rotate kuro buffers through the visible window positions (tmux: C-o).
+  "Rotate kuro buffers through the visible window positions.
 Window geometry stays fixed; each window adopts a neighbour's buffer,
 cycling around so no buffer is lost.  Forward rotation shifts every buffer
 to the next window (the last wraps to the first); with BACKWARD non-nil —
@@ -263,7 +273,7 @@ when fewer than two kuro panes are visible."
   (let* ((wins (kuro-mux--visible-windows))
          (n    (length wins)))
     (when (< n 2)
-      (user-error "kuro-mux: need at least two visible kuro panes to rotate"))
+      (user-error "Kuro-mux: need at least two visible kuro panes to rotate"))
     (let* ((bufs (mapcar #'window-buffer wins))
            ;; Forward = right-shift the buffer list onto the windows:
            ;; window[i] shows what window[i-1] showed, window[0] takes the last.
@@ -279,7 +289,7 @@ when fewer than two kuro panes are visible."
 
 ;;;###autoload
 (defun kuro-mux-rotate-panes-backward ()
-  "Rotate kuro buffers through window positions in reverse (tmux: M-o).
+  "Rotate kuro buffers through window positions in reverse.
 Equivalent to `kuro-mux-rotate-panes' with a prefix argument."
   (interactive)
   (kuro-mux-rotate-panes t))
@@ -296,7 +306,7 @@ first).  Index 1 is the oldest session; 0 selects the tenth.  Signals
          (target   (nth idx sessions)))
     (if target
         (switch-to-buffer target)
-      (user-error "kuro-mux: no session at index %d (have %d)"
+      (user-error "Kuro-mux: no session at index %d (have %d)"
                   (if (= n 0) 10 n)
                   (length sessions)))))
 

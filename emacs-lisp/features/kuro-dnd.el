@@ -19,7 +19,7 @@
   "Handle a drag-and-drop URI by inserting the file path into the terminal.
 URI is a file:// URL.  The path is shell-quoted before insertion.
 Returns `private' to indicate the drop was handled."
-  (when-let ((path (and (string-prefix-p "file://" uri)
+  (when-let* ((path (and (string-prefix-p "file://" uri)
                         (dnd-get-local-file-name uri t))))
     (kuro--send-key (shell-quote-argument path))
     'private))

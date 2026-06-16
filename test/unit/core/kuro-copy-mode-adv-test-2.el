@@ -282,5 +282,11 @@
                  search-backward isearch-backward (point-max) "doc"))))
     (should (member '(interactive) (cddr exp)))))
 
+(ert-deftest kuro-copy-test-define-copy-mode-bindings-expands-to-dolist ()
+  "`kuro--define-copy-mode-bindings' single-step expands to a `dolist' form."
+  (let ((exp (macroexpand-1
+              '(kuro--define-copy-mode-bindings map bindings))))
+    (should (eq (car exp) 'dolist))))
+
 (provide 'kuro-copy-mode-adv-test-2)
 ;;; kuro-copy-mode-adv-test-2.el ends here

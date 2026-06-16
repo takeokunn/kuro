@@ -139,7 +139,7 @@ Returns nil if all three fields are nil/empty."
   (let (parts)
     (when (and aid (not (string-empty-p aid)))
       (push (concat "aid=" aid) parts))
-    (when-let ((dur (kuro--format-prompt-duration duration-ms)))
+    (when-let* ((dur (kuro--format-prompt-duration duration-ms)))
       (when (>= (or duration-ms 0) kuro-prompt-status-min-duration-ms)
         (push dur parts)))
     (when (and err-path (not (string-empty-p err-path)))
@@ -153,7 +153,7 @@ Returns nil if all three fields are nil/empty."
 AID, DURATION-MS, and ERR-PATH are forwarded to `kuro--format-prompt-extras'.
 The overlay carries `kuro-prompt-status' so it is removed by
 `kuro--clear-prompt-status-overlays'."
-  (when-let ((label (kuro--format-prompt-extras aid duration-ms err-path)))
+  (when-let* ((label (kuro--format-prompt-extras aid duration-ms err-path)))
     (save-excursion
       (goto-char (point-min))
       (when (zerop (forward-line row))
@@ -182,7 +182,7 @@ legacy 4-tuples emitted by older Rust builds."
           (let ((aid         (nth 0 rest))
                 (duration-ms (nth 1 rest))
                 (err-path    (nth 2 rest)))
-            (when-let ((indicator (kuro--prompt-status-indicator exit-code)))
+            (when-let* ((indicator (kuro--prompt-status-indicator exit-code)))
               (kuro--apply-prompt-status-overlay row indicator))
             (when (and kuro-prompt-status-show-extras
                        (or aid duration-ms err-path))
@@ -193,7 +193,7 @@ legacy 4-tuples emitted by older Rust builds."
   (when (and kuro-prompt-status-annotations
              (or (null left-margin-width) (< left-margin-width 2)))
     (setq left-margin-width 2)
-    (when-let ((win (get-buffer-window)))
+    (when-let* ((win (get-buffer-window)))
       (set-window-margins win 2 (cdr (window-margins win))))))
 
 ;;; Mode-line exit-status segment

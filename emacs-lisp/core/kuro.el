@@ -37,6 +37,7 @@
 (require 'kuro-config)
 (require 'kuro-ffi)
 (require 'kuro-faces)
+(require 'kuro-keymap)
 (require 'kuro-overlays)
 (require 'kuro-navigation)
 (require 'kuro-input)
@@ -74,35 +75,28 @@
 ;; Color palette table is rebuilt lazily on first kuro-mode entry; defined in kuro-colors.el.
 (declare-function kuro--rebuild-named-colors "kuro-colors" ())
 
+(defconst kuro--mode-key-bindings
+  '(("C-c C-c" . kuro-send-interrupt)
+    ("C-c C-z" . kuro-send-sigstop)
+    ("C-c C-\\" . kuro-send-sigquit)
+    ("C-c C-p" . kuro-previous-prompt)
+    ("C-c C-n" . kuro-next-prompt)
+    ("C-c C-o" . kuro-copy-command-output)
+    ("C-c C-M-n" . kuro-next-failed-command)
+    ("C-c C-M-p" . kuro-previous-failed-command)
+    ("C-c C-r" . kuro-command-history)
+    ("C-c C-t" . kuro-copy-mode)
+    ("C-c C-SPC" . kuro-copy-mode)
+    ("C-c C-q" . kuro-send-next-key)
+    ("C-c C-i" . kuro-cycle-input-mode)
+    ("C-c C-s" . kuro-search-forward)
+    ("C-c C-e" . kuro-edit-scrollback))
+  "Key bindings installed in `kuro-mode-map'.")
+
 (defvar kuro-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; Terminal keybindings should pass through
-    (define-key map [?\C-c ?\C-c] 'kuro-send-interrupt)
-    (define-key map [?\C-c ?\C-z] 'kuro-send-sigstop)
-    (define-key map [?\C-c ?\C-\\] 'kuro-send-sigquit)
-    ;; Prompt navigation (OSC 133)
-    (define-key map [?\C-c ?\C-p] #'kuro-previous-prompt)
-    (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
-    ;; Copy the output of the command at point (OSC 133), iTerm2-style
-    (define-key map [?\C-c ?\C-o] #'kuro-copy-command-output)
-    ;; Jump between failed commands (non-zero exit) — next-error for the shell
-    (define-key map (kbd "C-c C-M-n") #'kuro-next-failed-command)
-    (define-key map (kbd "C-c C-M-p") #'kuro-previous-failed-command)
-    ;; Jump to any past command via completion (OSC 133), fzf-history style
-    (define-key map [?\C-c ?\C-r] #'kuro-command-history)
-    ;; Copy mode: suspend PTY input and enable normal Emacs navigation/selection
-    (define-key map [?\C-c ?\C-t] #'kuro-copy-mode)
-    (define-key map (kbd "C-c C-SPC") #'kuro-copy-mode)
-    ;; Send next key directly to PTY, bypassing kuro-keymap-exceptions
-    (define-key map [?\C-c ?\C-q] #'kuro-send-next-key)
-    ;; Input mode cycling: semi-char → char → line → semi-char
-    (define-key map [?\C-c ?\C-i] #'kuro-cycle-input-mode)
-    ;; Scrollback search: enter copy mode + isearch in one step.
-    ;; C-c prefix avoids stealing raw C-s (XOFF) from the PTY.
-    (define-key map (kbd "C-c C-s") #'kuro-search-forward)
-    ;; Scrollback editing: open a writable snapshot buffer
-    (define-key map (kbd "C-c C-e") #'kuro-edit-scrollback)
-    map)
+  (kuro--build-keymap-from-alist kuro--mode-key-bindings
+                                 (lambda (binding) (kbd (car binding)))
+                                 #'cdr)
   "Keymap for Kuro major mode.")
 
 ;; Load kuro-input-mode here — AFTER kuro-mode-map is defined — so the
@@ -138,11 +132,15 @@ cycle independently call `kuro--resize'."
   "The `kuro-mode' buffer this scrollback snapshot was created from.
 Set by `kuro-edit-scrollback' in the snapshot buffer.")
 
+(defconst kuro--scrollback-edit-bindings
+  '(("C-c C-c" . kuro-scrollback-send)
+    ("C-c C-k" . kuro-scrollback-discard))
+  "Key bindings installed in `kuro--scrollback-edit-keymap'.")
+
 (defvar kuro--scrollback-edit-keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c C-c") #'kuro-scrollback-send)
-    (define-key map (kbd "C-c C-k") #'kuro-scrollback-discard)
-    map)
+  (kuro--build-keymap-from-alist kuro--scrollback-edit-bindings
+                                 (lambda (binding) (car binding))
+                                 #'cdr)
   "Keymap installed in buffers created by `kuro-edit-scrollback'.")
 
 ;;;###autoload
@@ -153,7 +151,7 @@ Created by `kuro-edit-scrollback'.
 The buffer holds a verbatim copy of the terminal content at the time
 the snapshot was taken.  All Emacs editing commands apply: `isearch',
 `query-replace', `string-rectangle', `delete-rectangle', `swiper',
-M-x, etc.
+and similar extended commands.
 
 \\[kuro-scrollback-send]    — send entire buffer to the PTY and close
 \\[kuro-scrollback-discard] — discard edits and close this buffer"

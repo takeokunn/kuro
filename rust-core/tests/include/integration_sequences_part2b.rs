@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn test_xtgettcap_smol_returns_overline() {
     let mut term = TerminalCore::new(24, 80);
@@ -156,7 +158,7 @@ fn test_sixel_inherits_osc4_palette_override() {
     let mut term = TerminalCore::new(24, 80);
     // Override palette index 1 via OSC 4 (pure red)
     term.advance(b"\x1b]4;1;rgb:ff/00/00\x07");
-    assert!(term.osc_data().palette[1].is_some(), "OSC 4 palette entry 1 must be set");
+    assert!(term.osc_data().palette()[1].is_some(), "OSC 4 palette entry 1 must be set");
     // Now send a minimal sixel that references color register 1 without redefining it
     // DCS 0;1;0 q (P2=1 = background is color register 0)
     // The fact that this doesn't panic and the palette is initialized is what we test

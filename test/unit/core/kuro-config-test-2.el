@@ -225,6 +225,42 @@
     (kuro--check-positive-integer kuro-scrollback-size errors)
     (should (null errors))))
 
+;;; Group 22b: positive-integer validation tables
+
+(ert-deftest test-kuro-positive-integer-config-vars-enumerates-required-settings ()
+  "`kuro--positive-integer-config-vars' lists all required positive integer settings."
+  (should (equal kuro--positive-integer-config-vars
+                 '(kuro-scrollback-size
+                   kuro-frame-rate
+                   kuro-tui-frame-rate))))
+
+(ert-deftest test-kuro-optional-positive-integer-config-vars-enumerates-optional-settings ()
+  "`kuro--optional-positive-integer-config-vars' lists nullable positive integer settings."
+  (should (equal kuro--optional-positive-integer-config-vars
+                 '(kuro-font-size))))
+
+(ert-deftest test-kuro-check-positive-integer-vars-accumulates-symbol-errors ()
+  "`kuro--check-positive-integer-vars' pushes errors for invalid symbol values."
+  (let ((errors nil)
+        (kuro-frame-rate 0)
+        (kuro-tui-frame-rate "5"))
+    (kuro--check-positive-integer-vars
+     '(kuro-frame-rate kuro-tui-frame-rate) errors)
+    (should (= (length errors) 2))
+    (should (cl-some (lambda (e) (string-match-p "kuro-frame-rate" e)) errors))
+    (should (cl-some (lambda (e) (string-match-p "kuro-tui-frame-rate" e)) errors))))
+
+(ert-deftest test-kuro-check-optional-positive-integer-vars-skips-nil ()
+  "`kuro--check-optional-positive-integer-vars' accepts nil and rejects bad values."
+  (let ((errors nil)
+        (kuro-font-size nil))
+    (kuro--check-optional-positive-integer-vars '(kuro-font-size) errors)
+    (should (null errors))
+    (setq kuro-font-size -1)
+    (kuro--check-optional-positive-integer-vars '(kuro-font-size) errors)
+    (should (= (length errors) 1))
+    (should (string-match-p "kuro-font-size" (car errors)))))
+
 ;;; Group 23: kuro--check-hex-color macro
 
 (ert-deftest test-kuro-check-hex-color-valid-lowercase ()

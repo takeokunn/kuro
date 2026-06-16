@@ -1,3 +1,8 @@
+use super::dirty_lines_support::{
+    advance_newlines, assert_scrollback_contains, make_dirty_session, push_scrollback_line,
+    push_scrollback_lines,
+};
+
 // ---------------------------------------------------------------------------
 // get_dirty_lines: text-only encoding (no face ranges)
 // ---------------------------------------------------------------------------
@@ -8,7 +13,7 @@
 /// written row is returned and the text matches the cell content.
 #[test]
 fn test_get_dirty_lines_returns_dirty_rows() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.core.advance(b"Hello");
 
     let dirty = session.get_dirty_lines();
@@ -29,7 +34,7 @@ fn test_get_dirty_lines_returns_dirty_rows() {
 /// After `get_dirty_lines` the dirty set is cleared; a second call returns empty.
 #[test]
 fn test_get_dirty_lines_clears_dirty_set() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.core.advance(b"ABC");
 
     let first = session.get_dirty_lines();
@@ -45,7 +50,7 @@ fn test_get_dirty_lines_clears_dirty_set() {
 /// `get_dirty_lines` on a fresh session returns rows marked dirty by init.
 #[test]
 fn test_get_dirty_lines_full_dirty_path() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     // full_dirty is set during construction; writing any content triggers it.
     session.core.advance(b"\x1b[?1049h"); // enter alt screen — sets full_dirty
     let dirty = session.get_dirty_lines();
@@ -59,33 +64,26 @@ fn test_get_dirty_lines_full_dirty_path() {
 /// `get_scrollback` returns lines pushed into scrollback.
 #[test]
 fn test_get_scrollback_returns_pushed_lines() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
 
     // Write a distinctive line, then scroll it into scrollback.
-    session.core.advance(b"SCROLLBACK_LINE");
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
+    push_scrollback_line(&mut session, b"SCROLLBACK_LINE");
 
     let sb = session.get_scrollback(100);
     assert!(
         !sb.is_empty(),
         "get_scrollback must return non-empty vec after pushing lines"
     );
-    assert!(
-        sb.iter().any(|l| l.contains("SCROLLBACK_LINE")),
-        "scrollback must contain the written line"
-    );
+    assert_scrollback_contains(&session, "SCROLLBACK_LINE");
 }
 
 /// `get_scrollback` is capped by `max_lines`.
 #[test]
 fn test_get_scrollback_respects_max_lines() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
 
     // Push many lines into scrollback.
-    for _ in 0..50 {
-        session.core.advance(b"line\n");
-    }
+    push_scrollback_lines(&mut session, 50);
 
     let sb = session.get_scrollback(5);
     assert!(
@@ -98,10 +96,9 @@ fn test_get_scrollback_respects_max_lines() {
 /// `get_scrollback_count` returns non-zero after pushing lines.
 #[test]
 fn test_get_scrollback_count_nonzero_after_push() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.core.advance(b"line1\nline2\n");
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
+    advance_newlines(&mut session, 24);
 
     assert!(
         session.get_scrollback_count() > 0,
@@ -112,12 +109,10 @@ fn test_get_scrollback_count_nonzero_after_push() {
 /// `clear_scrollback` empties the scrollback buffer and resets the count.
 #[test]
 fn test_clear_scrollback_empties_buffer() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
 
     // Push lines into scrollback.
-    session.core.advance(b"Keep\n");
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
+    push_scrollback_line(&mut session, b"Keep\n");
     assert!(
         session.get_scrollback_count() > 0,
         "Pre-condition: scrollback must be non-empty before clear"
@@ -139,12 +134,11 @@ fn test_clear_scrollback_empties_buffer() {
 /// `set_scrollback_max_lines(0)` causes `get_scrollback` to always return empty.
 #[test]
 fn test_set_scrollback_max_lines_zero_disables_scrollback() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.set_scrollback_max_lines(0);
 
     session.core.advance(b"line\n");
-    let newlines = b"\n".repeat(24);
-    session.core.advance(&newlines);
+    advance_newlines(&mut session, 24);
 
     let sb = session.get_scrollback(100);
     assert!(
@@ -160,7 +154,7 @@ fn test_set_scrollback_max_lines_zero_disables_scrollback() {
 /// `scroll_offset` starts at 0 on a fresh session.
 #[test]
 fn test_scroll_offset_zero_initially() {
-    let session = make_session();
+    let session = make_dirty_session();
     assert_eq!(
         session.scroll_offset(),
         0,
@@ -171,12 +165,10 @@ fn test_scroll_offset_zero_initially() {
 /// `viewport_scroll_up` increases offset; `viewport_scroll_down` decreases it.
 #[test]
 fn test_viewport_scroll_down_reduces_offset() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
 
     // Push enough lines to have scrollback.
-    for _ in 0..30 {
-        session.core.advance(b"line\n");
-    }
+    push_scrollback_lines(&mut session, 30);
 
     session.viewport_scroll_up(5);
     let offset_after_up = session.scroll_offset();
@@ -196,11 +188,9 @@ fn test_viewport_scroll_down_reduces_offset() {
 /// `viewport_scroll_down` to 0 restores the live view (scroll_offset == 0).
 #[test]
 fn test_viewport_scroll_down_to_zero_restores_live() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
 
-    for _ in 0..30 {
-        session.core.advance(b"line\n");
-    }
+    push_scrollback_lines(&mut session, 30);
 
     session.viewport_scroll_up(5);
     session.viewport_scroll_down(usize::MAX); // clamp to 0
@@ -218,7 +208,7 @@ fn test_viewport_scroll_down_to_zero_restores_live() {
 /// `command()` returns the shell command string stored at construction.
 #[test]
 fn test_command_returns_stored_command() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.command = "fish".to_owned();
     assert_eq!(session.command(), "fish");
 }
@@ -226,7 +216,7 @@ fn test_command_returns_stored_command() {
 /// `command()` returns an empty string for sessions created with no command.
 #[test]
 fn test_command_empty_for_make_session() {
-    let session = make_session();
+    let session = make_dirty_session();
     assert_eq!(
         session.command(),
         "",
@@ -237,7 +227,7 @@ fn test_command_empty_for_make_session() {
 /// `pid()` returns `None` for test sessions with `pty: None`.
 #[test]
 fn test_pid_returns_none_without_pty() {
-    let session = make_session();
+    let session = make_dirty_session();
     assert!(
         session.pid().is_none(),
         "pid() must return None when no PTY is attached"
@@ -251,7 +241,7 @@ fn test_pid_returns_none_without_pty() {
 /// `get_palette_updates` returns empty vec when no OSC 4 has been sent.
 #[test]
 fn test_get_palette_updates_empty_initially() {
-    let session = make_session();
+    let session = make_dirty_session();
     let updates = session.get_palette_updates();
     assert!(
         updates.is_empty(),
@@ -262,7 +252,7 @@ fn test_get_palette_updates_empty_initially() {
 /// After OSC 4 sets palette entry 1, `get_palette_updates` includes that entry.
 #[test]
 fn test_get_palette_updates_after_osc4() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     // OSC 4 ; 1 ; rgb:ff/00/00 ST
     session.core.advance(b"\x1b]4;1;rgb:ff/00/00\x1b\\");
 
@@ -278,7 +268,7 @@ fn test_get_palette_updates_after_osc4() {
 /// `get_default_colors` returns the `0xFF00_0000` sentinel when no OSC 10/11/12 set.
 #[test]
 fn test_get_default_colors_sentinel_when_unset() {
-    let session = make_session();
+    let session = make_dirty_session();
     let (fg, bg, cursor) = session.get_default_colors();
     assert_eq!(
         fg, 0xFF00_0000u32,
@@ -297,7 +287,7 @@ fn test_get_default_colors_sentinel_when_unset() {
 /// After OSC 10 sets default fg, `get_default_colors` returns the new value.
 #[test]
 fn test_get_default_colors_after_osc10() {
-    let mut session = make_session();
+    let mut session = make_dirty_session();
     session.core.advance(b"\x1b]10;rgb:ff/80/00\x07");
 
     let (fg, _bg, _cursor) = session.get_default_colors();
@@ -306,7 +296,3 @@ fn test_get_default_colors_after_osc10() {
         "get_default_colors fg must not be the sentinel after OSC 10"
     );
 }
-
-include!("tests_unit_dec_accessors.rs");
-include!("tests_unit_dec_accessors_ext.rs");
-include!("tests_unit_color_scheme.rs");

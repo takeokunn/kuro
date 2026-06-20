@@ -247,10 +247,10 @@ fn test_take_clipboard_actions_drains_queue() {
         "take_clipboard_actions should return 1 action after OSC 52 write"
     );
     match &actions[0] {
-        crate::types::osc::ClipboardAction::Write(text) => {
-            assert_eq!(text, "hello", "Write action should contain decoded text");
+        crate::types::osc::ClipboardAction::Write { data, .. } => {
+            assert_eq!(data, "hello", "Write action should contain decoded text");
         }
-        other @ crate::types::osc::ClipboardAction::Query => {
+        other @ crate::types::osc::ClipboardAction::Query { .. } => {
             panic!("Expected Write action, got {other:?}")
         }
     }
@@ -273,7 +273,7 @@ fn test_take_clipboard_actions_query_action() {
     let actions = session.take_clipboard_actions();
     assert_eq!(actions.len(), 1, "Expected 1 clipboard query action");
     assert!(
-        matches!(actions[0], crate::types::osc::ClipboardAction::Query),
+        matches!(actions[0], crate::types::osc::ClipboardAction::Query { .. }),
         "Expected Query variant"
     );
 

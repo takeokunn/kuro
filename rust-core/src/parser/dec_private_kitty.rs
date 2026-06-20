@@ -76,6 +76,43 @@ pub fn handle_dsr_color_scheme(term: &mut TerminalCore) {
     term.meta.pending_responses.push(bytes.to_vec());
 }
 
+/// Handle DSR 11 — cursor visibility report (xterm DEC DSR extension).
+///
+/// Sequence: CSI ? 11 n
+/// Response:
+/// - `CSI ? 25 ; 1 n` when the cursor is currently visible (DECTCEM set).
+/// - `CSI ? 25 ; 2 n` when the cursor is currently hidden.
+///
+/// The visibility state is read from `dec_modes.cursor_visible`, the same flag
+/// driven by `CSI ? 25 h/l` (DECTCEM). Mirrors the `?` private-DSR push style
+/// used by [`handle_dsr_color_scheme`].
+#[inline]
+pub fn handle_dsr_cursor_visibility(term: &mut TerminalCore) {
+    let bytes: &[u8] = if term.dec_modes.cursor_visible {
+        b"\x1b[?25;1n"
+    } else {
+        b"\x1b[?25;2n"
+    };
+    term.meta.pending_responses.push(bytes.to_vec());
+}
+
+/// Handle DSR 12 — cursor style report (xterm DEC DSR extension).
+///
+/// Sequence: CSI ? 12 n
+/// Response: `CSI ? <Ps> SP y`, where `<Ps>` mirrors the current DECSCUSR style
+/// code of `dec_modes.cursor_shape` (0/1=blinking block, 2=steady block,
+/// 3=blinking underline, 4=steady underline, 5=blinking bar, 6=steady bar).
+///
+/// The `Ps` value is obtained via `i64::from(CursorShape)`, the canonical
+/// DECSCUSR encoding, so the report round-trips with `handle_decscusr`. Uses the
+/// same `meta.pending_responses` push style as [`handle_dsr_color_scheme`].
+#[inline]
+pub fn handle_dsr_cursor_style(term: &mut TerminalCore) {
+    let ps = i64::from(term.dec_modes.cursor_shape);
+    let response = format!("\x1b[?{ps} y");
+    term.meta.pending_responses.push(response.into_bytes());
+}
+
 /// Pure-fn body of `kuro_core_set_color_scheme` defun — extracted so unit
 /// tests in this file can exercise the state-update + notification logic
 /// without going through the FFI layer.

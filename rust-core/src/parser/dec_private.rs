@@ -110,6 +110,16 @@ pub struct DecModes {
     /// When set, sixel images are rendered without scrolling (DEC VT340 "display" mode).
     /// When reset (default), sixel images scroll normally.
     pub sixel_display_mode: bool,
+
+    /// Save/restore stack for XTSAVE/XTRESTORE private modes (CSI ? Pm s / CSI ? Pm r).
+    ///
+    /// xterm's `CSI ? Pm s` saves the listed DEC private modes and `CSI ? Pm r`
+    /// restores them. Kuro implements a full-snapshot approximation: each `s`
+    /// pushes a complete clone of the current [`DecModes`] (regardless of which
+    /// modes `Pm` lists) and each `r` pops and restores the whole snapshot. The
+    /// snapshots themselves carry an empty stack so the depth cannot grow
+    /// quadratically. Capped at [`SAVED_MODES_STACK_MAX`] entries.
+    pub saved_modes: Vec<DecModes>,
 }
 
 impl Default for DecModes {
@@ -149,6 +159,42 @@ impl DecModes {
             deccolm: false,
             reverse_wraparound: false,
             sixel_display_mode: false,
+            saved_modes: Vec::new(),
+        }
+    }
+
+    /// Save the current DEC private modes onto the save/restore stack
+    /// (XTSAVE — `CSI ? Pm s`).
+    ///
+    /// Full-snapshot approximation: the *entire* [`DecModes`] is cloned
+    /// regardless of the requested `Pm` list. The pushed snapshot carries an
+    /// empty `saved_modes` so the stack depth cannot grow quadratically. The
+    /// stack is capped at [`SAVED_MODES_STACK_MAX`]; once full, the oldest
+    /// entry is evicted to keep the most recent saves.
+    pub fn save_modes(&mut self) {
+        let mut snapshot = self.clone();
+        snapshot.saved_modes = Vec::new();
+        if self.saved_modes.len() >= SAVED_MODES_STACK_MAX {
+            self.saved_modes.remove(0);
+        }
+        self.saved_modes.push(snapshot);
+    }
+
+    /// Restore the most recently saved DEC private modes from the save/restore
+    /// stack (XTRESTORE — `CSI ? Pm r`).
+    ///
+    /// Full-snapshot approximation: pops the last snapshot and replaces the
+    /// whole [`DecModes`] with it (preserving the remaining stack). An empty
+    /// stack makes this a no-op. Returns `true` when a snapshot was restored.
+    pub fn restore_modes(&mut self) -> bool {
+        match self.saved_modes.pop() {
+            Some(mut snapshot) => {
+                // Preserve the remaining save stack across the restore.
+                snapshot.saved_modes = std::mem::take(&mut self.saved_modes);
+                *self = snapshot;
+                true
+            }
+            None => false,
         }
     }
 
@@ -303,12 +349,35 @@ pub fn handle_dec_modes(term: &mut crate::TerminalCore, params: &vte::Params, se
 /// Matches the limit used by other terminal emulators (e.g. foot, kitty).
 const KEYBOARD_FLAGS_STACK_MAX: usize = 64;
 
+/// Maximum depth of the XTSAVE/XTRESTORE DEC private mode save stack
+/// (CSI ? Pm s / CSI ? Pm r). Capped to bound memory against a hostile stream
+/// that issues unbounded `CSI ? s` saves without matching restores.
+pub(crate) const SAVED_MODES_STACK_MAX: usize = 32;
+
+/// Handle XTSAVE — save DEC private modes (`CSI ? Pm s`).
+///
+/// Full-snapshot approximation: pushes a clone of the entire current
+/// [`DecModes`] regardless of the `Pm` list. See [`DecModes::save_modes`].
+#[inline]
+pub fn handle_save_modes(term: &mut crate::TerminalCore) {
+    term.dec_modes.save_modes();
+}
+
+/// Handle XTRESTORE — restore DEC private modes (`CSI ? Pm r`).
+///
+/// Full-snapshot approximation: pops and restores the entire [`DecModes`].
+/// An empty stack is a no-op. See [`DecModes::restore_modes`].
+#[inline]
+pub fn handle_restore_modes(term: &mut crate::TerminalCore) {
+    term.dec_modes.restore_modes();
+}
+
 #[path = "dec_private_kitty.rs"]
 mod kitty_keyboard;
 
 pub(crate) use kitty_keyboard::{
-    apply_color_scheme, handle_dsr_color_scheme, handle_kitty_kb_pop, handle_kitty_kb_push,
-    handle_kitty_kb_query,
+    apply_color_scheme, handle_dsr_color_scheme, handle_dsr_cursor_style,
+    handle_dsr_cursor_visibility, handle_kitty_kb_pop, handle_kitty_kb_push, handle_kitty_kb_query,
 };
 
 #[cfg(test)]

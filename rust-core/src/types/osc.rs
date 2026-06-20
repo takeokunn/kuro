@@ -94,13 +94,57 @@ pub struct HyperlinkState {
     pub(crate) uri: Option<Arc<str>>,
 }
 
+/// Selection target for an OSC 52 clipboard operation.
+///
+/// Carries the `Pc` selector parsed from `OSC 52 ; Pc ; Pd ST`. The wire
+/// selector is a string of chars from `{c,p,q,s,0-7}`; the first recognised
+/// char wins and an empty/absent selector defaults to [`SelectionTarget::Clipboard`]
+/// per the xterm convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionTarget {
+    /// `c` — system clipboard (CLIPBOARD).
+    Clipboard,
+    /// `p` — primary selection (PRIMARY).
+    Primary,
+    /// `s` — select / secondary (mapped to xterm's "select" buffer).
+    Select,
+    /// `0`-`7` — numbered cut buffers.
+    CutBuffer(u8),
+}
+
+impl SelectionTarget {
+    /// Parse the OSC 52 `Pc` selector field. The first recognised selector
+    /// char determines the target; an empty selector (or one with no
+    /// recognised char) defaults to [`SelectionTarget::Clipboard`].
+    pub(crate) fn from_selector(sel: &[u8]) -> Self {
+        for &b in sel {
+            match b {
+                b'c' => return Self::Clipboard,
+                b'p' => return Self::Primary,
+                b's' | b'q' => return Self::Select,
+                b'0'..=b'7' => return Self::CutBuffer(b - b'0'),
+                _ => {}
+            }
+        }
+        Self::Clipboard
+    }
+}
+
 /// Clipboard action for OSC 52
 #[derive(Debug, Clone)]
 pub enum ClipboardAction {
-    /// Write text to clipboard
-    Write(String),
-    /// Query clipboard contents
-    Query,
+    /// Write text to the given selection target.
+    Write {
+        /// Selection target parsed from the OSC 52 `Pc` field.
+        target: SelectionTarget,
+        /// The decoded clipboard text.
+        data: String,
+    },
+    /// Query the contents of the given selection target.
+    Query {
+        /// Selection target parsed from the OSC 52 `Pc` field.
+        target: SelectionTarget,
+    },
 }
 
 /// Desktop notification request from OSC 9 (iTerm2) or OSC 777 (`notify`).
@@ -149,6 +193,25 @@ pub struct OscData {
     /// Save/restore stack for the 256-color palette (XTPUSHCOLORS / XTPOPCOLORS).
     /// CSI # P pushes; CSI # Q pops and restores palette_dirty; capped at 10.
     pub(crate) palette_stack: Vec<Vec<Option<[u8; 3]>>>,
+    /// In-progress OSC 99 (Kitty notification) chunk keyed by the `i=<id>` field.
+    /// `d=0` chunks accumulate here; `d=1` finalizes and pushes to `notifications`.
+    pub(crate) notification_chunk: Option<NotificationChunk>,
+}
+
+/// Accumulator for a chunked OSC 99 (Kitty desktop notification).
+///
+/// Kitty allows a notification to be sent in multiple `OSC 99` sequences sharing
+/// the same `i=<id>`; intermediate chunks set `d=0` (done=false) and the final
+/// chunk sets `d=1`. Title and body payloads accumulate independently here until
+/// the notification is finalized and pushed to [`OscData::notifications`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NotificationChunk {
+    /// The `i=<id>` value that groups chunks of the same notification.
+    pub(crate) id: String,
+    /// Accumulated `p=title` payload bytes.
+    pub(crate) title: String,
+    /// Accumulated `p=body` payload bytes.
+    pub(crate) body: String,
 }
 
 impl OscData {
@@ -301,6 +364,7 @@ impl Default for OscData {
             cwd_host: None,
             pointer_shape: None,
             palette_stack: Vec::new(),
+            notification_chunk: None,
         }
     }
 }

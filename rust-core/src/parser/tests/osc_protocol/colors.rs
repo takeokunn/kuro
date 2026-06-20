@@ -240,7 +240,7 @@ fn test_handle_osc_52_empty_data_is_noop() {
     let mut core = make_core!();
     let params: &[&[u8]] = &[b"52", b"c", b""];
     super::handle_osc_52(&mut core, params);
-    assert_osc_52_action!(core, ClipboardAction::Write(s) if s.is_empty());
+    assert_osc_52_action!(core, ClipboardAction::Write { data, .. } if data.is_empty());
 }
 
 // ── handle_osc_104 (out-of-range index) ───────────────────────────────────────

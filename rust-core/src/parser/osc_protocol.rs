@@ -89,6 +89,17 @@ pub(crate) fn handle_osc_777(core: &mut TerminalCore, params: &[&[u8]]) {
     support::handle_osc_777(core, params);
 }
 
+/// Handle OSC 99 — Kitty desktop notifications
+/// (`OSC 99 ; metadata ; payload ST`).
+///
+/// `metadata` is a colon-separated list of `key=value` pairs (`i`, `d`, `p`,
+/// `e`, `a`, `u`); `payload` is the (optionally base64) notification text.
+/// Supports chunking via matching `i=<id>` with `d=0`/`d=1`. The `a=<actions>`
+/// metadata key is parsed but not yet wired to action dispatch.
+pub(crate) fn handle_osc_99(core: &mut TerminalCore, params: &[&[u8]]) {
+    support::handle_osc_99(core, params);
+}
+
 pub(crate) fn handle_osc_104(core: &mut TerminalCore, params: &[&[u8]]) {
     support::handle_osc_104(core, params);
 }

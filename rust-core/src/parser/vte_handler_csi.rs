@@ -16,8 +16,11 @@ fn handle_csi_dsr_color_scheme_query(tc: &mut TerminalCore, params: &vte::Params
     // See: https://contour-terminal.org/vt-extensions/color-palette-update-notifications/
     for param_group in params {
         for &ps in param_group {
-            if ps == 996 {
-                parser::dec_private::handle_dsr_color_scheme(tc);
+            match ps {
+                11 => parser::dec_private::handle_dsr_cursor_visibility(tc),
+                12 => parser::dec_private::handle_dsr_cursor_style(tc),
+                996 => parser::dec_private::handle_dsr_color_scheme(tc),
+                _ => {}
             }
         }
     }
@@ -158,6 +161,11 @@ fn handle_csi_dec_prefixed_dispatch(
             // DECRQM — DEC private mode query
             parser::dec_private::handle_decrqm(tc, params);
         }
+        // XTSAVE — CSI ? Pm s: save the listed DEC private modes (full-snapshot
+        // approximation; the whole DecModes is pushed regardless of params).
+        's' => parser::dec_private::handle_save_modes(tc),
+        // XTRESTORE — CSI ? Pm r: restore previously saved DEC private modes.
+        'r' => parser::dec_private::handle_restore_modes(tc),
         'n' => handle_csi_dsr_color_scheme_query(tc, params),
         // DECSED / DECSEL — Selective Erase (same as ED/EL; we don't track protection)
         'J' | 'K' => parser::erase::handle_erase(tc, params, c),

@@ -118,6 +118,66 @@ fn test_handle_dsr_color_scheme_light_pushes_ps2() {
     assert_single_pending_response_bytes(&term, b"\x1b[?997;2n");
 }
 
+/// DSR 11 — cursor visibility report: when the cursor is visible (DECTCEM set,
+/// the default), `handle_dsr_cursor_visibility` pushes `CSI ? 25 ; 1 n`.
+#[test]
+fn test_handle_dsr_cursor_visibility_visible_pushes_ps1() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.cursor_visible = true;
+    handle_dsr_cursor_visibility(&mut term);
+    assert_single_pending_response_bytes(&term, b"\x1b[?25;1n");
+}
+
+/// DSR 11 — cursor visibility report: when the cursor is hidden (DECTCEM
+/// cleared), `handle_dsr_cursor_visibility` pushes `CSI ? 25 ; 2 n`.
+#[test]
+fn test_handle_dsr_cursor_visibility_hidden_pushes_ps2() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.cursor_visible = false;
+    handle_dsr_cursor_visibility(&mut term);
+    assert_single_pending_response_bytes(&term, b"\x1b[?25;2n");
+}
+
+/// DSR 11 — full sequence: `CSI ? 11 n` while the cursor is hidden via
+/// `CSI ? 25 l` reports `CSI ? 25 ; 2 n` (only the report, not the hide ack).
+#[test]
+fn test_dsr_cursor_visibility_full_sequence_hidden() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?25l"); // hide cursor (no response)
+    term.advance(b"\x1b[?11n"); // DSR 11
+    assert_single_pending_response_bytes(&term, b"\x1b[?25;2n");
+}
+
+/// DSR 12 — cursor style report: default shape (BlinkingBlock => DECSCUSR 0)
+/// pushes `CSI ? 0 SP y`.
+#[test]
+fn test_handle_dsr_cursor_style_default_pushes_ps0() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    handle_dsr_cursor_style(&mut term);
+    assert_single_pending_response_bytes(&term, b"\x1b[?0 y");
+}
+
+/// DSR 12 — cursor style report: SteadyBar (DECSCUSR 6) pushes `CSI ? 6 SP y`,
+/// mirroring the current DECSCUSR style code.
+#[test]
+fn test_handle_dsr_cursor_style_steady_bar_pushes_ps6() {
+    use crate::types::cursor::CursorShape;
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.cursor_shape = CursorShape::SteadyBar;
+    handle_dsr_cursor_style(&mut term);
+    assert_single_pending_response_bytes(&term, b"\x1b[?6 y");
+}
+
+/// DSR 12 — full sequence: set the style via DECSCUSR `CSI 4 SP q`
+/// (SteadyUnderline) then query `CSI ? 12 n` reports `CSI ? 4 SP y`.
+#[test]
+fn test_dsr_cursor_style_full_sequence_after_decscusr() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[4 q"); // DECSCUSR -> SteadyUnderline (no response)
+    term.advance(b"\x1b[?12n"); // DSR 12
+    assert_single_pending_response_bytes(&term, b"\x1b[?4 y");
+}
+
 /// T3d: `apply_color_scheme(false)` with notifications enabled and previous
 /// state dark — returns `true`, pushes exactly one `CSI ? 997 ; 2 n` byte
 /// string (light unsolicited notification).

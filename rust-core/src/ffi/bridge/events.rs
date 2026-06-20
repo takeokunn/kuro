@@ -21,28 +21,46 @@ define_session_query_opt!(
 
 // Poll for pending clipboard actions from OSC 52 and clear them.
 //
-// Returns a list of clipboard actions. Each action is either:
-//   - ("write" . TEXT) for a write action
-//   - ("query" . nil) for a query action
+// Returns a list of clipboard actions. Each action is a 3-element list whose
+// first element is the action tag, second the payload, and third the selection
+// target string ("clipboard", "primary", "select", or "cut-buffer-N"):
+//   - ("write" TEXT TARGET) for a write action
+//   - ("query" nil  TARGET) for a query action
+// The TARGET lets Emacs route OSC 52 ; p to PRIMARY vs ; c to CLIPBOARD.
 define_drain_session_vec_to_lisp!(
     kuro_core_poll_clipboard_actions,
     "poll_clipboard_actions",
     super::super::abstraction::session::TerminalSession::take_clipboard_actions,
     |env, action| {
         let item = match action {
-            crate::types::osc::ClipboardAction::Write(text) => {
+            crate::types::osc::ClipboardAction::Write { target, data } => {
                 let tag = "write".into_lisp(env)?;
-                let text_val = text.into_lisp(env)?;
-                build_emacs_list_from_values(env, [tag, text_val])?
+                let text_val = data.into_lisp(env)?;
+                let target_val = selection_target_name(target).into_lisp(env)?;
+                build_emacs_list_from_values(env, [tag, text_val, target_val])?
             }
-            crate::types::osc::ClipboardAction::Query => {
+            crate::types::osc::ClipboardAction::Query { target } => {
                 let tag = "query".into_lisp(env)?;
-                build_emacs_list_from_values(env, [tag, false.into_lisp(env)?])?
+                let target_val = selection_target_name(target).into_lisp(env)?;
+                build_emacs_list_from_values(env, [tag, false.into_lisp(env)?, target_val])?
             }
         };
         Ok(item)
     }
 );
+
+/// Map a [`SelectionTarget`] to the stable string Emacs uses to route the
+/// clipboard write/query to the correct selection.
+#[inline]
+fn selection_target_name(target: crate::types::osc::SelectionTarget) -> String {
+    use crate::types::osc::SelectionTarget;
+    match target {
+        SelectionTarget::Clipboard => "clipboard".to_owned(),
+        SelectionTarget::Primary => "primary".to_owned(),
+        SelectionTarget::Select => "select".to_owned(),
+        SelectionTarget::CutBuffer(n) => format!("cut-buffer-{n}"),
+    }
+}
 
 // Poll for pending desktop notifications (OSC 9 / OSC 777) and clear them.
 //

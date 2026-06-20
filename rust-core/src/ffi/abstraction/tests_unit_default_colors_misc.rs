@@ -16,7 +16,7 @@ fn test_take_clipboard_actions_two_writes_drained_together() {
     for action in &actions {
         assert!(matches!(
             action,
-            crate::types::osc::ClipboardAction::Write(_)
+            crate::types::osc::ClipboardAction::Write { .. }
         ));
     }
     assert!(session.take_clipboard_actions().is_empty());

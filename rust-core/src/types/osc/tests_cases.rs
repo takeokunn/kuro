@@ -1,6 +1,8 @@
 use super::tests_support::*;
 use crate::types::color::Color;
-use crate::types::osc::{ClipboardAction, DefaultColorSlot, HyperlinkState, OscData, PromptMark};
+use crate::types::osc::{
+    ClipboardAction, DefaultColorSlot, HyperlinkState, OscData, PromptMark, SelectionTarget,
+};
 
 // -------------------------------------------------------------------------
 // OscData construction
@@ -142,17 +144,78 @@ fn prompt_mark_event_fields_accessible() {
 // -------------------------------------------------------------------------
 
 #[test]
-// CONSTRUCTION: ClipboardAction::Write stores its payload.
+// CONSTRUCTION: ClipboardAction::Write stores its payload and target.
 fn clipboard_action_write_payload_stored() {
-    let a = ClipboardAction::Write("clipboard text".to_owned());
-    assert!(matches!(a, ClipboardAction::Write(ref s) if s == "clipboard text"));
+    let a = ClipboardAction::Write {
+        target: SelectionTarget::Clipboard,
+        data: "clipboard text".to_owned(),
+    };
+    assert!(matches!(a, ClipboardAction::Write { ref data, .. } if data == "clipboard text"));
 }
 
 #[test]
 // CONSTRUCTION: ClipboardAction::Query is still constructible.
 fn clipboard_action_query_variant() {
-    let a = ClipboardAction::Query;
-    assert!(matches!(a, ClipboardAction::Query));
+    let a = ClipboardAction::Query {
+        target: SelectionTarget::Clipboard,
+    };
+    assert!(matches!(a, ClipboardAction::Query { .. }));
+}
+
+#[test]
+// PARSE: empty/absent selector defaults to Clipboard.
+fn selection_target_empty_defaults_clipboard() {
+    assert_eq!(
+        SelectionTarget::from_selector(b""),
+        SelectionTarget::Clipboard
+    );
+}
+
+#[test]
+// PARSE: `p` selector maps to Primary.
+fn selection_target_p_is_primary() {
+    assert_eq!(
+        SelectionTarget::from_selector(b"p"),
+        SelectionTarget::Primary
+    );
+}
+
+#[test]
+// PARSE: `s` and `q` selectors map to Select.
+fn selection_target_s_and_q_are_select() {
+    assert_eq!(SelectionTarget::from_selector(b"s"), SelectionTarget::Select);
+    assert_eq!(SelectionTarget::from_selector(b"q"), SelectionTarget::Select);
+}
+
+#[test]
+// PARSE: numeric selectors `0`-`7` map to the corresponding cut buffer.
+fn selection_target_digits_are_cut_buffers() {
+    assert_eq!(
+        SelectionTarget::from_selector(b"0"),
+        SelectionTarget::CutBuffer(0)
+    );
+    assert_eq!(
+        SelectionTarget::from_selector(b"7"),
+        SelectionTarget::CutBuffer(7)
+    );
+}
+
+#[test]
+// PARSE: the first recognised selector char wins.
+fn selection_target_first_recognised_char_wins() {
+    assert_eq!(
+        SelectionTarget::from_selector(b"pc"),
+        SelectionTarget::Primary
+    );
+}
+
+#[test]
+// PARSE: an unrecognised selector falls back to Clipboard.
+fn selection_target_unknown_defaults_clipboard() {
+    assert_eq!(
+        SelectionTarget::from_selector(b"xyz"),
+        SelectionTarget::Clipboard
+    );
 }
 
 #[test]

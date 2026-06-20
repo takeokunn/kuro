@@ -2,7 +2,8 @@
 
 use super::osc_protocol::{
     encode_color_spec, handle_osc_104, handle_osc_133, handle_osc_1337, handle_osc_51,
-    handle_osc_52, handle_osc_777, handle_osc_9, handle_osc_default_colors, parse_color_spec,
+    handle_osc_52, handle_osc_777, handle_osc_9, handle_osc_99, handle_osc_default_colors,
+    parse_color_spec,
 };
 
 use crate::types::osc::DefaultColorSlot;
@@ -23,6 +24,7 @@ use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_B
 /// - OSC 110/111/112: Reset default foreground/background/cursor color to terminal default.
 /// - OSC 51: Emacs eval command request (security: Elisp-side whitelist filtering).
 /// - OSC 52: Clipboard access.
+/// - OSC 99: Kitty desktop notifications (`metadata ; payload`, colon-separated metadata).
 /// - OSC 104: Reset color palette.
 /// - OSC 133: Shell integration prompt marks.
 /// - OSC 1337: iTerm2 inline images.
@@ -36,6 +38,7 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         b"7" => handle_osc_7(core, params),
         b"8" => handle_osc_8(core, params),
         b"9" => handle_osc_9(core, params),
+        b"99" => handle_osc_99(core, params),
         b"777" => handle_osc_777(core, params),
         b"4" => handle_osc_4(core, params),
         b"10" | b"11" | b"12" => handle_osc_default_colors(core, params),

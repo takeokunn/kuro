@@ -161,19 +161,23 @@ fn test_handle_osc_133_multiple_marks_accumulate_in_order() {
     assert_eq!(marks[3].mark, PromptMark::CommandEnd);
 }
 
-/// `handle_osc_52` with a non-`c` selection character still records the write.
+/// `handle_osc_52` with a non-`c` selection character records the write and
+/// carries the parsed [`SelectionTarget`] through.
 ///
-/// The OSC 52 handler does not validate the selection character at params[1];
-/// it only uses params[2] (the data).  A `p` selection must behave identically
-/// to `c` for Write actions.
+/// The OSC 52 handler parses the selection character at params[1] and decodes
+/// the data at params[2]. A `p` selection records a Write tagged Primary.
 #[test]
 fn test_handle_osc_52_non_c_selection_records_write() {
+    use crate::types::osc::SelectionTarget;
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     // base64("hi") = "aGk="
     let params: &[&[u8]] = &[b"52", b"p", b"aGk="];
     super::handle_osc_52(&mut core, params);
-    assert_osc_52_action!(core, ClipboardAction::Write(s) if s == "hi");
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::Primary, data } if data == "hi"
+    );
 }
 
 // `handle_osc_default_colors` set-then-query for OSC 10 returns the exact

@@ -4,7 +4,8 @@ use crate::parser::limits::{
     OSC133_MAX_ERR_PATH_BYTES, OSC51_MAX_EVAL_BYTES,
 };
 use crate::types::osc::{
-    ClipboardAction, DefaultColorSlot, Notification, PromptMark, PromptMarkEvent,
+    ClipboardAction, DefaultColorSlot, Notification, NotificationChunk, PromptMark, PromptMarkEvent,
+    SelectionTarget,
 };
 use crate::TerminalCore;
 
@@ -33,7 +34,11 @@ pub(super) fn handle_osc_51(core: &mut TerminalCore, params: &[&[u8]]) {
     push_osc_51_eval_command(core, cmd_raw);
 }
 
-fn push_osc_52_clipboard_write(core: &mut TerminalCore, data_raw: &[u8]) {
+fn push_osc_52_clipboard_write(
+    core: &mut TerminalCore,
+    target: SelectionTarget,
+    data_raw: &[u8],
+) {
     if data_raw.len() > 1_048_576 {
         return;
     }
@@ -42,7 +47,7 @@ fn push_osc_52_clipboard_write(core: &mut TerminalCore, data_raw: &[u8]) {
         if let Ok(text) = String::from_utf8(decoded) {
             core.osc_data
                 .clipboard_actions
-                .push(ClipboardAction::Write(text));
+                .push(ClipboardAction::Write { target, data: text });
         }
     }
 }
@@ -52,13 +57,19 @@ pub(super) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
         return;
     };
 
+    // Wire format: OSC 52 ; Pc ; Pd ST. The `Pc` selector defaults to clipboard
+    // when empty or absent.
+    let target = SelectionTarget::from_selector(params.get(1).copied().unwrap_or(b""));
+
     if data_raw == b"?" {
-        core.osc_data.clipboard_actions.push(ClipboardAction::Query);
+        core.osc_data
+            .clipboard_actions
+            .push(ClipboardAction::Query { target });
         return;
     }
 
     // 1MB cap.
-    push_osc_52_clipboard_write(core, data_raw);
+    push_osc_52_clipboard_write(core, target, data_raw);
 }
 
 fn build_notification(title_raw: Option<&[u8]>, body_raw: &[u8]) -> Option<Notification> {
@@ -104,6 +115,178 @@ pub(super) fn handle_osc_777(core: &mut TerminalCore, params: &[&[u8]]) {
     let title_raw: &[u8] = params.get(2).copied().unwrap_or(b"");
     let body_raw: &[u8] = params.get(3).copied().unwrap_or(b"");
     push_notification(core, Some(title_raw), body_raw);
+}
+
+/// Which target the OSC 99 `p=` payload type writes into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Osc99PayloadType {
+    Title,
+    Body,
+    /// `p=close`, `p=icon`, `p=?` — recognised but not surfaced as text.
+    Other,
+}
+
+/// Parsed OSC 99 metadata (colon-separated `key=value` pairs).
+struct Osc99Metadata {
+    /// `i=<id>` notification group id (empty when absent).
+    id: String,
+    /// `d=` done flag; default `true` (single-shot). `d=0` means more chunks follow.
+    done: bool,
+    /// `p=` payload type. Defaults to [`Osc99PayloadType::Body`] so the minimal
+    /// form `OSC 99 ; ; text` yields a notification with `body = text` and no
+    /// title (matching this terminal's notification contract). An explicit
+    /// `p=title` sets the title instead.
+    payload_type: Osc99PayloadType,
+    /// `e=` encoding flag; `true` means the payload is base64.
+    encoded: bool,
+    // Note: `a=<actions>` and `u=<urgency>` are parsed for forward-compatibility
+    // but `a=` is NOT yet wired to any action dispatch (documented limitation).
+}
+
+impl Default for Osc99Metadata {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            done: true,
+            payload_type: Osc99PayloadType::Body,
+            encoded: false,
+        }
+    }
+}
+
+/// Parse the colon-separated OSC 99 metadata field into a [`Osc99Metadata`].
+///
+/// Unknown keys and malformed pairs are ignored gracefully; a missing key keeps
+/// its documented default. `a=<actions>` and `u=<urgency>` are recognised but
+/// `a=` is not yet wired to action dispatch.
+fn parse_osc99_metadata(meta_raw: &[u8]) -> Osc99Metadata {
+    let mut meta = Osc99Metadata::default();
+    let Ok(meta_str) = std::str::from_utf8(meta_raw) else {
+        return meta;
+    };
+
+    for pair in meta_str.split(':') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue; // malformed pair (no '='): ignore
+        };
+        match key {
+            "i" => meta.id = value.to_owned(),
+            "d" => meta.done = value != "0",
+            "e" => meta.encoded = value == "1",
+            "p" => {
+                meta.payload_type = match value {
+                    "body" => Osc99PayloadType::Body,
+                    "title" => Osc99PayloadType::Title,
+                    _ => Osc99PayloadType::Other, // close|icon|?|unknown
+                };
+            }
+            // a=<actions>: NOT yet wired to action dispatch. u=<urgency>: ignored.
+            _ => {}
+        }
+    }
+    meta
+}
+
+/// Decode the OSC 99 payload into a lossy-UTF8 string, base64-decoding first when
+/// `e=1`. Returns `None` when base64 decoding fails.
+fn decode_osc99_payload(payload_raw: &[u8], encoded: bool) -> Option<String> {
+    if encoded {
+        let decoded = crate::util::base64::decode(payload_raw).ok()?;
+        Some(String::from_utf8_lossy(&decoded).into_owned())
+    } else {
+        Some(String::from_utf8_lossy(payload_raw).into_owned())
+    }
+}
+
+/// Append `text` to `dst`, capping the accumulated length at
+/// [`NOTIFICATION_MAX_BYTES`]. Excess bytes are truncated on a char boundary.
+fn append_capped(dst: &mut String, text: &str) {
+    let remaining = crate::parser::limits::NOTIFICATION_MAX_BYTES.saturating_sub(dst.len());
+    if remaining == 0 {
+        return;
+    }
+    if text.len() <= remaining {
+        dst.push_str(text);
+    } else {
+        let mut end = remaining;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        dst.push_str(&text[..end]);
+    }
+}
+
+/// Finalize an accumulated [`NotificationChunk`], pushing a [`Notification`] when
+/// it carries any body or title text.
+fn finalize_notification_chunk(core: &mut TerminalCore, chunk: NotificationChunk) {
+    if chunk.body.is_empty() && chunk.title.is_empty() {
+        return;
+    }
+    core.osc_data.notifications.push(Notification {
+        title: (!chunk.title.is_empty()).then_some(chunk.title),
+        body: chunk.body,
+    });
+}
+
+/// Handle OSC 99 — Kitty desktop notifications.
+///
+/// Wire format: `OSC 99 ; metadata ; payload ST` where `metadata` is a
+/// colon-separated list of `key=value` pairs (`i`, `d`, `p`, `e`, `a`, `u`).
+/// The minimal form `OSC 99 ; ; Hello world` yields a notification with body
+/// text "Hello world" and no title.
+///
+/// Chunking: chunks sharing the same `i=<id>` with `d=0` accumulate; the
+/// notification is pushed on `d=1` (or immediately when no `i=` is present, i.e.
+/// a single-shot sequence). `e=1` payloads are base64-decoded. Accumulated text
+/// is capped at [`NOTIFICATION_MAX_BYTES`].
+///
+/// `a=<actions>` is parsed but NOT yet wired to any action dispatch.
+pub(super) fn handle_osc_99(core: &mut TerminalCore, params: &[&[u8]]) {
+    let meta_raw: &[u8] = params.get(1).copied().unwrap_or(b"");
+    let meta = parse_osc99_metadata(meta_raw);
+
+    // The VTE parser splits OSC on ';'; rejoin any payload that itself contained
+    // ';' so semicolons in the notification text are preserved.
+    let payload: Vec<u8> = if params.len() <= 3 {
+        params.get(2).copied().unwrap_or(b"").to_vec()
+    } else {
+        params[2..].join(&b';')
+    };
+
+    let Some(text) = decode_osc99_payload(&payload, meta.encoded) else {
+        return; // malformed base64: ignore gracefully
+    };
+
+    // Take any in-progress chunk that matches this id; otherwise start fresh.
+    let mut chunk = match core.osc_data.notification_chunk.take() {
+        Some(existing) if existing.id == meta.id && !meta.id.is_empty() => existing,
+        Some(orphan) => {
+            // A different in-progress notification is abandoned by a new id;
+            // finalize it so its accumulated text is not lost.
+            finalize_notification_chunk(core, orphan);
+            NotificationChunk {
+                id: meta.id.clone(),
+                ..NotificationChunk::default()
+            }
+        }
+        None => NotificationChunk {
+            id: meta.id.clone(),
+            ..NotificationChunk::default()
+        },
+    };
+
+    match meta.payload_type {
+        Osc99PayloadType::Title => append_capped(&mut chunk.title, &text),
+        Osc99PayloadType::Body => append_capped(&mut chunk.body, &text),
+        Osc99PayloadType::Other => {} // close/icon/?: no text accumulation
+    }
+
+    // Single-shot (no id) or explicit completion (d=1) finalizes immediately.
+    if meta.done || meta.id.is_empty() {
+        finalize_notification_chunk(core, chunk);
+    } else {
+        core.osc_data.notification_chunk = Some(chunk);
+    }
 }
 
 /// Handle OSC 104 — Reset color palette.

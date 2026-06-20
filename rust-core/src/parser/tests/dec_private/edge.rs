@@ -399,3 +399,138 @@ fn test_decrqm_deccolm_reports_status() {
     term.advance(b"\x1b[?3$p");
     assert_single_pending_response_text(&term, "\x1b[?3;1$y");
 }
+
+// ── XTSAVE / XTRESTORE — CSI ? Pm s / CSI ? Pm r ─────────────────────────────
+// Full-snapshot approximation: `s` pushes a clone of the whole DecModes,
+// `r` pops and restores it.
+
+#[test]
+fn test_xtsave_xtrestore_round_trips_modes_via_advance() {
+    // INTENT: Set modes 1049 and 2004, save, change them, restore → both
+    // restored to their saved (true) state through the CSI ? s / ? r stream path.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?1049h\x1b[?2004h");
+    assert!(term.dec_modes.alternate_screen);
+    assert!(term.dec_modes.bracketed_paste);
+
+    // XTSAVE — snapshot current modes (params are ignored in the full-snapshot model).
+    term.advance(b"\x1b[?1049;2004s");
+
+    // Mutate both modes after saving.
+    term.advance(b"\x1b[?1049l\x1b[?2004l");
+    assert!(!term.dec_modes.alternate_screen);
+    assert!(!term.dec_modes.bracketed_paste);
+
+    // XTRESTORE — pop the snapshot; both modes return to their saved (true) state.
+    term.advance(b"\x1b[?1049;2004r");
+    assert!(
+        term.dec_modes.alternate_screen,
+        "1049 must be restored to its saved value"
+    );
+    assert!(
+        term.dec_modes.bracketed_paste,
+        "2004 must be restored to its saved value"
+    );
+}
+
+#[test]
+fn test_save_modes_then_restore_modes_round_trip() {
+    // INTENT: Direct DecModes API — save, mutate, restore returns the snapshot.
+    let mut modes = DecModes::new();
+    modes.set_mode(1049);
+    modes.set_mode(2004);
+
+    modes.save_modes();
+    modes.reset_mode(1049);
+    modes.reset_mode(2004);
+    assert!(!modes.alternate_screen);
+    assert!(!modes.bracketed_paste);
+
+    assert!(modes.restore_modes(), "restore must report success");
+    assert!(modes.alternate_screen);
+    assert!(modes.bracketed_paste);
+}
+
+#[test]
+fn test_restore_modes_empty_stack_is_no_op() {
+    // INTENT: XTRESTORE with nothing saved must not change state and must
+    // report failure (no snapshot popped).
+    let mut modes = DecModes::new();
+    modes.set_mode(2004);
+    assert!(modes.bracketed_paste);
+
+    assert!(
+        !modes.restore_modes(),
+        "restore on empty stack must return false"
+    );
+    // State is untouched.
+    assert!(modes.bracketed_paste, "modes must be unchanged");
+    assert!(modes.saved_modes.is_empty());
+}
+
+#[test]
+fn test_restore_modes_empty_stack_no_op_via_advance() {
+    // INTENT: CSI ? r with an empty save stack is a no-op on the stream path.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?2004h");
+    term.advance(b"\x1b[?r"); // restore with empty stack
+    assert!(
+        term.dec_modes.bracketed_paste,
+        "empty-stack restore must leave modes untouched"
+    );
+}
+
+#[test]
+fn test_save_modes_stack_cap_holds() {
+    // INTENT: The save stack is capped at SAVED_MODES_STACK_MAX; pushing more
+    // than the cap evicts the oldest entry so length never exceeds the cap.
+    let mut modes = DecModes::new();
+    for _ in 0..(super::super::SAVED_MODES_STACK_MAX + 10) {
+        modes.save_modes();
+    }
+    assert_eq!(
+        modes.saved_modes.len(),
+        super::super::SAVED_MODES_STACK_MAX,
+        "stack must be capped at SAVED_MODES_STACK_MAX"
+    );
+}
+
+#[test]
+fn test_snapshot_carries_empty_stack() {
+    // INTENT: Each saved snapshot stores an empty saved_modes so the structure
+    // cannot grow quadratically with stack depth.
+    let mut modes = DecModes::new();
+    modes.save_modes();
+    modes.save_modes();
+    for snap in &modes.saved_modes {
+        assert!(
+            snap.saved_modes.is_empty(),
+            "snapshots must not carry their own save stack"
+        );
+    }
+}
+
+#[test]
+fn test_restore_preserves_remaining_stack() {
+    // INTENT: Restoring pops only the top snapshot; earlier saves remain on the
+    // stack and can be restored by a subsequent CSI ? r.
+    let mut modes = DecModes::new();
+    // First save: 2004 on, 1049 off.
+    modes.set_mode(2004);
+    modes.save_modes();
+    // Second save: both on.
+    modes.set_mode(1049);
+    modes.save_modes();
+
+    // Mutate then restore the top (both-on) snapshot.
+    modes.reset_mode(2004);
+    modes.reset_mode(1049);
+    assert!(modes.restore_modes());
+    assert!(modes.alternate_screen);
+    assert!(modes.bracketed_paste);
+
+    // The earlier (2004-only) snapshot must still be restorable.
+    assert!(modes.restore_modes());
+    assert!(modes.bracketed_paste, "2004 was on in the first save");
+    assert!(!modes.alternate_screen, "1049 was off in the first save");
+}

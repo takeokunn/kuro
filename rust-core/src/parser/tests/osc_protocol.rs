@@ -104,7 +104,7 @@ fn test_handle_osc_52_write_clipboard() {
     // base64("hello") = "aGVsbG8="
     let params: &[&[u8]] = &[b"52", b"c", b"aGVsbG8="];
     super::handle_osc_52(&mut core, params);
-    assert_osc_52_action!(core, ClipboardAction::Write(s) if s == "hello");
+    assert_osc_52_action!(core, ClipboardAction::Write { data, .. } if data == "hello");
 }
 
 #[test]
@@ -113,7 +113,65 @@ fn test_handle_osc_52_query_clipboard() {
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"52", b"c", b"?"];
     super::handle_osc_52(&mut core, params);
-    assert_osc_52_action!(core, ClipboardAction::Query);
+    assert_osc_52_action!(core, ClipboardAction::Query { .. });
+}
+
+#[test]
+fn test_handle_osc_52_primary_selection_target() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; p ; base64("hello") -> Primary target.
+    let params: &[&[u8]] = &[b"52", b"p", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::Primary, data } if data == "hello"
+    );
+}
+
+#[test]
+fn test_handle_osc_52_empty_selector_defaults_clipboard() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; ; base64("hello") -> empty selector defaults to Clipboard.
+    let params: &[&[u8]] = &[b"52", b"", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::Clipboard, data } if data == "hello"
+    );
+}
+
+#[test]
+fn test_handle_osc_52_query_carries_clipboard_target() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; c ; ? -> query the clipboard target.
+    let params: &[&[u8]] = &[b"52", b"c", b"?"];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Query {
+            target: SelectionTarget::Clipboard
+        }
+    );
+}
+
+#[test]
+fn test_handle_osc_52_cut_buffer_target() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; 3 ; base64("hello") -> cut buffer 3.
+    let params: &[&[u8]] = &[b"52", b"3", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::CutBuffer(3), data } if data == "hello"
+    );
 }
 
 #[test]

@@ -63,6 +63,18 @@
   (let ((exp (macroexpand-1 '(kuro--clear-session-state))))
     (should (eq (car exp) 'setq))))
 
+(ert-deftest kuro-lifecycle--run-session-setup-fns-macroexpands-to-progn ()
+  "`kuro--run-session-setup-fns' expands to the fixed setup sequence."
+  (should (equal (macroexpand-1 '(kuro--run-session-setup-fns))
+                 '(progn
+                    (kuro--setup-char-width-table)
+                    (kuro--setup-fontset)
+                    (kuro--ensure-left-margin)
+                    (kuro--setup-dnd)
+                    (kuro--setup-compilation)
+                    (kuro--setup-bookmark)
+                    (kuro--color-scheme-install-hook)))))
+
 
 (provide 'kuro-lifecycle-ext2-test-7)
 ;;; kuro-lifecycle-ext2-test-7.el ends here

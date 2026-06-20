@@ -263,4 +263,22 @@ impl Screen {
             Some(self)
         }
     }
+
+    /// Run `f` on the currently active screen, if one exists.
+    #[inline]
+    pub(super) fn with_active_screen<'a, R>(
+        &'a self,
+        f: impl FnOnce(&'a Self) -> R,
+    ) -> Option<R> {
+        self.active_screen().map(f)
+    }
+
+    /// Run `f` on the currently active screen, if one exists.
+    #[inline]
+    pub(super) fn with_active_screen_mut<'a, R>(
+        &'a mut self,
+        f: impl FnOnce(&'a mut Self) -> R,
+    ) -> Option<R> {
+        self.active_screen_mut().map(f)
+    }
 }

@@ -26,17 +26,14 @@ fn test_csi_da1_queues_response() {
 #[test]
 fn test_csi_da1_advertises_sixel() {
     let term = term_with!(b"\x1b[c");
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[?1;2;4c",
-        "DA1 must include attribute 4 (Sixel) in its capability list"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[?1;2;4c");
 }
 
 /// DA1 with an explicit 0 parameter (CSI 0 c) must reply identically to CSI c.
 #[test]
 fn test_csi_da1_zero_param_same_as_bare() {
     let term = term_with!(b"\x1b[0c");
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[?1;2;4c");
+    assert_single_pending_response_bytes(&term, b"\x1b[?1;2;4c");
 }
 
 /// DA2 (CSI > c) must queue a secondary device attribute response.
@@ -51,7 +48,7 @@ fn test_csi_da2_queues_response() {
 fn test_csi_xtversion_queues_response() {
     let term = term_with!(b"\x1b[>q");
     assert_response_starts!(term, b"\x1bP>|");
-    let resp = String::from_utf8_lossy(&term.meta.pending_responses[0]);
+    let resp = String::from_utf8_lossy(first_pending_response_bytes(&term));
     assert!(
         resp.contains("kuro"),
         "XTVERSION response must contain 'kuro', got: {resp:?}"
@@ -120,7 +117,7 @@ fn test_csi_dsr_queues_cursor_position() {
     term.advance(b"\x1b[5;10H"); // cursor to row 4, col 9 (0-indexed)
     term.advance(b"\x1b[6n"); // DSR — cursor position report
     assert_response_starts!(term, b"\x1b[");
-    let resp = String::from_utf8_lossy(&term.meta.pending_responses[0]);
+    let resp = String::from_utf8_lossy(first_pending_response_bytes(&term));
     // Response must contain "5;10R" (1-indexed)
     assert!(
         resp.contains("5;10R"),
@@ -133,10 +130,7 @@ fn test_csi_dsr_queues_cursor_position() {
 fn test_csi_dsr_unknown_param_no_response() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[99n"); // param 99 — not a recognised DSR code
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "DSR with unknown param must not queue a response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 /// DSR 5 (operating status) must reply ESC[0n ("terminal OK").
@@ -144,11 +138,7 @@ fn test_csi_dsr_unknown_param_no_response() {
 fn test_csi_dsr_operating_status_ok() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[5n");
-    assert_eq!(
-        term.meta.pending_responses,
-        vec![b"\x1b[0n".to_vec()],
-        "DSR 5 must reply ESC[0n"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[0n");
 }
 
 /// TBC (CSI 0 g) — clear tab stop at cursor column.
@@ -264,7 +254,7 @@ fn test_csi_ich_inserts_blank_at_cursor() {
     let mut term = term_with!(b"ABCD");
     term.advance(b"\x1b[1;3H"); // cursor to (row 0, col 2)
     term.advance(b"\x1b[1@"); // ICH 1: insert 1 blank at col 2
-    // 'A' and 'B' remain; col 2 is now blank; 'C' shifts to col 3
+                              // 'A' and 'B' remain; col 2 is now blank; 'C' shifts to col 3
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, 'B');
     assert_cell_char!(term, row 0, col 2, ' ');
@@ -277,7 +267,7 @@ fn test_csi_dch_deletes_char_at_cursor() {
     let mut term = term_with!(b"ABCD");
     term.advance(b"\x1b[1;2H"); // cursor to col 1
     term.advance(b"\x1b[1P"); // DCH 1: delete 'B'
-    // 'A' remains; 'C' shifts to col 1; 'D' to col 2; col 3 is blank
+                              // 'A' remains; 'C' shifts to col 1; 'D' to col 2; col 3 is blank
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, 'C');
     assert_cell_char!(term, row 0, col 2, 'D');
@@ -291,7 +281,7 @@ fn test_csi_ech_erases_without_moving_cursor() {
     term.advance(b"\x1b[1;2H"); // cursor to col 1
     let col_before = term.screen.cursor().col;
     term.advance(b"\x1b[2X"); // ECH 2: erase 2 chars from col 1
-    // Col 0 unchanged; cols 1-2 blank; col 3 onward unchanged
+                              // Col 0 unchanged; cols 1-2 blank; col 3 onward unchanged
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, ' ');
     assert_cell_char!(term, row 0, col 2, ' ');

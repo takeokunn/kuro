@@ -19,6 +19,7 @@
 
 (require 'kuro-ffi)
 (require 'kuro-ffi-modes)
+(require 'kuro-navigation-macros)
 
 (declare-function kuro--get-focus-events "kuro-ffi-modes" ())
 (declare-function kuro--send-key "kuro-ffi" (data))
@@ -94,29 +95,11 @@ Returns the closest matching entry to point, or nil when none is found."
         (car (last matches))
       (car matches))))
 
-(defmacro kuro--def-navigator (name type-pred on-found on-miss docstring)
-  "Define NAME as a directional navigator over `kuro--prompt-positions'.
-DOCSTRING becomes the generated function docstring.
-TYPE-PRED filters entries.  ON-FOUND runs with `target' bound to the entry,
-ON-MISS runs with `direction' still in scope when no match is found."
-  `(defun ,name (direction)
-     ,docstring
-     (let ((target (kuro--find-mark-in-direction direction ,type-pred)))
-       (if target
-           ,on-found
-         ,on-miss))))
-
 (kuro--def-navigator kuro--navigate-to-prompt
   (lambda (e) (equal (car e) "prompt-start"))
   (kuro--goto-prompt-row (cadr target))
   (message "kuro: no %s prompt" (symbol-name direction))
   "Navigate to the nearest prompt-start in DIRECTION (`previous' or `next').")
-
-(defmacro kuro--def-nav-cmd (name nav-fn direction docstring)
-  "Define NAME as an interactive navigation command.
-DOCSTRING becomes the generated command docstring.
-Calls NAV-FN with DIRECTION (a quoted symbol) on invocation."
-  `(defun ,name () ,docstring (interactive) (,nav-fn ',direction)))
 
 ;;;###autoload
 (kuro--def-nav-cmd kuro-previous-prompt kuro--navigate-to-prompt previous
@@ -247,21 +230,6 @@ A failed command is a `command-end' mark with a non-zero OSC 133 exit code.")
   "Jump to the previous command that exited with a non-zero status (OSC 133).")
 
 ;;; Focus event handlers
-
-(defmacro kuro--with-focus-guard (&rest body)
-  "Execute BODY only when in an active kuro buffer with focus-events enabled."
-  `(when (and (derived-mode-p 'kuro-mode)
-              kuro--initialized
-              (kuro--get-focus-events))
-     ,@body))
-
-(defmacro kuro--def-focus-handler (name sequence doc)
-  "Define a focus event handler NAME that sends SEQUENCE.
-DOC is the docstring for the generated handler function."
-  `(defun ,name ()
-     ,doc
-     (kuro--with-focus-guard
-      (kuro--send-key ,sequence))))
 
 (kuro--def-focus-handler kuro--handle-focus-in  "\e[I" "Handle focus-in event; send focus-in sequence to terminal.")
 (kuro--def-focus-handler kuro--handle-focus-out "\e[O" "Handle focus-out event; send focus-out sequence to terminal.")

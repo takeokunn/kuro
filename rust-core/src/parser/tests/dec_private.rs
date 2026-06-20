@@ -6,6 +6,65 @@
 use super::*;
 use proptest::prelude::*;
 
+pub(super) fn pending_response_texts(core: &crate::TerminalCore) -> Vec<String> {
+    core.meta
+        .pending_responses
+        .iter()
+        .map(|response| String::from_utf8_lossy(response).into_owned())
+        .collect()
+}
+
+pub(super) fn assert_no_pending_responses(core: &crate::TerminalCore) {
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "expected no queued responses, got {:?}",
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_pending_response_count(core: &crate::TerminalCore, count: usize) {
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        count,
+        "expected {} queued responses, got {:?}",
+        count,
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_single_pending_response_bytes(core: &crate::TerminalCore, expected: &[u8]) {
+    assert_eq!(
+        core.meta.pending_responses,
+        vec![expected.to_vec()],
+        "expected a single queued response {:?}, got {:?}",
+        expected,
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_single_pending_response_text(core: &crate::TerminalCore, expected: &str) {
+    assert_eq!(
+        pending_response_texts(core),
+        vec![expected.to_owned()],
+        "expected a single queued response {:?}, got {:?}",
+        expected,
+        pending_response_texts(core)
+    );
+}
+
+pub(super) fn assert_pending_response_texts(core: &crate::TerminalCore, expected: &[&str]) {
+    let expected = expected
+        .iter()
+        .map(|response| response.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        pending_response_texts(core),
+        expected,
+        "unexpected queued responses: {:?}",
+        core.meta.pending_responses
+    );
+}
+
 /// Generate a set/reset pair for a simple boolean DEC mode field.
 ///
 /// Both generated tests follow the three-step pattern:

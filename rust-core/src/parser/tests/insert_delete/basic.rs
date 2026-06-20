@@ -47,7 +47,7 @@ fn test_il_respects_scroll_region() {
     assert_eq!(char_at(&term, 0, 0), '0');
     assert_eq!(char_at(&term, 1, 0), '1');
     assert_eq!(char_at(&term, 2, 0), '2'); // cursor was below this row
-    // Two blank lines inserted at row 3
+                                           // Two blank lines inserted at row 3
     assert_eq!(char_at(&term, 3, 0), ' ');
     assert_eq!(char_at(&term, 4, 0), ' ');
     // Original rows 3,4 shifted to 5,6
@@ -367,6 +367,6 @@ fn test_ech_basic() {
     assert_eq!(char_at(&term, 0, 2), 'A'); // left: untouched
     assert_eq!(char_at(&term, 0, 3), ' '); // erased
     assert_eq!(char_at(&term, 0, 4), 'A'); // right: untouched
-    // Cursor must NOT move
+                                           // Cursor must NOT move
     assert_eq!(term.screen.cursor().col, 3);
 }

@@ -23,6 +23,7 @@
 ;;; Code:
 
 (require 'seq)
+(require 'kuro-char-width-macros)
 
 ;; set-fontset-font is defined in src/fontset.c (graphical builds only).
 ;; Declare it so the byte-compiler does not warn when compiling in --batch mode.
@@ -97,17 +98,6 @@ width 1, plus Nerd Font PUA ranges.")
   "Unicode ranges with display width 0 (zero-width combining characters).
 Variation Selectors modify the preceding character's rendering (e.g., VS16
 forces emoji presentation) without consuming a grid column themselves.")
-
-;;; Fontset-assignment macro
-
-(defmacro kuro--set-fontset-font-both (range spec)
-  "Register SPEC for RANGE in both the current frame and the default fontset.
-Both nil (current frame) and t (default template) are updated because
-frame creation copies the default fontset — modifying only t would not
-update existing frames, and modifying only nil would not affect new frames."
-  `(progn
-     (set-fontset-font nil ,range ,spec nil 'prepend)
-     (set-fontset-font t   ,range ,spec nil 'prepend)))
 
 ;;; EA-Ambiguous font assignment and glyph-metric refinement
 

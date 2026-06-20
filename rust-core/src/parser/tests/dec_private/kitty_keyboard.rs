@@ -126,8 +126,7 @@ macro_rules! test_decrqm {
                 term.advance($enable_seq);
             }
             term.advance(format!("\x1b[?{}$p", $mode).as_bytes());
-            let resp = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-            assert_eq!(resp, $expected);
+            assert_single_pending_response_text(&term, $expected);
         }
     };
 }

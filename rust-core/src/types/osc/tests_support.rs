@@ -1,5 +1,5 @@
-use crate::types::osc::{OscData, PromptMark, PromptMarkEvent};
 use crate::types::color::Color;
+use crate::types::osc::{OscData, PromptMark, PromptMarkEvent};
 
 pub(crate) fn prompt_mark_event(
     mark: PromptMark,

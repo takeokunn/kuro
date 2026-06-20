@@ -1,3 +1,5 @@
+use super::tests_support::*;
+
 // ── New edge-case tests ───────────────────────────────────────────────────────
 
 // DSR (Device Status Report) tests
@@ -8,15 +10,7 @@ fn test_dsr_param6_enqueues_cpr_response() {
     let mut term = term!(24, 80);
     term.screen.move_cursor(4, 9); // row=5, col=10 in 1-indexed
     term.advance(b"\x1b[6n");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "DSR 6 must enqueue exactly one response"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[5;10R",
-        "DSR 6 response must be ESC[row;colR (1-indexed)"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[5;10R");
 }
 
 #[test]
@@ -24,7 +18,7 @@ fn test_dsr_param6_at_origin_is_1_1() {
     // At (0,0) the 1-indexed response is ESC[1;1R.
     let mut term = term!(24, 80);
     term.advance(b"\x1b[6n");
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[1;1R");
+    assert_single_pending_response_bytes(&term, b"\x1b[1;1R");
 }
 
 #[test]
@@ -32,15 +26,7 @@ fn test_dsr_param5_reports_operating_status_ok() {
     // CSI 5 n (operating-status query) must reply CSI 0 n ("ready, no malfunction").
     let mut term = term!(24, 80);
     term.advance(b"\x1b[5n");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "DSR 5 must enqueue exactly one status response"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[0n",
-        "DSR 5 response must be ESC[0n (terminal OK)"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[0n");
 }
 
 #[test]
@@ -48,10 +34,7 @@ fn test_dsr_unknown_param_is_silent_noop() {
     // DSR codes other than 5 / 6 are not defined here and must stay silent.
     let mut term = term!(24, 80);
     term.advance(b"\x1b[99n");
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "Unknown DSR code must not enqueue a response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 // Zero-parameter tests for CUU / CUD / CUF / CUB

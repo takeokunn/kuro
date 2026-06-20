@@ -48,39 +48,11 @@ pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: ch
 fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
     let rows = term.screen.rows() as usize;
 
-    // Get top parameter (1-indexed, convert to 0-indexed)
-    // Default is 0 (top of screen)
-    let top = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .saturating_sub(1) as usize;
-
-    // Get bottom parameter (1-indexed, convert to 0-indexed)
-    // Default is rows (end of screen)
-    let bottom = params
-        .iter()
-        .nth(1)
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(rows as u16)
-        .min(rows as u16) as usize;
-
-    // Validate: top must be < bottom
-    if top < bottom {
+    if let Some((top, bottom)) = decstbm_bounds(params, rows) {
         term.screen.set_scroll_region(top, bottom);
-
-        // Move cursor to home position after setting scroll region.
-        // Per DEC VT510: DECOM off → absolute (0,0); DECOM on → scroll region top.
-        if term.dec_modes.origin_mode {
-            term.screen.move_cursor(top, 0);
-        } else {
-            term.screen.move_cursor(0, 0);
-        }
+        term.screen
+            .move_cursor(decstbm_home_row(term.dec_modes.origin_mode, top), 0);
     }
-    // If invalid, ignore the sequence (DEC behavior)
 }
 
 fn scroll_param_amount(params: &vte::Params) -> usize {
@@ -93,20 +65,46 @@ fn scroll_param_amount(params: &vte::Params) -> usize {
         .max(1) as usize
 }
 
+fn decstbm_bounds(params: &vte::Params, rows: usize) -> Option<(usize, usize)> {
+    let rows = u16::try_from(rows).unwrap_or(u16::MAX);
+    let top = params
+        .iter()
+        .next()
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(1)
+        .saturating_sub(1) as usize;
+    let bottom = params
+        .iter()
+        .nth(1)
+        .and_then(|p| p.iter().next())
+        .copied()
+        .unwrap_or(rows)
+        .min(rows) as usize;
+
+    (top < bottom).then_some((top, bottom))
+}
+
+fn decstbm_home_row(origin_mode: bool, top: usize) -> usize {
+    if origin_mode {
+        top
+    } else {
+        0
+    }
+}
+
 fn csi_su(term: &mut crate::TerminalCore, params: &vte::Params) {
     let n = scroll_param_amount(params);
 
     // Scroll up (content moves down), applying BCE background to new blank lines
-    term.screen
-        .scroll_up(n, term.current_attrs.background);
+    term.screen.scroll_up(n, term.current_attrs.background);
 }
 
 fn csi_sd(term: &mut crate::TerminalCore, params: &vte::Params) {
     let n = scroll_param_amount(params);
 
     // Scroll down (content moves up), applying BCE background to new blank lines
-    term.screen
-        .scroll_down(n, term.current_attrs.background);
+    term.screen.scroll_down(n, term.current_attrs.background);
 }
 
 /// SL — Scroll Left (CSI Ps SP @)

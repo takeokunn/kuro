@@ -18,7 +18,6 @@
 
 ;;; Code:
 
-(require 'seq)
 (require 'kuro-ffi)
 (require 'kuro-renderer)
 (require 'kuro-faces)
@@ -28,6 +27,8 @@
 (require 'kuro-bookmark)
 (require 'kuro-color-scheme)
 (require 'kuro-sessions)
+(require 'kuro-lifecycle-module)
+(require 'kuro-lifecycle-macros)
 
 ;; Forward-declare functions defined in kuro.el to avoid circular require
 (declare-function kuro-mode "kuro" ())
@@ -36,15 +37,6 @@
 (declare-function kuro--render-cycle      "kuro-renderer" ())
 (declare-function kuro--start-render-loop "kuro-renderer" ())
 (declare-function kuro--stop-render-loop  "kuro-renderer" ())
-
-;; kuro--ensure-module-loaded, kuro-module-load, kuro-module-download, and
-;; kuro-module-build are defined in kuro-module.el; kuro-module-installation-method
-;; is defined as a defcustom there.
-(declare-function kuro--ensure-module-loaded "kuro-module" ())
-(declare-function kuro-module-load           "kuro-module" ())
-(declare-function kuro-module-download       "kuro-module" (&optional version))
-(declare-function kuro-module-build          "kuro-module" ())
-(defvar kuro-module-installation-method)
 
 ;; face-remap-remove-relative is provided by the C core (face-remap.el)
 (declare-function face-remap-remove-relative "face-remap" (cookie))
@@ -74,7 +66,7 @@
 
 ;; kuro-input-paste.el — used by kuro-send-region
 (declare-function kuro--send-paste-or-raw        "kuro-input-paste" (text))
-(declare-function kuro--schedule-immediate-render "kuro-input"       ())
+(declare-function kuro--schedule-immediate-render "kuro-input-render" ())
 
 ;; kuro-faces.el
 (declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
@@ -104,7 +96,6 @@
 ;;; Forward defvar references — defvar-local symbols used here but defined elsewhere
 
 ;; kuro-config.el
-(defvar kuro-module-installation-method)
 (defvar kuro-shell-integration)
 
 ;; kuro-faces.el
@@ -241,12 +232,6 @@ Returns BUFFER after attempting startup."
         (message "Kuro: Started terminal with command: %s" command))))
   buffer)
 
-(defmacro kuro--clear-session-state ()
-  "Reset buffer-local session identity after detach or error.
-Sets `kuro--initialized' to nil and `kuro--session-id' to 0."
-  `(setq kuro--initialized nil
-         kuro--session-id  0))
-
 (defun kuro--do-attach (session-id rows cols)
   "Perform the core attach step for SESSION-ID at terminal size ROWS x COLS.
 Assume the calling buffer is already in `kuro-mode'.
@@ -263,10 +248,7 @@ Signals on any failure; the caller is responsible for rollback."
   "Roll back a failed attach for SESSION-ID.
 Log ERR, clear state, detach, and kill BUFFER."
   (message "Kuro: Failed to attach to session %d: %s" session-id err)
-  (kuro--clear-session-state)
-  (condition-case nil
-      (kuro-core-detach session-id)
-    (error nil))
+  (kuro--detach-and-clear-session-state session-id)
   (kill-buffer buffer)
   nil)
 
@@ -278,12 +260,7 @@ Assumes `kuro--stop-render-loop' and `kuro--cleanup-render-state' already ran."
            (kuro--is-process-alive)
            (not (yes-or-no-p "Kill the terminal process? (\"no\" detaches it)? ")))
       ;; Detach: PTY keeps running; another buffer can attach later.
-      (condition-case nil
-          (progn
-            (kuro-core-detach kuro--session-id)
-            (kuro--clear-session-state))
-        (error
-         (kuro--clear-session-state)))
+      (kuro--detach-and-clear-session-state kuro--session-id)
     ;; Destroy: shutdown PTY and remove session from the HashMap.
     (kuro--shutdown)))
 
@@ -333,69 +310,8 @@ Does not include `kuro--reset-cursor-cache' because it is a macro.")
     (kuro--apply-font-to-buffer buffer)
     (kuro--remap-default-face kuro-color-white kuro-color-black)
     (kuro--reset-cursor-cache)
-    (mapc #'funcall kuro--session-setup-fns)
+    (kuro--run-session-setup-fns)
     (ignore-errors (kuro-color-scheme-refresh))))
-
-(defun kuro--module-loadable-p ()
-  "Return non-nil when the Rust dynamic module is loaded into Emacs.
-Detects this by probing for `kuro-core-init', the canonical FFI entry
-point provided by the native module."
-  (fboundp 'kuro-core-init))
-
-(defun kuro--try-load-module ()
-  "Attempt to load the Rust native module, swallowing any errors.
-Returns non-nil iff the module is loaded after the attempt."
-  (ignore-errors (kuro-module-load))
-  (kuro--module-loadable-p))
-
-(defconst kuro--module-install-methods
-  '((prebuilt ?d kuro-module-download "download")
-    (cargo    ?b kuro-module-build    "cargo build"))
-  "Auto-install methods as (SYMBOL KEY-CHAR INSTALL-FN DISPLAY-NAME).
-Each entry maps a `kuro-module-installation-method' symbol and an
-interactive key character to the install function and its display name.")
-
-(defun kuro--install-and-load-module (install-fn install-name)
-  "Run INSTALL-FN, load the module, and verify it's callable.
-INSTALL-NAME is a display string used in the error message on failure.
-Signals an error when the module is not loadable after installation."
-  (funcall install-fn)
-  (kuro-module-load)
-  (or (kuro--module-loadable-p)
-      (error "Kuro: %s succeeded but native init is not bound" install-name)))
-
-(defun kuro--prompt-and-install-module ()
-  "Prompt the user to choose an install method from `kuro--module-install-methods'.
-Reads a single character: one of the KEY-CHARs in the methods table or `q'
-to abort.  Dispatches to `kuro--install-and-load-module' on a match,
-or signals `user-error' for `q'."
-  (let* ((valid-keys (append (mapcar (lambda (m) (nth 1 m))
-                                     kuro--module-install-methods)
-                             '(?q)))
-         (key   (read-char-choice
-                 (concat "Kuro native module not found. "
-                         "Install: [d]ownload prebuilt, [b]uild from source, [q]uit? ")
-                 valid-keys))
-         (entry (seq-find (lambda (m) (eq (nth 1 m) key))
-                          kuro--module-install-methods)))
-    (if entry
-        (kuro--install-and-load-module (nth 2 entry) (nth 3 entry))
-      (user-error "Aborted: kuro native module is required"))))
-
-(defun kuro--ensure-module-installed ()
-  "Ensure the native module is installed, prompting the user if not.
-Honours `kuro-module-installation-method': symbols in
-`kuro--module-install-methods' map to their install functions directly;
-`manual' aborts with an error; nil falls through to the interactive prompt.
-Returns non-nil on success; signals an error otherwise."
-  (or (kuro--try-load-module)
-      (if-let* ((entry (assq kuro-module-installation-method
-                            kuro--module-install-methods)))
-          (kuro--install-and-load-module (nth 2 entry) (nth 3 entry))
-        (pcase kuro-module-installation-method
-          ('manual (user-error "Native module missing; install manually then retry"))
-          (_       (kuro--prompt-and-install-module))))))
-
 
 (require 'kuro-lifecycle-commands)
 

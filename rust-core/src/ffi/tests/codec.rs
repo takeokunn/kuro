@@ -29,14 +29,10 @@ type ScreenLine = (
     Vec<usize>,
 );
 
+/// Return the byte length of one encoded row payload.
 #[inline]
-fn pbt_read_u32(buf: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap())
-}
-
-#[inline]
-fn pbt_read_u64(buf: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(buf[offset..offset + 8].try_into().unwrap())
+fn binary_row_len(text_len: usize, num_face_ranges: usize, col_to_buf_len: usize) -> usize {
+    4 + 4 + 4 + text_len + (28 * num_face_ranges) + 4 + (4 * col_to_buf_len)
 }
 
 /// Build a `Line` of `chars.len()` columns with default SGR attributes.
@@ -87,7 +83,7 @@ macro_rules! assert_face_range {
 ///
 /// Usage: `assert_binary_face!(result, BASE, buf 0, 5, fg 0xFF000000, bg 0x00, flags 0x01)`
 macro_rules! assert_binary_face {
-    ($buf:expr, $base:literal, buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr) => {{
+    ($buf:expr, $base:expr, buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr, ul $ul:expr) => {{
         assert_eq!(read_u32_le($buf, $base), $s as u32, "binary face start_buf");
         assert_eq!(
             read_u32_le($buf, $base + 4),
@@ -97,7 +93,46 @@ macro_rules! assert_binary_face {
         assert_eq!(read_u32_le($buf, $base + 8), $fg, "binary face fg");
         assert_eq!(read_u32_le($buf, $base + 12), $bg, "binary face bg");
         assert_eq!(read_u64_le($buf, $base + 16), $f, "binary face flags");
-        // ul_color at offset +24 (version 2: 28 bytes per face range)
+        assert_eq!(read_u32_le($buf, $base + 24), $ul, "binary face ul_color");
+    }};
+}
+
+/// Assert the shared frame header fields in an `encode_screen_binary` result.
+macro_rules! assert_binary_header {
+    ($buf:expr, rows $rows:expr) => {{
+        assert_eq!(read_u32_le($buf, 0), 2, "format_version must be 2");
+        assert_eq!(read_u32_le($buf, 4), $rows as u32, "num_rows must match");
+    }};
+}
+
+/// Assert one encoded screen row layout and return the next byte offset.
+///
+/// Usage: `let next = assert_binary_row!(out, 8, row 42, text "Hello", faces 0, ctb []);`
+macro_rules! assert_binary_row {
+    ($buf:expr, $base:expr, row $row:expr, text $text:expr, faces $faces:expr, ctb [$($ctb:expr),* $(,)?]) => {{
+        let text = $text.as_bytes();
+        let ctb = &[$($ctb as u32),*];
+        let faces = $faces as usize;
+        let ctb_base = $base + 12 + text.len() + (28 * faces);
+
+        assert_eq!(read_u32_le($buf, $base), $row as u32, "row_index");
+        assert_eq!(read_u32_le($buf, $base + 4), faces as u32, "num_face_ranges");
+        assert_eq!(read_u32_le($buf, $base + 8), text.len() as u32, "text_byte_len");
+        assert_eq!(
+            &$buf[$base + 12..$base + 12 + text.len()],
+            text,
+            "text bytes"
+        );
+        assert_eq!(read_u32_le($buf, ctb_base), ctb.len() as u32, "col_to_buf_len");
+        for (i, expected) in ctb.iter().copied().enumerate() {
+            assert_eq!(
+                read_u32_le($buf, ctb_base + 4 + (4 * i)),
+                expected,
+                "col_to_buf[{i}]"
+            );
+        }
+
+        ctb_base + 4 + (4 * ctb.len())
     }};
 }
 

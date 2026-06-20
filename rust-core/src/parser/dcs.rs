@@ -158,10 +158,7 @@ fn xtgettcap_identity_response(cap_name: &str, cap_hex: &str) -> Option<String> 
         "TN" | "name" => Some(xtgettcap_hex_response(cap_hex, b"kuro")),
         "RGB" => Some(xtgettcap_hex_response(cap_hex, b"8:8:8")),
         "Tc" => Some(xtgettcap_empty_response(cap_hex)),
-        "Ms" => Some(xtgettcap_hex_response(
-            cap_hex,
-            b"\x1b]52;%p1%s;%p2%s\x07",
-        )),
+        "Ms" => Some(xtgettcap_hex_response(cap_hex, b"\x1b]52;%p1%s;%p2%s\x07")),
         "colors" | "Co" => Some(xtgettcap_hex_response(cap_hex, b"256")),
         "ccc" => Some(xtgettcap_empty_response(cap_hex)),
         "U8" | "u8" => Some(xtgettcap_hex_response(cap_hex, b"1")),
@@ -210,8 +207,14 @@ fn xtgettcap_terminal_response(cap_name: &str, cap_hex: &str) -> Option<String> 
     match cap_name {
         // setrgbf / setrgbb — truecolor set foreground / background in terminfo
         // parameter format. vim, tmux, and other tools use these.
-        "setrgbf" => Some(xtgettcap_hex_response(cap_hex, b"\x1b[38;2;%p1%d;%p2%d;%p3%dm")),
-        "setrgbb" => Some(xtgettcap_hex_response(cap_hex, b"\x1b[48;2;%p1%d;%p2%d;%p3%dm")),
+        "setrgbf" => Some(xtgettcap_hex_response(
+            cap_hex,
+            b"\x1b[38;2;%p1%d;%p2%d;%p3%dm",
+        )),
+        "setrgbb" => Some(xtgettcap_hex_response(
+            cap_hex,
+            b"\x1b[48;2;%p1%d;%p2%d;%p3%dm",
+        )),
         // Sync — synchronized output (DEC mode 2026). Some tools check this.
         "Sync" => Some(xtgettcap_hex_response(cap_hex, b"\x1b[?2026h")),
         // E3 — clear the scrollback buffer (CSI 3 J / ED 3).
@@ -250,12 +253,20 @@ fn build_xtgettcap_response(cap_name: &str, cap_hex: &str) -> String {
 
 /// Handle XTGETTCAP response.
 fn handle_xtgettcap(core: &mut TerminalCore, buf: &[u8]) {
+    core.meta.pending_responses.extend(xtgettcap_responses(buf));
+}
+
+fn xtgettcap_responses(buf: &[u8]) -> Vec<Vec<u8>> {
+    let mut responses = Vec::new();
+
     // buf contains hex-encoded capability name(s), semicolon separated.
     // Example: "544e" = "TN" (terminal name).
     for_each_xtgettcap_request(buf, |cap_name, cap_hex| {
         let response = build_xtgettcap_response(cap_name, cap_hex);
-        core.meta.pending_responses.push(response.into_bytes());
+        responses.push(response.into_bytes());
     });
+
+    responses
 }
 
 fn for_each_xtgettcap_request(buf: &[u8], mut f: impl FnMut(&str, &str)) {
@@ -301,6 +312,20 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[path = "tests/dcs.rs"]
 mod tests;
 
+fn sixel_cell_dimensions(width: u32, height: u32) -> (u32, u32) {
+    (
+        width.div_ceil(CELL_PIXEL_WIDTH),
+        height.div_ceil(CELL_PIXEL_HEIGHT),
+    )
+}
+
+fn advance_cursor_after_sixel(core: &mut TerminalCore, cell_h: u32) {
+    let cursor = *core.screen.cursor();
+    let max_row = (core.screen.rows() as usize).saturating_sub(1);
+    let new_row = cursor.row.saturating_add(cell_h as usize).min(max_row);
+    core.screen.move_cursor(new_row, 0);
+}
+
 fn build_sixel_image_data(
     pixels: Vec<u8>,
     width: u32,
@@ -314,32 +339,31 @@ fn build_sixel_image_data(
     }
 }
 
-fn sixel_cell_dimensions(width: u32, height: u32) -> (u32, u32) {
-    (width.div_ceil(CELL_PIXEL_WIDTH), height.div_ceil(CELL_PIXEL_HEIGHT))
-}
-
-fn build_sixel_placement(
+fn build_sixel_image_placement(
+    cursor: crate::types::cursor::Cursor,
     image_id: u32,
-    row: usize,
-    col: usize,
-    display_cols: u32,
-    display_rows: u32,
+    cell_w: u32,
+    cell_h: u32,
 ) -> crate::grid::screen::ImagePlacement {
     crate::grid::screen::ImagePlacement {
         image_id,
         placement_id: None,
-        row,
-        col,
-        display_cols,
-        display_rows,
+        row: cursor.row,
+        col: cursor.col,
+        display_cols: cell_w,
+        display_rows: cell_h,
     }
 }
 
-fn advance_cursor_after_sixel(core: &mut TerminalCore, cell_h: u32) {
-    let cursor = *core.screen.cursor();
-    let max_row = (core.screen.rows() as usize).saturating_sub(1);
-    let new_row = cursor.row.saturating_add(cell_h as usize).min(max_row);
-    core.screen.move_cursor(new_row, 0);
+fn store_sixel_image(core: &mut TerminalCore, pixels: Vec<u8>, width: u32, height: u32) -> u32 {
+    let data = build_sixel_image_data(pixels, width, height);
+    core.screen.active_graphics_mut().store_image(None, data)
+}
+
+fn add_sixel_placement(core: &mut TerminalCore, placement: crate::grid::screen::ImagePlacement) {
+    if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
+        core.kitty.pending_image_notifications.push(notif);
+    }
 }
 
 fn finalize_sixel_image_placement(
@@ -352,29 +376,21 @@ fn finalize_sixel_image_placement(
         return None;
     }
 
-    let data = build_sixel_image_data(pixels, width, height);
-    let actual_id = core.screen.active_graphics_mut().store_image(None, data);
+    let actual_id = store_sixel_image(core, pixels, width, height);
     let cursor = *core.screen.cursor();
     let (cell_w, cell_h) = sixel_cell_dimensions(width, height);
-    let placement = build_sixel_placement(
-        actual_id,
-        cursor.row,
-        cursor.col,
-        cell_w,
-        cell_h,
-    );
-
-    if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
-        core.kitty.pending_image_notifications.push(notif);
-    }
+    let placement = build_sixel_image_placement(cursor, actual_id, cell_w, cell_h);
+    add_sixel_placement(core, placement);
 
     Some(cell_h)
 }
 
 fn handle_sixel_complete(core: &mut TerminalCore, decoder: crate::parser::sixel::SixelDecoder) {
-    if let Some((pixels, width, height)) = decoder.finish() {
-        if let Some(cell_h) = finalize_sixel_image_placement(core, pixels, width, height) {
-            advance_cursor_after_sixel(core, cell_h);
-        }
-    }
+    let Some((pixels, width, height)) = decoder.finish() else {
+        return;
+    };
+    let Some(cell_h) = finalize_sixel_image_placement(core, pixels, width, height) else {
+        return;
+    };
+    advance_cursor_after_sixel(core, cell_h);
 }

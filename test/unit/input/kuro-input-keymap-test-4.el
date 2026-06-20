@@ -15,16 +15,14 @@
 
 (ert-deftest kuro-input-keymap-setup-navigation-fkeys-all-bound ()
   "`kuro--keymap-setup-navigation' binds all 12 function keys."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-navigation
     (dolist (fkey '([f1] [f2] [f3] [f4] [f5] [f6]
                     [f7] [f8] [f9] [f10] [f11] [f12]))
       (should (lookup-key km fkey)))))
 
 (ert-deftest kuro-input-keymap-setup-navigation-modifier-arrows-all-bound ()
   "`kuro--keymap-setup-navigation' binds all 12 modifier+arrow combinations."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-navigation
     (dolist (mod kuro--xterm-modifier-codes)
       (dolist (arrow kuro--xterm-arrow-codes)
         (let ((event (intern (format "%s-%s" (car mod) (car arrow)))))
@@ -32,8 +30,7 @@
 
 (ert-deftest kuro-input-keymap-setup-navigation-all-nav-table-entries-bound ()
   "`kuro--keymap-setup-navigation' installs a live binding for every entry in `kuro--nav-key-bindings'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-navigation km)
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-navigation
     (pcase-dolist (`(,key . ,_cmd) kuro--nav-key-bindings)
       (should (lookup-key km key)))))
 
@@ -49,8 +46,7 @@
 
 (ert-deftest kuro-input-keymap-setup-mouse-all-table-entries-bound ()
   "`kuro--keymap-setup-mouse' installs a live binding for every entry in `kuro--mouse-bindings'."
-  (let ((km (make-sparse-keymap)))
-    (kuro--keymap-setup-mouse km)
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-mouse
     (pcase-dolist (`(,key . ,_cmd) kuro--mouse-bindings)
       (should (lookup-key km key)))))
 
@@ -66,31 +62,28 @@
 This behavior moved from `kuro--keymap-setup-yank' to the dedicated
 `kuro--keymap-apply-exceptions' function to allow building a char-mode keymap
 without exception removal."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions '("M-x")))
-    (kuro--keymap-setup-meta km)
-    (should (lookup-key km (kbd "M-x")))   ; confirm it is installed
-    (kuro--keymap-apply-exceptions km)
-    (should-not (lookup-key km (kbd "M-x")))))
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-meta
+    (let ((kuro-keymap-exceptions '("M-x")))
+      (should (lookup-key km (kbd "M-x")))   ; confirm it is installed
+      (kuro--keymap-apply-exceptions km)
+      (should-not (lookup-key km (kbd "M-x"))))))
 
 (ert-deftest kuro-input-keymap-setup-yank-exception-clears-esc-fallback ()
   "`kuro--keymap-apply-exceptions' clears the ESC+char fallback for M-CHAR exceptions.
 This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-exceptions'."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions '("M-b")))
-    (kuro--keymap-setup-meta km)
-    (should (lookup-key km (vector ?\e ?b)))  ; confirm installed
-    (kuro--keymap-apply-exceptions km)
-    (should-not (lookup-key km (vector ?\e ?b)))))
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-meta
+    (let ((kuro-keymap-exceptions '("M-b")))
+      (should (lookup-key km (vector ?\e ?b)))  ; confirm installed
+      (kuro--keymap-apply-exceptions km)
+      (should-not (lookup-key km (vector ?\e ?b))))))
 
 (ert-deftest kuro-input-keymap-setup-yank-no-exceptions-keeps-yank-remap ()
   "With an empty exceptions list, all three yank remaps remain after `kuro--keymap-setup-yank'."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions nil))
-    (kuro--keymap-setup-yank km)
-    (should (lookup-key km [remap yank]))
-    (should (lookup-key km [remap yank-pop]))
-    (should (lookup-key km [remap clipboard-yank]))))
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-yank
+    (let ((kuro-keymap-exceptions nil))
+      (should (lookup-key km [remap yank]))
+      (should (lookup-key km [remap yank-pop]))
+      (should (lookup-key km [remap clipboard-yank])))))
 
 
 ;;; Group 17: Shift+Tab and Shift+Return KKP bindings
@@ -117,15 +110,14 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
 
 (ert-deftest kuro-input-keymap--g18-yank-bindings-installs-all ()
   "`kuro--keymap-setup-yank' installs every remap from `kuro--yank-bindings'."
-  (let ((map (make-sparse-keymap)))
-    (kuro--keymap-setup-yank map)
+  (kuro-input-keymap-test--with-fresh-keymap map kuro--keymap-setup-yank
     (dolist (b kuro--yank-bindings)
       (should (eq (lookup-key map (vector 'remap (car b)))
                   (cdr b))))))
 
 (ert-deftest kuro-input-keymap--g18-backtab-and-stab-share-same-command ()
   "[backtab] and [S-tab] must both map to `kuro--send-shifted-tab'."
-  (let ((map (kuro--build-keymap)))
+  (kuro-input-keymap-test--with-built-map map
     (should (eq (lookup-key map [backtab]) #'kuro--send-shifted-tab))
     (should (eq (lookup-key map [S-tab])   #'kuro--send-shifted-tab))))
 
@@ -168,24 +160,24 @@ This behavior moved from `kuro--keymap-setup-yank' to `kuro--keymap-apply-except
 
 (ert-deftest kuro-input-keymap-apply-exceptions-non-meta-clears-binding-only ()
   "`kuro--keymap-apply-exceptions' clears a non-M-* binding without touching ESC+char."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions '("C-g")))
-    (define-key km (kbd "C-g") #'ignore)
-    (kuro--keymap-apply-exceptions km)
-    ;; The C-g binding must be cleared.
-    (should-not (lookup-key km (kbd "C-g")))))
+  (kuro-input-keymap-test--with-fresh-keymap km identity
+    (let ((kuro-keymap-exceptions '("C-g")))
+      (define-key km (kbd "C-g") #'ignore)
+      (kuro--keymap-apply-exceptions km)
+      ;; The C-g binding must be cleared.
+      (should-not (lookup-key km (kbd "C-g"))))))
 
 (ert-deftest kuro-input-keymap-apply-exceptions-multi-char-meta-no-esc-fallback ()
   "`kuro--keymap-apply-exceptions' handles M-<multi-char> without touching ESC+char.
 When the part after \"M-\" is more than one char (e.g. \"M-C-f\"), `char' is nil
 and the inner `(when char ...)' branch is skipped — no ESC+char clear attempt."
-  (let ((km (make-sparse-keymap))
-        (kuro-keymap-exceptions '("M-C-f")))
-    (define-key km (kbd "M-C-f") #'ignore)
-    ;; Must not error — the (when char) guard must prevent the (aref rest 0) call.
-    (should-not (condition-case err
-                    (progn (kuro--keymap-apply-exceptions km) nil)
-                  (error err)))))
+  (kuro-input-keymap-test--with-fresh-keymap km identity
+    (let ((kuro-keymap-exceptions '("M-C-f")))
+      (define-key km (kbd "M-C-f") #'ignore)
+      ;; Must not error — the (when char) guard must prevent the (aref rest 0) call.
+      (should-not (condition-case err
+                      (progn (kuro--keymap-apply-exceptions km) nil)
+                    (error err))))))
 
 (provide 'kuro-input-keymap-test-4)
 ;;; kuro-input-keymap-test-4.el ends here

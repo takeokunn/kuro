@@ -59,8 +59,7 @@ macro_rules! assert_line_bg {
         let _line = $term.screen.get_line($r).unwrap();
         for _c in $cr {
             assert_eq!(
-                _line.cells[_c].attrs.background,
-                $bg,
+                _line.cells[_c].attrs.background, $bg,
                 concat!($msg, " (col={})"),
                 _c
             );
@@ -75,11 +74,9 @@ macro_rules! assert_row_range_bg {
             let _line = $term.screen.get_line(_r).unwrap();
             for _c in $cr {
                 assert_eq!(
-                    _line.cells[_c].attrs.background,
-                    $bg,
+                    _line.cells[_c].attrs.background, $bg,
                     concat!($msg, " (row={}, col={})"),
-                    _r,
-                    _c
+                    _r, _c
                 );
             }
         }
@@ -110,11 +107,9 @@ macro_rules! assert_row_range_foreground {
             let _line = $term.screen.get_line(_r).unwrap();
             for _c in $cr {
                 assert_eq!(
-                    _line.cells[_c].attrs.foreground,
-                    $fg,
+                    _line.cells[_c].attrs.foreground, $fg,
                     concat!($msg, " (row={}, col={})"),
-                    _r,
-                    _c
+                    _r, _c
                 );
             }
         }

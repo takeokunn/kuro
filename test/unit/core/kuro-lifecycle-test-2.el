@@ -296,6 +296,18 @@ and returns nil, so the table is rendered with zero rows."
     (should (memq 'kuro--initialized exp))
     (should (memq 'kuro--session-id exp))))
 
+(ert-deftest kuro-lifecycle-detach-and-clear-session-state-expands-to-condition-case ()
+  "`kuro--detach-and-clear-session-state' expands to a detach guard and cleanup."
+  (let ((exp (macroexpand-1 '(kuro--detach-and-clear-session-state 7))))
+    (should
+     (equal exp
+            '(condition-case nil
+                 (progn
+                   (kuro-core-detach 7)
+                   (kuro--clear-session-state))
+               (error
+                (kuro--clear-session-state)))))))
+
 (provide 'kuro-lifecycle-test-2)
 
 ;;; kuro-lifecycle-test-2.el ends here

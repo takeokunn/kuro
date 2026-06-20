@@ -129,6 +129,26 @@
   (should (assq 'window-selection-change-functions kuro-mux--lifecycle-hooks))
   (should (assq 'kill-emacs-hook kuro-mux--lifecycle-hooks)))
 
+(ert-deftest kuro-mux-ext-install-hooks-macroexpands-to-progn ()
+  "`kuro--install-mux-lifecycle-hooks' expands to direct `add-hook' calls."
+  (should (equal (macroexpand-1 '(kuro--install-mux-lifecycle-hooks))
+                 '(progn
+                    (add-hook 'kuro-mode-hook 'kuro-mux--on-session-created)
+                    (add-hook 'kill-buffer-hook 'kuro-mux--on-session-killed)
+                    (add-hook 'window-selection-change-functions
+                              'kuro-mux--track-window-change)
+                    (add-hook 'kill-emacs-hook 'kuro-mux--auto-save-on-exit)))))
+
+(ert-deftest kuro-mux-ext-uninstall-hooks-macroexpands-to-progn ()
+  "`kuro--uninstall-mux-lifecycle-hooks' expands to direct `remove-hook' calls."
+  (should (equal (macroexpand-1 '(kuro--uninstall-mux-lifecycle-hooks))
+                 '(progn
+                    (remove-hook 'kuro-mode-hook 'kuro-mux--on-session-created)
+                    (remove-hook 'kill-buffer-hook 'kuro-mux--on-session-killed)
+                    (remove-hook 'window-selection-change-functions
+                                 'kuro-mux--track-window-change)
+                    (remove-hook 'kill-emacs-hook 'kuro-mux--auto-save-on-exit)))))
+
 (ert-deftest kuro-mux-ext-install-hooks-adds-all ()
   "`kuro-mux--install-hooks' calls `add-hook' for every lifecycle hook entry."
   (let (added)
@@ -271,7 +291,7 @@
           (let ((kuro-mux--pipe-pane-file "/tmp/kuro-test-pipe.log")
                 written-text)
             (cl-letf (((symbol-function 'write-region)
-                       (lambda (text nil file append _)
+                       (lambda (text _ignored _file _append _)
                          (setq written-text text))))
               (kuro-mux--pipe-pane-watcher 1 6 0)
               (should (equal written-text "hello")))))

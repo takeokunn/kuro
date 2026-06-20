@@ -167,6 +167,11 @@ impl OscData {
         self.hyperlink.uri.as_deref()
     }
 
+    /// Sets the active OSC 8 hyperlink URI.
+    pub(crate) fn set_hyperlink_uri(&mut self, uri: Option<String>) {
+        self.hyperlink.uri = uri.map(Arc::from);
+    }
+
     /// Returns the pending OSC 133 prompt marks.
     pub fn prompt_marks(&self) -> &[PromptMarkEvent] {
         &self.prompt_marks
@@ -190,6 +195,18 @@ impl OscData {
     /// Returns the OSC 4 palette overrides.
     pub fn palette(&self) -> &[Option<[u8; 3]>] {
         &self.palette
+    }
+
+    /// Stores the OSC 7 current working directory and hostname and marks the value dirty.
+    pub(crate) fn set_cwd(&mut self, cwd_host: Option<String>, cwd: Option<String>) {
+        self.cwd_host = cwd_host;
+        self.cwd = cwd;
+        self.cwd_dirty = true;
+    }
+
+    /// Stores the OSC 22 pointer shape override.
+    pub(crate) fn set_pointer_shape(&mut self, pointer_shape: Option<String>) {
+        self.pointer_shape = pointer_shape;
     }
 
     /// Resets the entire OSC 4 palette and marks it dirty.
@@ -222,6 +239,11 @@ impl OscData {
         self.palette_dirty = true;
     }
 
+    /// Marks the OSC 4 palette as dirty for FFI/render consumers.
+    pub(crate) fn mark_palette_dirty(&mut self) {
+        self.palette_dirty = true;
+    }
+
     pub(crate) fn default_color(&self, slot: DefaultColorSlot) -> &Option<Color> {
         match slot {
             DefaultColorSlot::Foreground => &self.default_fg,
@@ -251,11 +273,7 @@ impl OscData {
     }
 
     /// Pushes an OSC 133 prompt mark if the queue has not reached `max_pending`.
-    pub(crate) fn push_prompt_mark(
-        &mut self,
-        event: PromptMarkEvent,
-        max_pending: usize,
-    ) -> bool {
+    pub(crate) fn push_prompt_mark(&mut self, event: PromptMarkEvent, max_pending: usize) -> bool {
         if self.prompt_marks.len() >= max_pending {
             return false;
         }

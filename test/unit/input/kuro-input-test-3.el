@@ -338,6 +338,16 @@
               '(kuro--def-kkp-key kuro-test--kkp-key2 "\e[9;1u" ?\t "doc"))))
     (should (member '(interactive) (cddr exp)))))
 
+(ert-deftest kuro-input-with-kkp-disambiguate-expands-to-if ()
+  "`kuro--with-kkp-disambiguate' expands to an `if' over the KKP flag."
+  (let ((exp (macroexpand-1
+              '(kuro--with-kkp-disambiguate kkp-form legacy-form))))
+    (should (eq (car exp) 'if))
+    (should (equal (cadr exp)
+                   '(kuro--kkp-flag-p kuro--kkp-disambiguate)))
+    (should (equal (caddr exp) 'kkp-form))
+    (should (equal (cadddr exp) 'legacy-form))))
+
 ;;; Group 32 — kuro--def-key-sender structural tests
 ;;
 ;; kuro--def-key-sender generates NON-interactive helper functions

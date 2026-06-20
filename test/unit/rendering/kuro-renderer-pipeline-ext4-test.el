@@ -125,14 +125,15 @@
         (kuro--handle-pending-resize))
       (should (= (1- (line-number-at-pos (point-max))) 15)))))
 
-(ert-deftest kuro-renderer-pipeline-pending-resize-valid-p-table ()
-  "`kuro--pending-resize-valid-p' follows initialization and positive dimension rules."
-  (dolist (entry kuro-renderer-pipeline-test--pending-resize-validity-cases)
-    (pcase-let ((`((,initialized ,rows ,cols) . ,expected) entry))
-      (let ((kuro--initialized initialized))
-        (if expected
-            (should (kuro--pending-resize-valid-p rows cols))
-          (should-not (kuro--pending-resize-valid-p rows cols)))))))
+(kuro-renderer-pipeline-test--deftest-table-cases
+    kuro-renderer-pipeline-pending-resize-valid-p-table
+    "`kuro--pending-resize-valid-p' follows initialization and positive dimension rules."
+    kuro-renderer-pipeline-test--pending-resize-validity-cases
+    (`((,initialized ,rows ,cols) . ,expected)
+     (let ((kuro--initialized initialized))
+       (if expected
+           (should (kuro--pending-resize-valid-p rows cols))
+         (should-not (kuro--pending-resize-valid-p rows cols))))))
 
 (kuro-renderer-pipeline-test--deftest-row-count-cases)
 

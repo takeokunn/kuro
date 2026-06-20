@@ -116,32 +116,43 @@
 
 ;;; Group 11 — kuro-activity-list-mode keymap
 
-(ert-deftest kuro-activity-test-list-map-binds-revert ()
-  "`kuro-activity-list-mode-map' binds g to tabulated-list-revert."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "g"))
-              #'tabulated-list-revert)))
+(defconst kuro-activity-test--list-map-binding-table
+  '((kuro-activity-test-list-map-binds-revert "g" tabulated-list-revert)
+    (kuro-activity-test-list-map-binds-delete "d" kuro-activity-list-delete-entry)
+    (kuro-activity-test-list-map-binds-clear   "c" kuro-activity-clear)
+    (kuro-activity-test-list-map-binds-quit    "q" quit-window))
+  "Table of (test-name key command) for `kuro-activity-list-mode-map'.")
 
-(ert-deftest kuro-activity-test-list-map-binds-delete ()
-  "`kuro-activity-list-mode-map' binds d to kuro-activity-list-delete-entry."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "d"))
-              #'kuro-activity-list-delete-entry)))
+(defmacro kuro-activity-test--def-list-map-binding (test-name key command)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro-activity-list-mode-map' binds %s to %s." key command)
+     (should (eq (lookup-key kuro-activity-list-mode-map (kbd ,key))
+                 #',command))))
 
-(ert-deftest kuro-activity-test-list-map-binds-clear ()
-  "`kuro-activity-list-mode-map' binds c to kuro-activity-clear."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "c"))
-              #'kuro-activity-clear)))
+(defmacro kuro-activity-test--deftest-list-map-bindings ()
+  "Define all `kuro-activity-list-mode-map' binding checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key ,command) entry))
+            `(kuro-activity-test--def-list-map-binding
+              ,test-name ,key ,command)))
+        kuro-activity-test--list-map-binding-table)))
 
-(ert-deftest kuro-activity-test-list-map-binds-quit ()
-  "`kuro-activity-list-mode-map' binds q to quit-window."
-  (should (eq (lookup-key kuro-activity-list-mode-map (kbd "q"))
-              #'quit-window)))
+(kuro-activity-test--deftest-list-map-bindings)
+
+(ert-deftest kuro-activity-test--all-list-map-bindings-correct ()
+  "Invariant: every entry in the list-mode keymap table is bound correctly."
+  (dolist (entry kuro-activity-test--list-map-binding-table)
+    (pcase-let ((`(,_name ,key ,command) entry))
+      (should (eq (lookup-key kuro-activity-list-mode-map (kbd key))
+                  command)))))
 
 (ert-deftest kuro-activity-test-list-delete-entry-removes-from-log ()
   "`kuro-activity-list-delete-entry' removes the entry from `kuro-activity--log'."
   (let* ((entry (list nil "s" "b"))
          (kuro-activity--log (list entry)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id)    (lambda () entry))
-              ((symbol-function 'tabulated-list-delete-entry) #'ignore))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () entry)))
       (kuro-activity-list-delete-entry)
       (should (null kuro-activity--log)))))
 
@@ -170,10 +181,17 @@
      ,(format "`kuro--activity-exit-code-status' exit-code=%S → %S." exit-code expected)
      (should (equal (kuro--activity-exit-code-status ,exit-code) ,expected))))
 
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-nil-is-empty  nil "")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-zero-is-check 0   " ✓")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-one-is-cross  1   " ✗ (exit 1)")
-(kuro-activity-test--def-exit-code-status kuro-activity-exit-code-status-127-is-cross 127  " ✗ (exit 127)")
+(defmacro kuro-activity-test--deftest-exit-code-statuses ()
+  "Define all exit-code status checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,code ,expected) entry))
+            `(kuro-activity-test--def-exit-code-status
+              ,test-name ,code ,expected)))
+        kuro-activity-test--exit-code-status-table)))
+
+(kuro-activity-test--deftest-exit-code-statuses)
 
 (ert-deftest kuro-activity-test--all-exit-code-statuses-correct ()
   "Invariant: every entry in the exit-code-status table maps to the expected string."

@@ -99,31 +99,21 @@ test_parse_color_spec_none!(
 
 #[test]
 fn test_handle_osc_52_write_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     // base64("hello") = "aGVsbG8="
     let params: &[&[u8]] = &[b"52", b"c", b"aGVsbG8="];
     super::handle_osc_52(&mut core, params);
-    assert_eq!(core.osc_data().clipboard_actions.len(), 1);
-    match &core.osc_data().clipboard_actions[0] {
-        ClipboardAction::Write(s) => assert_eq!(s, "hello"),
-        other @ ClipboardAction::Query => panic!("expected Write, got {other:?}"),
-    }
+    assert_osc_52_action!(core, ClipboardAction::Write(s) if s == "hello");
 }
 
 #[test]
 fn test_handle_osc_52_query_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"52", b"c", b"?"];
     super::handle_osc_52(&mut core, params);
-    assert_eq!(core.osc_data().clipboard_actions.len(), 1);
-    assert!(matches!(
-        core.osc_data().clipboard_actions[0],
-        ClipboardAction::Query
-    ));
+    assert_osc_52_action!(core, ClipboardAction::Query);
 }
 
 #[test]

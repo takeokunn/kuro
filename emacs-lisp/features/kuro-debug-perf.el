@@ -23,6 +23,8 @@
 
 ;;; Code:
 
+(require 'kuro-config)
+
 ;;; User-facing toggle
 
 (defcustom kuro-debug-perf nil

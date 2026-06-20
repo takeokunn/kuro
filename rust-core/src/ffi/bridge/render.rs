@@ -1,16 +1,36 @@
 //! Render polling: dirty lines with face/color data, scrollback, scroll viewport, bell
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::result::Result;
-
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
-use super::{catch_panic, lock_session, query_session, query_session_mut};
+use super::{
+    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_query_default,
+    query_session, query_session_data_or_default_mut_with_panic, query_session_mut,
+};
 use crate::error::KuroError;
-use crate::ffi::abstraction::with_session;
 
-// ── Internal helpers ────────────────────────────────────────────────────────
+mod helpers;
+
+use self::helpers::{
+    build_emacs_poll_updates_with_faces_line, build_emacs_vector_from_iter, poll_binary_direct,
+    poll_dirty_lines, poll_encoded_lines,
+};
+
+macro_rules! define_poll_updates_handler {
+    ($(#[$attr:meta])* $fn_name:ident, $label:expr, $poll:expr, |$env:ident, $value:pat_param| $success:block) => {
+        $(#[$attr])*
+        #[defun]
+        fn $fn_name(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+            match $poll(session_id, $label) {
+                Ok($value) => {
+                    let $env = env;
+                    $success
+                }
+                Err(e) => emit_error(env, &e),
+            }
+        }
+    };
+}
 
 /// Signal a Kuro error to Emacs and return `nil`.
 ///
@@ -25,377 +45,217 @@ fn emit_error<'e>(env: &'e Env, e: &KuroError) -> EmacsResult<Value<'e>> {
     false.into_lisp(env)
 }
 
-/// Poll dirty lines from a session, acquire lock, and collect encoded lines.
-///
-/// Shared by `kuro_core_poll_updates_with_faces` and
-/// `kuro_core_poll_updates_binary`.  Returns `Vec::new()` when the session
-/// does not exist.
-#[inline]
-fn poll_encoded_lines(
-    session_id: u64,
-    context: &'static str,
-) -> Result<Vec<crate::ffi::codec::EncodedLine>, KuroError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        let lines = {
-            let mut global = lock_session!();
-            let Some(session) = global.get_mut(&session_id) else {
-                return Ok(Vec::new());
-            };
-            session.poll_output()?;
-            session.get_dirty_lines_with_faces()
-        };
-        Ok(lines)
-    }))
-    .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error(context)))
-}
-
-/// Poll dirty lines using the single-pass binary-direct encoding.
-///
-/// Used by `kuro_core_poll_updates_binary_with_strings` to avoid the
-/// intermediate `Vec<EncodedLine>` allocation and the two-pass encode.
-/// Returns `(Vec::new(), Vec::new())` when the session does not exist.
-#[inline]
-fn poll_binary_direct(
-    session_id: u64,
-    context: &'static str,
-) -> Result<(Vec<String>, Vec<u8>), KuroError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        let mut global = lock_session!();
-        let Some(session) = global.get_mut(&session_id) else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-        session.poll_output()?;
-        Ok(session.get_dirty_lines_binary_direct())
-    }))
-    .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error(context)))
-}
-
-/// Build an Emacs proper list from a double-ended iterator in reverse order.
-#[inline]
-fn build_emacs_list_from_rev<'e, I, T, F>(
-    env: &'e Env,
-    items: I,
-    mut build_item: F,
-) -> EmacsResult<Value<'e>>
-where
-    I: IntoIterator<Item = T>,
-    I::IntoIter: DoubleEndedIterator,
-    F: FnMut(&'e Env, T) -> EmacsResult<Value<'e>>,
-{
-    let mut list = false.into_lisp(env)?;
-    for item in items.into_iter().rev() {
-        let value = build_item(env, item)?;
-        list = env.cons(value, list)?;
-    }
-    Ok(list)
-}
-
-/// Build an Emacs vector from an iterator of values.
-#[inline]
-fn build_emacs_vector_from_iter<'e, I, T, F>(
-    env: &'e Env,
-    len: usize,
-    init: Value<'e>,
-    items: I,
-    mut build_item: F,
-) -> EmacsResult<Value<'e>>
-where
-    I: IntoIterator<Item = T>,
-    F: FnMut(&'e Env, T) -> EmacsResult<Value<'e>>,
-{
-    let vec = env.make_vector(len, init)?;
-    for (idx, item) in items.into_iter().enumerate() {
-        vec.set(idx, build_item(env, item)?)?;
-    }
-    vec.into_lisp(env)
-}
-
-/// Poll for terminal updates and return dirty lines
-#[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "line_no is a terminal row index (≤ 65535); usize→i64 never wraps"
-)]
-fn kuro_core_poll_updates(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    let result: Result<Vec<(usize, String)>, KuroError> = catch_unwind(AssertUnwindSafe(|| {
-        let mut global = lock_session!();
-
-        if let Some(session) = global.get_mut(&session_id) {
-            session.poll_output()?;
-            Ok(session.get_dirty_lines())
-        } else {
-            Ok(Vec::new())
-        }
-    }))
-    .unwrap_or_else(|_| Err(crate::ffi::error::ffi_error("panic in poll_updates")));
-
-    match result {
-        Ok(dirty_lines) => build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
+define_poll_updates_handler!(
+    /// Poll for terminal updates and return dirty lines
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "line_no is a terminal row index (≤ 65535); usize→i64 never wraps"
+    )]
+    kuro_core_poll_updates,
+    "panic in poll_updates",
+    poll_dirty_lines,
+    |env, dirty_lines| {
+        build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
             let line_no_val = (line_no as i64).into_lisp(env)?;
             let text_val = text.into_lisp(env)?;
-            env.cons(line_no_val, text_val)
-        }),
-        Err(e) => emit_error(env, &e),
-    }
-}
-
-/// Poll for terminal updates and return dirty lines with face information.
-///
-/// # 1-frame latency between reading and rendering
-///
-/// This function calls `poll_output()` followed by
-/// `get_dirty_lines_with_faces()` in a single lock acquisition:
-///
-/// - **`poll_output()`** reads new bytes from the PTY channel and feeds them
-///   into the parser/grid, which may mark additional lines as dirty.
-/// - **`get_dirty_lines_with_faces()`** returns (and clears) the lines that
-///   were marked dirty by *previous* `poll_output()` calls.
-///
-/// Consequently, bytes read in *this* call will not appear in the returned
-/// dirty set — they will surface as dirty lines in the *next* render cycle.
-/// This is correct behaviour: the worst-case additional latency is bounded
-/// to `1 / frame_rate` (typically ≤ 16 ms at 60 fps), which is imperceptible.
-#[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-)]
-fn kuro_core_poll_updates_with_faces(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    let result = poll_encoded_lines(session_id, "panic in poll_updates_with_faces");
-
-    match result {
-        Ok(lines) => build_emacs_list_from_rev(env, lines, |env, (line_no, text, face_ranges, col_to_buf)| {
-            let line_no_val = (line_no as i64).into_lisp(env)?;
-            let text_val = text.into_lisp(env)?;
-
-            // Convert face ranges to Emacs list of flat (start end fg bg flags ul-color) lists.
-            let face_list = build_emacs_list_from_rev(env, face_ranges, |env, (
-                start_buf,
-                end_buf,
-                fg,
-                bg,
-                flags,
-                ul_color,
-            )| {
-                let start_val = (start_buf as i64).into_lisp(env)?;
-                let end_val = (end_buf as i64).into_lisp(env)?;
-                let fg_val = i64::from(fg).into_lisp(env)?;
-                let bg_val = i64::from(bg).into_lisp(env)?;
-                let flags_val = (flags as i64).into_lisp(env)?;
-                let ul_color_val = i64::from(ul_color).into_lisp(env)?;
-
-                let nil = false.into_lisp(env)?;
-                let range_list = env.cons(ul_color_val, nil)?;
-                let range_list = env.cons(flags_val, range_list)?;
-                let range_list = env.cons(bg_val, range_list)?;
-                let range_list = env.cons(fg_val, range_list)?;
-                let range_list = env.cons(end_val, range_list)?;
-                env.cons(start_val, range_list)
-            })?;
-
-            // Build col_to_buf as Emacs vector for cursor placement.
-            let col_to_buf_vec = build_emacs_vector_from_iter(
-                env,
-                col_to_buf.len(),
-                false.into_lisp(env)?,
-                col_to_buf,
-                |env, offset| (offset as i64).into_lisp(env),
-            )?;
-
-            let line_pair = env.cons(line_no_val, text_val)?;
-            let line_data = env.cons(line_pair, face_list)?;
-            env.cons(line_data, col_to_buf_vec)
-        }),
-        Err(e) => emit_error(env, &e),
-    }
-}
-
-/// Poll for terminal updates and return a binary-encoded frame as an Emacs vector.
-///
-/// Returns an Emacs vector of integers (each element is a byte value 0–255)
-/// encoding the dirty line data in the binary frame format defined in
-/// `crate::ffi::codec::encode_screen_binary`.
-///
-/// Using an Emacs vector of fixnums avoids the GC pressure from thousands of
-/// cons-cell allocations per frame that `kuro_core_poll_updates_with_faces`
-/// produces, at the cost of a slightly more complex Elisp decoder.
-///
-/// Returns `nil` (`false`) when no dirty lines are present.
-#[defun]
-fn kuro_core_poll_updates_binary(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    let result = poll_encoded_lines(session_id, "panic in poll_updates_binary");
-
-    match result {
-        Ok(lines) => {
-            if lines.is_empty() {
-                return false.into_lisp(env);
-            }
-            let bytes = crate::ffi::codec::encode_screen_binary(&lines);
-            build_emacs_vector_from_iter(
-                env,
-                bytes.len(),
-                0i64.into_lisp(env)?,
-                bytes,
-                |env, byte| i64::from(byte).into_lisp(env),
-            )
-        }
-        Err(e) => emit_error(env, &e),
-    }
-}
-
-/// Poll for terminal updates and return a cons `(text-strings . binary-face-data)`.
-///
-/// This is a text-decode-optimised companion to `kuro_core_poll_updates_binary`.
-/// Instead of embedding UTF-8 bytes in the binary frame (requiring the Elisp
-/// side to perform a `make-string` + `dotimes aset` loop + `decode-coding-string`
-/// triple-copy decode), this function:
-///
-/// - Returns row text as **native Emacs strings** via `env.into_lisp(text)`,
-///   crossing the FFI boundary without any extra byte-by-byte copy on the Lisp side.
-/// - Returns face/color/col-to-buf data in the same compact binary format as
-///   `kuro_core_poll_updates_binary`, so the optimised binary decoder continues
-///   to apply for those fields.
-///
-/// Return value: a cons cell `(TEXT-STRINGS . BINARY-DATA)` where:
-/// - `TEXT-STRINGS` is an Emacs vector of strings, one entry per dirty row,
-///   in the same order as the rows encoded in `BINARY-DATA`.
-/// - `BINARY-DATA` is an Emacs vector of byte fixnums identical to what
-///   `kuro_core_poll_updates_binary` would return, **except** the `text_byte_len`
-///   header field is always 0 and no text bytes are written for any row (the
-///   strings are provided via `TEXT-STRINGS` instead).
-///
-/// Returns `nil` (`false`) when no dirty lines are present.
-#[defun]
-fn kuro_core_poll_updates_binary_with_strings(
-    env: &Env,
-    session_id: u64,
-) -> EmacsResult<Value<'_>> {
-    let result = poll_binary_direct(session_id, "panic in poll_updates_binary_with_strings");
-
-    match result {
-        Ok((texts, bytes)) => {
-            if texts.is_empty() {
-                return false.into_lisp(env);
-            }
-
-            let strings_vec = build_emacs_vector_from_iter(
-                env,
-                texts.len(),
-                false.into_lisp(env)?,
-                texts,
-                |env, text| text.as_str().into_lisp(env),
-            )?;
-            let bytes_vec = build_emacs_vector_from_iter(
-                env,
-                bytes.len(),
-                0i64.into_lisp(env)?,
-                bytes,
-                |env, byte| i64::from(byte).into_lisp(env),
-            )?;
-
-            env.cons(strings_vec, bytes_vec)
-        }
-        Err(e) => emit_error(env, &e),
-    }
-}
-
-/// Get scrollback buffer lines
-#[defun]
-fn kuro_core_get_scrollback(
-    env: &Env,
-    session_id: u64,
-    max_lines: usize,
-) -> EmacsResult<Value<'_>> {
-    let scrollback_lines: Vec<String> =
-        catch_unwind(AssertUnwindSafe(|| -> crate::Result<Vec<String>> {
-            let global = lock_session!();
-            Ok(global
-                .get(&session_id)
-                .map(|s| s.get_scrollback(max_lines))
-                .unwrap_or_default())
-        }))
-        .unwrap_or_else(|_| {
-            let _ = env.message("kuro: panic in get_scrollback");
-            Ok(Vec::new())
+            build_emacs_list_from_values(env, [line_no_val, text_val])
         })
-        .unwrap_or_default();
+    }
+);
 
-    build_emacs_list_from_rev(env, scrollback_lines, |env, line| line.into_lisp(env))
-}
+define_poll_updates_handler!(
+    /// Poll for terminal updates and return dirty lines with face information.
+    ///
+    /// # 1-frame latency between reading and rendering
+    ///
+    /// This function calls `poll_output()` followed by
+    /// `get_dirty_lines_with_faces()` in a single lock acquisition:
+    ///
+    /// - **`poll_output()`** reads new bytes from the PTY channel and feeds them
+    ///   into the parser/grid, which may mark additional lines as dirty.
+    /// - **`get_dirty_lines_with_faces()`** returns (and clears) the lines that
+    ///   were marked dirty by *previous* `poll_output()` calls.
+    ///
+    /// Consequently, bytes read in *this* call will not appear in the returned
+    /// dirty set — they will surface as dirty lines in the *next* render cycle.
+    /// This is correct behaviour: the worst-case additional latency is bounded
+    /// to `1 / frame_rate` (typically ≤ 16 ms at 60 fps), which is imperceptible.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
+    )]
+    kuro_core_poll_updates_with_faces,
+    "panic in poll_updates_with_faces",
+    poll_encoded_lines,
+    |env, lines| {
+        build_emacs_list_from_rev(env, lines, build_emacs_poll_updates_with_faces_line)
+    }
+);
 
-/// Clear scrollback buffer
-#[defun]
-fn kuro_core_clear_scrollback(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session_mut(env, session_id, false, |session| {
+define_poll_updates_handler!(
+    /// Poll for terminal updates and return a binary-encoded frame as an Emacs vector.
+    ///
+    /// Returns an Emacs vector of integers (each element is a byte value 0–255)
+    /// encoding the dirty line data in the binary frame format defined in
+    /// `crate::ffi::codec::encode_screen_binary`.
+    ///
+    /// Using an Emacs vector of fixnums avoids the GC pressure from thousands of
+    /// cons-cell allocations per frame that `kuro_core_poll_updates_with_faces`
+    /// produces, at the cost of a slightly more complex Elisp decoder.
+    ///
+    /// Returns `nil` (`false`) when no dirty lines are present.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
+    )]
+    kuro_core_poll_updates_binary,
+    "panic in poll_updates_binary",
+    poll_encoded_lines,
+    |env, lines| {
+        if lines.is_empty() {
+            return false.into_lisp(env);
+        }
+        let bytes = crate::ffi::codec::encode_screen_binary(&lines);
+        build_emacs_vector_from_iter(
+            env,
+            bytes.len(),
+            0i64.into_lisp(env)?,
+            bytes,
+            |env, byte| i64::from(byte).into_lisp(env),
+        )
+    }
+);
+
+define_poll_updates_handler!(
+    /// Poll for terminal updates and return a cons `(text-strings . binary-face-data)`.
+    ///
+    /// This is a text-decode-optimised companion to `kuro_core_poll_updates_binary`.
+    /// Instead of embedding UTF-8 bytes in the binary frame (requiring the Elisp
+    /// side to perform a `make-string` + `dotimes aset` loop + `decode-coding-string`
+    /// triple-copy decode), this function:
+    ///
+    /// - Returns row text as **native Emacs strings** via `env.into_lisp(text)`,
+    ///   crossing the FFI boundary without any extra byte-by-byte copy on the Lisp side.
+    /// - Returns face/color/col-to-buf data in the same compact binary format as
+    ///   `kuro_core_poll_updates_binary`, so the optimised binary decoder continues
+    ///   to apply for those fields.
+    ///
+    /// Return value: a cons cell `(TEXT-STRINGS . BINARY-DATA)` where:
+    /// - `TEXT-STRINGS` is an Emacs vector of strings, one entry per dirty row,
+    ///   in the same order as the rows encoded in `BINARY-DATA`.
+    /// - `BINARY-DATA` is an Emacs vector of byte fixnums identical to what
+    ///   `kuro_core_poll_updates_binary` would return, **except** the `text_byte_len`
+    ///   header field is always 0 and no text bytes are written for any row (the
+    ///   strings are provided via `TEXT-STRINGS` instead).
+    ///
+    /// Returns `nil` (`false`) when no dirty lines are present.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
+    )]
+    kuro_core_poll_updates_binary_with_strings,
+    "panic in poll_updates_binary_with_strings",
+    poll_binary_direct,
+    |env, (texts, bytes)| {
+        if texts.is_empty() {
+            return false.into_lisp(env);
+        }
+
+        let strings_vec = build_emacs_vector_from_iter(
+            env,
+            texts.len(),
+            false.into_lisp(env)?,
+            texts,
+            |env, text| text.as_str().into_lisp(env),
+        )?;
+        let bytes_vec = build_emacs_vector_from_iter(
+            env,
+            bytes.len(),
+            0i64.into_lisp(env)?,
+            bytes,
+            |env, byte| i64::from(byte).into_lisp(env),
+        )?;
+
+        build_emacs_list_from_values(env, [strings_vec, bytes_vec])
+    }
+);
+
+define_session_query_default!(
+    /// Clear scrollback buffer
+    kuro_core_clear_scrollback,
+    false,
+    query_session_mut,
+    |session| {
         session.clear_scrollback();
         Ok(true)
-    })
-}
+    }
+);
 
-/// Scroll the viewport up by n lines (toward older scrollback content)
-#[defun]
-fn kuro_core_scroll_up(env: &Env, session_id: u64, n: usize) -> EmacsResult<Value<'_>> {
-    catch_panic(env, || {
-        with_session(session_id, |session| {
-            session.viewport_scroll_up(n);
-            Ok(true)
-        })
-    })
-}
+define_session_query_default!(
+    /// Scroll the viewport up by n lines (toward older scrollback content)
+    kuro_core_scroll_up,
+    false,
+    n: usize,
+    query_session_mut,
+    |session| {
+        session.viewport_scroll_up(n);
+        Ok(true)
+    }
+);
 
-/// Scroll the viewport down by n lines (toward live content)
-#[defun]
-fn kuro_core_scroll_down(env: &Env, session_id: u64, n: usize) -> EmacsResult<Value<'_>> {
-    catch_panic(env, || {
-        with_session(session_id, |session| {
-            session.viewport_scroll_down(n);
-            Ok(true)
-        })
-    })
-}
+define_session_query_default!(
+    /// Scroll the viewport down by n lines (toward live content)
+    kuro_core_scroll_down,
+    false,
+    n: usize,
+    query_session_mut,
+    |session| {
+        session.viewport_scroll_down(n);
+        Ok(true)
+    }
+);
 
-/// Check and clear the pending bell flag atomically.
-///
-/// Returns `t` if a BEL character has been received since the last call,
-/// then unconditionally resets the flag.  Subsequent calls return `nil`
-/// until another BEL is received.  Merges the former two-call
-/// `kuro-core-bell-pending` + `kuro-core-clear-bell` pattern into a single
-/// lock acquisition.
-#[defun]
-fn kuro_core_take_bell_pending(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session_mut(env, session_id, false, |session| {
-        Ok(session.take_bell_pending())
-    })
-}
+define_session_query_default!(
+    /// Check and clear the pending bell flag atomically.
+    ///
+    /// Returns `t` if a BEL character has been received since the last call,
+    /// then unconditionally resets the flag.  Subsequent calls return `nil`
+    /// until another BEL is received.  Merges the former two-call
+    /// `kuro-core-bell-pending` + `kuro-core-clear-bell` pattern into a single
+    /// lock acquisition.
+    kuro_core_take_bell_pending,
+    false,
+    query_session_mut,
+    |session| session.take_bell_pending()
+);
 
-/// Set scrollback buffer max lines
-#[defun]
-fn kuro_core_set_scrollback_max_lines(
-    env: &Env,
-    session_id: u64,
+define_session_query_default!(
+    /// Set scrollback buffer max lines
+    kuro_core_set_scrollback_max_lines,
+    false,
     max_lines: usize,
-) -> EmacsResult<Value<'_>> {
-    query_session_mut(env, session_id, false, |session| {
+    query_session_mut,
+    |session| {
         session.set_scrollback_max_lines(max_lines);
         Ok(true)
-    })
-}
+    }
+);
 
-/// Get scrollback buffer line count
-#[defun]
-fn kuro_core_get_scrollback_count(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, 0usize, |session| {
-        Ok(session.get_scrollback_count())
-    })
-}
+define_session_query_default!(
+    /// Get scrollback buffer line count
+    kuro_core_get_scrollback_count,
+    0usize,
+    query_session,
+    |session| session.get_scrollback_count()
+);
 
-/// Get the current viewport scroll offset (0 = live view, N = scrolled back N lines)
-#[defun]
-fn kuro_core_get_scroll_offset(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    catch_panic(env, || {
-        with_session(session_id, |session| Ok(session.scroll_offset()))
-    })
-}
+define_session_query_default!(
+    /// Get the current viewport scroll offset (0 = live view, N = scrolled back N lines)
+    kuro_core_get_scroll_offset,
+    0usize,
+    query_session,
+    |session| session.scroll_offset()
+);
 
 /// Atomically consume pending full-screen scroll event counts and reset them.
 ///
@@ -409,22 +269,20 @@ fn kuro_core_get_scroll_offset(env: &Env, session_id: u64) -> EmacsResult<Value<
 #[defun]
 fn kuro_core_consume_scroll_events(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
     use crate::ffi::abstraction::TerminalSession;
-    let (up, down): (u32, u32) = catch_unwind(AssertUnwindSafe(|| -> crate::Result<(u32, u32)> {
-        let mut global = lock_session!();
-        Ok(global
-            .get_mut(&session_id)
-            .map_or((0, 0), TerminalSession::consume_scroll_events))
-    }))
-    .unwrap_or_else(|_| {
-        let _ = env.message("kuro: panic in consume_scroll_events");
-        Ok((0, 0))
-    })
-    .unwrap_or((0, 0));
+    let (up, down): (u32, u32) = query_session_data_or_default_mut_with_panic(
+        session_id,
+        || (0, 0),
+        || {
+            let _ = env.message("kuro: panic in consume_scroll_events");
+            (0, 0)
+        },
+        |session| Ok(TerminalSession::consume_scroll_events(session)),
+    );
 
     if up > 0 || down > 0 {
         let up_val = i64::from(up).into_lisp(env)?;
         let down_val = i64::from(down).into_lisp(env)?;
-        env.cons(up_val, down_val)
+        build_emacs_list_from_values(env, [up_val, down_val])
     } else {
         false.into_lisp(env)
     }

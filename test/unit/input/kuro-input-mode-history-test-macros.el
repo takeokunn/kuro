@@ -10,46 +10,23 @@
 (require 'kuro-input-mode-test-support)
 (require 'kuro-input-mode-history-test-cases)
 
-(defmacro kuro-history-test--with-complete (&rest body)
-  "Run BODY with `kuro--line-undo-push' and `kuro--line-set-buffer' stubbed.
-Binds `set-buf-called' to the argument passed to `kuro--line-set-buffer'."
-  `(kuro-input-mode-test--with-buffer
-    (let (set-buf-called)
-      (cl-letf (((symbol-function 'kuro--line-undo-push) #'ignore)
-                ((symbol-function 'kuro--line-set-buffer)
-                 (lambda (s) (setq set-buf-called s))))
-        ,@body))))
-
-(defmacro kuro-history2--with-nav (history buf idx stash &rest body)
-  "Run BODY inside `kuro-input-mode-test--with-edit' with history state pre-set.
-HISTORY is bound to `kuro--line-history'.
-BUF is bound to `kuro--line-buffer'.
-IDX is bound to `kuro--line-history-idx'.
-STASH is bound to `kuro--line-history-stash'."
-  (declare (indent 4))
-  `(kuro-input-mode-test--with-edit
-    (setq kuro--line-history ,history
-          kuro--line-buffer ,buf
-          kuro--line-history-idx ,idx
-          kuro--line-history-stash ,stash)
-    ,@body))
-
 (defmacro kuro-history-test--def-complete-history (name docstring buffer history expected)
   "Define one `kuro--line-complete-history' test."
   `(ert-deftest ,name ()
      ,docstring
-     (kuro-history-test--with-complete
-       (setq kuro--line-buffer ,buffer
-             kuro--line-history ',history)
-       (let (msg-text)
-         (cl-letf (((symbol-function 'message)
-                    (lambda (fmt &rest args)
-                      (setq msg-text (apply #'format fmt args)))))
-           (kuro--line-complete-history))
-         (should (equal set-buf-called ,(plist-get expected :set-buffer)))
-         ,@(when (plist-member expected :message)
-             `((should (string-match-p ,(plist-get expected :message)
-                                       (or msg-text "")))))))))
+     (kuro-input-mode-test--with-edit
+      (setq kuro--line-buffer ,buffer
+            kuro--line-history ',history)
+      (let (msg-text)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (setq msg-text (apply #'format fmt args)))))
+          (kuro--line-complete-history))
+        (should (equal kuro--line-buffer ,(plist-get expected :buffer)))
+        (should (= kuro--line-point ,(plist-get expected :point)))
+        ,@(when (plist-member expected :message)
+            `((should (string-match-p ,(plist-get expected :message)
+                                      (or msg-text "")))))))))
 
 (defmacro kuro-history-test--deftest-complete-history ()
   "Define `kuro--line-complete-history' data-driven tests."
@@ -248,32 +225,54 @@ STASH is bound to `kuro--line-history-stash'."
   "Define navigation action tests selected by CASES.
 When CASES is nil, define every case from `kuro-history2--nav-action-cases'."
   (declare (indent 0))
-  `(progn
+  (let ((selected-cases
+         (seq-filter (lambda (case)
+                       (or (null cases) (memq (car case) cases)))
+                     kuro-history2--nav-action-cases)))
+    (cons 'progn
+          (mapcar
+           (lambda (case)
+             (pcase-let ((`(,name ,docstring ,history ,buffer ,idx ,stash ,action ,expected)
+                          case))
+               (let (assertions)
+                 (when (plist-member expected :buffer)
+                   (push `(should (equal kuro--line-buffer
+                                         ,(plist-get expected :buffer)))
+                         assertions))
+                 (when (plist-member expected :idx)
+                   (push `(should (= kuro--line-history-idx
+                                     ,(plist-get expected :idx)))
+                         assertions))
+                 (when (plist-member expected :stash)
+                   (push `(should (equal kuro--line-history-stash
+                                         ,(plist-get expected :stash)))
+                         assertions))
+                 `(ert-deftest ,name ()
+                    ,docstring
+                    (kuro-input-mode-test--with-edit
+                     (setq kuro--line-history ',history
+                           kuro--line-buffer ,buffer
+                           kuro--line-history-idx ,idx
+                           kuro--line-history-stash ,stash)
+                     (,action)
+                     ,@(nreverse assertions))))))
+           selected-cases))))
+
+(defmacro kuro-history2--deftest-history-index-table
+    (test-name docstring cases function)
+  "Define one table-driven history-index test.
+CASES must be a symbol naming a `defconst' whose value is a list of
+((IDX HISTORY) . EXPECTED) entries. FUNCTION is the index helper to call."
+  `(ert-deftest ,test-name ()
+     ,docstring
      ,@(mapcar
         (lambda (case)
-          (pcase-let ((`(,name ,docstring ,history ,buffer ,idx ,stash ,action ,expected)
-                       case))
-            (let (assertions)
-              (when (plist-member expected :buffer)
-                (push `(should (equal kuro--line-buffer
-                                      ,(plist-get expected :buffer)))
-                      assertions))
-              (when (plist-member expected :idx)
-                (push `(should (= kuro--line-history-idx
-                                  ,(plist-get expected :idx)))
-                      assertions))
-              (when (plist-member expected :stash)
-                (push `(should (equal kuro--line-history-stash
-                                      ,(plist-get expected :stash)))
-                      assertions))
-              `(ert-deftest ,name ()
-                 ,docstring
-               (kuro-history2--with-nav ',history ,buffer ,idx ,stash
-                 (,action)
-                 ,@(nreverse assertions))))))
-        (seq-filter (lambda (case)
-                      (or (null cases) (memq (car case) cases)))
-                    kuro-history2--nav-action-cases))))
+          (pcase-let ((`((,idx ,history) . ,expected) case))
+            `(kuro-input-mode-test--with-edit
+               (setq kuro--line-history ',history
+                     kuro--line-history-idx ,idx)
+               (should (= (,function) ,expected)))))
+        (symbol-value cases))))
 
 (provide 'kuro-input-mode-history-test-macros)
 

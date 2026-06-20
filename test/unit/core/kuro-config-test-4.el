@@ -4,6 +4,14 @@
 
 (require 'ert)
 (require 'cl-lib)
+
+;; Bootstrap the FFI macro directory for tests that run without the full
+;; emacs-lisp tree on `load-path'.
+(let* ((this-dir (file-name-directory
+                  (or load-file-name buffer-file-name default-directory)))
+       (ffi-dir (expand-file-name "../../../emacs-lisp/ffi" this-dir)))
+  (add-to-list 'load-path ffi-dir t))
+(require 'kuro-ffi-macros)
 (require 'kuro-config)
 
 ;;; Group 25: kuro--set-keymap-exceptions
@@ -85,18 +93,24 @@
 
 ;;; Group 27: kuro--defvar-permanent-local macro
 
+(defmacro kuro-config-test--with-fresh-permanent-local (value &rest body)
+  "Bind SYM to a fresh symbol and define it as a permanent-local variable."
+  (declare (indent 1))
+  (let ((sym (make-symbol "kuro-perm-local-test-")))
+    `(let ((sym ',sym))
+       (kuro--defvar-permanent-local ,sym ,value "test var")
+       ,@body)))
+
 (ert-deftest kuro-config-ext-test-defvar-permanent-local-sets-property ()
   "`kuro--defvar-permanent-local' sets the permanent-local property to t."
   ;; Evaluate the macro with a fresh test symbol so we are not relying on
   ;; kuro-ffi.el's pre-existing variables (tested separately in kuro-ffi-ext2).
-  (let ((sym (gensym "kuro-perm-local-test-")))
-    (eval `(kuro--defvar-permanent-local ,sym nil "test var") t)
+  (kuro-config-test--with-fresh-permanent-local nil
     (should (eq t (get sym 'permanent-local)))))
 
 (ert-deftest kuro-config-ext-test-defvar-permanent-local-variable-is-defvarred ()
   "`kuro--defvar-permanent-local' produces a bound (defvar'd) variable."
-  (let ((sym (gensym "kuro-perm-local-bound-")))
-    (eval `(kuro--defvar-permanent-local ,sym :initial-value "bound test") t)
+  (kuro-config-test--with-fresh-permanent-local :initial-value
     (should (boundp sym))))
 
 (ert-deftest kuro-config-ext-test-defvar-permanent-local-survives-kill-all-local-variables ()

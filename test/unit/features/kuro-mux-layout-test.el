@@ -53,6 +53,17 @@
   "`kuro-mux-layouts' includes \"main-vertical\"."
   (should (member "main-vertical" kuro-mux-layouts)))
 
+(ert-deftest kuro-mux-layout-dispatch-layout-macroexpands-to-pcase ()
+  "`kuro--dispatch-layout' expands to fixed `pcase' dispatch."
+  (should (equal (macroexpand-1 '(kuro--dispatch-layout layout win buffers))
+                 '(pcase layout
+                    ("even-horizontal" (kuro-mux--layout-chain win (cdr buffers) 'right))
+                    ("even-vertical" (kuro-mux--layout-chain win (cdr buffers) 'below))
+                    ("main-vertical" (kuro-mux--layout-main win (cdr buffers) 'right 'below))
+                    ("main-horizontal" (kuro-mux--layout-main win (cdr buffers) 'below 'right))
+                    ("tiled" (kuro-mux--layout-tiled buffers))
+                    (_ (user-error "Kuro-mux: unknown layout: %s" layout))))))
+
 
 ;;; Group 38 — kuro-mux--visible-session-buffers
 

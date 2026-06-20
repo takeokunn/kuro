@@ -99,6 +99,18 @@
      (should (string= (kuro-mux--session-display-name buf) "*mux-n2*"))
      (kill-buffer buf))))
 
+(ert-deftest kuro-mux-test-find-session-by-name ()
+  "`kuro-mux--find-session-by-name' returns the matching live buffer."
+  (kuro-mux-test--with-registry
+   (let* ((b1 (kuro-mux-test--make-session "*mux-find-1*"))
+          (b2 (kuro-mux-test--make-session "*mux-find-2*")))
+     (with-current-buffer b2
+       (setq kuro-mux--name "target"))
+     (should (eq (kuro-mux--find-session-by-name "target") b2))
+     (should (null (kuro-mux--find-session-by-name "missing")))
+     (kill-buffer b1)
+     (kill-buffer b2))))
+
 
 ;;; Group 3 — Navigation helpers
 

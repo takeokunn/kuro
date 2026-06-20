@@ -25,6 +25,7 @@
 
 (require 'cl-lib)
 (require 'kuro-input-mouse)
+(require 'kuro-input-mouse-scroll)
 (require 'kuro-input-mouse-test-cases)
 (require 'kuro-input-mouse-test-macros)
 

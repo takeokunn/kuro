@@ -16,6 +16,7 @@
 
 (require 'kuro-ffi)
 (require 'kuro-ffi-modes)
+(require 'kuro-render-cursor-macros)
 
 ;; Forward references for vars defined in kuro-render-buffer.el
 (defvar kuro--row-positions)
@@ -24,6 +25,7 @@
 (defvar kuro--scroll-offset)
 
 (declare-function kuro--decscusr-to-cursor-type "kuro-render-buffer" (shape))
+(declare-function kuro--goto-row-start "kuro-render-buffer" (row))
 
 ;;; Cursor state cache
 
@@ -57,18 +59,7 @@ falls back to O(row) `forward-line' only when the cache misses."
                          (aref row-map col)
                        col)))
     (save-excursion
-      ;; Fast path: use row-positions cache to jump directly to row start (O(1)).
-      (let* ((rp        kuro--row-positions)
-             (row-start (and rp
-                             (< row (length rp))
-                             (aref rp row))))
-        (if row-start
-            (goto-char row-start)
-          ;; Slow path: linear scan from point-min (O(row)).
-          (goto-char (point-min))
-          (when (> (forward-line row) 0)
-            (goto-char (point-max))
-            (beginning-of-line))))
+      (kuro--goto-row-start row)
       (goto-char (min (+ (point) buf-offset) (line-end-position)))
       (point))))
 
@@ -99,15 +90,6 @@ When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil."
               (if visible
                   (kuro--decscusr-to-cursor-type (or shape 0))
                 nil)))
-
-;;; Cursor state macros + helpers
-
-(defmacro kuro--cache-cursor-state (row col visible shape)
-  "Store ROW, COL, VISIBLE, SHAPE into the per-buffer cursor cache variables."
-  `(setq kuro--last-cursor-row     ,row
-         kuro--last-cursor-col     ,col
-         kuro--last-cursor-visible ,visible
-         kuro--last-cursor-shape   ,shape))
 
 (defsubst kuro--cursor-state-changed-p (row col visible shape)
   "Return non-nil when (ROW COL VISIBLE SHAPE) differs from the cached state."
@@ -146,35 +128,39 @@ every live frame's window tree — called only on cache miss."
   (or (and kuro--cursor-marker (marker-position kuro--cursor-marker))
       (kuro--grid-col-to-buffer-pos row col)))
 
+(defsubst kuro--cursor-state-parts (state)
+  "Return cursor STATE as a list of row, col, visibility, and shape."
+  (pcase-let ((`(,row ,col ,visible ,shape) state))
+    (list row col visible shape)))
+
+(defsubst kuro--apply-cursor-state-change (win row col visible shape)
+  "Persist cursor state and re-anchor WIN at the new position."
+  (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
+    (kuro--cache-cursor-state row col visible shape)
+    (kuro--ensure-cursor-marker target-pos)
+    (kuro--anchor-window-at-pos win target-pos)
+    (kuro--apply-cursor-display visible shape)))
+
+(defsubst kuro--reanchor-cursor-window (win row col)
+  "Re-anchor WIN to the cached or fallback cursor position."
+  (kuro--anchor-window-at-pos win (kuro--cursor-fallback-pos row col)))
+
 ;;; Cursor update
 
 (defun kuro--update-cursor ()
   "Update cursor position and shape in buffer.
-Uses the consolidated `kuro--get-cursor-state' to fetch position,
+  Uses the consolidated `kuro--get-cursor-state' to fetch position,
 visibility, and shape in a single Mutex acquisition (PERF-004).
 Skips buffer position computation when cursor state is unchanged,
 but ALWAYS re-anchors the window at point-min to prevent Emacs'
 native redisplay from drifting the viewport between render cycles."
   (unless (> kuro--scroll-offset 0)
-    (when-let* ((state (kuro--get-cursor-state)))
-      ;; cdr-chain: each cdr advances the spine once (shared intermediate cells).
-      (let* ((row     (car state))
-             (s1      (cdr state))
-             (col     (car s1))
-             (s2      (cdr s1))
-             (visible (car s2))
-             (shape   (car (cdr s2))))
-        ;; `visible' may be nil (hidden cursor) — guard only on window availability.
-        (when-let* ((win (kuro--resolve-window)))
-          (if (kuro--cursor-state-changed-p row col visible shape)
-              ;; State changed: recompute position, update cache and display.
-              (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
-                (kuro--cache-cursor-state row col visible shape)
-                (kuro--ensure-cursor-marker target-pos)
-                (kuro--anchor-window-at-pos win target-pos)
-                (kuro--apply-cursor-display visible shape))
-            ;; Cursor unchanged — re-anchor to prevent viewport drift.
-            (kuro--anchor-window-at-pos win (kuro--cursor-fallback-pos row col))))))))
+    (when-let* ((state (kuro--get-cursor-state))
+                (win (kuro--resolve-window)))
+      (pcase-let ((`(,row ,col ,visible ,shape) (kuro--cursor-state-parts state)))
+        (if (kuro--cursor-state-changed-p row col visible shape)
+            (kuro--apply-cursor-state-change win row col visible shape)
+          (kuro--reanchor-cursor-window win row col))))))
 
 ;;; Scrollback indicator
 

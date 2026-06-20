@@ -34,41 +34,27 @@
 
 (ert-deftest kuro-input-mode-test-line-edit-send-sends-and-kills-buffer ()
   "`kuro-line-edit-send' sends buffer text with RET and kills the edit buffer."
-  (kuro-input-mode-test--with-buffer
-   (let ((term-buf (current-buffer))
-         (sent-text nil))
-     (cl-letf (((symbol-function 'kuro--send-key)
-                (lambda (k) (setq sent-text k)))
-               ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-               ((symbol-function 'message) #'ignore))
-       (let ((edit-buf (get-buffer-create "*kuro-line-edit-send-test*")))
-         (with-current-buffer edit-buf
-           (kuro-line-edit-mode)
-           (insert "git status")
-           (setq kuro--line-edit-source-buffer term-buf)
-           (setq kuro--line-edit-original "")
-           (kuro-line-edit-send))
-         (should (string= sent-text "git status\r"))
-         (should (not (buffer-live-p edit-buf))))))))
+  (kuro-input-mode-edit-test--with-line-edit "send-test" "" 0
+    (with-current-buffer edit-buf
+      (insert "git status")
+      (setq kuro--line-edit-original ""
+            kuro--line-edit-source-buffer term-buf))
+    (should (string= (kuro-input-mode-test--capture-sent-string
+                      (with-current-buffer edit-buf
+                        (kuro-line-edit-send)))
+                     "git status\r"))
+    (should-not (buffer-live-p edit-buf))))
 
 (ert-deftest kuro-input-mode-test-line-edit-discard-restores-line-buffer ()
   "`kuro-line-edit-discard' restores `kuro--line-buffer' in the terminal buffer."
-  (kuro-input-mode-test--with-buffer
-   (let ((term-buf (current-buffer)))
-     (setq kuro--line-buffer "")
-     (setq kuro--line-point 0)
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore)
-               ((symbol-function 'message) #'ignore))
-       (let ((edit-buf (get-buffer-create "*kuro-line-edit-discard-test*")))
-         (with-current-buffer edit-buf
-           (kuro-line-edit-mode)
-           (insert "partial-cmd")
-           (setq kuro--line-edit-source-buffer term-buf)
-           (setq kuro--line-edit-original "partial-cmd")
-           (kuro-line-edit-discard))
-         (should (not (buffer-live-p edit-buf)))
-         (should (string= kuro--line-buffer "partial-cmd"))
-         (should (= kuro--line-point 11)))))))
+  (kuro-input-mode-edit-test--with-line-edit "discard-test" "partial-cmd" 11
+    (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore)
+              ((symbol-function 'message) #'ignore))
+      (with-current-buffer edit-buf
+        (kuro-line-edit-discard)))
+    (should (string= kuro--line-buffer "partial-cmd"))
+    (should (= kuro--line-point 11))
+    (should-not (buffer-live-p edit-buf))))
 
 (ert-deftest kuro-input-mode-test-line-edit-keymap-has-send-and-discard ()
   "`kuro--line-edit-keymap' binds C-c C-c and C-c C-k."

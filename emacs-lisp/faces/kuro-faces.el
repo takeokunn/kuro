@@ -38,6 +38,7 @@
 (require 'kuro-ffi-osc)
 (require 'kuro-faces-color)
 (require 'kuro-faces-attrs)
+(require 'kuro-faces-macros)
 (require 'kuro-char-width)
 
 ;; Core Emacs face remapping functions (provided by C core; suppress warnings)
@@ -73,22 +74,6 @@ or when the buffer is killed.  Internal state; do not set directly.")
 `kuro--get-cached-face-raw' to avoid one cons allocation per cache hit.
 A fresh vector is created only on cache miss (when puthash is called),
 so the stored key is never the same object as this lookup vector.")
-
-;;; Face remap lifecycle macro
-
-(defmacro kuro--with-face-remap (cookie-var &rest remap-body)
-  "Remove the face-remap cookie in COOKIE-VAR, then evaluate REMAP-BODY.
-COOKIE-VAR is a symbol whose value holds the cookie returned by
-`face-remap-add-relative', or nil when no remap is active.
-The old cookie is removed and COOKIE-VAR set to nil before REMAP-BODY runs.
-REMAP-BODY is typically a `setq' form that stores the new cookie back into
-COOKIE-VAR.  When REMAP-BODY is empty the macro acts as a pure remove."
-  (declare (indent 1))
-  `(progn
-     (when ,cookie-var
-       (face-remap-remove-relative ,cookie-var)
-       (setq ,cookie-var nil))
-     ,@remap-body))
 
 ;;; Font remapping
 
@@ -241,18 +226,22 @@ Returns non-nil if the color for IDX actually changed, nil otherwise."
   (pcase-let ((`(,idx ,r ,g ,b) entry))
     (kuro--apply-palette-entry idx r g b)))
 
+(defun kuro--apply-palette-update-entries (entries)
+  "Apply OSC 4 palette update ENTRIES.
+Returns non-nil if at least one entry changed."
+  (let ((changed nil))
+    (dolist (entry entries changed)
+      (when (kuro--apply-palette-update-entry entry)
+        (setq changed t)))))
+
 (defun kuro--apply-palette-updates ()
   "Apply any pending OSC 4 palette overrides from the Rust core.
 Fetches all pending updates, applies each via `kuro--apply-palette-entry',
 then flushes the face cache if at least one entry actually changed."
   (when kuro--initialized
     (when-let* ((updates (kuro--get-palette-updates)))
-      (let ((changed nil))
-        (dolist (entry updates)
-          (when (kuro--apply-palette-update-entry entry)
-            (setq changed t)))
-        (when changed
-          (kuro--clear-face-cache))))))
+      (when (kuro--apply-palette-update-entries updates)
+        (kuro--clear-face-cache)))))
 
 (provide 'kuro-faces)
 

@@ -34,7 +34,7 @@
 (defconst kuro-poll-modes-test--poll-cwd-table
   '((kuro-poll-modes-poll-cwd-adds-trailing-slash           "/home/user/project" "/home/user/project/")
     (kuro-poll-modes-poll-cwd-idempotent-with-trailing-slash "/tmp/"              "/tmp/"))
-  "Table of (test-name input expected-dir) for `kuro--poll-cwd' trailing-slash normalization.")
+  "Table of (test-name input expected-dir) for `kuro--poll-cwd'.")
 
 (defmacro kuro-poll-modes-test--def-poll-cwd (test-name input expected)
   `(ert-deftest ,test-name ()
@@ -238,6 +238,26 @@ that reads terminal mode variables set by `kuro--apply-terminal-modes'."
   "Every symbol in `kuro--tier1-poll-fns' is a bound function."
   (dolist (fn kuro--tier1-poll-fns)
     (should (fboundp fn))))
+
+(ert-deftest kuro-poll-modes-run-tier1-poll-fns-macroexpands-to-progn ()
+  "`kuro--run-tier1-poll-fns' expands to the fixed tier-1 poll sequence."
+  (should (equal (macroexpand-1 '(kuro--run-tier1-poll-fns))
+                 '(progn
+                    (kuro--poll-terminal-mode-state)
+                    (kuro--poll-cwd)
+                    (kuro--handle-clipboard-actions)
+                    (kuro--poll-prompt-mark-updates)
+                    (kuro--poll-eval-command-updates)
+                    (kuro--poll-image-events)
+                    (kuro--apply-hyperlink-ranges)
+                    (kuro--check-process-exit)))))
+
+(ert-deftest kuro-poll-modes-dispatch-clipboard-action-macroexpands-to-pcase ()
+  "`kuro--dispatch-clipboard-action' expands to a fixed pcase dispatch."
+  (should (equal (macroexpand-1 '(kuro--dispatch-clipboard-action action))
+                 '(pcase (car action)
+                    ('write (kuro--clipboard-write (cdr action)))
+                    ('query (kuro--clipboard-query))))))
 
 (provide 'kuro-poll-modes-test-2)
 

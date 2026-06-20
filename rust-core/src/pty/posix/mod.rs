@@ -17,8 +17,8 @@ use cleanup::{reap_child_until, signal_child_tree, DROP_WAITPID_TIMEOUT_MS};
 use nix::pty::{openpty, OpenptyResult, Winsize};
 use nix::sys::signal::Signal;
 use nix::unistd::{fork, ForkResult, Pid};
-use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
 use shell::ShellCommand;
+use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -164,6 +164,58 @@ impl Pty {
         )
     }
 
+    fn take_peek_buffer(&self) -> Option<Vec<u8>> {
+        self.peek_buffer
+            .lock()
+            .expect("peek_buffer lock poisoned")
+            .take()
+    }
+
+    fn store_peek_buffer(&self, data: Vec<u8>) {
+        *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(data);
+    }
+
+    fn drain_pending_bytes(&mut self, max_bytes: Option<usize>) -> Vec<u8> {
+        if matches!(max_bytes, Some(0)) {
+            return Vec::new();
+        }
+
+        let capacity = max_bytes.map_or(8192, |max_bytes| max_bytes.min(8192));
+        let mut all_data = Vec::with_capacity(capacity);
+
+        if let Some(mut data) = self.take_peek_buffer() {
+            if let Some(max_bytes) = max_bytes {
+                if data.len() > max_bytes {
+                    let overflow = data.split_off(max_bytes);
+                    all_data.extend(data);
+                    self.store_peek_buffer(overflow);
+                    return all_data;
+                }
+            }
+            all_data.extend(data);
+        }
+
+        while max_bytes.map_or(true, |max_bytes| all_data.len() < max_bytes) {
+            match self.receiver.try_recv() {
+                Ok(mut data) => {
+                    if let Some(max_bytes) = max_bytes {
+                        let remaining = max_bytes - all_data.len();
+                        if data.len() > remaining {
+                            let overflow = data.split_off(remaining);
+                            all_data.extend(data);
+                            self.store_peek_buffer(overflow);
+                            break;
+                        }
+                    }
+                    all_data.extend(data);
+                }
+                Err(_) => break,
+            }
+        }
+
+        all_data
+    }
+
     /// Spawn a new PTY with the given shell command and initial terminal dimensions.
     ///
     /// Passing `rows` and `cols` to `openpty` is critical: it sets the PTY window
@@ -210,15 +262,15 @@ impl Pty {
         // SAFETY: all shared state (channel sender, Arc clones, reader_fd) is fully set
         // up before forking; the Child branch runs only async-signal-safe code until exec.
         match unsafe { fork() } {
-        Ok(ForkResult::Parent { child }) => Ok(Self::spawn_parent_pty(
-            master_file,
-            child,
-            receiver,
-            sender,
-            shutdown,
-            reader_file,
-            process_exited,
-        )),
+            Ok(ForkResult::Parent { child }) => Ok(Self::spawn_parent_pty(
+                master_file,
+                child,
+                receiver,
+                sender,
+                shutdown,
+                reader_file,
+                process_exited,
+            )),
             Ok(ForkResult::Child) => {
                 // Child process: delegate all setup to the helper.
                 // If the helper returns Err, the error propagates out of spawn() in the
@@ -262,24 +314,7 @@ impl Pty {
     /// # Errors
     /// Never returns an error in the current implementation (channel `try_recv` is infallible after data arrives).
     pub fn read(&mut self) -> Result<Vec<u8>> {
-        let mut all_data = Vec::with_capacity(8192);
-
-        // Drain the peek buffer first (populated by has_pending_data)
-        if let Some(data) = self
-            .peek_buffer
-            .lock()
-            .expect("peek_buffer lock poisoned")
-            .take()
-        {
-            all_data.extend(data);
-        }
-
-        // Drain remaining channel data
-        while let Ok(data) = self.receiver.try_recv() {
-            all_data.extend(data);
-        }
-
-        Ok(all_data)
+        Ok(self.drain_pending_bytes(None))
     }
 
     /// Read up to `max_bytes` from the PTY channel without blocking.
@@ -295,41 +330,7 @@ impl Pty {
             return Ok(Vec::new());
         }
 
-        let mut all_data = Vec::with_capacity(max_bytes.min(8192));
-
-        if let Some(mut data) = self
-            .peek_buffer
-            .lock()
-            .expect("peek_buffer lock poisoned")
-            .take()
-        {
-            if data.len() > max_bytes {
-                let overflow = data.split_off(max_bytes);
-                all_data.extend(data);
-                *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(overflow);
-                return Ok(all_data);
-            }
-            all_data.extend(data);
-        }
-
-        while all_data.len() < max_bytes {
-            match self.receiver.try_recv() {
-                Ok(mut data) => {
-                    let remaining = max_bytes - all_data.len();
-                    if data.len() > remaining {
-                        let overflow = data.split_off(remaining);
-                        all_data.extend(data);
-                        *self.peek_buffer.lock().expect("peek_buffer lock poisoned") =
-                            Some(overflow);
-                        break;
-                    }
-                    all_data.extend(data);
-                }
-                Err(_) => break,
-            }
-        }
-
-        Ok(all_data)
+        Ok(self.drain_pending_bytes(Some(max_bytes)))
     }
 
     /// Check if the PTY channel has pending unread data (non-blocking, does not consume).
@@ -345,7 +346,7 @@ impl Pty {
         // Try to consume one item and store it in the peek buffer
         match self.receiver.try_recv() {
             Ok(data) => {
-                *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(data);
+                self.store_peek_buffer(data);
                 true
             }
             Err(_) => false,

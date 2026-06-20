@@ -176,27 +176,23 @@
         (when buf (kill-buffer buf))))))
 
 (ert-deftest kuro-mux-test--help-prints-prefix-key ()
-  "`kuro-mux-help' prints the current `kuro-mux-prefix-key'."
-  (let ((printed "")
-        (kuro-mux-prefix-key "C-c x"))
-    (cl-letf (((symbol-function 'with-help-window)
-               (lambda (_name &rest body) (eval (cons 'progn body) t)))
-              ((symbol-function 'princ)
-               (lambda (s) (setq printed (concat printed s))))
-              ((symbol-function 'substitute-command-keys) #'identity))
-      (kuro-mux-help)
-      (should (string-match-p "C-c x" printed)))))
+  "`kuro-mux--help-insert' prints the current `kuro-mux-prefix-key'."
+  (let ((kuro-mux-prefix-key "C-c x"))
+    (let ((contents
+           (with-temp-buffer
+             (cl-letf (((symbol-function 'substitute-command-keys) #'identity))
+               (kuro-mux--help-insert))
+             (buffer-string))))
+      (should (string-match-p "C-c x" contents)))))
 
 (ert-deftest kuro-mux-test--help-prints-available-commands-header ()
-  "`kuro-mux-help' prints the \"Available commands\" section header."
-  (let ((printed ""))
-    (cl-letf (((symbol-function 'with-help-window)
-               (lambda (_name &rest body) (eval (cons 'progn body) t)))
-              ((symbol-function 'princ)
-               (lambda (s) (setq printed (concat printed s))))
-              ((symbol-function 'substitute-command-keys) #'identity))
-      (kuro-mux-help)
-      (should (string-match-p "Available commands" printed)))))
+  "`kuro-mux--help-insert' prints the \"Available commands\" section header."
+  (let ((contents
+         (with-temp-buffer
+           (cl-letf (((symbol-function 'substitute-command-keys) #'identity))
+             (kuro-mux--help-insert))
+           (buffer-string))))
+    (should (string-match-p "Available commands" contents))))
 
 (ert-deftest kuro-mux-test--clock-message-contains-time ()
   "`kuro-mux-clock' message includes a time formatted as HH:MM:SS."

@@ -2,6 +2,14 @@ use super::PALETTE_STACK_MAX;
 use crate::parser;
 use crate::TerminalCore;
 
+macro_rules! dispatch_if_handled {
+    ($call:expr, $ret:expr) => {
+        if $call {
+            return $ret;
+        }
+    };
+}
+
 #[inline]
 fn handle_csi_dsr_color_scheme_query(tc: &mut TerminalCore, params: &vte::Params) {
     // CSI ? Ps n — DEC DSR queries
@@ -21,16 +29,8 @@ fn handle_csi_modify_other_keys(tc: &mut TerminalCore, params: &vte::Params) {
     // type 4 = modifyOtherKeys; value 0/1/2 = disabled/level1/level2.
     // We record the setting for type 4; other types are silently accepted.
     let mut iter = params.iter();
-    let key_type = iter
-        .next()
-        .and_then(|p| p.first())
-        .copied()
-        .unwrap_or(0);
-    let value = iter
-        .next()
-        .and_then(|p| p.first())
-        .copied()
-        .unwrap_or(0);
+    let key_type = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
+    let value = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
     if key_type == 4 {
         tc.dec_modes.modify_other_keys = value.min(2) as u8;
     }
@@ -105,7 +105,8 @@ fn handle_csi_repeat_last_printed_char(tc: &mut TerminalCore, params: &vte::Para
             .unwrap_or(1)
             .max(1);
         for _ in 0..n {
-            tc.screen.print(ch, tc.current_attrs, tc.dec_modes.auto_wrap);
+            tc.screen
+                .print(ch, tc.current_attrs, tc.dec_modes.auto_wrap);
         }
     }
 }
@@ -117,59 +118,76 @@ fn handle_csi_prefixed_dispatch(
     intermediates: &[u8],
     c: char,
 ) -> bool {
-    // Handle DEC-private and Kitty-protocol CSI sequences (CSI ? … / CSI > … / CSI < …).
-    // A single `first()` call replaces three separate is_empty()+index checks.
-    // Note: `b' '` (DECSCUSR) and `b'!'` (DECSTR) must fall through to the
-    // standard match below, so only the three DEC-prefix bytes return early here.
     match intermediates.first() {
         Some(b'?') => {
-            match c {
-                'h' | 'l' => {
-                    let set = c == 'h';
-                    parser::dec_private::handle_dec_modes(tc, params, set);
-                }
-                'u' => {
-                    // CSI ? u — Query keyboard flags
-                    parser::dec_private::handle_kitty_kb_query(tc);
-                }
-                'p' if intermediates.len() >= 2 && intermediates[1] == b'$' => {
-                    // DECRQM — DEC private mode query
-                    parser::dec_private::handle_decrqm(tc, params);
-                }
-                'n' => handle_csi_dsr_color_scheme_query(tc, params),
-                // DECSED / DECSEL — Selective Erase (same as ED/EL; we don't track protection)
-                'J' | 'K' => parser::erase::handle_erase(tc, params, c),
-                _ => {}
-            }
+            handle_csi_dec_prefixed_dispatch(tc, params, intermediates, c);
             true
         }
         Some(b'>') => {
-            match c {
-                'u' => {
-                    // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
-                    parser::dec_private::handle_kitty_kb_push(tc, params);
-                }
-                'c' => handle_csi_da2_response(tc),
-                'q' => handle_csi_xtversion_response(tc),
-                'm' => handle_csi_modify_other_keys(tc, params),
-                _ => {}
-            }
+            handle_csi_kitty_prefixed_dispatch(tc, params, c);
             true
         }
         Some(b'<') => {
-            if c == 'u' {
-                // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
-                parser::dec_private::handle_kitty_kb_pop(tc);
-            }
+            handle_csi_keyboard_pop_dispatch(tc, c);
             true
         }
         Some(b'=') => {
-            if c == 'c' {
-                handle_csi_da3_response(tc);
-            }
+            handle_csi_da3_dispatch(tc, c);
             true
         }
         _ => false,
+    }
+}
+
+fn handle_csi_dec_prefixed_dispatch(
+    tc: &mut TerminalCore,
+    params: &vte::Params,
+    intermediates: &[u8],
+    c: char,
+) {
+    match c {
+        'h' | 'l' => {
+            let set = c == 'h';
+            parser::dec_private::handle_dec_modes(tc, params, set);
+        }
+        'u' => {
+            // CSI ? u — Query keyboard flags
+            parser::dec_private::handle_kitty_kb_query(tc);
+        }
+        'p' if intermediates.len() >= 2 && intermediates[1] == b'$' => {
+            // DECRQM — DEC private mode query
+            parser::dec_private::handle_decrqm(tc, params);
+        }
+        'n' => handle_csi_dsr_color_scheme_query(tc, params),
+        // DECSED / DECSEL — Selective Erase (same as ED/EL; we don't track protection)
+        'J' | 'K' => parser::erase::handle_erase(tc, params, c),
+        _ => {}
+    }
+}
+
+fn handle_csi_kitty_prefixed_dispatch(tc: &mut TerminalCore, params: &vte::Params, c: char) {
+    match c {
+        'u' => {
+            // CSI > Ps u — Push and set keyboard flags (Kitty keyboard protocol)
+            parser::dec_private::handle_kitty_kb_push(tc, params);
+        }
+        'c' => handle_csi_da2_response(tc),
+        'q' => handle_csi_xtversion_response(tc),
+        'm' => handle_csi_modify_other_keys(tc, params),
+        _ => {}
+    }
+}
+
+fn handle_csi_keyboard_pop_dispatch(tc: &mut TerminalCore, c: char) {
+    if c == 'u' {
+        // CSI < u — Pop keyboard flags (Kitty keyboard protocol)
+        parser::dec_private::handle_kitty_kb_pop(tc);
+    }
+}
+
+fn handle_csi_da3_dispatch(tc: &mut TerminalCore, c: char) {
+    if c == 'c' {
+        handle_csi_da3_response(tc);
     }
 }
 
@@ -229,11 +247,7 @@ fn handle_csi_standard_status_dispatch(
 }
 
 #[inline]
-fn handle_csi_standard_sgr_dispatch(
-    tc: &mut TerminalCore,
-    params: &vte::Params,
-    c: char,
-) -> bool {
+fn handle_csi_standard_sgr_dispatch(tc: &mut TerminalCore, params: &vte::Params, c: char) -> bool {
     match c {
         // SGR — Select Graphic Rendition (CSI Ps m)
         'm' => {
@@ -427,28 +441,28 @@ fn handle_csi_standard_dispatch(
     intermediates: &[u8],
     c: char,
 ) {
-    // Handle standard CSI sequences
-    if handle_csi_standard_status_dispatch(tc, params, intermediates, c) {
-        return;
-    }
-    if handle_csi_standard_sgr_dispatch(tc, params, c) {
-        return;
-    }
-    if handle_csi_standard_spacing_dispatch(tc, params, intermediates, c) {
-        return;
-    }
-    if handle_csi_standard_cursor_dispatch(tc, params, c) {
-        return;
-    }
+    // Handle standard CSI sequences.
+    dispatch_if_handled!(
+        handle_csi_standard_status_dispatch(tc, params, intermediates, c),
+        ()
+    );
+    dispatch_if_handled!(handle_csi_standard_sgr_dispatch(tc, params, c), ());
+    dispatch_if_handled!(
+        handle_csi_standard_spacing_dispatch(tc, params, intermediates, c),
+        ()
+    );
+    dispatch_if_handled!(handle_csi_standard_cursor_dispatch(tc, params, c), ());
     // Palette stack opcodes use the `#` intermediate and share command letters
     // with insert/delete. Dispatch them first so `CSI #P/#Q/#R` is not
     // consumed by the plain edit path.
-    if handle_csi_standard_palette_dispatch(tc, intermediates, c) {
-        return;
-    }
-    if handle_csi_standard_edit_dispatch(tc, params, intermediates, c) {
-        return;
-    }
+    dispatch_if_handled!(
+        handle_csi_standard_palette_dispatch(tc, intermediates, c),
+        ()
+    );
+    dispatch_if_handled!(
+        handle_csi_standard_edit_dispatch(tc, params, intermediates, c),
+        ()
+    );
 
     // Unknown/unhandled CSI sequences are silently ignored
 }

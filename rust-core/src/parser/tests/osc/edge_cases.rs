@@ -158,7 +158,11 @@ fn test_osc8_uri_at_exactly_limit() {
 fn test_osc9_basic_notification_pushed() {
     let mut core = crate::TerminalCore::new(24, 80);
     core.advance(b"\x1b]9;Build complete\x07");
-    assert_eq!(core.osc_data.notifications.len(), 1, "one notification should be queued");
+    assert_eq!(
+        core.osc_data.notifications.len(),
+        1,
+        "one notification should be queued"
+    );
     let n = &core.osc_data.notifications[0];
     assert_eq!(n.body, "Build complete");
     assert!(n.title.is_none(), "OSC 9 sets no title");
@@ -167,11 +171,13 @@ fn test_osc9_basic_notification_pushed() {
 /// OSC 9 with exactly one param (no body) must be silently ignored.
 #[test]
 fn test_osc9_missing_body_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     // Advance only the sequence code with no second param.
     let params: &[&[u8]] = &[b"9"];
-    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "no body → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_9,
+        params,
+        "OSC 9 with no body"
+    );
 }
 
 /// OSC 9 with three params (ConEmu progress form `OSC 9 ; 4 ; …`) must be ignored.
@@ -180,19 +186,23 @@ fn test_osc9_missing_body_is_noop() {
 /// exercises the `params.len() != 2` early-return for the ConEmu case.
 #[test]
 fn test_osc9_three_params_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"9", b"4", b"50"]; // ConEmu progress: type=4, value=50%
-    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "3-param ConEmu form → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_9,
+        params,
+        "OSC 9 with three params"
+    );
 }
 
 /// OSC 9 with an empty body param must be silently ignored.
 #[test]
 fn test_osc9_empty_body_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"9", b""];
-    crate::parser::osc_protocol::handle_osc_9(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "empty body → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_9,
+        params,
+        "OSC 9 with empty body"
+    );
 }
 
 // ── OSC 777 — URXVT desktop notifications (subcommand + title + body) ─────────
@@ -202,7 +212,11 @@ fn test_osc9_empty_body_is_noop() {
 fn test_osc777_notify_with_title_and_body() {
     let mut core = crate::TerminalCore::new(24, 80);
     core.advance(b"\x1b]777;notify;MyApp;Download done\x07");
-    assert_eq!(core.osc_data.notifications.len(), 1, "one notification should be queued");
+    assert_eq!(
+        core.osc_data.notifications.len(),
+        1,
+        "one notification should be queued"
+    );
     let n = &core.osc_data.notifications[0];
     assert_eq!(n.body, "Download done");
     assert_eq!(n.title.as_deref(), Some("MyApp"));
@@ -215,34 +229,43 @@ fn test_osc777_notify_empty_title_stores_none() {
     let params: &[&[u8]] = &[b"777", b"notify", b"", b"job finished"];
     crate::parser::osc_protocol::handle_osc_777(&mut core, params);
     assert_eq!(core.osc_data.notifications.len(), 1);
-    assert!(core.osc_data.notifications[0].title.is_none(), "empty title → None");
+    assert!(
+        core.osc_data.notifications[0].title.is_none(),
+        "empty title → None"
+    );
 }
 
 /// OSC 777 with an unknown subcommand (not `"notify"`) must be silently ignored.
 #[test]
 fn test_osc777_unknown_subcommand_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"777", b"bell", b"title", b"body"];
-    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "unknown subcommand → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_777,
+        params,
+        "OSC 777 with unknown subcommand"
+    );
 }
 
 /// OSC 777 `notify` with empty body must be silently ignored.
 #[test]
 fn test_osc777_empty_body_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"777", b"notify", b"title", b""];
-    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "empty body → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_777,
+        params,
+        "OSC 777 with empty body"
+    );
 }
 
 /// OSC 777 with missing subcommand param must be silently ignored.
 #[test]
 fn test_osc777_missing_subcommand_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"777"];
-    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "no subcommand → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_777,
+        params,
+        "OSC 777 with no subcommand"
+    );
 }
 
 /// OSC 0 with no semicolon (single-param) must be a silent no-op.
@@ -255,8 +278,14 @@ fn test_osc0_no_title_param_is_noop() {
     core.meta.title = "previous".to_string();
     let params: &[&[u8]] = &[b"0"]; // no semicolon → only one param
     handle_osc(&mut core, params, false);
-    assert_eq!(core.meta.title, "previous", "OSC 0 without title param must leave title unchanged");
-    assert!(!core.meta.title_dirty, "title_dirty must not be set when title param is absent");
+    assert_eq!(
+        core.meta.title, "previous",
+        "OSC 0 without title param must leave title unchanged"
+    );
+    assert!(
+        !core.meta.title_dirty,
+        "title_dirty must not be set when title param is absent"
+    );
 }
 
 /// OSC 22 with no second param (cursor-shape absent) must be a silent no-op.
@@ -281,11 +310,13 @@ fn test_osc22_no_shape_param_is_noop() {
 /// in `handle_osc_777` (4096-byte limit).
 #[test]
 fn test_osc777_oversized_body_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let big_body = "B".repeat(4097); // 4097 > NOTIFICATION_MAX_BYTES (4096)
     let params: &[&[u8]] = &[b"777", b"notify", b"title", big_body.as_bytes()];
-    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "oversized body → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_777,
+        params,
+        "OSC 777 with oversized body"
+    );
 }
 
 /// OSC 777 notify with an oversized title must be a silent no-op.
@@ -293,9 +324,11 @@ fn test_osc777_oversized_body_is_noop() {
 /// Exercises the `title_raw.len() > NOTIFICATION_MAX_BYTES` early-return.
 #[test]
 fn test_osc777_oversized_title_is_noop() {
-    let mut core = crate::TerminalCore::new(24, 80);
     let big_title = "T".repeat(4097);
     let params: &[&[u8]] = &[b"777", b"notify", big_title.as_bytes(), b"body"];
-    crate::parser::osc_protocol::handle_osc_777(&mut core, params);
-    assert!(core.osc_data.notifications.is_empty(), "oversized title → no notification");
+    assert_osc_notifications_empty!(
+        crate::parser::osc_protocol::handle_osc_777,
+        params,
+        "OSC 777 with oversized title"
+    );
 }

@@ -12,6 +12,7 @@
 
 (declare-function derived-mode-p "subr" (&rest modes))
 
+(require 'kuro-mux-layout-macros)
 
 (defconst kuro-mux--layout-handlers
   (list
@@ -124,8 +125,7 @@ collapsed to one window, then re-split.  Analogous to tmux select-layout."
     (delete-other-windows)
     (let ((win (selected-window)))
       (set-window-buffer win (car buffers))
-      (funcall (alist-get layout kuro-mux--layout-handlers nil nil #'equal)
-               win buffers))
+      (kuro--dispatch-layout layout win buffers))
     (balance-windows)
     ;; Record the applied layout on the frame so `kuro-mux-next-layout' /
     ;; `kuro-mux-previous-layout' can cycle relative to it.

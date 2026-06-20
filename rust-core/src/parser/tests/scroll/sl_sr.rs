@@ -1,4 +1,3 @@
-
 // Tests for SL (Scroll Left, CSI Ps SP @) and SR (Scroll Right, CSI Ps SP A).
 //
 // Both sequences use a SPACE intermediate byte (0x20) to distinguish them from
@@ -61,7 +60,7 @@ fn test_sl_applies_only_to_scroll_region_rows() {
     // Restrict scroll region to rows 2-4 (1-indexed CSI 3;5 r)
     term.advance(b"\x1b[3;5r");
     term.advance(b"\x1b[2 @"); // SL 2 within region
-    // Rows outside the region must be unchanged
+                               // Rows outside the region must be unchanged
     assert_eq!(&row_str(&term, 0, 10), "AAAAAAAAAA");
     assert_eq!(&row_str(&term, 5, 10), "BBBBBBBBBB");
     // Rows inside the region must be shifted

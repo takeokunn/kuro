@@ -7,37 +7,24 @@
 ;;; Commentary:
 
 ;; Shared `defsubst' and `defmacro' forms used by both `kuro-input-mode'
-;; and `kuro-input-mode-ext'.  Extracted here so the byte-compiler sees all
-;; inline definitions before it compiles either half.
+;; and `kuro-input-mode-ext'.  This file stays focused on CPS-style inline
+;; forms and command-definition macros; buffer mutation helpers live in
+;; `kuro-input-mode-buffer-macros'.
 ;;
 ;; Do not load this file directly; it is `require'd automatically by
 ;; `kuro-input-mode'.
 
 ;;; Code:
 
-;; Forward declarations — suppress free-variable warnings when the
-;; defsubsts below are byte-compiled before kuro-input-mode.el loads.
-(defvar kuro--line-buffer)
-(defvar kuro--line-point)
-(defvar kuro--line-undo-stack)
+;; Forward declarations for helper continuations and shared state provided
+;; by `kuro-input-mode-buffer-macros` and `kuro-input-mode-line-state`.
 
 ;; Declare the display-refresh continuation so defmacro expansions that
 ;; call it do not produce "undefined function" warnings at compile time.
-(declare-function kuro--line-mode-update-display "kuro-input-mode" ())
+(declare-function kuro--line-mode-update-display "kuro-input-mode-line-display" ())
 
-(defconst kuro--line-undo-max-depth 100
-  "Maximum number of undo states retained in `kuro--line-undo-stack'.")
-
-
-;;;; Line mode: undo stack (inline)
-
-(defsubst kuro--line-undo-push ()
-  "Push the current line-buffer state onto `kuro--line-undo-stack'.
-Called at the start of every editing command that mutates `kuro--line-buffer'."
-  (push (cons kuro--line-buffer kuro--line-point) kuro--line-undo-stack)
-  (when (> (length kuro--line-undo-stack) kuro--line-undo-max-depth)
-    (setq kuro--line-undo-stack
-          (seq-take kuro--line-undo-stack kuro--line-undo-max-depth))))
+(require 'kuro-input-mode-buffer-macros)
+(require 'kuro-input-mode-line-state)
 
 
 ;;;; Line mode: CPS display continuation
@@ -51,17 +38,37 @@ Encodes the invariant: every edit ends with a display update (CPS continuation).
   "Push undo state, execute BODY mutating line state, then refresh display."
   `(progn (kuro--line-undo-push) ,@body (kuro--line-mode-update-display)))
 
+(defmacro kuro--def-line-command (name docstring &rest body)
+  "Define NAME as a line-mode command with BODY.
+DOCSTRING becomes the generated command docstring.  Use this for
+commands whose control flow does not fit the specialized navigation or
+word-transform macros."
+  (declare (indent 1))
+  `(defun ,name ()
+     ,docstring
+     (interactive)
+     ,@body))
+
 (defmacro kuro--def-line-nav (name docstring &rest body)
   "Define NAME as a line-mode cursor-movement command.
 DOCSTRING becomes the generated command docstring.
 BODY runs unconditionally; `kuro--line-mode-update-display' is the
 CPS continuation."
   (declare (indent 1))
-  `(defun ,name ()
-     ,docstring
-     (interactive)
+  `(kuro--def-line-command ,name ,docstring
      ,@body
      (kuro--line-mode-update-display)))
+
+(defmacro kuro--def-line-history-nav (name docstring guard stashp index-form buffer-form)
+  "Define NAME as a line-mode history navigation command.
+GUARD decides whether the command changes history state.  When STASHP is
+non-nil, the current in-progress buffer is stashed before moving."
+  (declare (indent 1))
+  `(kuro--def-line-command ,name ,docstring
+     (when ,guard
+       ,@(when stashp '((kuro--line-history-stash-if-fresh)))
+       (setq kuro--line-history-idx ,index-form)
+       (kuro--line-set-buffer ,buffer-form))))
 
 
 ;;;; Line mode: word boundary primitives (inline)
@@ -92,25 +99,33 @@ CPS continuation."
     (setq p (1- p)))
   p)
 
-;;;; Line mode: buffer replacement helpers
+(defsubst kuro--line-skip-unix-word-bwd (s p)
+  "Retreat P to the start of the previous bash-style token in S.
+Whitespace delimiters are space and tab only; punctuation stays inside the
+token, matching `bash' `unix-word-rubout' behavior."
+  (while (and (> p 0) (memq (aref s (1- p)) '(?\s ?\t)))
+    (setq p (1- p)))
+  (while (and (> p 0) (not (memq (aref s (1- p)) '(?\s ?\t))))
+    (setq p (1- p)))
+  p)
 
-(defsubst kuro--line-set-buffer (text)
-  "Set line buffer to TEXT with point at end, then refresh display.
-CPS continuation for history navigation and whole-buffer completion."
-  (setq kuro--line-buffer text
-        kuro--line-point  (length text))
-  (kuro--line-mode-update-display))
-
-(defmacro kuro--line-splice (from to replacement new-point)
-  "Replace buffer[FROM..TO] with REPLACEMENT and set point to NEW-POINT.
-Does NOT call `kuro--line-mode-update-display'; compose with
-`kuro--with-line-edit-undo' to get the display continuation."
+(defmacro kuro--line-apply-word-transform (replacement-form)
+  "Apply REPLACEMENT-FORM to the next word and splice it back."
   (declare (indent 0))
-  `(setq kuro--line-buffer
-         (concat (substring kuro--line-buffer 0 ,from)
-                 ,replacement
-                 (substring kuro--line-buffer ,to))
-         kuro--line-point ,new-point))
+  `(let* ((bounds (kuro--line-word-bounds-forward))
+          (start  (car bounds))
+          (end    (cdr bounds))
+          (s      kuro--line-buffer))
+     (when (> end start)
+       (kuro--line-splice-with-undo start end ,replacement-form end))))
+
+(defmacro kuro--def-line-word-transform (name docstring replacement-form)
+  "Define NAME as a line-mode command that rewrites the next word.
+DOCSTRING becomes the generated command docstring.  REPLACEMENT-FORM is
+evaluated inside `kuro--line-apply-word-transform'."
+  (declare (indent 2))
+  `(kuro--def-line-command ,name ,docstring
+     (kuro--line-apply-word-transform ,replacement-form)))
 
 (provide 'kuro-input-mode-macros)
 

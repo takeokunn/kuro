@@ -97,5 +97,25 @@
                 `(kuro-mux-test--def-parse-layout-plists
                   ,test-name ,raw ,expected-length ,expected-first-fields))))
 
+(defmacro kuro-mux-test--deftest-prefix-bindings-invariants ()
+  "Define all `kuro-mux--prefix-bindings' invariant tests."
+  `(progn
+     ,@(cl-loop for (test-name docstring . body)
+                in kuro-mux-test--prefix-bindings-invariant-table
+                collect
+                `(ert-deftest ,test-name ()
+                   ,docstring
+                   ,@body))))
+
+(defmacro kuro-mux-test--deftest-prefix-resize-bindings-invariants ()
+  "Define all `kuro-mux--prefix-resize-bindings' invariant tests."
+  `(progn
+     ,@(cl-loop for (test-name docstring . body)
+                in kuro-mux-test--prefix-resize-bindings-invariant-table
+                collect
+                `(ert-deftest ,test-name ()
+                   ,docstring
+                   ,@body))))
+
 (provide 'kuro-mux-test-macros)
 ;;; kuro-mux-test-macros.el ends here

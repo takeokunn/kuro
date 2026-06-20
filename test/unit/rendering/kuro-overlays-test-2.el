@@ -25,15 +25,16 @@
 (kuro-overlays-test--def-blink-visible kuro-overlays-blink-visible-slow t   nil t   nil)
 (kuro-overlays-test--def-blink-visible kuro-overlays-blink-visible-fast nil t   nil t)
 
-(ert-deftest kuro-overlays-test--blink-visible-both-variants ()
-  "Invariant: blink-visible dispatches correctly for both slow and fast variants."
-  (dolist (entry kuro-overlays-test--blink-visible-table)
-    (pcase-let ((`(,_name ,slow-init ,fast-init ,slow-exp ,fast-exp) entry))
-      (kuro-overlays-test--with-buffer
-        (setq kuro--blink-visible-slow slow-init
-              kuro--blink-visible-fast fast-init)
-        (should (eq slow-exp (kuro--blink-visible 'slow)))
-        (should (eq fast-exp (kuro--blink-visible 'fast)))))))
+(kuro-overlays-test--deftest-table-cases
+    kuro-overlays-test--blink-visible-both-variants
+    "Invariant: blink-visible dispatches correctly for both slow and fast variants."
+    kuro-overlays-test--blink-visible-table
+    (`(,_name ,slow-init ,fast-init ,slow-exp ,fast-exp)
+     (kuro-overlays-test--with-buffer
+       (setq kuro--blink-visible-slow slow-init
+             kuro--blink-visible-fast fast-init)
+       (should (eq slow-exp (kuro--blink-visible 'slow)))
+       (should (eq fast-exp (kuro--blink-visible 'fast))))))
 
 (ert-deftest kuro-overlays-toggle-blink-state-flips-slow ()
   "kuro--toggle-blink-state 'slow toggles kuro--blink-visible-slow."

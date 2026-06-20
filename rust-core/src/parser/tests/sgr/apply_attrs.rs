@@ -44,7 +44,7 @@ fn apply_sgr_attrs_sgr0_resets_bold() {
 #[test]
 fn apply_sgr_attrs_italic_on_and_off() {
     let mut a = fresh_attrs();
-    let on:  &[u16] = &[3];
+    let on: &[u16] = &[3];
     let off: &[u16] = &[23];
     apply_sgr_attrs(&mut a, &[on]);
     assert!(a.flags.contains(SgrFlags::ITALIC));
@@ -71,7 +71,7 @@ fn apply_sgr_attrs_underline_subparam_curly() {
 #[test]
 fn apply_sgr_attrs_underline_subparam_0_clears() {
     let mut a = fresh_attrs();
-    let on:  &[u16] = &[4];
+    let on: &[u16] = &[4];
     let off: &[u16] = &[4, 0];
     apply_sgr_attrs(&mut a, &[on]);
     apply_sgr_attrs(&mut a, &[off]);
@@ -90,7 +90,7 @@ fn apply_sgr_attrs_foreground_named_red() {
 #[test]
 fn apply_sgr_attrs_foreground_default_resets() {
     let mut a = fresh_attrs();
-    let red:  &[u16] = &[31];
+    let red: &[u16] = &[31];
     let dflt: &[u16] = &[39];
     apply_sgr_attrs(&mut a, &[red, dflt]);
     assert_eq!(a.foreground, Color::Default);
@@ -99,7 +99,7 @@ fn apply_sgr_attrs_foreground_default_resets() {
 #[test]
 fn apply_sgr_attrs_overline_on_off() {
     let mut a = fresh_attrs();
-    let on:  &[u16] = &[53];
+    let on: &[u16] = &[53];
     let off: &[u16] = &[55];
     apply_sgr_attrs(&mut a, &[on]);
     assert!(a.overline);
@@ -125,9 +125,12 @@ fn apply_sgr_attrs_superscript_subscript_exclusive() {
 fn apply_sgr_attrs_skip_empty_group() {
     let mut a = fresh_attrs();
     let empty: &[u16] = &[];
-    let bold:  &[u16] = &[1];
+    let bold: &[u16] = &[1];
     apply_sgr_attrs(&mut a, &[empty, bold]);
-    assert!(a.flags.contains(SgrFlags::BOLD), "empty group must be skipped");
+    assert!(
+        a.flags.contains(SgrFlags::BOLD),
+        "empty group must be skipped"
+    );
 }
 
 #[test]
@@ -244,7 +247,10 @@ fn apply_sgr_attrs_bright_foreground_90_to_97() {
     let mut a = fresh_attrs();
     for param in 90u16..=97 {
         apply_sgr_attrs(&mut a, &[&[param]]);
-        assert!(matches!(a.foreground, Color::Named(_)), "SGR {param} must set bright fg");
+        assert!(
+            matches!(a.foreground, Color::Named(_)),
+            "SGR {param} must set bright fg"
+        );
     }
 }
 
@@ -253,7 +259,10 @@ fn apply_sgr_attrs_bright_background_100_to_107() {
     let mut a = fresh_attrs();
     for param in 100u16..=107 {
         apply_sgr_attrs(&mut a, &[&[param]]);
-        assert!(matches!(a.background, Color::Named(_)), "SGR {param} must set bright bg");
+        assert!(
+            matches!(a.background, Color::Named(_)),
+            "SGR {param} must set bright bg"
+        );
     }
 }
 

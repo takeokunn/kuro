@@ -206,7 +206,7 @@ Verification: after a second install the old timer is no longer in `timer-list'.
       ;; Mapping should be stored
       (should (equal (gethash 0 kuro--col-to-buf-map) [0 0 1 1])))))
 
-;;; Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
+;;; Group 25: kuro--timed
 
 (ert-deftest kuro-renderer-timed-returns-body-value ()
   "kuro--timed returns the value produced by body."
@@ -224,41 +224,6 @@ Verification: after a second install the old timer is no longer in `timer-list'.
   (let ((ms 0) (ran nil))
     (kuro--timed ms (setq ran t))
     (should ran)))
-
-(ert-deftest kuro-renderer-pipeline-face-count-nil-returns-zero ()
-  "kuro--pipeline-face-count returns 0 for a nil updates list."
-  (should (= 0 (kuro--pipeline-face-count nil))))
-
-(ert-deftest kuro-renderer-pipeline-face-count-counts-faces ()
-  "kuro--pipeline-face-count sums face-range counts across all updates.
-face-ranges is a stride-6 flat vector: (/ (length fr) 6) gives the count.
-Row 0 has 2 ranges (12 elements) and row 1 has 3 ranges (18 elements) = 5 total."
-  ;; updates is a vector of flat [row text face-ranges col-to-buf] entries.
-  (let ((updates (vector (vector 0 "a" (make-vector 12 0) [])
-                         (vector 1 "b" (make-vector 18 0) []))))
-    (should (= 5 (kuro--pipeline-face-count updates)))))
-
-(ert-deftest kuro-renderer-pipeline-step-apply-skips-nil ()
-  "kuro--pipeline-step-apply does not call kuro--apply-dirty-lines for nil."
-  (let ((called 0))
-    (cl-letf (((symbol-function 'kuro--apply-dirty-lines)
-               (lambda (&rest _) (cl-incf called))))
-      (kuro--pipeline-step-apply nil)
-      (should (= 0 called)))))
-
-(ert-deftest kuro-renderer-pipeline-step-apply-calls-dirty-lines-when-non-nil ()
-  "kuro--pipeline-step-apply calls kuro--apply-dirty-lines with the update list."
-  (let* ((updates (vector (vector 0 "abc" [] [])))
-         (received nil))
-    (cl-letf (((symbol-function 'kuro--apply-dirty-lines)
-               (lambda (ul) (setq received ul))))
-      (kuro--pipeline-step-apply updates)
-      (should (eq received updates)))))
-
-(ert-deftest kuro-renderer-pipeline-step-apply-returns-nil-for-nil ()
-  "kuro--pipeline-step-apply returns nil (from `when') for a nil update-list."
-  (cl-letf (((symbol-function 'kuro--apply-dirty-lines) #'ignore))
-    (should (null (kuro--pipeline-step-apply nil)))))
 
 ;;; kuro--reset-cursor-cache structural tests (Group 13 ext.)
 

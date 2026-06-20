@@ -29,10 +29,7 @@ fn test_apc_non_ascii_bytes_accepted_without_panic() {
         core.kitty.apc_buf.is_empty(),
         "apc_buf must be cleared after dispatch"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC with non-ASCII payload must not queue any response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 /// An APC payload starting with 'G' (Kitty Graphics prefix) that contains
@@ -62,6 +59,7 @@ fn test_apc_kitty_prefix_with_non_ascii_payload_no_panic() {
         core.kitty.apc_buf.is_empty(),
         "apc_buf must be cleared after dispatch"
     );
+    assert_no_apc_responses(&core);
 }
 
 // ── New edge-case tests (Round 34+) ───────────────────────────────────────────
@@ -119,10 +117,7 @@ fn test_apc_split_across_two_advance_calls() {
         "state must return to Idle after ST in second call"
     );
     // The Kitty query produces a pending response.
-    assert!(
-        !core.meta.pending_responses.is_empty(),
-        "Kitty query split across two calls must still produce a response"
-    );
+    let _resp = single_apc_response_text(&core);
 }
 
 /// A new ESC _ while already inside an APC payload (InApc state) must NOT
@@ -149,10 +144,7 @@ fn test_esc_underscore_inside_apc_is_treated_as_payload() {
         "buffer must be cleared after dispatch"
     );
     // Non-Kitty prefix 'X', so no response.
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC must not queue a response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 /// Two ESC bytes in a row while in AfterApcEsc state: the first ESC transitions
@@ -234,10 +226,7 @@ fn test_apc_utf8_multibyte_payload_accepted() {
         core.kitty.apc_buf.is_empty(),
         "buffer must be cleared after dispatch"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC must not queue a response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 /// A Kitty query sequence with a numeric image id in the response format:
@@ -253,12 +242,7 @@ fn test_kitty_query_response_includes_image_id() {
         core.kitty.apc_state == ApcScanState::Idle,
         "state must be Idle after Kitty query"
     );
-    assert!(
-        !core.meta.pending_responses.is_empty(),
-        "Kitty query must produce a pending response"
-    );
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
+    let resp = single_apc_response_text(&core);
     assert!(
         resp.contains("i=42"),
         "Kitty query response must echo the image id i=42; got: {resp:?}"

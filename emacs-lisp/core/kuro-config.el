@@ -1,4 +1,4 @@
-;;; kuro-config.el --- User configuration for Kuro terminal emulator  -*- lexical-binding: t; -*-
+;;; kuro-config.el --- Entry point for Kuro configuration  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
 
@@ -6,21 +6,14 @@
 
 ;;; Commentary:
 
-;; Central configuration module for the Kuro terminal emulator.
-;; All user-facing defcustom variables are defined here.
-;;
-;; This file has no dependencies on other kuro modules and must be
-;; loaded before kuro-renderer.el.
+;; Compatibility entry point for Kuro configuration.
+;; User-facing defcustom values live here; runtime validation lives in
+;; `kuro-config-logic'.
 
 ;;; Code:
 
+(require 'kuro-config-logic)
 (require 'kuro-colors)
-
-;; Forward declaration for kuro--keymap, defined in kuro-input-keymap.el.
-(defvar kuro--keymap nil
-  "Forward reference; defvar in kuro-input-keymap.el.")
-
-;;; Customization Groups
 
 (defgroup kuro nil
   "Kuro terminal emulator."
@@ -31,154 +24,6 @@
   "Display settings for Kuro terminal emulator."
   :group 'kuro
   :prefix "kuro-")
-
-;;; Internal buffer iterator
-
-(defun kuro--kuro-buffers ()
-  "Return a list of all live Kuro terminal buffers."
-  (when (fboundp 'kuro-mode)
-    (let (result)
-      (dolist (buf (buffer-list))
-        (when (and (buffer-live-p buf)
-                   (with-current-buffer buf
-                     (derived-mode-p 'kuro-mode)))
-          (push buf result)))
-      (nreverse result))))
-
-;;; Validation Primitives
-
-(defsubst kuro--positive-integer-p (val)
-  "Return non-nil if VAL is a positive integer (> 0)."
-  (and (integerp val) (> val 0)))
-
-(defsubst kuro--positive-integer-error (var value)
-  "Return a validation error for VAR holding VALUE."
-  (format "%s: must be a positive integer, got: %s" var value))
-
-(defmacro kuro--broadcast-to-buffers (fn &rest args)
-  "When FN is bound, call (FN ARGS...) in every live kuro-mode buffer."
-  `(when (fboundp ',fn)
-     (dolist (buf (kuro--kuro-buffers))
-       (with-current-buffer buf
-         (,fn ,@args)))))
-
-(defmacro kuro--in-all-buffers (&rest body)
-  "Evaluate BODY with each live kuro buffer current."
-  `(dolist (buf (kuro--kuro-buffers))
-     (with-current-buffer buf
-       ,@body)))
-
-(defmacro kuro--with-mode (mode msg &rest body)
-  "Execute BODY only when `derived-mode-p' MODE.
-Signal user-error MSG otherwise."
-  `(if (derived-mode-p ',mode)
-       (progn ,@body)
-     (user-error ,msg)))
-
-(defmacro kuro--with-kuro-mode (&rest body)
-  "Execute BODY only in an active kuro-mode buffer, signaling user-error otherwise."
-  `(kuro--with-mode kuro-mode "Not in a kuro buffer" ,@body))
-
-(defmacro kuro--check-positive-integer (var errors)
-  "Push an error string onto ERRORS if VAR is not a positive integer."
-  `(unless (kuro--positive-integer-p ,var)
-     (push (kuro--positive-integer-error ',var ,var) ,errors)))
-
-(defmacro kuro--check-positive-integer-symbol (var errors)
-  "Push an error onto ERRORS if symbol VAR is not bound to a positive integer."
-  `(let* ((sym ,var)
-          (val (symbol-value sym)))
-     (unless (kuro--positive-integer-p val)
-       (push (kuro--positive-integer-error sym val) ,errors))))
-
-(defmacro kuro--check-positive-integer-vars (vars errors)
-  "Push validation errors onto ERRORS for every symbol in VARS."
-  `(dolist (var ,vars)
-     (kuro--check-positive-integer-symbol var ,errors)))
-
-(defmacro kuro--check-optional-positive-integer-vars (vars errors)
-  "Push validation errors onto ERRORS for non-nil symbols in VARS."
-  `(dolist (var ,vars)
-     (when (symbol-value var)
-       (kuro--check-positive-integer-symbol var ,errors))))
-
-(defmacro kuro--check-hex-color (var errors)
-  "Push an error string onto ERRORS if VAR is not a 6-digit hex color string."
-  `(let ((val (symbol-value ,var)))
-     (unless (and (stringp val)
-                  (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val))
-       (push (format "%s: must be a 6-digit hex string like #rrggbb, got: %s"
-                     ,var val)
-             ,errors))))
-
-(defmacro kuro--def-positive-int-setter (name err-msg doc &rest body)
-  "Define a defcustom :set handler NAME for a positive-integer setting.
-ERR-MSG is the user-error format string (receives VALUE as %s argument).
-DOC is the function docstring.
-Validates VALUE, sets SYMBOL via `set-default', then evaluates BODY.
-SYMBOL and VALUE are bound within BODY."
-  (declare (indent 3) (doc-string 3))
-  `(defun ,name (symbol value)
-     ,doc
-     (unless (kuro--positive-integer-p value)
-       (user-error ,err-msg value))
-     (set-default symbol value)
-     ,@body))
-
-;;; :set handler functions
-
-(defun kuro--set-shell (symbol value)
-  "Validate and set SYMBOL to VALUE for `kuro-shell'."
-  (unless (or (null value) (string-empty-p value) (executable-find value))
-    (user-error "Kuro: shell executable not found: %s" value))
-  (set-default symbol value))
-
-(kuro--def-positive-int-setter kuro--set-scrollback-size
-    "kuro: scrollback-size must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and propagate to all live Kuro buffers."
-  (kuro--broadcast-to-buffers kuro--set-scrollback-max-lines value))
-
-(kuro--def-positive-int-setter kuro--set-frame-rate
-    "kuro: frame-rate must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and restart render loops in all active Kuro buffers."
-  (when (and (fboundp 'kuro--stop-render-loop)
-             (fboundp 'kuro--start-render-loop))
-    (kuro--in-all-buffers
-      (kuro--stop-render-loop)
-      (kuro--start-render-loop))))
-
-(kuro--def-positive-int-setter kuro--set-tui-frame-rate
-    "kuro: tui-frame-rate must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and switch render timer in TUI-mode Kuro buffers."
-  (when (fboundp 'kuro--switch-render-timer)
-    (kuro--in-all-buffers
-      (when (bound-and-true-p kuro--tui-mode-active)
-        (kuro--switch-render-timer value)))))
-
-(defun kuro--set-font (symbol value)
-  "Set SYMBOL to VALUE and apply font remap to all active Kuro buffers."
-  (set-default symbol value)
-  (kuro--broadcast-to-buffers kuro--apply-font-to-buffer buf))
-
-(defun kuro--set-keymap-exceptions (symbol value)
-  "Set SYMBOL to VALUE and rebuild the Kuro input keymap.
-Propagates the new keymap to all live `kuro-mode' buffers by updating
-the parent of their local `kuro-mode-map'."
-  (set-default-toplevel-value symbol value)
-  (when (fboundp 'kuro--build-keymap)
-    (kuro--build-keymap)
-    (kuro--in-all-buffers
-      (when (boundp 'kuro-mode-map)
-        (set-keymap-parent kuro-mode-map kuro--keymap)))))
-
-(defun kuro--set-input-echo-delay (symbol value)
-  "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.
-VALUE must be a non-negative number."
-  (unless (numberp value)
-    (user-error "Kuro-input-echo-delay must be a number"))
-  (when (< value 0)
-    (user-error "Kuro-input-echo-delay must be non-negative"))
-  (set-default symbol value))
 
 ;;; Color variable enumeration
 
@@ -409,39 +254,6 @@ The value is converted to Emacs face :height units (* 10 value)."
 (defconst kuro--optional-positive-integer-config-vars
   '(kuro-font-size)
   "Kuro config variables that may be nil or a positive integer.")
-
-(defun kuro--validate-config ()
-  "Validate all Kuro configuration settings.
-Returns a list of error description strings.
-An empty list indicates that all settings are valid."
-  (let ((errors nil))
-    (unless (or (null kuro-shell)
-                (string-empty-p kuro-shell)
-                (executable-find kuro-shell))
-      (push (format "kuro-shell: executable not found: %s" kuro-shell) errors))
-    (kuro--check-positive-integer-vars kuro--positive-integer-config-vars errors)
-    (kuro--check-optional-positive-integer-vars
-     kuro--optional-positive-integer-config-vars errors)
-    (dolist (color-var kuro--color-defcustom-vars)
-      (kuro--check-hex-color color-var errors))
-    (nreverse errors)))
-
-;;;###autoload
-(defun kuro-validate-config ()
-  "Check Kuro configuration and report any validation errors.
-Displays results in the echo area."
-  (interactive)
-  (let ((errors (kuro--validate-config)))
-    (if errors
-        (message "Kuro configuration errors (%d):\n%s"
-                 (length errors)
-                 (mapconcat #'identity errors "\n"))
-      (message "Kuro: all configuration settings are valid."))))
-
-;; The color table is initialized lazily from `kuro-mode' (see kuro.el)
-;; rather than at load time, so that requiring kuro-config does not
-;; trigger global side effects.  The defcustom :set handler also
-;; rebuilds it whenever a color is customised.
 
 (provide 'kuro-config)
 

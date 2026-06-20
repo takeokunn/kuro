@@ -34,6 +34,32 @@ so the stub is the default environment for all mutation unit tests."
     (cl-letf (((symbol-function 'kuro--line-mode-update-display) #'ignore))
       ,@body)))
 
+(defmacro kuro-input-mode-test--capture-sent-string (&rest body)
+  "Run BODY with send/render stubs and return the last string sent."
+  `(let ((kuro-input-mode-test--sent-string nil))
+     (cl-letf (((symbol-function 'kuro--send-key)
+                (lambda (s)
+                  (setq kuro-input-mode-test--sent-string s)))
+               ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+       ,@body)
+     kuro-input-mode-test--sent-string))
+
+(defmacro kuro-input-mode-test--with-send-key-stubs (&rest body)
+  "Run BODY with send/render stubs active and ignore sent data."
+  `(cl-letf (((symbol-function 'kuro--send-key) #'ignore)
+             ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+     ,@body))
+
+(defmacro kuro-input-mode-test--with-yank-last-arg (history buffer point &rest body)
+  "Run BODY with the state needed for `kuro--line-yank-last-arg' tests."
+  `(kuro-input-mode-test--with-edit
+    (setq kuro--line-history ,history
+          kuro--line-buffer ,buffer
+          kuro--line-point ,point
+          kuro--line-yank-last-arg-idx 0
+          kuro--line-yank-last-arg-len 0)
+    ,@body))
+
 (defmacro kuro-input-mode-test--with-line (buf-str point-pos &rest body)
   "Run BODY in line mode with `kuro--line-buffer' = BUF-STR and point at POINT-POS."
   `(kuro-input-mode-test--with-buffer
@@ -42,7 +68,7 @@ so the stub is the default environment for all mutation unit tests."
           kuro--line-point  ,point-pos)
     ,@body))
 
-(defmacro kuro-input-mode-readline-test--def-line-keymap (test-name key-str fn-symbol)
+(defmacro kuro-input-mode-test--def-line-keymap (test-name key-str fn-symbol)
   "Define TEST-NAME asserting KEY-STR is bound to FN-SYMBOL in line mode."
   `(ert-deftest ,test-name ()
      ,(format "Line keymap binds %S to `%s'." key-str fn-symbol)
@@ -50,6 +76,10 @@ so the stub is the default environment for all mutation unit tests."
       (kuro--build-keymap)
       (kuro--build-line-mode-keymap)
       (should (eq (lookup-key kuro--line-mode-keymap (kbd ,key-str)) #',fn-symbol)))))
+
+(defmacro kuro-input-mode-readline-test--def-line-keymap (test-name key-str fn-symbol)
+  "Define TEST-NAME asserting KEY-STR is bound to FN-SYMBOL in line mode."
+  `(kuro-input-mode-test--def-line-keymap ,test-name ,key-str ,fn-symbol))
 
 (defmacro kuro-input-mode-readline-test--deftest-line-keymaps ()
   "Define line keymap binding tests from shared readline binding data."
@@ -113,12 +143,7 @@ BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
 
 (defmacro kuro-input-mode-edit-test--def-line-keymap (test-name key-str fn-symbol)
   "Define TEST-NAME asserting KEY-STR is bound to FN-SYMBOL in line mode."
-  `(ert-deftest ,test-name ()
-     ,(format "Line keymap binds %S to `%s'." key-str fn-symbol)
-     (kuro-input-mode-test--with-buffer
-      (kuro--build-keymap)
-      (kuro--build-line-mode-keymap)
-      (should (eq (lookup-key kuro--line-mode-keymap (kbd ,key-str)) #',fn-symbol)))))
+  `(kuro-input-mode-test--def-line-keymap ,test-name ,key-str ,fn-symbol))
 
 (defmacro kuro-input-mode-edit-test--deftest-line-keymaps ()
   "Define edit-mode line keymap binding tests from shared data."
@@ -248,12 +273,35 @@ BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
               ,test-name ,input ,point ,expected-span)))
         kuro-input-mode-macros-test--word-bounds-forward-cases)))
 
+(defun kuro-input-mode-macros-test--normalize-expansion (exp)
+  "Return EXP in a defun-like shape when macroexpand wraps it in defalias."
+  (if (and (consp exp) (eq (car exp) 'defalias))
+      (let* ((name (cadr exp))
+             (fn (caddr exp))
+             (symbol-name (if (and (consp name) (eq (car name) 'quote))
+                              (cadr name)
+                            name))
+             (lambda-form
+              (cond
+               ((and (consp fn) (eq (car fn) 'function)
+                     (consp (cadr fn))
+                     (eq (car (cadr fn)) 'lambda))
+                (cadr fn))
+               ((and (consp fn) (eq (car fn) 'lambda))
+                fn)
+               (t nil))))
+        (if lambda-form
+            `(defun ,symbol-name ,@(cdr lambda-form))
+          exp))
+    exp))
+
 (defmacro kuro-input-mode-macros-test--def-macro-head
     (test-name form expected-head expected-second)
   "Define TEST-NAME asserting FORM expands to EXPECTED-HEAD and EXPECTED-SECOND."
   `(ert-deftest ,test-name ()
      ,(format "%S expands to `%s'." (car form) expected-head)
-     (let ((exp (macroexpand-1 ',form)))
+     (let ((exp (kuro-input-mode-macros-test--normalize-expansion
+                 (macroexpand ',form))))
        (should (eq (car exp) ',expected-head))
        ,@(when expected-second
            `((should (eq (cadr exp) ',expected-second)))))))
@@ -273,7 +321,8 @@ BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
   "Define TEST-NAME asserting EXPECTED-MEMBER is in FORM expansion body."
   `(ert-deftest ,test-name ()
      ,(format "%S expansion contains %S." (car form) expected-member)
-     (let ((exp (macroexpand-1 ',form)))
+     (let ((exp (kuro-input-mode-macros-test--normalize-expansion
+                 (macroexpand ',form))))
        (should (member ',expected-member (cddr exp))))))
 
 (defmacro kuro-input-mode-macros-test--deftest-macro-members ()
@@ -291,7 +340,8 @@ BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
   "Define TEST-NAME asserting FORM expansion ends with EXPECTED-TAIL."
   `(ert-deftest ,test-name ()
      ,(format "%S expansion ends with %S." (car form) expected-tail)
-     (let* ((exp (macroexpand-1 ',form))
+     (let* ((exp (kuro-input-mode-macros-test--normalize-expansion
+                  (macroexpand ',form)))
             (forms (if (eq (car exp) 'defun) (cddr exp) (cdr exp))))
        (should (equal (car (last forms)) ',expected-tail)))))
 
@@ -310,7 +360,8 @@ BODY runs with `edit-buf' and `term-buf' bound; cleanup is automatic."
   "Define TEST-NAME asserting ACCESSOR of FORM expansion is EXPECTED."
   `(ert-deftest ,test-name ()
      ,(format "%S expansion %S is %S." (car form) accessor expected)
-     (let* ((exp (macroexpand-1 ',form))
+     (let* ((exp (kuro-input-mode-macros-test--normalize-expansion
+                  (macroexpand ',form)))
             (forms (cdr exp))
             (actual (pcase ',accessor
                       ('car (car forms))

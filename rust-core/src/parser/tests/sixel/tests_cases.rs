@@ -12,7 +12,7 @@ use super::tests_support::*;
 
 #[test]
 fn test_empty_sixel() {
-    let decoder = make_decoder();
+    let decoder = decode(b"");
     assert!(decoder.finish().is_none());
 }
 
@@ -77,18 +77,44 @@ fn new_decoder_params_is_empty() {
     assert!(d.params.is_empty());
 }
 
+#[test]
+fn resolved_output_dimensions_prefers_declared_size_when_buffer_is_large_enough() {
+    assert_resolved_output_dimensions!(
+        8,
+        6,
+        4,
+        3,
+        8 * 6 * 4,
+        expected Some([8, 6])
+    );
+}
+
+#[test]
+fn resolved_output_dimensions_falls_back_to_actual_size_when_declared_buffer_is_too_small() {
+    assert_resolved_output_dimensions!(
+        8,
+        6,
+        4,
+        3,
+        4 * 3 * 4,
+        expected Some([4, 3])
+    );
+}
+
+#[test]
+fn resolved_output_dimensions_returns_none_when_no_size_is_usable() {
+    assert_resolved_output_dimensions!(8, 6, 0, 0, 0, expected None);
+}
+
 // ---------------------------------------------------------------------------
 // Single pixel / raster
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_single_pixel_sixel() {
-    let mut decoder = make_decoder();
-    feed(&mut decoder, b"\"1;1;1;6#0~");
+    let decoder = decode(b"\"1;1;1;6#0~");
 
-    let result = decoder.finish();
-    assert!(result.is_some());
-    let (pixels, w, h) = result.expect("result should exist");
+    let (pixels, w, h) = finish_pixels(decoder);
     assert_eq!(w, 1);
     assert_eq!(h, 6);
     assert_eq!(pixels.len(), 24); // 1 * 6 * RGBA(4)
@@ -100,68 +126,39 @@ fn test_single_pixel_sixel() {
 
 #[test]
 fn raster_sets_declared_dimensions() {
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;40;20");
-    // Unterminated raster; flush via finish
-    let _ = d.finish();
-    // We can't inspect after finish (consumes self), so test via a non-consuming path:
-    // re-run with a terminator byte
-    let mut d2 = make_decoder();
-    feed(&mut d2, b"\"1;1;40;20?"); // `?` triggers raster termination + paint
-    assert_eq!(d2.declared_width, 40);
-    assert_eq!(d2.declared_height, 20);
+    assert_finish_dims!(seq b"\"1;1;40;20?", w 40, h 20);
 }
 
 #[test]
 fn raster_fewer_than_four_params_ignored() {
     // "Pan;Pad;Ph — only 3 params, must not set declared dimensions
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;40?"); // 3 params (0,0,40) — params[3] missing
-    assert_eq!(d.declared_width, 0);
-    assert_eq!(d.declared_height, 0);
+    let d = decode(b"\"1;1;40?"); // 3 params (0,0,40) — params[3] missing
+    assert_declared_dims!(d, w 0, h 0);
 }
 
 #[test]
 fn raster_zero_width_ignored() {
     // "1;1;0;20 — zero width must not set declared dimensions
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;0;20?");
-    assert_eq!(d.declared_width, 0);
-    assert_eq!(d.declared_height, 0);
+    let d = decode(b"\"1;1;0;20?");
+    assert_declared_dims!(d, w 0, h 0);
 }
 
 #[test]
 fn raster_zero_height_ignored() {
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;40;0?");
-    assert_eq!(d.declared_width, 0);
-    assert_eq!(d.declared_height, 0);
+    let d = decode(b"\"1;1;40;0?");
+    assert_declared_dims!(d, w 0, h 0);
 }
 
 #[test]
 fn raster_oversized_dimensions_ignored() {
     // 4097 * 4097 exceeds MAX_SIXEL_SIZE (4096*4096)
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;4097;4097?");
-    assert_eq!(d.declared_width, 0);
-    assert_eq!(d.declared_height, 0);
+    let d = decode(b"\"1;1;4097;4097?");
+    assert_declared_dims!(d, w 0, h 0);
 }
 
 #[test]
 fn raster_finish_flushes_unterminated_command() {
-    // Feed raster without a terminating non-digit byte, let finish() flush it
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;8;6");
-    // No terminator byte — finish() must flush
-    // After finish(), declared dimensions should be set and result non-None
-    // (we need at least one sixel data byte for finish to return Some)
-    // Re-feed with terminator to inspect state
-    let mut d2 = make_decoder();
-    feed(&mut d2, b"\"1;1;8;6");
-    // Manually simulate finish flush path by feeding a data char
-    d2.put(b'~'); // this acts as terminator for raster and paints
-    assert_eq!(d2.declared_width, 8);
-    assert_eq!(d2.declared_height, 6);
+    assert_finish_dims!(seq b"\"1;1;8;6", w 8, h 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,8 +183,7 @@ fn color_definition_rgb_blue() {
 #[test]
 fn color_definition_clamps_rgb_to_100() {
     // Values above 100 must be clamped to 100 before scaling to 255
-    let mut d = make_decoder();
-    feed(&mut d, b"#4;2;200;200;200$");
+    let d = decode(b"#4;2;200;200;200$");
     // 100.min(200) * 255 / 100 == 255
     assert_eq!(d.color_map.get(&4), Some(&[255u8, 255, 255]));
 }
@@ -195,7 +191,7 @@ fn color_definition_clamps_rgb_to_100() {
 #[test]
 fn color_select_only_sets_current_color() {
     // #N with fewer than 5 params only selects current_color without redefining map entry
-    let mut d = make_decoder();
+    let mut d = decode(b"");
     let original = d.color_map.get(&3).copied();
     feed(&mut d, b"#3$");
     assert_eq!(d.current_color, 3);
@@ -209,9 +205,8 @@ fn color_select_only_sets_current_color() {
 #[test]
 fn color_no_params_does_not_panic() {
     // `#` followed immediately by a non-digit, non-semicolon character
-    let mut d = make_decoder();
-    feed(&mut d, b"#~"); // finalize color command with empty params, then paint
-                         // Must not panic; current_color stays 0
+    let d = decode(b"#~"); // finalize color command with empty params, then paint
+                           // Must not panic; current_color stays 0
     assert_eq!(d.current_color, 0);
 }
 
@@ -219,8 +214,7 @@ fn color_no_params_does_not_panic() {
 fn color_index_high_value_clamped_to_max_register() {
     // Indices above 1023 are clamped to 1023 (MAX_COLOR_REGISTERS - 1).
     // Must not panic; the color must land at register 1023, not 65535.
-    let mut d = make_decoder();
-    feed(&mut d, b"#65535;2;50;50;50$");
+    let d = decode(b"#65535;2;50;50;50$");
     assert!(
         d.color_map.contains_key(&1023),
         "out-of-range register must be clamped to 1023"
@@ -234,24 +228,21 @@ fn color_index_high_value_clamped_to_max_register() {
 #[test]
 fn color_index_at_max_register_is_stored() {
     // Register 1023 is the last valid register; must be stored normally.
-    let mut d = make_decoder();
-    feed(&mut d, b"#1023;2;50;50;50$");
+    let d = decode(b"#1023;2;50;50;50$");
     assert!(d.color_map.contains_key(&1023));
 }
 
 #[test]
 fn color_index_just_below_max_is_stored() {
     // Register 1022 is within bounds.
-    let mut d = make_decoder();
-    feed(&mut d, b"#1022;2;100;0;0$");
+    let d = decode(b"#1022;2;100;0;0$");
     assert!(d.color_map.contains_key(&1022));
 }
 
 #[test]
 fn color_hls_definition() {
     // #1;1;0;50;100 → HLS(0°, 50%, 100%) → red
-    let mut d = make_decoder();
-    feed(&mut d, b"#5;1;0;50;100$");
+    let d = decode(b"#5;1;0;50;100$");
     let rgb = d.color_map.get(&5).copied().unwrap_or([0, 0, 0]);
     assert!(rgb[0] > 200, "hls red: r should be high, got {}", rgb[0]);
     assert!(rgb[1] < 50, "hls red: g should be low, got {}", rgb[1]);
@@ -261,7 +252,7 @@ fn color_hls_definition() {
 #[test]
 fn color_unknown_type_does_not_insert() {
     // Color type 3 is not defined (only 1=HLS, 2=RGB)
-    let mut d = make_decoder();
+    let mut d = decode(b"");
     let before = d.color_map.contains_key(&9);
     feed(&mut d, b"#9;3;50;50;50$");
     // current_color is set to 9 but no new map entry should be added for type 3
@@ -270,12 +261,7 @@ fn color_unknown_type_does_not_insert() {
 
 #[test]
 fn color_finish_flushes_unterminated_color_command() {
-    // Feed color definition without terminator — finish() must flush it
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;4;6");
-    feed(&mut d, b"#1;2;100;0;0"); // no terminator
-    let _ = d.finish();
-    // We can't inspect after finish, but it must not panic
+    let _ = decode(b"\"1;1;4;6#1;2;100;0;0").finish();
 }
 
 // ---------------------------------------------------------------------------
@@ -284,25 +270,14 @@ fn color_finish_flushes_unterminated_color_command() {
 
 #[test]
 fn test_rle_repeat() {
-    let mut decoder = make_decoder();
-    feed(&mut decoder, b"\"1;1;10;6!10~");
-    let result = decoder.finish();
-    assert!(result.is_some());
-    let (_, w, h) = result.expect("result should exist");
-    assert_eq!(w, 10);
-    assert_eq!(h, 6);
+    let decoder = decode(b"\"1;1;10;6!10~");
+    assert_finish_dims!(decoder decoder, w 10, h 6);
 }
 
 #[test]
 fn repeat_one_equivalent_to_single_paint() {
-    // !1~ and ~ should produce identical cursor advancement
-    let mut d1 = make_decoder();
-    feed(&mut d1, b"\"1;1;2;6~");
-    let cursor_single = d1.cursor_x;
-
-    let mut d2 = make_decoder();
-    feed(&mut d2, b"\"1;1;2;6!1~");
-    let cursor_repeat1 = d2.cursor_x;
+    let cursor_single = decode(b"\"1;1;2;6~").cursor_x;
+    let cursor_repeat1 = decode(b"\"1;1;2;6!1~").cursor_x;
 
     assert_eq!(cursor_single, cursor_repeat1);
 }
@@ -310,8 +285,7 @@ fn repeat_one_equivalent_to_single_paint() {
 #[test]
 fn repeat_zero_treated_as_one() {
     // !0~ — count.max(1) means 0 becomes 1
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;4;6!0~");
+    let d = decode(b"\"1;1;4;6!0~");
     // cursor_x should advance by 1 (count clamped to 1)
     assert_eq!(d.cursor_x, 1);
 }
@@ -319,23 +293,17 @@ fn repeat_zero_treated_as_one() {
 #[test]
 fn repeat_large_count_saturates_to_declared_width() {
     // Repeat count exceeding declared width stops at width boundary
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;5;6!100~");
+    let d = decode(b"\"1;1;5;6!100~");
     // cursor_x advances by 100 but pixel painting stops at declared_width=5
     assert_eq!(d.cursor_x, 100); // cursor_x reflects repeat count
-    let result = d.finish();
-    assert!(result.is_some());
-    let (_, w, _) = result.unwrap();
-    assert_eq!(w, 5); // width capped at declared_width
+    assert_finish_dims!(decoder d, w 5, h 6);
 }
 
 #[test]
 fn repeat_non_data_byte_resets_state() {
     // `!` followed by a non-digit non-data byte should reset to Normal and re-process
-    let mut d = make_decoder();
-    // `!$` — repeat with carriage return as terminator
-    feed(&mut d, b"\"1;1;4;6!$");
-    // After `$` re-processed as carriage-return, cursor_x resets to 0
+    let d = decode(b"\"1;1;4;6!$"); // `!$` — repeat with carriage return as terminator
+                                    // After `$` re-processed as carriage-return, cursor_x resets to 0
     assert_eq!(d.cursor_x, 0);
     assert!(d.state == SixelParseState::Normal);
 }

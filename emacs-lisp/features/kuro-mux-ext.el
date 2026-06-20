@@ -1,4 +1,4 @@
-;;; kuro-mux-ext.el --- kuro-mux: pane management, tab-bar, persistence, keymap  -*- lexical-binding: t; -*-
+;;; kuro-mux-ext.el --- kuro-mux: pane management, tab-bar, persistence  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
 
@@ -6,12 +6,13 @@
 
 ;; Extension module for kuro-mux.el.  Loaded automatically by kuro-mux.el.
 ;; Provides: pane movement between frames, session naming, tab-bar integration,
-;; layout persistence, session monitoring, pipe-pane, prefix keymap, and setup.
+;; layout persistence, prefix keymap, and setup.
 ;; All functions here depend on kuro-mux.el having been loaded first.
 
 ;;; Code:
 
 (declare-function kuro-mux--live-sessions      "kuro-mux" ())
+(declare-function kuro-mux--find-session-by-name "kuro-mux" (name))
 (declare-function kuro-mux--session-display-name "kuro-mux" (buf))
 (declare-function kuro-mux--register           "kuro-mux" ())
 (declare-function kuro-mux--unregister         "kuro-mux" ())
@@ -35,25 +36,20 @@
 (declare-function kuro-mux-swap-pane-forward   "kuro-mux-windows" ())
 (declare-function kuro-mux-swap-pane-backward  "kuro-mux-windows" ())
 (declare-function kuro-mux-resize-pane         "kuro-mux-windows" (direction &optional delta))
+(declare-function kuro--send-paste-or-raw      "kuro-input-paste" (text))
+(require 'kuro-config)
+(require 'kuro-mux-ext-macros)
 (declare-function kuro-mux-install-mode-line       "kuro-mux"      ())
 (declare-function kuro-mux--track-window-change    "kuro-mux-windows" (_frame))
 (declare-function kuro-mux-save-layout             "kuro-mux-ext2" ())
-(declare-function kuro--activity-notify            "kuro-activity" (title body))
 
 ;; Forward declarations for buffer-local variables defined in kuro-mux.el.
 ;; kuro-mux-tab-bar-mode is defined later in this file (define-minor-mode at line ~187).
 (defvar kuro-mux-tab-bar-mode)
-(defvar kuro-mux-monitor-activity-debounce)
 (defvar kuro-mux-mode-line-segment)
 (defvar kuro-mux--name)
 (defvar kuro-mux--command)
 (defvar kuro-mux--directory)
-(defvar kuro-mux--monitor-activity)
-(defvar kuro-mux--monitor-activity-last-notified)
-(defvar kuro-mux--monitor-silence-seconds)
-(defvar kuro-mux--monitor-silence-timer)
-(defvar kuro-mux--pipe-pane-file)
-(defvar kuro-shell)
 
 
 ;;;; Pane movement between frames
@@ -130,9 +126,7 @@ Signals `user-error' when no session matching NAME is found."
                                   (kuro-mux--live-sessions))
                           nil t)
          (read-string "Send text: ")))
-  (let ((target (seq-find (lambda (buf)
-                            (string= (kuro-mux--session-display-name buf) name))
-                          (kuro-mux--live-sessions))))
+  (let ((target (kuro-mux--find-session-by-name name)))
     (if target
         (with-current-buffer target
           (kuro--send-paste-or-raw text))
@@ -142,25 +136,29 @@ Signals `user-error' when no session matching NAME is found."
 ;;;; Tab-bar integration
 
 (defun kuro-mux--tab-bar-update ()
-  "Rebuild the tab-bar tab list to reflect the current session registry.
-Each live kuro session gets one tab named by `kuro-mux--session-display-name'.
-Existing non-kuro tabs are preserved at their current positions."
-  (when (and (fboundp 'tab-bar-tabs) (fboundp 'tab-bar-select-tab-by-name))
+  "Ensure the tab-bar contains one tab for each live kuro session.
+Each missing session tab is created and named by
+`kuro-mux--session-display-name'."
+  (when (fboundp 'tab-bar-tabs)
     ;; Ensure tab-bar-mode is on
     (tab-bar-mode 1)
     ;; For each session without a corresponding tab, create one
     (dolist (buf (kuro-mux--live-sessions))
       (let* ((name (kuro-mux--session-display-name buf))
-             (existing (seq-find (lambda (tab)
-                                   (string= (alist-get 'name tab) name))
-                                 (tab-bar-tabs))))
-        (unless existing
+             (has-tab (kuro-mux--tab-bar-session-tab-p name)))
+        (unless has-tab
           (tab-bar-new-tab)
           (with-current-buffer buf
             (switch-to-buffer buf))
           ;; Rename the new tab
           (when (fboundp 'tab-bar-rename-tab)
             (tab-bar-rename-tab name)))))))
+
+(defun kuro-mux--tab-bar-session-tab-p (name)
+  "Return non-nil when a tab-bar tab named NAME already exists."
+  (seq-find (lambda (tab)
+              (string= (alist-get 'name tab) name))
+            (tab-bar-tabs)))
 
 (defun kuro-mux--on-session-created ()
   "Hook function: register new session and update tab-bar if enabled."
@@ -169,30 +167,30 @@ Existing non-kuro tabs are preserved at their current positions."
     (kuro-mux--tab-bar-update)))
 
 (defun kuro-mux--on-session-killed ()
-  "Hook function: unregister session and update tab-bar if enabled."
+  "Hook function: unregister session."
   (kuro-mux--unregister))
 
-(defconst kuro-mux--lifecycle-hooks
-  '((kuro-mode-hook                    . kuro-mux--on-session-created)
-    (kill-buffer-hook                  . kuro-mux--on-session-killed)
-    (window-selection-change-functions . kuro-mux--track-window-change)
-    (kill-emacs-hook                   . kuro-mux--auto-save-on-exit))
-  "Hook alist managed by `kuro-mux-tab-bar-mode'.  Each entry is (HOOK . FN).")
+(eval-and-compile
+  (defconst kuro-mux--lifecycle-hooks
+    '((kuro-mode-hook                    . kuro-mux--on-session-created)
+      (kill-buffer-hook                  . kuro-mux--on-session-killed)
+      (window-selection-change-functions . kuro-mux--track-window-change)
+      (kill-emacs-hook                   . kuro-mux--auto-save-on-exit))
+    "Hook alist managed by `kuro-mux-tab-bar-mode'.  Each entry is (HOOK . FN)."))
 
 (defun kuro-mux--install-hooks ()
   "Install kuro-mux lifecycle hooks."
-  (dolist (h kuro-mux--lifecycle-hooks) (add-hook (car h) (cdr h))))
+  (kuro--install-mux-lifecycle-hooks))
 
 (defun kuro-mux--uninstall-hooks ()
   "Remove kuro-mux lifecycle hooks."
-  (dolist (h kuro-mux--lifecycle-hooks) (remove-hook (car h) (cdr h))))
+  (kuro--uninstall-mux-lifecycle-hooks))
 
 ;;;###autoload
 (define-minor-mode kuro-mux-tab-bar-mode
   "Global minor mode that syncs kuro sessions with tab-bar tabs.
-When enabled, each new kuro session automatically gets a tab-bar tab,
-and closing a session removes its tab.  `tab-bar-mode' is activated
-automatically when the first kuro tab is created."
+When enabled, each new kuro session automatically gets a tab-bar tab.
+`tab-bar-mode' is activated automatically when the first kuro tab is created."
   :global t
   :group 'kuro
   (if kuro-mux-tab-bar-mode
@@ -227,114 +225,6 @@ Called from `kill-emacs-hook'.  No-op when `kuro-mux-auto-save-layout' is nil
 or when there are no live sessions to persist."
   (when (and kuro-mux-auto-save-layout (kuro-mux--live-sessions))
     (kuro-mux-save-layout)))
-
-;;;; Session monitoring (activity + silence)
-
-(defun kuro-mux--activity-watcher (_beg _end _old-len)
-  "Called from `after-change-functions' to detect output in monitored sessions.
-Fires a notification when the buffer is not currently visible and at least
-`kuro-mux-monitor-activity-debounce' seconds have elapsed since the last one."
-  (when (and kuro-mux--monitor-activity
-             (not (get-buffer-window (current-buffer) 'visible))
-             (> (float-time)
-                (+ kuro-mux--monitor-activity-last-notified
-                   kuro-mux-monitor-activity-debounce)))
-    (setq kuro-mux--monitor-activity-last-notified (float-time))
-    (kuro--activity-notify
-     (format "Activity: %s" (buffer-name))
-     "Session produced output while hidden")))
-
-(defun kuro-mux--silence-watcher (_beg _end _old-len)
-  "Called from `after-change-functions' to reset the silence countdown.
-Cancels any pending silence timer and schedules a new one for
-`kuro-mux--monitor-silence-seconds' seconds in the future."
-  (when kuro-mux--monitor-silence-seconds
-    (when (timerp kuro-mux--monitor-silence-timer)
-      (cancel-timer kuro-mux--monitor-silence-timer))
-    (let ((buf (current-buffer))
-          (sec kuro-mux--monitor-silence-seconds))
-      (setq kuro-mux--monitor-silence-timer
-            (run-with-timer sec nil
-              (lambda ()
-                (when (buffer-live-p buf)
-                  (with-current-buffer buf
-                    (kuro--activity-notify
-                     (format "Silence: %s" (buffer-name))
-                     (format "No output for %gs" sec))))))))))
-
-;;;###autoload
-(defun kuro-mux-monitor-activity-toggle ()
-  "Toggle activity monitoring for the current kuro session.
-When enabled, a notification fires via `kuro--activity-notify' the first
-time new output arrives while the buffer is not displayed in any visible
-frame.  Subsequent notifications are throttled by
-`kuro-mux-monitor-activity-debounce'.
-Analogous to tmux `:monitor-activity on/off'."
-  (interactive)
-  (kuro--with-kuro-mode
-   (setq kuro-mux--monitor-activity (not kuro-mux--monitor-activity))
-   (if kuro-mux--monitor-activity
-       (progn
-         (add-hook 'after-change-functions #'kuro-mux--activity-watcher nil t)
-         (message "kuro-mux: activity monitoring ON for %s" (buffer-name)))
-     (remove-hook 'after-change-functions #'kuro-mux--activity-watcher t)
-     (message "kuro-mux: activity monitoring OFF for %s" (buffer-name)))))
-
-;;;###autoload
-(defun kuro-mux-monitor-silence (seconds)
-  "Monitor the current kuro session for silence longer than SECONDS.
-A notification fires via `kuro--activity-notify' when the session produces
-no output for SECONDS consecutive seconds.  The timer is reset on every
-new output event.  Pass 0 to disable silence monitoring for this session.
-Analogous to tmux `:monitor-silence N'."
-  (interactive "nMonitor silence after (seconds, 0=off): ")
-  (kuro--with-kuro-mode
-   (setq kuro-mux--monitor-silence-seconds (and (> seconds 0) seconds))
-   (if kuro-mux--monitor-silence-seconds
-       (progn
-         (add-hook 'after-change-functions #'kuro-mux--silence-watcher nil t)
-         (message "kuro-mux: silence monitoring ON (%gs) for %s"
-                  seconds (buffer-name)))
-     (when (timerp kuro-mux--monitor-silence-timer)
-       (cancel-timer kuro-mux--monitor-silence-timer)
-       (setq kuro-mux--monitor-silence-timer nil))
-     (remove-hook 'after-change-functions #'kuro-mux--silence-watcher t)
-     (message "kuro-mux: silence monitoring OFF for %s" (buffer-name)))))
-
-
-;;;; Pipe pane — capture rendered session output to a file
-
-(defun kuro-mux--pipe-pane-watcher (beg end _old-len)
-  "Append buffer text from BEG to END to `kuro-mux--pipe-pane-file'.
-Called from `after-change-functions' when output piping is active."
-  (when (and kuro-mux--pipe-pane-file (< beg end))
-    (let ((text (buffer-substring-no-properties beg end)))
-      (condition-case err
-          (write-region text nil kuro-mux--pipe-pane-file t 'silent)
-        (error
-         (message "kuro-mux pipe-pane error: %s" (error-message-string err))
-         (setq kuro-mux--pipe-pane-file nil)
-         (remove-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher t))))))
-
-(defun kuro-mux-pipe-pane (file)
-  "Toggle piping of this session's rendered output to FILE (tmux: pipe-pane).
-When output is already being piped, stop it (pass nil interactively).
-Otherwise prompt for FILE and start appending rendered text to it.
-Bound to `P' in the mux prefix map."
-  (interactive
-   (if kuro-mux--pipe-pane-file
-       (list nil)
-     (list (read-file-name "Pipe output to file: "))))
-  (kuro--with-kuro-mode
-   (if (null file)
-       (progn
-         (setq kuro-mux--pipe-pane-file nil)
-         (remove-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher t)
-         (message "kuro-mux: pipe-pane stopped for %s" (buffer-name)))
-     (setq kuro-mux--pipe-pane-file (expand-file-name file))
-     (add-hook 'after-change-functions #'kuro-mux--pipe-pane-watcher nil t)
-     (message "kuro-mux: piping %s → %s" (buffer-name) kuro-mux--pipe-pane-file))))
-
 
 (provide 'kuro-mux-ext)
 ;;; kuro-mux-ext.el ends here

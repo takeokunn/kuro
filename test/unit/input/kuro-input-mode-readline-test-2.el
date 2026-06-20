@@ -203,32 +203,15 @@
 (kuro-input-mode-readline-test--deftest-command-line-cases
  kuro-input-mode-readline-test--transpose-word-cases)
 
-;;; Group 32 — kuro--def-line-kill-word macro structural coverage
+;;; Group 32 — kuro--line-kill-word / backward-kill-word
 
-(ert-deftest kuro-input-mode-test-def-line-kill-word-kill-word-is-interactive ()
-  "`kuro--line-kill-word' is an interactive command (macro-generated)."
+(ert-deftest kuro-input-mode-test-kill-word-is-interactive ()
+  "`kuro--line-kill-word' is an interactive command."
   (should (commandp #'kuro--line-kill-word)))
 
-(ert-deftest kuro-input-mode-test-def-line-kill-word-backward-kill-word-is-interactive ()
-  "`kuro--line-backward-kill-word' is an interactive command (macro-generated)."
+(ert-deftest kuro-input-mode-test-backward-kill-word-is-interactive ()
+  "`kuro--line-backward-kill-word' is an interactive command."
   (should (commandp #'kuro--line-backward-kill-word)))
-
-(ert-deftest kuro-input-mode-test-def-line-kill-word-macroexpand-1-is-defun ()
-  "`kuro--def-line-kill-word' single-step expands to a `defun' form."
-  (let ((exp (macroexpand-1
-              '(kuro--def-line-kill-word kuro-test--dummy-kill
-                 kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
-                 p bound bound "doc"))))
-    (should (eq (car exp) 'defun))
-    (should (eq (cadr exp) 'kuro-test--dummy-kill))))
-
-(ert-deftest kuro-input-mode-test-def-line-kill-word-expansion-contains-interactive ()
-  "`kuro--def-line-kill-word' expansion contains (interactive) form."
-  (let ((exp (macroexpand-1
-              '(kuro--def-line-kill-word kuro-test--dummy-kill2
-                 kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
-                 p bound bound "doc"))))
-    (should (member '(interactive) (cddr exp)))))
 
 ;;; Group 33 — kuro--line-kill-to-bol and kuro--line-kill-line edge cases
 

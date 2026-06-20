@@ -5,10 +5,8 @@ use super::osc_protocol::{
     handle_osc_52, handle_osc_777, handle_osc_9, handle_osc_default_colors, parse_color_spec,
 };
 
-use std::sync::Arc;
-
-use crate::TerminalCore;
 use crate::types::osc::DefaultColorSlot;
+use crate::TerminalCore;
 
 use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_BYTES};
 
@@ -34,19 +32,7 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         return;
     }
     match params[0] {
-        b"0" | b"2" => {
-            if let Some(raw) = params.get(1) {
-                if raw.is_empty() {
-                    return; // ignore empty titles
-                }
-                if raw.len() > MAX_TITLE_BYTES {
-                    return; // ignore oversized titles (DoS prevention)
-                }
-                let title = String::from_utf8_lossy(raw).into_owned();
-                core.meta.title = title;
-                core.meta.title_dirty = true;
-            }
-        }
+        b"0" | b"2" => handle_osc_title(core, params),
         b"7" => handle_osc_7(core, params),
         b"8" => handle_osc_8(core, params),
         b"9" => handle_osc_9(core, params),
@@ -55,17 +41,12 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         b"10" | b"11" | b"12" => handle_osc_default_colors(core, params),
         // OSC 22 — window pointer cursor shape (e.g. "default", "pointer", "text", "crosshair").
         // Applications set this to change the OS mouse cursor within the terminal area.
-        b"22" => {
-            if let Some(raw) = params.get(1) {
-                let name = String::from_utf8_lossy(raw).into_owned();
-                core.osc_data.pointer_shape = if name.is_empty() { None } else { Some(name) };
-            }
-        }
+        b"22" => handle_osc_pointer_shape(core, params),
         // OSC 110/111/112: reset default fg/bg/cursor color to terminal default.
         // Symmetric counterparts to OSC 10/11/12 set/query.
-        b"110" => core.osc_data.reset_default_color(DefaultColorSlot::Foreground),
-        b"111" => core.osc_data.reset_default_color(DefaultColorSlot::Background),
-        b"112" => core.osc_data.reset_default_color(DefaultColorSlot::Cursor),
+        b"110" => reset_osc_default_color(core, DefaultColorSlot::Foreground),
+        b"111" => reset_osc_default_color(core, DefaultColorSlot::Background),
+        b"112" => reset_osc_default_color(core, DefaultColorSlot::Cursor),
         b"51" => handle_osc_51(core, params),
         b"52" => handle_osc_52(core, params),
         b"104" => handle_osc_104(core, params),
@@ -75,34 +56,98 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
     }
 }
 
-/// Handle OSC 7 — set current working directory.
-///
-/// Wire format: `OSC 7 ; file://hostname/path BEL`
-/// Extracts the path component (after `file://host`), enforces
-/// [`OSC7_MAX_PATH_BYTES`], and stores it in `core.osc_data.cwd`.
-/// Sets `cwd_dirty = true` so the Emacs side updates the modeline.
+fn osc_lossy_text(raw: &[u8]) -> String {
+    String::from_utf8_lossy(raw).into_owned()
+}
+
+fn osc_normalized_lossy_text(raw: &[u8], max_len: Option<usize>) -> Option<String> {
+    if max_len.is_some_and(|max_len| raw.len() > max_len) {
+        return None;
+    }
+
+    let text = osc_lossy_text(raw);
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn osc_apply_param<T, F, G>(params: &[&[u8]], idx: usize, parse: F, mut set: G)
+where
+    F: Fn(&[u8]) -> Option<T>,
+    G: FnMut(T),
+{
+    if let Some(value) = params.get(idx).and_then(|raw| parse(raw)) {
+        set(value);
+    }
+}
+
+fn osc_title_from_raw(raw: &[u8]) -> Option<String> {
+    osc_normalized_lossy_text(raw, Some(MAX_TITLE_BYTES))
+}
+
+fn osc_param_value<T>(params: &[&[u8]], idx: usize, parse: fn(&[u8]) -> Option<T>) -> Option<T> {
+    params.get(idx).and_then(|raw| parse(raw))
+}
+
+fn handle_osc_title(core: &mut TerminalCore, params: &[&[u8]]) {
+    osc_apply_param(params, 1, osc_title_from_raw, |title| {
+        core.meta.set_title(title);
+    });
+}
+
+fn osc_pointer_shape_from_raw(raw: &[u8]) -> Option<String> {
+    osc_normalized_lossy_text(raw, None)
+}
+
+fn handle_osc_pointer_shape(core: &mut TerminalCore, params: &[&[u8]]) {
+    osc_apply_param(params, 1, osc_pointer_shape_from_raw, |name| {
+        core.osc_data.set_pointer_shape(Some(name));
+    });
+}
+
+fn osc7_host_and_path(after_scheme: &str) -> (&str, &str) {
+    match after_scheme.find('/') {
+        Some(i) => (&after_scheme[..i], &after_scheme[i..]),
+        None => ("", after_scheme),
+    }
+}
+
+fn osc7_cwd_from_raw(raw: &[u8]) -> Option<(Option<String>, String)> {
+    let url = osc_lossy_text(raw);
+    let after_scheme = url.strip_prefix("file://")?;
+    let (host, path) = osc7_host_and_path(after_scheme);
+
+    if path.len() > OSC7_MAX_PATH_BYTES {
+        return None;
+    }
+
+    let host = match host {
+        "" | "localhost" => None,
+        host => Some(host.to_owned()),
+    };
+    let path = path.to_owned();
+
+    Some((host, path))
+}
+
+fn osc8_uri_from_raw(raw: &[u8]) -> Option<Option<String>> {
+    if raw.is_empty() {
+        return Some(None);
+    }
+    osc_normalized_lossy_text(raw, Some(OSC8_MAX_URI_BYTES)).map(Some)
+}
+
+fn reset_osc_default_color(core: &mut TerminalCore, slot: DefaultColorSlot) {
+    core.osc_data.reset_default_color(slot);
+}
+
 #[inline]
 fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
-    if let Some(raw) = params.get(1) {
-        let url = String::from_utf8_lossy(raw);
-        if let Some(after_scheme) = url.strip_prefix("file://") {
-            // Extract hostname (everything before the first /)
-            let (host, path) = match after_scheme.find('/') {
-                Some(i) => (&after_scheme[..i], &after_scheme[i..]),
-                None => ("", after_scheme),
-            };
-            if path.len() <= OSC7_MAX_PATH_BYTES {
-                // Store hostname only if non-empty and not localhost
-                core.osc_data.cwd_host = if host.is_empty() || host == "localhost" {
-                    None
-                } else {
-                    Some(host.to_owned())
-                };
-                core.osc_data.cwd = Some(path.to_owned());
-                core.osc_data.cwd_dirty = true;
-            }
-        }
-    }
+    osc_apply_param(params, 1, osc7_cwd_from_raw, |(host, path)| {
+        core.osc_data.set_cwd(host, Some(path));
+    });
 }
 
 /// Handle OSC 8 — hyperlink start/end.
@@ -113,20 +158,14 @@ fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
 /// The `params` field (e.g. `id=`) is accepted but not stored.
 #[inline]
 fn handle_osc_8(core: &mut TerminalCore, params: &[&[u8]]) {
-    if params.get(1).is_some() {
-        // params field (e.g. id=...) is accepted but intentionally discarded
-        if let Some(uri_raw) = params.get(2) {
-            let uri = String::from_utf8_lossy(uri_raw);
-            if uri.is_empty() {
-                // Close hyperlink
-                core.osc_data.hyperlink = crate::types::osc::HyperlinkState::default();
-            } else if uri.len() <= OSC8_MAX_URI_BYTES {
-                core.osc_data.hyperlink = crate::types::osc::HyperlinkState {
-                    uri: Some(Arc::from(uri.into_owned())),
-                };
-            }
-        }
-    }
+    let Some(_) = params.get(1) else {
+        return;
+    };
+
+    osc_apply_param(params, 2, osc8_uri_from_raw, |uri| {
+        // Close hyperlink or store a validated URI.
+        core.osc_data.set_hyperlink_uri(uri);
+    });
 }
 
 /// Compute the standard xterm 256-color built-in color for palette index `idx`.
@@ -178,10 +217,12 @@ fn xterm_default_color(idx: usize) -> [u8; 3] {
 }
 
 fn parse_osc_palette_index(params: &[&[u8]]) -> Option<usize> {
-    let idx_raw = params.get(1)?;
-    let idx_str = std::str::from_utf8(idx_raw).ok()?;
-    let idx = idx_str.parse::<usize>().ok()?;
-    (idx < 256).then_some(idx)
+    osc_param_value(params, 1, |raw| {
+        std::str::from_utf8(raw)
+            .ok()
+            .and_then(|idx_str| idx_str.parse::<usize>().ok())
+            .filter(|idx| *idx < 256)
+    })
 }
 
 fn apply_osc_palette_query(core: &mut TerminalCore, idx: usize) {

@@ -19,56 +19,26 @@
 ;; # Dependencies
 ;;
 ;; Depends on `kuro--send-key-sequence' and `kuro--send-special' which are
-;; defined in `kuro-input'.  This file is required by kuro-input.el AFTER
-;; those functions are defined, so no circular dependency arises.
+;; defined in `kuro-input-send'.  Shared KKP constants live in
+;; `kuro-input-keys-data'.  This file is required by kuro-input.el after that
+;; module is loaded, so no circular dependency arises.
 
 ;;; Code:
 
-;; Forward references: defined in kuro-input.el, loaded before this file.
-(declare-function kuro--send-key-sequence "kuro-input" (normal-sequence application-sequence))
-(declare-function kuro--send-special "kuro-input" (byte))
-(declare-function kuro--send-key "kuro-ffi" (str))
-(declare-function kuro--schedule-immediate-render "kuro-input" ())
+(require 'kuro-input-keys-macros)
+(require 'kuro-input-keys-data)
+(require 'kuro-input-macros)
 
-;; kuro--keyboard-flags is a defvar-permanent-local in kuro-input-paste.el,
-;; loaded before this file.  Forward-declare to silence byte-compiler.
+;; Forward references: defined in kuro-input-send.el, loaded before this file.
+(declare-function kuro--send-key-sequence "kuro-input-send" (normal-sequence application-sequence))
+(declare-function kuro--send-special "kuro-input-send" (byte))
+(declare-function kuro--send-key "kuro-ffi" (str))
+(declare-function kuro--schedule-immediate-render "kuro-input-render" ())
+
+;; kuro--keyboard-flags is a defvar-permanent-local in kuro-input-paste.el.
+;; Forward-declare to silence byte-compiler.
 (defvar kuro--keyboard-flags 0
   "Forward reference; defvar-permanent-local in kuro-input-paste.el.")
-
-
-;;; Kitty Keyboard Protocol (KKP) flag bitmasks and codepoints
-
-(defconst kuro--kkp-disambiguate  #x01
-  "KKP flag: disambiguate escape codes (Escape → CSI 27;1u, Alt+key → CSI key;3u).")
-(defconst kuro--kkp-report-events #x02
-  "KKP flag: report key press/repeat/release event types.")
-(defconst kuro--kkp-all-escape    #x08
-  "KKP flag: report ALL keys as escape codes (CSI codepoint;modifier u).")
-
-;; KKP codepoints for functional (non-Unicode) keys.
-;; Source: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-keys
-(defconst kuro--kkp-cp-up        57352)
-(defconst kuro--kkp-cp-down      57353)
-(defconst kuro--kkp-cp-left      57350)
-(defconst kuro--kkp-cp-right     57351)
-(defconst kuro--kkp-cp-home      57356)
-(defconst kuro--kkp-cp-end       57357)
-(defconst kuro--kkp-cp-insert    57348)
-(defconst kuro--kkp-cp-delete    57349)
-(defconst kuro--kkp-cp-page-up   57354)
-(defconst kuro--kkp-cp-page-down 57355)
-(defconst kuro--kkp-cp-f1        57364)
-(defconst kuro--kkp-cp-f2        57365)
-(defconst kuro--kkp-cp-f3        57366)
-(defconst kuro--kkp-cp-f4        57367)
-(defconst kuro--kkp-cp-f5        57368)
-(defconst kuro--kkp-cp-f6        57369)
-(defconst kuro--kkp-cp-f7        57370)
-(defconst kuro--kkp-cp-f8        57371)
-(defconst kuro--kkp-cp-f9        57372)
-(defconst kuro--kkp-cp-f10       57373)
-(defconst kuro--kkp-cp-f11       57374)
-(defconst kuro--kkp-cp-f12       57375)
 
 
 ;;; KKP key-sender helper
@@ -82,26 +52,8 @@
 When the REPORT_ALL_KEYS_AS_ESCAPE_CODES flag (0x08) is set, send the
 canonical CSI CODEPOINT ; 1 u form.  Otherwise fall back to the legacy
 LEGACY-NORMAL / LEGACY-APPLICATION pair via `kuro--send-key-sequence'."
-  (if (kuro--kkp-flag-p kuro--kkp-all-escape)
-      (progn
-        (kuro--send-key (format "\e[%d;1u" codepoint))
-        (kuro--schedule-immediate-render))
+  (kuro--with-kkp-all-escape (format "\e[%d;1u" codepoint)
     (kuro--send-key-sequence legacy-normal legacy-application)))
-
-(defmacro kuro--def-key-sequence (name doc normal application &optional kkp-cp)
-  "Define an interactive command NAME that sends a key sequence to the PTY.
-NORMAL is sent in normal cursor mode; APPLICATION in application cursor mode.
-When KKP-CP (a KKP codepoint integer) is provided and the REPORT_ALL_KEYS
-flag is active, the canonical CSI KKP-CP ; 1 u form is sent instead.
-DOC is the function docstring."
-  (if kkp-cp
-      `(defun ,name () ,doc
-         (interactive)
-         (kuro--send-kkp-functional ,kkp-cp ,normal ,application))
-    `(defun ,name () ,doc
-       (interactive)
-       (kuro--send-key-sequence ,normal ,application))))
-
 
 ;;; Arrow Keys (Normal and Application Mode)
 (kuro--def-key-sequence kuro--arrow-up    "Send arrow up key."    "\e[A" "\eOA" kuro--kkp-cp-up)
@@ -138,9 +90,7 @@ DOC is the function docstring."
 With KKP REPORT_ALL_KEYS flag (0x08), encodes as CSI char;5u so the app
 can distinguish Ctrl+I from Tab, Ctrl+M from Enter, etc."
   (interactive "nChar: \nModifier: ")
-  (if (kuro--kkp-flag-p kuro--kkp-all-escape)
-      ;; KKP Ctrl modifier: shift=1, alt=2, ctrl=4 → wire modifier = (4+1)=5
-      (kuro--send-key (format "\e[%d;5u" char))
+  (kuro--with-kkp-all-escape (format "\e[%d;5u" char)
     (kuro--send-special (logand char 31))))
 
 (defun kuro--alt-modified (char)

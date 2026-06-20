@@ -119,6 +119,11 @@ that identify the clickable target."
 
 ;;; Scanner
 
+(defun kuro--overlay-with-marker-p (pos marker)
+  "Return non-nil when an overlay at POS has MARKER set."
+  (cl-some (lambda (ov) (overlay-get ov marker))
+           (overlays-at pos)))
+
 (defun kuro--scan-urls-in-region (beg end)
   "Scan region BEG to END for URLs and file:line patterns, creating overlays."
   (save-excursion
@@ -128,8 +133,7 @@ that identify the clickable target."
         (let ((url-beg (match-beginning 0))
               (url-end (match-end 0))
               (url (match-string-no-properties 0)))
-          (unless (cl-some (lambda (ov) (overlay-get ov 'kuro-url))
-                           (overlays-at url-beg))
+          (unless (kuro--overlay-with-marker-p url-beg 'kuro-url)
             (kuro--make-url-overlay url-beg url-end url)))))
     (when kuro-file-line-detection
       (goto-char beg)
@@ -138,8 +142,7 @@ that identify the clickable target."
               (file-end (match-end 0))
               (file (match-string-no-properties 1))
               (line (string-to-number (match-string-no-properties 2))))
-          (unless (cl-some (lambda (ov) (overlay-get ov 'kuro-url))
-                           (overlays-at file-beg))
+          (unless (kuro--overlay-with-marker-p file-beg 'kuro-url)
             (when (file-exists-p file)
               (kuro--make-file-line-overlay file-beg file-end file line))))))))
 

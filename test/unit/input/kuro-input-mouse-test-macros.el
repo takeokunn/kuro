@@ -12,10 +12,7 @@
 (defmacro kuro-input-mouse-test--with-send (mode sgr pixel col row &rest body)
   "Execute BODY with mouse stubs installed and `sent' bound."
   (declare (indent 5))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
+  `(kuro-mouse-test--with-state ,mode ,sgr ,pixel
      (let ((sent nil))
        (cl-letf (((symbol-function 'kuro--send-key)
                   (lambda (s) (setq sent s)))
@@ -30,10 +27,7 @@
 (defmacro kuro-input-mouse-test--with-send-and-type (mode sgr pixel col row event-type &rest body)
   "Like `kuro-input-mouse-test--with-send' but stubs `event-basic-type'."
   (declare (indent 6))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
+  `(kuro-mouse-test--with-state ,mode ,sgr ,pixel
      (let ((sent nil))
        (cl-letf (((symbol-function 'kuro--send-key)
                   (lambda (s) (setq sent s)))
@@ -46,6 +40,15 @@
                  ((symbol-function 'posn-x-y)
                   (lambda (_pos) (cons ,col ,row))))
          ,@body))))
+
+(defmacro kuro-mouse-test--with-state (mode sgr pixel &rest body)
+  "Execute BODY in a temp buffer with mouse MODE, SGR, and PIXEL state."
+  (declare (indent 3))
+  `(with-temp-buffer
+     (setq-local kuro--mouse-mode ,mode
+                 kuro--mouse-sgr ,sgr
+                 kuro--mouse-pixel-mode ,pixel)
+     ,@body))
 
 (defmacro kuro-mouse-test--with-event (col row &rest body)
   "Execute BODY with event position functions stubbed for COL and ROW."
@@ -61,10 +64,7 @@
 (defmacro kuro-mouse-test--with-encode-buffer (mode sgr pixel col row &rest body)
   "Temp buffer with mouse MODE/SGR/PIXEL and event position COL/ROW; run BODY."
   (declare (indent 5))
-  `(with-temp-buffer
-     (setq-local kuro--mouse-mode ,mode
-                 kuro--mouse-sgr ,sgr
-                 kuro--mouse-pixel-mode ,pixel)
+  `(kuro-mouse-test--with-state ,mode ,sgr ,pixel
      (kuro-mouse-test--with-event ,col ,row
        ,@body)))
 

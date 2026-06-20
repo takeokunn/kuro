@@ -177,6 +177,15 @@
     (kuro--scan-urls-in-region (point-min) (point-max))
     (should (= (length kuro--url-overlays) 1))))
 
+(ert-deftest kuro-url-detect--scan-skips-duplicate-file-line-overlays ()
+  "kuro--scan-urls-in-region does not create duplicate file:line overlays."
+  (kuro-url-detect-test--with-buffer
+    (insert "/tmp/test-file.el:10\n")
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) t)))
+      (kuro--scan-urls-in-region (point-min) (point-max))
+      (kuro--scan-urls-in-region (point-min) (point-max))
+      (should (= (length kuro--url-overlays) 1)))))
+
 (ert-deftest kuro-url-detect--scan-creates-multiple-url-overlays ()
   "kuro--scan-urls-in-region creates overlays for multiple URLs."
   (kuro-url-detect-test--with-buffer

@@ -10,10 +10,7 @@
 
 (ert-deftest kuro-input-mouse-pixel-and-sgr-both-set ()
   "When both pixel-mode and sgr are set, pixel-mode wins: SGR format, no +1 offset."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1000)
-    (setq-local kuro--mouse-sgr t)
-    (setq-local kuro--mouse-pixel-mode t)
+  (kuro-mouse-test--with-state 1000 t t
     (kuro-mouse-test--with-event 150 200
       (let ((result (kuro--encode-mouse 'fake-event 0 t)))
         (should (equal result "\e[<0;150;200M"))))))
@@ -22,20 +19,14 @@
 
 (ert-deftest kuro-input-mouse-x10-col-boundary-222-passes ()
   "X10 col1=223 (posn-col-row=222) is the last valid column."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1000)
-    (setq-local kuro--mouse-sgr nil)
-    (setq-local kuro--mouse-pixel-mode nil)
+  (kuro-mouse-test--with-state 1000 nil nil
     (kuro-mouse-test--with-event 222 0
       (let ((result (kuro--encode-mouse 'fake-event 0 t)))
         (should (stringp result))))))
 
 (ert-deftest kuro-input-mouse-x10-row-boundary-222-passes ()
   "X10 row1=223 (posn-col-row row=222) is the last valid row."
-  (with-temp-buffer
-    (setq-local kuro--mouse-mode 1000)
-    (setq-local kuro--mouse-sgr nil)
-    (setq-local kuro--mouse-pixel-mode nil)
+  (kuro-mouse-test--with-state 1000 nil nil
     (kuro-mouse-test--with-event 0 222
       (let ((result (kuro--encode-mouse 'fake-event 0 t)))
         (should (stringp result))))))

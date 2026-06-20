@@ -9,16 +9,32 @@
 
 (require 'cl-lib)
 
+(setq load-prefer-newer t)
+
 (let* ((this-dir (file-name-directory
                   (or load-file-name buffer-file-name default-directory)))
+       (core-impl-dir (expand-file-name "../../../emacs-lisp/core" this-dir))
+       (rendering-dir (expand-file-name "../../../emacs-lisp/rendering" this-dir))
+       (core-dir this-dir)
        (unit-dir (expand-file-name ".." this-dir)))
+  (add-to-list 'load-path core-impl-dir t)
+  (add-to-list 'load-path rendering-dir t)
+  (add-to-list 'load-path core-dir)
   (add-to-list 'load-path unit-dir))
 (require 'kuro-test-stubs)
 (require 'kuro-lifecycle-test-cases)
 
 (let* ((this-dir (file-name-directory
                   (or load-file-name buffer-file-name default-directory)))
-       (el-dir (expand-file-name "../../emacs-lisp" this-dir)))
+       (faces-dir (expand-file-name "../../../emacs-lisp/faces" this-dir))
+       (ffi-dir (expand-file-name "../../../emacs-lisp/ffi" this-dir))
+       (features-dir (expand-file-name "../../../emacs-lisp/features" this-dir))
+       (input-dir (expand-file-name "../../../emacs-lisp/input" this-dir))
+       (el-dir (expand-file-name "../../../emacs-lisp" this-dir)))
+  (add-to-list 'load-path faces-dir t)
+  (add-to-list 'load-path ffi-dir t)
+  (add-to-list 'load-path features-dir t)
+  (add-to-list 'load-path input-dir t)
   (add-to-list 'load-path el-dir t))
 
 (require 'kuro-lifecycle)

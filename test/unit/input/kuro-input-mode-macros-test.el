@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 ;; Unit tests for the CPS helpers in kuro-input-mode-macros:
-;;   `kuro--line-set-buffer'  — whole-buffer replacement + point-at-end + display
-;;   `kuro--line-splice'      — substring splice + new-point (no display call)
+;;   `kuro--line-splice'          — substring splice + new-point (no display call)
+;;   `kuro--with-line-edit-undo'  — undo push + display continuation
 
 ;;; Code:
 
@@ -11,45 +11,7 @@
 (require 'kuro-input-mode-macros)
 
 
-;;; Group 1 — kuro--line-set-buffer: state mutations
-
-(ert-deftest kuro-input-mode-macros-set-buffer-replaces-content ()
-  "`kuro--line-set-buffer' replaces kuro--line-buffer with TEXT."
-  (kuro-input-mode-test--with-line "hello" 5
-    (kuro--line-set-buffer "world")
-    (should (string= kuro--line-buffer "world"))))
-
-(ert-deftest kuro-input-mode-macros-set-buffer-point-at-end ()
-  "`kuro--line-set-buffer' sets kuro--line-point to (length TEXT)."
-  (kuro-input-mode-test--with-line "hello" 0
-    (kuro--line-set-buffer "abc")
-    (should (= kuro--line-point 3))))
-
-(ert-deftest kuro-input-mode-macros-set-buffer-empty-string ()
-  "`kuro--line-set-buffer' on empty string leaves point at 0."
-  (kuro-input-mode-test--with-line "hello" 5
-    (kuro--line-set-buffer "")
-    (should (string= kuro--line-buffer ""))
-    (should (= kuro--line-point 0))))
-
-(ert-deftest kuro-input-mode-macros-set-buffer-calls-display ()
-  "`kuro--line-set-buffer' calls `kuro--line-mode-update-display'."
-  (kuro-input-mode-test--with-line "hello" 5
-    (let ((calls 0))
-      (cl-letf (((symbol-function 'kuro--line-mode-update-display)
-                 (lambda () (setq calls (1+ calls)))))
-        (kuro--line-set-buffer "new")
-        (should (= calls 1))))))
-
-(ert-deftest kuro-input-mode-macros-set-buffer-unicode ()
-  "`kuro--line-set-buffer' point equals character length for multibyte strings."
-  (kuro-input-mode-test--with-line "" 0
-    (kuro--line-set-buffer "あいう")
-    (should (= kuro--line-point 3))
-    (should (string= kuro--line-buffer "あいう"))))
-
-
-;;; Group 2 — kuro--line-splice: pure state transform (no display side-effect)
+;;; Group 1 — kuro--line-splice: pure state transform (no display side-effect)
 
 (ert-deftest kuro-input-mode-macros-splice-middle-replacement ()
   "`kuro--line-splice' replaces buffer[from..to] with REPLACEMENT."
@@ -98,8 +60,7 @@
         (kuro--line-splice 0 5 "new" 3)
         (should (= calls 0))))))
 
-
-;;; Group 3 — kuro--line-splice composed inside kuro--with-line-edit-undo
+;;; Group 2 — kuro--line-splice composed inside kuro--with-line-edit-undo
 
 (ert-deftest kuro-input-mode-macros-splice-with-undo-pushes-state ()
   "kuro--with-line-edit-undo + kuro--line-splice saves old state to undo stack."
@@ -117,6 +78,62 @@
         (kuro--with-line-edit-undo
           (kuro--line-splice 0 5 "world" 5))
         (should (= calls 1))))))
+
+;;; Group 3 — macro expansion shape tests
+
+(defun kuro-input-mode-macros-test--expand (form)
+  "Return a normalized macro expansion for FORM."
+  (kuro-input-mode-macros-test--normalize-expansion (macroexpand form)))
+
+(defun kuro-input-mode-macros-test--assert-expansion (name form expected)
+  "Assert that FORM expands to EXPECTED, labeling the failure with NAME."
+  (ert-info ((format "%s" name))
+    (should (equal (kuro-input-mode-macros-test--expand form) expected))))
+
+(ert-deftest kuro-input-mode-macros-test-line-expansion-shapes ()
+  "Macro expansion shape tests stay table-driven so new cases stay low-ceremony."
+  (let ((cases
+         '((apply-word-transform
+            (kuro--line-apply-word-transform
+             (upcase (substring s start end)))
+            (let* ((bounds (kuro--line-word-bounds-forward))
+                   (start (car bounds))
+                   (end (cdr bounds))
+                   (s kuro--line-buffer))
+              (when (> end start)
+                (kuro--line-splice-with-undo start end
+                                             (upcase (substring s start end))
+                                             end))))
+           (replace-buffer-with-undo
+            (kuro--line-replace-buffer-with-undo (concat "a" "b"))
+            (let ((replacement (concat "a" "b")))
+              (kuro--line-splice-with-undo 0 (length kuro--line-buffer)
+                                           replacement
+                                           (length replacement))))
+           (insert-with-undo
+            (kuro--line-insert-with-undo start (concat "a" "b"))
+            (let ((pos start)
+                  (replacement (concat "a" "b")))
+              (kuro--line-splice-with-undo pos pos
+                                           replacement
+                                           (+ pos (length replacement)))))
+           (delete-with-undo
+            (kuro--line-delete-with-undo start end)
+            (progn
+              (kuro--line-undo-push)
+              (kuro--line-splice start end "" start)
+              (kuro--line-mode-update-display)))
+           (replace-range-with-undo
+            (kuro--line-replace-range-with-undo start end (concat "a" "b"))
+            (let ((from start)
+                  (to end)
+                  (replacement (concat "a" "b")))
+              (kuro--line-splice-with-undo from to
+                                           replacement
+                                           (+ from (length replacement))))))))
+    (dolist (case cases)
+      (pcase-let ((`(,name ,form ,expected) case))
+        (kuro-input-mode-macros-test--assert-expansion name form expected)))))
 
 (provide 'kuro-input-mode-macros-test)
 

@@ -8,6 +8,8 @@
 (require 'kuro-mux-ext)
 (require 'kuro-mux-ext2)
 
+(declare-function kuro-mode "kuro" ())
+
 (unless (fboundp 'kuro-mode)
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
@@ -158,26 +160,27 @@
         (should (= (length restored-specs) 1))
         (should (equal (plist-get (car restored-specs) :command) "bash"))))))
 
-
-;;; Group 69 — kuro-mux-prefix-map + bindings tables
+;;; Group 69 — kuro-mux-prefix-map
 
 (ert-deftest kuro-mux-ext2-prefix-map-is-keymap ()
   "`kuro-mux-prefix-map' is a keymap."
   (should (keymapp kuro-mux-prefix-map)))
 
-(ert-deftest kuro-mux-ext2-prefix-bindings-is-alist ()
-  "`kuro-mux--prefix-bindings' is a non-empty alist."
-  (should (listp kuro-mux--prefix-bindings))
-  (should (> (length kuro-mux--prefix-bindings) 0))
-  (should (consp (car kuro-mux--prefix-bindings))))
+(ert-deftest kuro-mux-ext2-prefix-bindings-include-core-commands ()
+  "`kuro-mux--prefix-bindings' keeps the core static prefix commands."
+  (should (equal (alist-get "n" kuro-mux--prefix-bindings nil nil #'equal)
+                 'kuro-mux-next))
+  (should (equal (alist-get "c" kuro-mux--prefix-bindings nil nil #'equal)
+                 'kuro-mux-create))
+  (should (equal (alist-get "?" kuro-mux--prefix-bindings nil nil #'equal)
+                 'kuro-mux-help)))
 
-(ert-deftest kuro-mux-ext2-prefix-resize-bindings-covers-four-directions ()
-  "`kuro-mux--prefix-resize-bindings' has entries for all four arrow keys."
-  (let ((keys (mapcar #'car kuro-mux--prefix-resize-bindings)))
-    (should (member "<up>"    keys))
-    (should (member "<down>"  keys))
-    (should (member "<left>"  keys))
-    (should (member "<right>" keys))))
+(ert-deftest kuro-mux-ext2-prefix-resize-bindings-cover-directions ()
+  "`kuro-mux--prefix-resize-bindings' covers all resize directions."
+  (should (equal (mapcar #'cadr kuro-mux--prefix-resize-bindings)
+                 '(up down left right)))
+  (should (equal (mapcar #'car kuro-mux--prefix-resize-bindings)
+                 '("<up>" "<down>" "<left>" "<right>"))))
 
 
 ;;; Group 70 — kuro-mux-create + kuro-mux-install-keys
@@ -208,7 +211,7 @@
   "`kuro-mux-install-keys' calls `define-key' with the prefix map."
   (let ((map (make-sparse-keymap)) bound-key)
     (cl-letf (((symbol-function 'define-key)
-               (lambda (_m k v) (setq bound-key k))))
+               (lambda (_m k _v) (setq bound-key k))))
       (kuro-mux-install-keys map)
       (should bound-key))))
 
@@ -276,13 +279,13 @@
          (kuro-mux--broadcast-mode t)
          (kuro-mux--broadcasting nil)
          sent-to)
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro-mux--live-sessions)
+  (unwind-protect
+      (cl-letf (((symbol-function 'kuro-mux--live-sessions)
                    (lambda () (list origin target)))
                   ((symbol-function 'kuro--send-paste-or-raw)
-                   (lambda (text) (push (current-buffer) sent-to))))
-          (kuro-mux--broadcast-send "hello")
-          (should (equal sent-to (list target))))
+                   (lambda (_text) (push (current-buffer) sent-to))))
+        (kuro-mux--broadcast-send "hello")
+        (should (equal sent-to (list target))))
       (kill-buffer target))))
 
 (ert-deftest kuro-mux-ext2-broadcast-send-re-entrancy-guard ()

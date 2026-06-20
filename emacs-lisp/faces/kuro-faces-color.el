@@ -128,6 +128,14 @@ unrecognised names are passed through rather than silently dropped."
 Each function receives the VALUE part of the `(type . value)' cons cell.
 Add an entry whenever a new Color variant is introduced on the Rust side.")
 
+(defmacro kuro--define-color-type-dispatch (color)
+  "Expand COLOR into a direct dispatch over Rust Color variants."
+  `(pcase (car ,color)
+     ('named   (kuro--color-named-to-emacs (cdr ,color)))
+     ('indexed (kuro--indexed-to-emacs (cdr ,color)))
+     ('rgb     (kuro--rgb-to-emacs (cdr ,color)))
+     (_ nil)))
+
 (defun kuro--color-to-emacs (color)
   "Convert Rust Color enum value to Emacs color string or nil.
 COLOR can be:
@@ -136,8 +144,7 @@ COLOR can be:
   - A cons cell (indexed . index) for 256-color palette
   - A cons cell (rgb . rgb-value) for truecolor (24-bit RGB)"
   (when (consp color)
-    (when-let* ((fn (cdr (assq (car color) kuro--color-type-handlers))))
-      (funcall fn (cdr color)))))
+    (kuro--define-color-type-dispatch color)))
 
 (defun kuro--indexed-to-emacs (idx)
   "Convert 256-color palette index IDX to Emacs color string."

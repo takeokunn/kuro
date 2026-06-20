@@ -403,17 +403,7 @@ fn test_pbt_encode_screen_binary_one_row_no_faces() {
     let lines: &[ScreenLine] = &[(0, "A".to_string(), vec![], vec![0])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(
-        out.len(),
-        4 + 4 + 4 + 4 + 4 + 1 + 4 + 4,
-        "total byte count mismatch"
-    );
-    assert_eq!(pbt_read_u32(&out, 0), 2, "format_version must be 2");
-    assert_eq!(pbt_read_u32(&out, 4), 1, "num_rows must be 1");
-    assert_eq!(pbt_read_u32(&out, 8), 0, "row_index must be 0");
-    assert_eq!(pbt_read_u32(&out, 12), 0, "num_face_ranges must be 0");
-    assert_eq!(pbt_read_u32(&out, 16), 1, "text_byte_len must be 1");
-    assert_eq!(out[20], b'A', "text byte must be b'A'");
-    assert_eq!(pbt_read_u32(&out, 21), 1, "col_to_buf_len must be 1");
-    assert_eq!(pbt_read_u32(&out, 25), 0, "col_to_buf[0] must be 0");
+    let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb [0]);
+    assert_eq!(out.len(), 8 + binary_row_len(1, 0, 1), "total byte count mismatch");
+    assert_eq!(next, out.len(), "row payload length mismatch");
 }

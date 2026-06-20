@@ -1,6 +1,8 @@
 // ── New edge-case tests + previously untested modes ──────────────────────────
 // `test_dec_mode_via_advance!` is defined in the parent module.
 
+use super::*;
+
 // ── DEC ?5 screen_reverse ────────────────────────────────────────────────────
 test_dec_mode_via_advance!(
     test_screen_reverse_set_and_clear,
@@ -90,14 +92,12 @@ fn test_ansi_decrqm_irm_reports_correct_status() {
     let mut term = crate::TerminalCore::new(24, 80);
     // Query IRM (mode 4) when reset → status 2
     term.advance(b"\x1b[4$p");
-    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    assert_eq!(r0, "\x1b[4;2$y", "IRM query (reset) must report status 2");
+    assert_single_pending_response_text(&term, "\x1b[4;2$y");
     term.meta.pending_responses.clear();
     // Set IRM then query → status 1
     term.advance(b"\x1b[4h");
     term.advance(b"\x1b[4$p");
-    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    assert_eq!(r1, "\x1b[4;1$y", "IRM query (set) must report status 1");
+    assert_single_pending_response_text(&term, "\x1b[4;1$y");
 }
 
 #[test]
@@ -105,25 +105,19 @@ fn test_ansi_decrqm_lnm_reports_correct_status() {
     let mut term = crate::TerminalCore::new(24, 80);
     // LNM reset → status 2
     term.advance(b"\x1b[20$p");
-    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    assert_eq!(r0, "\x1b[20;2$y", "LNM query (reset) must report status 2");
+    assert_single_pending_response_text(&term, "\x1b[20;2$y");
     term.meta.pending_responses.clear();
     // Set LNM, query → status 1
     term.advance(b"\x1b[20h");
     term.advance(b"\x1b[20$p");
-    let r1 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    assert_eq!(r1, "\x1b[20;1$y", "LNM query (set) must report status 1");
+    assert_single_pending_response_text(&term, "\x1b[20;1$y");
 }
 
 #[test]
 fn test_ansi_decrqm_unknown_mode_reports_zero() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[99$p"); // mode 99 is not implemented
-    let r = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    assert_eq!(
-        r, "\x1b[99;0$y",
-        "ANSI DECRQM for unknown mode must report status 0"
-    );
+    assert_single_pending_response_text(&term, "\x1b[99;0$y");
 }
 
 // ── Original edge cases ───────────────────────────────────────────────────────
@@ -250,15 +244,7 @@ fn test_decrqm_multi_param_queues_multiple_responses() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[?25$p"); // query cursor visible (default=set → status 1)
     term.advance(b"\x1b[?1049$p"); // query alt screen (default=reset → status 2)
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        2,
-        "two DECRQM queries must produce two responses"
-    );
-    let r0 = String::from_utf8(term.meta.pending_responses[0].clone()).unwrap();
-    let r1 = String::from_utf8(term.meta.pending_responses[1].clone()).unwrap();
-    assert_eq!(r0, "\x1b[?25;1$y");
-    assert_eq!(r1, "\x1b[?1049;2$y");
+    assert_pending_response_texts(&term, &["\x1b[?25;1$y", "\x1b[?1049;2$y"]);
 }
 
 #[test]
@@ -267,19 +253,11 @@ fn test_decrqm_alt_screen_47_reports_reset_then_set() {
     // real state (2 = reset on primary, 1 = set on alt), not 0 (unrecognised).
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[?47$p"); // default: primary screen → reset
-    assert_eq!(
-        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
-        "\x1b[?47;2$y",
-        "DECRQM 47 on the primary screen must report status 2 (reset)"
-    );
+    assert_single_pending_response_text(&term, "\x1b[?47;2$y");
     term.meta.pending_responses.clear();
     term.advance(b"\x1b[?47h"); // enter alternate screen
     term.advance(b"\x1b[?47$p");
-    assert_eq!(
-        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
-        "\x1b[?47;1$y",
-        "DECRQM 47 on the alternate screen must report status 1 (set)"
-    );
+    assert_single_pending_response_text(&term, "\x1b[?47;1$y");
 }
 
 #[test]
@@ -288,11 +266,7 @@ fn test_decrqm_alt_screen_1047_is_queryable() {
     // report status 0 (unrecognised).
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[?1047$p");
-    assert_eq!(
-        String::from_utf8(term.meta.pending_responses[0].clone()).unwrap(),
-        "\x1b[?1047;2$y",
-        "DECRQM 1047 must report reset (2), not unrecognised (0)"
-    );
+    assert_single_pending_response_text(&term, "\x1b[?1047;2$y");
 }
 
 #[test]

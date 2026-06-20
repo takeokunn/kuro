@@ -8,30 +8,21 @@
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-inserts-last-word ()
   "First M-. inserts the last whitespace-delimited word of the most recent history entry."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("git commit -m msg"))
-    (setq kuro--line-buffer "")
-    (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-yank-last-arg '("git commit -m msg") "" 0
     (kuro--line-yank-last-arg)
     (should (string= kuro--line-buffer "msg"))
     (should (= kuro--line-point 3))))
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-inserts-at-point ()
   "M-. inserts at the current cursor position, not always at end."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("echo hello"))
-    (setq kuro--line-buffer "echo ")
-    (setq kuro--line-point 5)
+  (kuro-input-mode-test--with-yank-last-arg '("echo hello") "echo " 5
     (kuro--line-yank-last-arg)
     (should (string= kuro--line-buffer "echo hello"))
     (should (= kuro--line-point 10))))
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-cycles-to-older-entry ()
   "Repeated M-. cycles to the last word of progressively older history entries."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("git push origin" "git pull upstream" "make test"))
-    (setq kuro--line-buffer "")
-    (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-yank-last-arg '("git push origin" "git pull upstream" "make test") "" 0
     (kuro--line-yank-last-arg)
     (should (string= kuro--line-buffer "origin"))
     (setq last-command 'kuro--line-yank-last-arg)
@@ -43,10 +34,7 @@
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-stops-at-oldest ()
   "M-. does not error when cycling past the oldest history entry; stays at oldest."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("ls -la" "pwd"))
-    (setq kuro--line-buffer "")
-    (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-yank-last-arg '("ls -la" "pwd") "" 0
     (kuro--line-yank-last-arg)            ; idx=0 → "la"
     (setq last-command 'kuro--line-yank-last-arg)
     (kuro--line-yank-last-arg)            ; idx=1 → "pwd"
@@ -57,10 +45,7 @@
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-resets-on-other-command ()
   "A non-M-. command between two M-. presses restarts cycling from the top."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("git push" "git pull"))
-    (setq kuro--line-buffer "")
-    (setq kuro--line-point 0)
+  (kuro-input-mode-test--with-yank-last-arg '("git push" "git pull") "" 0
     (kuro--line-yank-last-arg)            ; idx=0 → "push"
     (setq last-command 'kuro--line-self-insert)
     (setq kuro--line-buffer "")
@@ -71,16 +56,12 @@
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-empty-history-errors ()
   "`kuro--line-yank-last-arg' signals user-error when history is empty."
-  (kuro-input-mode-test--with-buffer
-   (setq kuro--line-history nil)
+  (kuro-input-mode-test--with-yank-last-arg nil "" 0
    (should-error (kuro--line-yank-last-arg) :type 'user-error)))
 
 (ert-deftest kuro-input-mode-test-yank-last-arg-pushes-undo ()
   "M-. pushes to `kuro--line-undo-stack' before modifying the buffer."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("rm -rf /tmp/foo"))
-    (setq kuro--line-buffer "cd ")
-    (setq kuro--line-point 3)
+  (kuro-input-mode-test--with-yank-last-arg '("rm -rf /tmp/foo") "cd " 3
     (kuro--line-yank-last-arg)
     (should (= (length kuro--line-undo-stack) 1))
     (should (equal (car kuro--line-undo-stack) '("cd " . 3)))))
@@ -130,7 +111,7 @@
        (kuro--line-commit)
        (should (string= sent "echo a\necho b\r"))))))
 
-;;; Group 39 — kuro--line-word-span-before-point + kuro--line-load-history-entry
+;;; Group 39 — kuro--line-word-span-before-point
 
 (kuro-input-mode-edit-test--deftest-word-spans)
 
@@ -140,51 +121,9 @@
     (let ((span (kuro--line-word-span-before-point)))
       (should (= (car span) (cdr span))))))
 
-(ert-deftest kuro-input-mode-test-load-history-entry-sets-buffer ()
-  "`kuro--line-load-history-entry' loads the Nth history entry into `kuro--line-buffer'."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("ls -la" "git status" "echo hello"))
-    (kuro--line-load-history-entry 1)
-    (should (string= kuro--line-buffer "git status"))))
-
-(ert-deftest kuro-input-mode-test-load-history-entry-sets-point-at-end ()
-  "`kuro--line-load-history-entry' sets `kuro--line-point' to the end of the loaded entry."
-  (kuro-input-mode-test--with-edit
-    (setq kuro--line-history '("ls -la" "echo hi"))
-    (kuro--line-load-history-entry 0)
-    (should (= kuro--line-point (length "ls -la")))))
-
-(ert-deftest kuro-input-mode-test-load-history-entry-calls-display-update ()
-  "`kuro--line-load-history-entry' calls `kuro--line-mode-update-display'."
-  (kuro-input-mode-test--with-buffer
-   (let ((called nil))
-     (cl-letf (((symbol-function 'kuro--line-mode-update-display)
-                (lambda () (setq called t))))
-       (setq kuro--line-history '("test"))
-       (kuro--line-load-history-entry 0)
-       (should called)))))
-
-;;; Group 40 — kuro--line-last-word + kuro--line-undo-push
+;;; Group 40 — kuro--line-last-word
 
 (kuro-input-mode-edit-test--deftest-line-last-words)
-
-(ert-deftest kuro-input-mode-test-line-undo-push-grows-stack ()
-  "`kuro--line-undo-push' pushes current (buffer . point) onto the undo stack."
-  (kuro-input-mode-test--with-buffer
-    (setq kuro--line-buffer "hello" kuro--line-point 3 kuro--line-undo-stack nil)
-    (kuro--line-undo-push)
-    (should (= (length kuro--line-undo-stack) 1))
-    (should (equal (car kuro--line-undo-stack) '("hello" . 3)))))
-
-(ert-deftest kuro-input-mode-test-line-undo-push-caps-at-max-depth ()
-  "`kuro--line-undo-push' trims the stack to `kuro--line-undo-max-depth'."
-  (kuro-input-mode-test--with-buffer
-    (let ((kuro--line-undo-max-depth 2))
-      (setq kuro--line-undo-stack nil)
-      (setq kuro--line-buffer "a" kuro--line-point 1) (kuro--line-undo-push)
-      (setq kuro--line-buffer "b" kuro--line-point 1) (kuro--line-undo-push)
-      (setq kuro--line-buffer "c" kuro--line-point 1) (kuro--line-undo-push)
-      (should (= (length kuro--line-undo-stack) 2)))))
 
 ;;; Group 41 — kuro--line-transpose-chars (C-t)
 

@@ -7,41 +7,41 @@
 ;;; Code:
 
 (defconst kuro-history-test--complete-history-cases
-  '((kuro-history-test-complete-history-match-calls-set-buffer
-     "When a history entry starts with the prefix, `kuro--line-set-buffer' is called."
+  '((kuro-history-test-complete-history-match-replaces-buffer
+     "When a history entry starts with the prefix, the buffer is replaced and point moves to the end."
      "git s"
      ("git status" "git commit")
-     (:set-buffer "git status"))
+     (:buffer "git status" :point 10))
     (kuro-history-test-complete-history-first-match-wins
      "seq-find returns the first (most recent) matching entry."
      "git"
      ("git status" "git commit" "git log")
-     (:set-buffer "git status"))
+     (:buffer "git status" :point 10))
     (kuro-history-test-complete-history-exact-match-skipped
      "An entry identical to the prefix is excluded; next candidate is used."
      "git status"
      ("git status" "git status --short")
-     (:set-buffer "git status --short"))
+     (:buffer "git status --short" :point 18))
     (kuro-history-test-complete-history-no-match-messages
-     "When no entry matches, a message is emitted and `kuro--line-set-buffer' is not called."
-     "xyz"
-     ("git status" "ls -la")
-     (:set-buffer nil :message "xyz"))
+      "When no entry matches, the buffer and point stay unchanged and a message is emitted."
+      "xyz"
+      ("git status" "ls -la")
+      (:buffer "xyz" :point 0 :message "xyz"))
     (kuro-history-test-complete-history-empty-history-no-match
-     "Empty history always produces the no-match path."
-     "ls"
-     nil
-     (:set-buffer nil))
+      "Empty history leaves the buffer unchanged and keeps point at the start."
+      "ls"
+      nil
+      (:buffer "ls" :point 0))
     (kuro-history-test-complete-history-empty-prefix-matches-any
-     "An empty prefix matches any non-empty history entry (string-prefix-p \"\" s is always t)."
-     ""
-     ("git status" "ls")
-     (:set-buffer "git status"))
+      "An empty prefix matches any non-empty history entry (string-prefix-p \"\" s is always t)."
+      ""
+      ("git status" "ls")
+      (:buffer "git status" :point 10))
     (kuro-history-test-complete-history-all-exact-no-match
-     "When every history entry equals the prefix, there is no completion."
-     "ls"
-     ("ls" "ls")
-     (:set-buffer nil)))
+      "When every history entry equals the prefix, there is no completion and point is unchanged."
+      "ls"
+      ("ls" "ls")
+      (:buffer "ls" :point 0)))
   "Data cases for `kuro--line-complete-history'.")
 
 (defconst kuro-history2--all-completions-cases

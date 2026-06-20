@@ -15,6 +15,7 @@
 
 (require 'kuro-ffi-osc)
 (require 'kuro-keymap)
+(require 'kuro-hyperlinks-macros)
 
 (declare-function kuro--row-position "kuro-render-buffer" (row))
 
@@ -31,17 +32,6 @@
     ([mouse-1] . kuro-open-hyperlink-at-point)
     ((kbd "RET") . kuro-open-hyperlink-at-point))
   "Keymap for hyperlink overlays.")
-
-(defmacro kuro--make-hyperlink-overlay (beg end uri)
-  "Create a clickable hyperlink overlay from BEG to END for URI."
-  `(let ((ov (make-overlay ,beg ,end nil t nil)))
-     (overlay-put ov 'face 'kuro-hyperlink)
-     (overlay-put ov 'kuro-hyperlink-uri ,uri)
-     (overlay-put ov 'mouse-face 'highlight)
-     (overlay-put ov 'help-echo ,uri)
-     (overlay-put ov 'keymap kuro--hyperlink-keymap)
-     (push ov kuro--hyperlink-overlays)
-     ov))
 
 (defconst kuro--hyperlink-allowed-schemes '("https" "http" "ftp" "ftps" "mailto")
   "URI schemes permitted for OSC 8 hyperlink navigation.

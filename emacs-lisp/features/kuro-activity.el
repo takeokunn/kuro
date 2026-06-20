@@ -201,19 +201,15 @@ Has no effect when point is not on a list entry."
   (interactive)
   (let ((entry (tabulated-list-get-id)))
     (when entry
-      (setq kuro-activity--log (delq entry kuro-activity--log))
+      (setq kuro-activity--log (delete entry kuro-activity--log))
       (tabulated-list-delete-entry))))
 
-(defconst kuro-activity-list-mode-bindings
-  '(("g" . tabulated-list-revert)
+(defvar kuro-activity-list-mode-map
+  (kuro--define-keymap
+    ("g" . tabulated-list-revert)
     ("d" . kuro-activity-list-delete-entry)
     ("c" . kuro-activity-clear)
-    ("q" . quit-window)))
-
-(defvar kuro-activity-list-mode-map
-  (kuro--build-keymap-from-alist kuro-activity-list-mode-bindings
-                                 (lambda (binding) (kbd (car binding)))
-                                 #'cdr)
+    ("q" . quit-window))
   "Keymap for `kuro-activity-list-mode'.")
 
 (defconst kuro-activity--list-columns

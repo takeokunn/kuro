@@ -17,20 +17,23 @@
       (should (equal (default-value 'kuro--test-font-sym) "Mono 12")))))
 
 (ert-deftest test-kuro-set-font-broadcasts-to-kuro-buffers ()
-  "kuro--set-font calls kuro--apply-font-to-buffer in each kuro-mode buffer."
-  ;; kuro--broadcast-to-buffers expands to (kuro--apply-font-to-buffer buf),
-  ;; so the stub must accept one argument.
+  "kuro--set-font calls kuro--apply-font-to-buffer in each live Kuro buffer."
   (let ((apply-called-in nil))
-    (cl-letf (((symbol-function 'kuro-mode)
-               (lambda () (setq major-mode 'kuro-mode)))
+    (cl-letf (((symbol-function 'kuro--kuro-buffers)
+               (lambda ()
+                 (list (get-buffer-create " *kuro-font-test-1*")
+                       (get-buffer-create " *kuro-font-test-2*"))))
               ((symbol-function 'kuro--apply-font-to-buffer)
                (lambda (_buf) (push (current-buffer) apply-called-in))))
-      (with-temp-buffer
-        (funcall 'kuro-mode)
-        (let ((kuro-buf (current-buffer)))
-          (defvar kuro--test-font-sym2 nil)
-          (kuro--set-font 'kuro--test-font-sym2 "DejaVu Mono")
-          (should (memq kuro-buf apply-called-in)))))))
+      (unwind-protect
+          (progn
+            (defvar kuro--test-font-sym2 nil)
+            (kuro--set-font 'kuro--test-font-sym2 "DejaVu Mono")
+            (should (= 2 (length apply-called-in)))
+            (should (member (get-buffer " *kuro-font-test-1*") apply-called-in))
+            (should (member (get-buffer " *kuro-font-test-2*") apply-called-in)))
+        (kill-buffer " *kuro-font-test-1*")
+        (kill-buffer " *kuro-font-test-2*")))))
 
 (ert-deftest test-kuro-set-font-skips-non-kuro-buffers ()
   "kuro--set-font does not call kuro--apply-font-to-buffer on non-kuro buffers."

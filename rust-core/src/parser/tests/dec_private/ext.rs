@@ -105,8 +105,7 @@ fn test_handle_dsr_color_scheme_dark_pushes_ps1() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.meta.color_scheme_dark = true;
     handle_dsr_color_scheme(&mut term);
-    assert_eq!(term.meta.pending_responses.len(), 1);
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;1n");
+    assert_single_pending_response_bytes(&term, b"\x1b[?997;1n");
 }
 
 /// T3c: `handle_dsr_color_scheme` with `color_scheme_dark = false` pushes
@@ -116,8 +115,7 @@ fn test_handle_dsr_color_scheme_light_pushes_ps2() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.meta.color_scheme_dark = false;
     handle_dsr_color_scheme(&mut term);
-    assert_eq!(term.meta.pending_responses.len(), 1);
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
+    assert_single_pending_response_bytes(&term, b"\x1b[?997;2n");
 }
 
 /// T3d: `apply_color_scheme(false)` with notifications enabled and previous
@@ -131,8 +129,7 @@ fn test_apply_color_scheme_change_with_notifications_pushes_response() {
     let changed = apply_color_scheme(&mut term, false);
     assert!(changed, "switching dark → light must report changed = true");
     assert!(!term.meta.color_scheme_dark);
-    assert_eq!(term.meta.pending_responses.len(), 1);
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
+    assert_single_pending_response_bytes(&term, b"\x1b[?997;2n");
 }
 
 /// T3e: `apply_color_scheme(true)` while already dark with notifications on —
@@ -145,10 +142,7 @@ fn test_apply_color_scheme_idempotent_no_change_no_response() {
     let changed = apply_color_scheme(&mut term, true);
     assert!(!changed, "no-op call must report changed = false");
     assert!(term.meta.color_scheme_dark);
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "idempotent call must not push any response bytes"
-    );
+    assert_no_pending_responses(&term);
 }
 
 /// T3f: `apply_color_scheme(false)` with notifications **disabled** — state
@@ -161,10 +155,7 @@ fn test_apply_color_scheme_change_without_notifications_pushes_nothing() {
     let changed = apply_color_scheme(&mut term, false);
     assert!(changed);
     assert!(!term.meta.color_scheme_dark);
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "notifications disabled must suppress CSI ? 997 ; Ps n push"
-    );
+    assert_no_pending_responses(&term);
 }
 
 /// T3g (isolation): OSC 11 — set default background color — must NOT modify
@@ -197,13 +188,7 @@ fn test_apply_color_scheme_then_dsr_996_emits_two_identical_responses() {
     term.advance(b"\x1b[?2031h"); // enable color scheme notifications
     let _ = apply_color_scheme(&mut term, false);
     term.advance(b"\x1b[?996n"); // DSR 996 query
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        2,
-        "expected one notification + one DSR response = 2 entries"
-    );
-    assert_eq!(term.meta.pending_responses[0], b"\x1b[?997;2n");
-    assert_eq!(term.meta.pending_responses[1], b"\x1b[?997;2n");
+    assert_pending_response_texts(&term, &["\x1b[?997;2n", "\x1b[?997;2n"]);
 }
 
 /// V#5 (reverse): DSR 996 first, then `apply_color_scheme(false)` —
@@ -216,17 +201,7 @@ fn test_dsr_996_then_apply_color_scheme_preserves_prior_response() {
     term.advance(b"\x1b[?2031h");
     term.advance(b"\x1b[?996n"); // DSR 996 → pushes "?997;1n"
     let _ = apply_color_scheme(&mut term, false); // change → pushes "?997;2n"
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        2,
-        "expected query response + change notification = 2 entries"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[?997;1n",
-        "prior DSR 996 response must remain ?997;1n; state change must not mutate \
-         already-pushed bytes"
-    );
-    assert_eq!(term.meta.pending_responses[1], b"\x1b[?997;2n");
+    assert_pending_response_texts(&term, &["\x1b[?997;1n", "\x1b[?997;2n"]);
 }
 
 /// V#8: Two consecutive DSR 996 queries push two distinct response entries.
@@ -238,11 +213,7 @@ fn test_dsr_996_then_apply_color_scheme_preserves_prior_response() {
 fn test_two_consecutive_dsr_996_pushes_two_responses() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[?996n\x1b[?996n");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        2,
-        "two DSR 996 queries must produce two distinct pending response entries"
-    );
+    assert_pending_response_count(&term, 2);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,11 +230,7 @@ fn test_dec_2048_enable_emits_immediate_size_report() {
         term.dec_modes.resize_in_band,
         "?2048h must set resize_in_band"
     );
-    assert_eq!(
-        term.meta.pending_responses,
-        vec![b"\x1b[48;24;80;0;0t".to_vec()],
-        "?2048h must immediately emit one current-size report"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[48;24;80;0;0t");
 }
 
 /// Disabling ?2048 clears `resize_in_band` and emits nothing.
@@ -277,10 +244,7 @@ fn test_dec_2048_disable_emits_no_report() {
         !term.dec_modes.resize_in_band,
         "?2048l must clear resize_in_band"
     );
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "?2048l (disable) must not emit a report"
-    );
+    assert_no_pending_responses(&term);
 }
 
 /// When ?2048 is active, `resize()` pushes a new in-band size report.
@@ -290,11 +254,7 @@ fn test_dec_2048_resize_emits_report_when_active() {
     term.advance(b"\x1b[?2048h");
     term.meta.pending_responses.clear(); // discard the initial report from enable
     term.resize(30, 100);
-    assert_eq!(
-        term.meta.pending_responses,
-        vec![b"\x1b[48;30;100;0;0t".to_vec()],
-        "resize() while ?2048 is set must emit a new size report"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[48;30;100;0;0t");
 }
 
 /// When ?2048 is NOT active, `resize()` emits nothing.
@@ -303,10 +263,7 @@ fn test_dec_2048_resize_emits_nothing_when_inactive() {
     let mut term = crate::TerminalCore::new(24, 80);
     // mode 2048 is off by default
     term.resize(30, 100);
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "resize() without ?2048 must not emit any report"
-    );
+    assert_no_pending_responses(&term);
 }
 
 /// `DecModes::apply_mode` / `get_mode` round-trip for 2048 in isolation.

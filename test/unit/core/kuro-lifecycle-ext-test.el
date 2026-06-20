@@ -126,36 +126,44 @@
 ;; Tests for the interactive session list: mode derivation, keymap bindings,
 ;; kuro-sessions-attach, kuro-sessions-destroy, kuro-sessions-refresh.
 
+(defconst kuro-lifecycle-ext-test--sessions-mode-keymap-table
+  '((kuro-lifecycle--sessions-mode-ret-bound-to-attach "RET" kuro-sessions-attach)
+    (kuro-lifecycle--sessions-mode-a-bound-to-attach   "a"   kuro-sessions-attach)
+    (kuro-lifecycle--sessions-mode-d-bound-to-destroy  "d"   kuro-sessions-destroy)
+    (kuro-lifecycle--sessions-mode-g-bound-to-refresh   "g"   kuro-sessions-refresh)
+    (kuro-lifecycle--sessions-mode-q-bound-to-quit     "q"   quit-window))
+  "Table of (test-name key-str command) for `kuro-sessions-mode-map'.")
+
+(defmacro kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+    (test-name key-str command)
+  `(ert-deftest ,test-name ()
+     ,(format "kuro-sessions-mode-map binds %S to `%s'." key-str command)
+     (should (eq (lookup-key kuro-sessions-mode-map (kbd ,key-str))
+                 #',command))))
+
 (ert-deftest kuro-lifecycle--sessions-mode-derived-from-tabulated-list ()
   "kuro-sessions-mode is derived from tabulated-list-mode."
   (with-temp-buffer
     (kuro-sessions-mode)
     (should (derived-mode-p 'tabulated-list-mode))))
 
-(ert-deftest kuro-lifecycle--sessions-mode-ret-bound-to-attach ()
-  "RET is bound to kuro-sessions-attach in kuro-sessions-mode-map."
-  (should (eq (lookup-key kuro-sessions-mode-map (kbd "RET"))
-              #'kuro-sessions-attach)))
+(kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+ kuro-lifecycle--sessions-mode-ret-bound-to-attach "RET" kuro-sessions-attach)
+(kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+ kuro-lifecycle--sessions-mode-a-bound-to-attach "a" kuro-sessions-attach)
+(kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+ kuro-lifecycle--sessions-mode-d-bound-to-destroy "d" kuro-sessions-destroy)
+(kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+ kuro-lifecycle--sessions-mode-g-bound-to-refresh "g" kuro-sessions-refresh)
+(kuro-lifecycle-ext-test--def-sessions-mode-keymap-binding
+ kuro-lifecycle--sessions-mode-q-bound-to-quit "q" quit-window)
 
-(ert-deftest kuro-lifecycle--sessions-mode-a-bound-to-attach ()
-  "`a' is bound to kuro-sessions-attach in kuro-sessions-mode-map."
-  (should (eq (lookup-key kuro-sessions-mode-map (kbd "a"))
-              #'kuro-sessions-attach)))
-
-(ert-deftest kuro-lifecycle--sessions-mode-d-bound-to-destroy ()
-  "`d' is bound to kuro-sessions-destroy in kuro-sessions-mode-map."
-  (should (eq (lookup-key kuro-sessions-mode-map (kbd "d"))
-              #'kuro-sessions-destroy)))
-
-(ert-deftest kuro-lifecycle--sessions-mode-g-bound-to-refresh ()
-  "`g' is bound to kuro-sessions-refresh in kuro-sessions-mode-map."
-  (should (eq (lookup-key kuro-sessions-mode-map (kbd "g"))
-              #'kuro-sessions-refresh)))
-
-(ert-deftest kuro-lifecycle--sessions-mode-q-bound-to-quit ()
-  "`q' is bound to quit-window in kuro-sessions-mode-map."
-  (should (eq (lookup-key kuro-sessions-mode-map (kbd "q"))
-              #'quit-window)))
+(ert-deftest kuro-lifecycle--sessions-mode-keymap-table-is-consistent ()
+  "Every entry in `kuro-lifecycle-ext-test--sessions-mode-keymap-table' matches."
+  (dolist (entry kuro-lifecycle-ext-test--sessions-mode-keymap-table)
+    (pcase-let ((`(,_test-name ,key-str ,command) entry))
+      (should (eq (lookup-key kuro-sessions-mode-map (kbd key-str))
+                  command)))))
 
 (ert-deftest kuro-lifecycle--list-sessions-creates-buffer-in-sessions-mode ()
   "kuro-list-sessions creates a buffer in kuro-sessions-mode."

@@ -22,7 +22,8 @@
                kuro-scroll-up kuro-scroll-down kuro-scroll-bottom
                kuro--F1 kuro--F2 kuro--F3 kuro--F4 kuro--F5 kuro--F6
                kuro--F7 kuro--F8 kuro--F9 kuro--F10 kuro--F11 kuro--F12
-               kuro--send-ctrl kuro--send-meta))
+               kuro--send-ctrl kuro--send-meta
+               kuro--kkp-flag-p))
   (unless (fboundp sym)
     (defalias sym (lambda (&rest _) nil))))
 (unless (fboundp 'kuro--yank)
@@ -41,11 +42,42 @@ Saves and restores `kuro--keymap' so global state is not corrupted."
         (kuro--build-keymap)
       (setq kuro--keymap orig))))
 
+(defmacro kuro-input-keymap-test--with-built-map (map-var &rest body)
+  "Bind MAP-VAR to a freshly built keymap and evaluate BODY."
+  `(let ((,map-var (kuro-keymap-test--built-map)))
+     ,@body))
+
+(defmacro kuro-input-keymap-test--with-fresh-keymap (keymap-var setup-fn &rest body)
+  "Bind KEYMAP-VAR to a fresh sparse map, run SETUP-FN, and evaluate BODY."
+  `(let ((,keymap-var (make-sparse-keymap))
+         (kuro-keymap-exceptions nil))
+     ,(if (macrop setup-fn)
+          (macroexpand `(,setup-fn ,keymap-var))
+        `(,setup-fn ,keymap-var))
+     ,@body))
+
+(defmacro kuro-input-keymap-test--with-kkp (kkp-enabled &rest body)
+  "Evaluate BODY with KKP-ENABLED and capture the last sent string."
+  (declare (indent 1))
+  `(let ((sent nil))
+     (cl-letf (((symbol-function 'kuro--send-key)
+                (lambda (value) (setq sent value)))
+               ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
+               ((symbol-function 'kuro--kkp-flag-p)
+                (lambda (_) ,kkp-enabled)))
+       ,@body)
+     sent))
+
 (defun kuro-input-keymap-test--selected-cases (cases names)
   "Return CASES filtered to NAMES, or all CASES when NAMES is nil."
   (if names
       (cl-remove-if-not (lambda (case) (memq (car case) names)) cases)
     cases))
+
+(defun kuro-input-keymap-test--each-entry (table fn)
+  "Call FN for each entry in TABLE."
+  (dolist (entry table)
+    (funcall fn entry)))
 
 (defmacro kuro-input-keymap-test--def-setup-binding-case
     (test-name setup-fn binding-specs)
@@ -54,7 +86,9 @@ Saves and restores `kuro--keymap' so global state is not corrupted."
      ,(format "`%s' installs expected key bindings." setup-fn)
      (let ((km (make-sparse-keymap))
            (kuro-keymap-exceptions nil))
-       (,setup-fn km)
+       ,(if (macrop setup-fn)
+            (macroexpand `(,setup-fn km))
+          `(,setup-fn km))
        ,@(mapcar
           (lambda (spec)
             (pcase-let ((`(,key ,expected) spec))
@@ -74,20 +108,77 @@ Saves and restores `kuro--keymap' so global state is not corrupted."
         (kuro-input-keymap-test--selected-cases
          kuro-input-keymap-test--setup-binding-cases names))))
 
+(defmacro kuro-input-keymap-test--def-built-binding-case
+    (test-name key expected)
+  "Define TEST-NAME asserting KEY is bound to EXPECTED in the built keymap."
+  `(ert-deftest ,test-name ()
+     ,(format "%S is bound to %S in the built keymap." key expected)
+     (kuro-input-keymap-test--with-built-map map
+       (should (eq (lookup-key map ,key) #',expected)))))
+
+(defmacro kuro-input-keymap-test--deftest-built-binding-cases (&rest names)
+  "Define built binding tests named by NAMES, or all known cases."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key ,expected) entry))
+            `(kuro-input-keymap-test--def-built-binding-case
+              ,test-name ,key ,expected)))
+        (kuro-input-keymap-test--selected-cases
+         kuro-input-keymap-test--built-binding-cases names))))
+
+(defmacro kuro-input-keymap-test--def-built-live-binding-case
+    (test-name key)
+  "Define TEST-NAME asserting KEY has a live binding in the built keymap."
+  `(ert-deftest ,test-name ()
+     ,(format "%S has a live binding in the built keymap." key)
+     (kuro-input-keymap-test--with-built-map map
+       (should (lookup-key map ,key)))))
+
+(defmacro kuro-input-keymap-test--deftest-built-live-binding-cases (&rest names)
+  "Define built live binding tests named by NAMES, or all known cases."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key) entry))
+            `(kuro-input-keymap-test--def-built-live-binding-case
+              ,test-name ,key)))
+        (kuro-input-keymap-test--selected-cases
+         kuro-input-keymap-test--built-live-binding-cases names))))
+
+(defmacro kuro-input-keymap-test--def-built-send-case
+    (test-name key sender-fn arg)
+  "Define TEST-NAME asserting KEY calls SENDER-FN with ARG."
+  `(ert-deftest ,test-name ()
+     ,(format "%S sends %S via %S in the built keymap." key arg sender-fn)
+     (let ((sent nil))
+       (cl-letf (((symbol-function ',sender-fn)
+                  (lambda (value) (push value sent))))
+         (kuro-input-keymap-test--with-built-map map
+           (funcall (lookup-key map ,key)))
+         (should (equal sent (list ,arg)))))))
+
+(defmacro kuro-input-keymap-test--deftest-built-send-cases (&rest names)
+  "Define built send tests named by NAMES, or all known cases."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key ,sender-fn ,arg) entry))
+            `(kuro-input-keymap-test--def-built-send-case
+              ,test-name ,key ,sender-fn ,arg)))
+        (kuro-input-keymap-test--selected-cases
+         kuro-input-keymap-test--built-send-cases names))))
+
 (defmacro kuro-input-keymap-test--def-shifted-key-send-case
     (test-name key kkp-enabled expected-sequence)
   "Define TEST-NAME asserting KEY sends EXPECTED-SEQUENCE under KKP-ENABLED."
   `(ert-deftest ,test-name ()
      ,(format "%S sends %S when KKP enabled is %S." key expected-sequence kkp-enabled)
-     (let ((sent nil))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (setq sent s)))
-                 ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-                 ((symbol-function 'kuro--kkp-flag-p)
-                  (lambda (_) ,kkp-enabled)))
-         (let ((map (kuro--build-keymap)))
-           (call-interactively (lookup-key map ,key)))
-         (should (equal sent ,expected-sequence))))))
+     (should (equal
+              (kuro-input-keymap-test--with-kkp ,kkp-enabled
+                (let ((map (kuro--build-keymap)))
+                  (call-interactively (lookup-key map ,key))))
+              ,expected-sequence))))
 
 (defmacro kuro-input-keymap-test--deftest-shifted-key-send-cases (&rest names)
   "Define shifted key send tests named by NAMES, or all known cases."
@@ -105,13 +196,10 @@ Saves and restores `kuro--keymap' so global state is not corrupted."
   "Define TEST-NAME asserting generated COMMAND sends KKP-SEQUENCE."
   `(ert-deftest ,test-name ()
      ,(format "`%s' sends KKP seq when DISAMBIGUATE flag is set." command)
-     (let ((sent nil))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (setq sent s)))
-                 ((symbol-function 'kuro--schedule-immediate-render) #'ignore)
-                 ((symbol-function 'kuro--kkp-flag-p) (lambda (_) t)))
-         (funcall #',command)
-         (should (equal sent ,kkp-sequence))))))
+     (should (equal
+              (kuro-input-keymap-test--with-kkp t
+                (funcall #',command))
+              ,kkp-sequence))))
 
 (defmacro kuro-input-keymap-test--deftest-generated-shifted-key-cases (&rest names)
   "Define generated shifted-key tests named by NAMES, or all known cases."

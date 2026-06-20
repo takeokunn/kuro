@@ -6,6 +6,8 @@
 (require 'kuro-config)
 (require 'kuro-mux)
 
+(declare-function kuro-mode "kuro" ())
+
 (unless (fboundp 'kuro-mode)
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
@@ -45,6 +47,14 @@
 
 ;;; Group 48 — kuro-mux--track-window-change
 
+(defmacro kuro-mux-windows-test--with-track-window-change (buffer livep &rest body)
+  "Run BODY with window-change hook dependencies stubbed for BUFFER.
+LIVEP controls whether the old selected window is considered live."
+  `(cl-letf (((symbol-function 'old-selected-window) (lambda () 'fake-win))
+             ((symbol-function 'window-live-p) (lambda (_w) ,livep))
+             ((symbol-function 'window-buffer) (lambda (_w) ,buffer)))
+     ,@body))
+
 (ert-deftest kuro-mux-windows-track-window-change-records-kuro-buf ()
   "`kuro-mux--track-window-change' sets `kuro-mux--last-session' to old kuro buffer."
   (let* ((kuro-buf (get-buffer-create " *kuro-wc-track*"))
@@ -52,20 +62,17 @@
     (unwind-protect
         (progn
           (with-current-buffer kuro-buf (kuro-mode))
-          (cl-letf (((symbol-function 'old-selected-window) (lambda () 'fake-win))
-                    ((symbol-function 'window-live-p) (lambda (_w) t))
-                    ((symbol-function 'window-buffer) (lambda (_w) kuro-buf))
-                    ((symbol-function 'current-buffer) (lambda () (get-buffer-create " *kuro-other*"))))
-            (kuro-mux--track-window-change nil)
-            (should (eq kuro-mux--last-session kuro-buf))))
+          (with-temp-buffer
+            (kuro-mux-windows-test--with-track-window-change kuro-buf t
+              (kuro-mux--track-window-change nil)
+              (should (eq kuro-mux--last-session kuro-buf)))))
       (kill-buffer kuro-buf)
       (ignore-errors (kill-buffer " *kuro-other*")))))
 
 (ert-deftest kuro-mux-windows-track-window-change-ignores-dead-window ()
   "`kuro-mux--track-window-change' does nothing when old window is not live."
   (let ((kuro-mux--last-session :sentinel))
-    (cl-letf (((symbol-function 'old-selected-window) (lambda () nil))
-              ((symbol-function 'window-live-p) (lambda (_w) nil)))
+    (kuro-mux-windows-test--with-track-window-change :sentinel nil
       (kuro-mux--track-window-change nil)
       ;; Should not have changed the value.
       (should (eq kuro-mux--last-session :sentinel)))))
@@ -77,12 +84,10 @@
     (unwind-protect
         (progn
           (with-current-buffer buf (kuro-mode))
-          (cl-letf (((symbol-function 'old-selected-window) (lambda () 'w))
-                    ((symbol-function 'window-live-p)  (lambda (_w) t))
-                    ((symbol-function 'window-buffer)  (lambda (_w) buf))
-                    ((symbol-function 'current-buffer) (lambda () buf)))
-            (kuro-mux--track-window-change nil)
-            (should (null kuro-mux--last-session))))
+          (with-current-buffer buf
+            (kuro-mux-windows-test--with-track-window-change buf t
+              (kuro-mux--track-window-change nil)
+              (should (null kuro-mux--last-session)))))
       (kill-buffer buf))))
 
 

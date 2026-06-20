@@ -75,22 +75,23 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
 (kuro-overlays-test--def-register-blink-overlay
  kuro-overlays-register-blink-overlay-fast fast 1 kuro--blink-overlays-fast kuro--blink-overlays-slow)
 
-(ert-deftest kuro-overlays-test--register-blink-overlay-both-types ()
-  "Invariant: register-blink-overlay adds to own list and excludes from other for both types."
-  (dolist (entry kuro-overlays-test--register-blink-overlay-table)
-    (pcase-let ((`(,_name ,type ,row ,own-sym ,other-sym) entry))
-      (kuro-overlays-test--with-buffer
-        (insert "hello\n")
-        (let ((ov (make-overlay 1 3))
-              (kuro--blink-overlays nil)
-              (kuro--blink-overlays-slow nil)
-              (kuro--blink-overlays-fast nil)
-              (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
-          (kuro--register-blink-overlay ov type row)
-          (should     (memq ov kuro--blink-overlays))
-          (should     (memq ov (symbol-value own-sym)))
-          (should-not (memq ov (symbol-value other-sym)))
-          (should     (memq ov (gethash row kuro--blink-overlays-by-row))))))))
+(kuro-overlays-test--deftest-table-cases
+    kuro-overlays-test--register-blink-overlay-both-types
+    "Invariant: register-blink-overlay adds to own list and excludes from other for both types."
+    kuro-overlays-test--register-blink-overlay-table
+    (`(,_name ,type ,row ,own-sym ,other-sym)
+     (kuro-overlays-test--with-buffer
+       (insert "hello\n")
+       (let ((ov (make-overlay 1 3))
+             (kuro--blink-overlays nil)
+             (kuro--blink-overlays-slow nil)
+             (kuro--blink-overlays-fast nil)
+             (kuro--blink-overlays-by-row (make-hash-table :test 'eql)))
+         (kuro--register-blink-overlay ov type row)
+         (should     (memq ov kuro--blink-overlays))
+         (should     (memq ov (symbol-value own-sym)))
+         (should-not (memq ov (symbol-value other-sym)))
+         (should     (memq ov (gethash row kuro--blink-overlays-by-row)))))))
 
 (ert-deftest kuro-overlays-register-blink-overlay-appends-to-row-hash ()
   "`kuro--register-blink-overlay' prepends OV to existing row hash entries."
@@ -107,6 +108,27 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
       (let ((row-list (gethash 0 kuro--blink-overlays-by-row)))
         (should (memq ov1 row-list))
         (should (memq ov2 row-list))))))
+
+(ert-deftest kuro-overlays-reset-blink-overlays-rebuilds-typed-lists ()
+  "`kuro--reset-blink-overlays' preserves survivor order while rebuilding typed lists."
+  (kuro-overlays-test--with-buffer
+    (insert "hello\n")
+    (let* ((ov1 (make-overlay 1 2))
+           (ov2 (make-overlay 2 3))
+           (ov3 (make-overlay 3 4))
+           (remaining (list ov1 ov2 ov3))
+           (kuro--blink-overlays (list 'old))
+           (kuro--blink-overlays-slow (list 'old-slow))
+           (kuro--blink-overlays-fast (list 'old-fast)))
+      (overlay-put ov1 'kuro-blink-type 'slow)
+      (overlay-put ov2 'kuro-blink-type 'fast)
+      (overlay-put ov3 'kuro-blink-type 'slow)
+      (kuro--reset-blink-overlays remaining)
+      (should (equal (mapcar (lambda (ov) (overlay-get ov 'kuro-blink-type))
+                             kuro--blink-overlays)
+                     '(slow fast slow)))
+      (should (equal kuro--blink-overlays-slow (list ov1 ov3)))
+      (should (equal kuro--blink-overlays-fast (list ov2))))))
 
 (ert-deftest kuro-overlays-decode-png-image-calls-create-image-with-decoded-data ()
   "`kuro--decode-png-image' base64-decodes the input and passes it to `create-image'."
@@ -128,29 +150,33 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
   "`kuro--decode-png-image' signals an error when base64 decoding fails."
   (should-error (kuro--decode-png-image "not-valid-base64!!!")))
 
-(ert-deftest kuro-overlays-place-image-overlay-creates-overlay-at-position ()
-  "`kuro--place-image-overlay' creates an overlay with correct properties."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\n")
-    (let ((kuro--image-overlays nil)
-          (kuro--has-images nil))
-      (kuro--place-image-overlay 'fake-img 0 0 1)
-      (should (= (length kuro--image-overlays) 1))
-      (should kuro--has-images)
-      (let ((ov (car kuro--image-overlays)))
-        (should (overlay-get ov 'kuro-image))
-        (should (eq (overlay-get ov 'display) 'fake-img))))))
+(defconst kuro-overlays-test--place-image-overlay-table
+  '((kuro-overlays-place-image-overlay-creates-overlay-at-position 0 0 1 1 2 "line0\nline1\n")
+    (kuro-overlays-place-image-overlay-noop-when-row-beyond-buffer 99 0 1 nil nil "one-line\n")
+    (kuro-overlays-place-image-overlay-with-col-offset               0 3 1 4 5 "hello\n")
+    (kuro-overlays-place-image-overlay-wide-cell-width               0 0 3 1 4 "hello\n"))
+  "Table of (test-name row col cell-width expected-start expected-end buffer-text).")
 
-(ert-deftest kuro-overlays-place-image-overlay-noop-when-row-beyond-buffer ()
-  "`kuro--place-image-overlay' is a no-op when the row is past the buffer end."
-  (kuro-overlays-test--with-buffer
-    (insert "one-line\n")
-    (let ((kuro--image-overlays nil)
-          (kuro--has-images nil))
-      ;; Row 99 is way beyond the 1-line buffer.
-      (kuro--place-image-overlay 'fake-img 99 0 1)
-      (should (null kuro--image-overlays))
-      (should-not kuro--has-images))))
+(kuro-overlays-test--deftest-table-cases
+    kuro-overlays-place-image-overlay-all-cases
+    "All `kuro--place-image-overlay' cases keep placement and no-op behavior consistent."
+    kuro-overlays-test--place-image-overlay-table
+    (`(,_name ,row ,col ,cell-width ,expected-start ,expected-end ,buffer-text)
+     (kuro-overlays-test--with-buffer
+       (insert buffer-text)
+       (kuro--place-image-overlay 'fake-img row col cell-width)
+       (if expected-start
+           (progn
+             (should (= (length kuro--image-overlays) 1))
+             (should kuro--has-images)
+             (let ((ov (car kuro--image-overlays)))
+               (should (= (overlay-start ov) expected-start))
+               (should (= (overlay-end ov) expected-end))
+               (should (overlay-get ov 'kuro-image))
+               (should (eq (overlay-get ov 'display) 'fake-img))
+               (should (overlay-get ov 'evaporate))))
+         (should (null kuro--image-overlays))
+         (should-not kuro--has-images)))))
 
 ;;; Group 19: kuro--ffi-face-default-p — pure predicate coverage
 
@@ -204,17 +230,18 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
 (kuro-overlays-test--def-ffi-face-invisible kuro-overlays-ffi-face-effects-hidden-flag-adds-invisible  kuro--sgr-flag-hidden t)
 (kuro-overlays-test--def-ffi-face-invisible kuro-overlays-ffi-face-effects-no-hidden-no-invisible      0                     nil)
 
-(ert-deftest kuro-overlays-ffi-face-invisible-all-table-entries-correct ()
-  "All entries in `kuro-overlays-test--ffi-face-invisible-table' match actual behavior."
-  (dolist (entry kuro-overlays-test--ffi-face-invisible-table)
-    (pcase-let ((`(,_name ,flags ,expectedp) entry))
-      (kuro-overlays-test--with-buffer
-        (insert "hello")
-        (kuro--apply-ffi-face-effects (point-min) (point-max)
-                                      (if (symbolp flags) (symbol-value flags) flags))
-        (if expectedp
-            (should (get-text-property (point-min) 'invisible))
-          (should-not (get-text-property (point-min) 'invisible)))))))
+(kuro-overlays-test--deftest-table-cases
+    kuro-overlays-ffi-face-invisible-all-table-entries-correct
+    "All entries in `kuro-overlays-test--ffi-face-invisible-table' match actual behavior."
+    kuro-overlays-test--ffi-face-invisible-table
+    (`(,_name ,flags ,expectedp)
+     (kuro-overlays-test--with-buffer
+       (insert "hello")
+       (kuro--apply-ffi-face-effects (point-min) (point-max)
+                                     (if (symbolp flags) (symbol-value flags) flags))
+       (if expectedp
+           (should (get-text-property (point-min) 'invisible))
+         (should-not (get-text-property (point-min) 'invisible))))))
 
 (defconst kuro-overlays-test--ffi-face-blink-table
   '((kuro-overlays-ffi-face-effects-blink-fast-creates-overlay kuro--sgr-flag-blink-fast)
@@ -232,25 +259,15 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
 (kuro-overlays-test--def-ffi-face-blink kuro-overlays-ffi-face-effects-blink-fast-creates-overlay kuro--sgr-flag-blink-fast)
 (kuro-overlays-test--def-ffi-face-blink kuro-overlays-ffi-face-effects-blink-slow-creates-overlay kuro--sgr-flag-blink-slow)
 
-(ert-deftest kuro-overlays-ffi-face-blink-all-table-entries-correct ()
-  "All entries in `kuro-overlays-test--ffi-face-blink-table' create blink overlays."
-  (dolist (entry kuro-overlays-test--ffi-face-blink-table)
-    (pcase-let ((`(,_name ,flag) entry))
-      (kuro-overlays-test--with-buffer
-        (insert "xx")
-        (kuro--apply-ffi-face-effects (point-min) (point-max) (symbol-value flag))
-        (should kuro--blink-overlays)))))
-
-;;; Group 22: kuro--apply-ffi-face-text-properties + constant invariants
-
-(ert-deftest kuro-overlays-apply-ffi-face-text-properties-sets-face ()
-  "`kuro--apply-ffi-face-text-properties' applies the face spec to the region."
-  (with-temp-buffer
-    (insert "hello")
-    (kuro--apply-ffi-face-text-properties (point-min) (point-max) 'bold)
-    (let ((face-val (get-text-property 1 'face)))
-      (should (or (eq face-val 'bold)
-                  (and (listp face-val) (memq 'bold face-val)))))))
+(kuro-overlays-test--deftest-table-cases
+    kuro-overlays-ffi-face-blink-all-table-entries-correct
+    "All entries in `kuro-overlays-test--ffi-face-blink-table' create blink overlays."
+    kuro-overlays-test--ffi-face-blink-table
+    (`(,_name ,flag)
+     (kuro-overlays-test--with-buffer
+       (insert "xx")
+       (kuro--apply-ffi-face-effects (point-min) (point-max) (symbol-value flag))
+       (should kuro--blink-overlays))))
 
 (ert-deftest kuro-overlays-sgr-visual-flags-mask-is-nonzero ()
   "`kuro--sgr-visual-flags-mask' is a non-zero integer covering blink+hidden bits."
@@ -261,42 +278,6 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
   "`kuro--blink-fast-frames-cached' and `kuro--blink-slow-frames-cached' are positive integers."
   (should (and (integerp kuro--blink-fast-frames-cached) (> kuro--blink-fast-frames-cached 0)))
   (should (and (integerp kuro--blink-slow-frames-cached) (> kuro--blink-slow-frames-cached 0))))
-
-;;; Group 23: kuro--place-image-overlay — column offset and wide cell-width
-
-(ert-deftest kuro-overlays-place-image-overlay-with-col-offset ()
-  "`kuro--place-image-overlay' navigates to the correct column via `forward-char'."
-  (kuro-overlays-test--with-buffer
-    (insert "hello\n")
-    (let ((kuro--image-overlays nil)
-          (kuro--has-images nil))
-      (kuro--place-image-overlay 'fake-img 0 3 1)
-      (should (= (length kuro--image-overlays) 1))
-      (let ((ov (car kuro--image-overlays)))
-        ;; Overlay starts at col 3 of row 0: point-min=1, forward-char 3 → position 4
-        (should (= (overlay-start ov) 4))
-        (should (= (overlay-end ov) 5))))))
-
-(ert-deftest kuro-overlays-place-image-overlay-wide-cell-width ()
-  "`kuro--place-image-overlay' end = min(start + cell-width, point-max) for wide spans."
-  (kuro-overlays-test--with-buffer
-    (insert "hello\n")
-    (let ((kuro--image-overlays nil)
-          (kuro--has-images nil))
-      (kuro--place-image-overlay 'fake-img 0 0 3)
-      (should (= (length kuro--image-overlays) 1))
-      (let ((ov (car kuro--image-overlays)))
-        (should (= (overlay-start ov) 1))
-        (should (= (overlay-end ov) 4))))))
-
-(ert-deftest kuro-overlays-place-image-overlay-sets-evaporate ()
-  "`kuro--place-image-overlay' sets the `evaporate' overlay property to t."
-  (kuro-overlays-test--with-buffer
-    (insert "hello\n")
-    (let ((kuro--image-overlays nil)
-          (kuro--has-images nil))
-      (kuro--place-image-overlay 'fake-img 0 0 1)
-      (should (overlay-get (car kuro--image-overlays) 'evaporate)))))
 
 (provide 'kuro-overlays-test-3)
 

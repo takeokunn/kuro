@@ -4,7 +4,7 @@
 
 ;;; Commentary:
 
-;; ERT tests for kuro-eval.el (OSC 51 eval whitelist).
+;; ERT tests for kuro-eval.el (OSC 51 command whitelist).
 ;; Tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
 
 ;;; Code:
@@ -130,10 +130,21 @@ security note)."
   "kuro--eval-command-allowed-p returns nil for whitespace-only string."
   (should-not (kuro--eval-command-allowed-p "   ")))
 
-;;; Group 2: kuro--eval-osc51-command evaluation
+;;; Group 2: kuro--eval-osc51-command dispatch
 
-(ert-deftest kuro-eval-osc51-evaluates-whitelisted ()
-  "kuro--eval-osc51-command evaluates whitelisted setenv sexp."
+(ert-deftest kuro-eval-osc51-dispatches-cd-bare ()
+  "kuro--eval-osc51-command dispatches bare cd commands."
+  (let ((target-dir (make-temp-file "kuro-eval-test-" t)))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory temporary-file-directory)
+          (kuro--eval-osc51-command
+           (format "cd %s" (shell-quote-argument target-dir)))
+          (should (equal default-directory (file-name-as-directory target-dir))))
+      (delete-directory target-dir t))))
+
+(ert-deftest kuro-eval-osc51-dispatches-setenv-sexp ()
+  "kuro--eval-osc51-command dispatches whitelisted setenv sexp."
   (let ((var-name "KURO_TEST_OSC51_VAR"))
     (unwind-protect
         (progn
@@ -145,9 +156,8 @@ security note)."
   "kuro--eval-osc51-command returns nil for blocked command."
   (should-not (kuro--eval-osc51-command "(delete-file \"/etc/passwd\")")))
 
-(ert-deftest kuro-eval-osc51-handles-eval-error ()
-  "kuro--eval-osc51-command handles eval errors gracefully."
-  ;; A whitelisted command that triggers an error should return nil, not signal.
+(ert-deftest kuro-eval-osc51-handles-malformed-command ()
+  "kuro--eval-osc51-command handles malformed whitelisted commands gracefully."
   (should-not (kuro--eval-osc51-command "(setenv)")))
 
 ;;; Group 3: defcustom defaults

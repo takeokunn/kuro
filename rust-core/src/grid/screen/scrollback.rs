@@ -38,16 +38,16 @@ const fn set_scroll_offset(screen: &mut Screen, new_offset: usize) {
 impl Screen {
     /// Set maximum scrollback buffer size
     pub fn set_scrollback_max_lines(&mut self, max_lines: usize) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.scrollback_max_lines = max_lines;
             trim_scrollback_to_max(screen);
-        }
+        });
     }
 
     /// Get scrollback lines (most recent first)
     #[must_use]
     pub fn get_scrollback_lines(&self, max_lines: usize) -> Vec<Line> {
-        self.active_screen().map_or_else(Vec::new, |screen| {
+        self.with_active_screen(|screen| {
             screen
                 .scrollback_buffer
                 .iter()
@@ -56,14 +56,15 @@ impl Screen {
                 .cloned()
                 .collect()
         })
+        .unwrap_or_default()
     }
 
     /// Clear the scrollback buffer
     pub fn clear_scrollback(&mut self) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.scrollback_buffer.clear();
             screen.scrollback_line_count = 0;
-        }
+        });
     }
 
     /// Scroll the viewport up by n lines (toward older scrollback content)

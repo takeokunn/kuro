@@ -11,9 +11,9 @@ impl Screen {
             cell.push_combining(c);
         }
         // Mark the line dirty
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.dirty_set.insert(row);
-        }
+        });
     }
 
     /// Mark rows in the range `lo..hi` (half-open) as dirty.
@@ -32,19 +32,19 @@ impl Screen {
 
     /// Mark a line as dirty in both the line flag and the dirty set
     pub fn mark_line_dirty(&mut self, row: usize) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.dirty_set.insert(row);
             if let Some(line) = screen.lines.get_mut(row) {
                 line.is_dirty = true;
             }
-        }
+        });
     }
 
     /// Mark all lines as dirty at once (more efficient than inserting every row)
     pub fn mark_all_dirty(&mut self) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.full_dirty = true;
-        }
+        });
     }
 
     /// Check whether all lines are marked dirty (full repaint pending)

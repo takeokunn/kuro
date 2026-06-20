@@ -39,7 +39,7 @@ fn test_esc_nel_cr_plus_lf() {
     term.advance(b"\x1b[4;15H"); // row 3, col 14
     assert_cursor!(term, row 3, col 14);
     term.advance(b"\x1bE"); // NEL
-    // cursor must be at row 4, col 0
+                            // cursor must be at row 4, col 0
     assert_cursor!(term, row 4, col 0);
 }
 
@@ -175,7 +175,7 @@ fn test_csi_decstr_clears_sgr_bold() {
     let mut term = term_with!(b"\x1b[1m"); // bold on
     assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b[!p"); // DECSTR
-    // After soft reset, bold should be cleared
+                              // After soft reset, bold should be cleared
     assert!(
         !term.current_attrs.flags.contains(SgrFlags::BOLD),
         "DECSTR must clear SGR BOLD"
@@ -187,7 +187,7 @@ fn test_csi_decstr_clears_sgr_bold() {
 #[test]
 fn test_csi_rep_repeats_last_char() {
     let term = term_with!(b"A\x1b[3b"); // 'A' then REP 3
-    // 'A' printed at col 0, then repeated at cols 1, 2, 3
+                                        // 'A' printed at col 0, then repeated at cols 1, 2, 3
     assert_cell_char!(term, row 0, col 0, 'A');
     assert_cell_char!(term, row 0, col 1, 'A');
     assert_cell_char!(term, row 0, col 2, 'A');
@@ -201,10 +201,10 @@ fn test_csi_rep_repeats_last_char() {
 #[test]
 fn test_xtpushsgr_xtpopsgr_roundtrip() {
     let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[1m");   // bold on
+    term.advance(b"\x1b[1m"); // bold on
     term.advance(b"\x1b[#{\x1b[0m"); // push bold, then reset
     assert!(!term.current_bold(), "bold must be cleared after SGR reset");
-    term.advance(b"\x1b[#}");   // pop → bold restored
+    term.advance(b"\x1b[#}"); // pop → bold restored
     assert!(term.current_bold(), "bold must be restored after XTPOPSGR");
 }
 
@@ -213,25 +213,28 @@ fn test_xtpushsgr_stack_survives_decrc() {
     // Demonstrate that XTPUSHSGR stack depth is unaffected by DECSC/DECRC.
     // Push twice; one DECRC should not shrink the stack.
     let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[1m");       // bold on
+    term.advance(b"\x1b[1m"); // bold on
     term.advance(b"\x1b[#{\x1b[0m"); // push (bold), reset
-    term.advance(b"\x1b[3m");       // italic on
-    term.advance(b"\x1b7");         // DECSC: save italic state
+    term.advance(b"\x1b[3m"); // italic on
+    term.advance(b"\x1b7"); // DECSC: save italic state
     term.advance(b"\x1b[#{\x1b[0m"); // push (italic), reset again
-    term.advance(b"\x1b8");         // DECRC: restore to italic state (does NOT pop XTPUSHSGR)
-    // XTPUSHSGR stack still has 2 entries; pop twice to confirm
-    term.advance(b"\x1b[#}");       // pop → italic
+    term.advance(b"\x1b8"); // DECRC: restore to italic state (does NOT pop XTPUSHSGR)
+                            // XTPUSHSGR stack still has 2 entries; pop twice to confirm
+    term.advance(b"\x1b[#}"); // pop → italic
     assert!(term.current_italic(), "first pop must restore italic");
-    term.advance(b"\x1b[#}");       // pop → bold
+    term.advance(b"\x1b[#}"); // pop → bold
     assert!(term.current_bold(), "second pop must restore bold");
 }
 
 #[test]
 fn test_xtpopsgr_on_empty_stack_is_noop() {
     let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[1m");   // bold on
-    term.advance(b"\x1b[#}");   // pop empty stack — must not panic, attrs unchanged
-    assert!(term.current_bold(), "bold must survive XTPOPSGR on empty stack");
+    term.advance(b"\x1b[1m"); // bold on
+    term.advance(b"\x1b[#}"); // pop empty stack — must not panic, attrs unchanged
+    assert!(
+        term.current_bold(),
+        "bold must survive XTPOPSGR on empty stack"
+    );
 }
 
 /// IL (CSI L) — Insert Line: inserts a blank line at the cursor row.
@@ -242,7 +245,7 @@ fn test_csi_il_inserts_blank_line() {
     // cursor is now at row 1; go back to row 0
     term.advance(b"\x1b[1;1H");
     term.advance(b"\x1b[1L"); // IL 1: insert blank line at row 0
-    // Row 0 must now be blank; row 1 must have 'A' content
+                              // Row 0 must now be blank; row 1 must have 'A' content
     assert_eq!(
         term.screen.get_cell(0, 0).unwrap().char(),
         ' ',
@@ -267,7 +270,7 @@ fn test_csi_dl_deletes_line() {
     term.advance(b"B");
     term.advance(b"\x1b[1;1H"); // cursor back to row 0
     term.advance(b"\x1b[1M"); // DL 1: delete row 0; row 1 shifts up
-    // Row 0 now holds what was row 1 ('B' at col 0)
+                              // Row 0 now holds what was row 1 ('B' at col 0)
     assert_eq!(
         term.screen.get_cell(0, 0).unwrap().char(),
         'B',
@@ -283,7 +286,7 @@ fn test_esc_decsc_saves_and_restores_sgr_attrs() {
     term.advance(b"\x1b[1m");
     assert!(term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b7"); // DECSC — save cursor + attrs
-    // Clear bold
+                            // Clear bold
     term.advance(b"\x1b[0m");
     assert!(!term.current_attrs.flags.contains(SgrFlags::BOLD));
     term.advance(b"\x1b8"); // DECRC — restore

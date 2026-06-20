@@ -373,5 +373,29 @@ then evaluate BODY inside the `*kuro-sessions*' buffer.
   (dolist (entry kuro--module-install-methods)
     (should (characterp (nth 1 entry)))))
 
+(ert-deftest kuro-lifecycle--install-module-by-method-macroexpands-to-pcase ()
+  "`kuro--install-module-by-method' expands to a fixed `pcase' dispatch."
+  (should (equal (macroexpand-1 '(kuro--install-module-by-method method))
+                 '(pcase method
+                    ('prebuilt
+                     (kuro--install-and-load-module #'kuro-module-download "download"))
+                    ('cargo
+                     (kuro--install-and-load-module #'kuro-module-build "cargo build"))
+                    ('manual
+                     (user-error "Native module missing; install manually then retry"))
+                    (_
+                     (kuro--prompt-and-install-module))))))
+
+(ert-deftest kuro-lifecycle--install-module-by-key-macroexpands-to-pcase ()
+  "`kuro--install-module-by-key' expands to a fixed `pcase' dispatch."
+  (should (equal (macroexpand-1 '(kuro--install-module-by-key key))
+                 '(pcase key
+                    (?d
+                     (kuro--install-and-load-module #'kuro-module-download "download"))
+                    (?b
+                     (kuro--install-and-load-module #'kuro-module-build "cargo build"))
+                    (_
+                     (user-error "Aborted: kuro native module is required"))))))
+
 (provide 'kuro-lifecycle-ext2-test)
 ;;; kuro-lifecycle-ext2-test.el ends here

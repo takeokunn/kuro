@@ -18,6 +18,28 @@ macro_rules! test_osc_104_reset_index {
     };
 }
 
+/// Assert that a default-color query queued exactly one well-formed response.
+macro_rules! assert_osc_default_colors_response_contains {
+    ($core:expr, $osc_num:expr, [$($fragment:expr),+ $(,)?], $message:expr) => {{
+        let core = &$core;
+        assert_eq!(core.pending_responses().len(), 1);
+        let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
+        let num_str = std::str::from_utf8($osc_num).unwrap();
+        assert!(
+            resp.contains(num_str),
+            "response must contain OSC number {num_str}: got {resp:?}"
+        );
+        $(
+            assert!(
+                resp.contains($fragment),
+                "{}: missing fragment {:?}; got {resp:?}",
+                $message,
+                $fragment
+            );
+        )+
+    }};
+}
+
 /// Generate a `handle_osc_default_colors` query test where the color IS set.
 macro_rules! test_osc_default_colors_query_set {
     ($name:ident, $osc_num:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
@@ -28,16 +50,33 @@ macro_rules! test_osc_default_colors_query_set {
             core.osc_data.$field = Some(Color::Rgb($r, $g, $b));
             let params: &[&[u8]] = &[$osc_num, b"?"];
             super::handle_osc_default_colors(&mut core, params);
-            assert_eq!(core.pending_responses().len(), 1);
-            let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-            let num_str = std::str::from_utf8($osc_num).unwrap();
-            assert!(
-                resp.contains(num_str),
-                "response must contain OSC number {num_str}: got {resp:?}"
+            assert_osc_default_colors_response_contains!(
+                core,
+                $osc_num,
+                ["rgb:"],
+                "set query response must contain rgb: color spec"
             );
-            assert!(
-                resp.contains("rgb:"),
-                "response must contain rgb: color spec: got {resp:?}"
+        }
+    };
+}
+
+/// Generate a `handle_osc_default_colors` query test where the color is unset.
+macro_rules! test_osc_default_colors_query_unset {
+    ($name:ident, $osc_num:expr, $field:ident) => {
+        #[test]
+        fn $name() {
+            let mut core = crate::TerminalCore::new(24, 80);
+            let params: &[&[u8]] = &[$osc_num, b"?"];
+            super::handle_osc_default_colors(&mut core, params);
+            assert_osc_default_colors_response_contains!(
+                core,
+                $osc_num,
+                ["8080"],
+                concat!(
+                    "unset ",
+                    stringify!($field),
+                    " query must respond with grey (0x8080)"
+                )
             );
         }
     };
@@ -136,21 +175,11 @@ macro_rules! test_osc_default_colors_set_then_query {
 
             let query_params: &[&[u8]] = &[$osc_num, b"?"];
             super::handle_osc_default_colors(&mut core, query_params);
-            assert_eq!(core.pending_responses().len(), 1);
-            let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-            let num_str = std::str::from_utf8($osc_num).unwrap();
-            assert!(
-                resp.contains(num_str),
-                "response must contain OSC number {num_str}: got {resp:?}"
-            );
-            assert!(
-                resp.contains("rgb:"),
-                "response must contain rgb: color spec: got {resp:?}"
-            );
-            assert!(
-                resp.contains($expected),
-                "round-trip response must contain encoded value {expected}: got {resp:?}",
-                expected = $expected
+            assert_osc_default_colors_response_contains!(
+                core,
+                $osc_num,
+                ["rgb:", $expected],
+                "round-trip query response must contain rgb: color spec and encoded value"
             );
         }
     };
@@ -192,6 +221,38 @@ macro_rules! test_osc_1337_noop {
     };
 }
 
+/// Generate a simple OSC 7 hostname preservation test.
+macro_rules! test_osc_7_hostname {
+    ($name:ident, $payload:expr, cwd $cwd:expr, host $host:expr) => {
+        #[test]
+        fn $name() {
+            let mut core = make_core!();
+            let params: &[&[u8]] = &[b"7", $payload];
+            crate::parser::osc::handle_osc(&mut core, params, false);
+            assert_eq!(core.osc_data().cwd.as_deref(), Some($cwd));
+            assert_eq!(core.osc_data().cwd_host.as_deref(), $host);
+        }
+    };
+}
+
+/// Generate an OSC 7 host reset test that first stores a remote hostname.
+macro_rules! test_osc_7_hostname_reset {
+    ($name:ident, first $first:expr, second $second:expr, cwd $cwd:expr) => {
+        #[test]
+        fn $name() {
+            let mut core = make_core!();
+            let first_params: &[&[u8]] = &[b"7", $first];
+            crate::parser::osc::handle_osc(&mut core, first_params, false);
+            assert_eq!(core.osc_data().cwd_host.as_deref(), Some("remotehost"));
+
+            let second_params: &[&[u8]] = &[b"7", $second];
+            crate::parser::osc::handle_osc(&mut core, second_params, false);
+            assert!(core.osc_data().cwd_host.is_none());
+            assert_eq!(core.osc_data().cwd.as_deref(), Some($cwd));
+        }
+    };
+}
+
 /// Generate an `handle_osc_52` noop test.
 macro_rules! test_osc_52_clipboard_empty {
     ($name:ident, $params_expr:expr, $msg:expr) => {
@@ -203,6 +264,16 @@ macro_rules! test_osc_52_clipboard_empty {
             assert!(core.osc_data().clipboard_actions.is_empty(), $msg);
         }
     };
+}
+
+/// Assert that `handle_osc_52` recorded exactly one action matching `pattern`.
+macro_rules! assert_osc_52_action {
+    ($core:expr, $pattern:pat $(if $guard:expr)? ) => {{
+        use crate::types::osc::ClipboardAction;
+        let actions = &$core.osc_data().clipboard_actions;
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(&actions[0], $pattern $(if $guard)?));
+    }};
 }
 
 /// Generate a `parse_iterm2_params` zero-dimension test.
@@ -240,6 +311,23 @@ macro_rules! test_osc_104_bad_param_no_change {
             assert!(core.osc_data().palette_dirty);
         }
     };
+}
+
+/// Build a 1x1 PNG in memory and return it as base64.
+macro_rules! test_1x1_png_b64 {
+    ($color_type:expr, [$($pixel:expr),+ $(,)?]) => {{
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut buf, 1, 1);
+            encoder.set_color($color_type);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("PNG header");
+            writer
+                .write_image_data(&[$($pixel),+])
+                .expect("PNG data");
+        }
+        crate::util::base64::encode(&buf)
+    }};
 }
 
 /// Construct a `TerminalCore` with the standard 24x80 grid.

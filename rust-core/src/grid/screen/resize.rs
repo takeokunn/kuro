@@ -87,12 +87,12 @@ impl Screen {
 
         let was_alternate = self.is_alternate_active;
 
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             // Keep the active screen's geometry in sync with the outer Screen.
             // Without this, the active buffer would keep stale dimensions and
             // later cursor, scroll, and blank-line calculations would diverge.
             resize_active_screen_state(screen, new_rows, new_cols);
-        }
+        });
 
         // Keep the inactive screen in sync so switching screens never causes a
         // size mismatch.  Without this, the alternate screen retains its

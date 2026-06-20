@@ -53,6 +53,38 @@ macro_rules! assert_cursor {
     }};
 }
 
+pub(crate) fn first_pending_response_bytes(core: &crate::TerminalCore) -> &[u8] {
+    &core.meta.pending_responses[0]
+}
+
+pub(crate) fn assert_no_pending_responses(core: &crate::TerminalCore) {
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "expected no queued responses, got {:?}",
+        core.meta.pending_responses
+    );
+}
+
+pub(crate) fn assert_pending_response_count(core: &crate::TerminalCore, count: usize) {
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        count,
+        "expected {} queued responses, got {:?}",
+        count,
+        core.meta.pending_responses
+    );
+}
+
+pub(crate) fn assert_single_pending_response_bytes(core: &crate::TerminalCore, expected: &[u8]) {
+    assert_eq!(
+        core.meta.pending_responses,
+        vec![expected.to_vec()],
+        "expected a single queued response {:?}, got {:?}",
+        expected,
+        core.meta.pending_responses
+    );
+}
+
 /// Assert `meta.pending_responses` is non-empty and that the first entry
 /// starts with `$prefix` (as a byte slice).
 ///
@@ -61,15 +93,13 @@ macro_rules! assert_cursor {
 /// ```
 macro_rules! assert_response_starts {
     ($term:expr, $prefix:expr) => {{
+        crate::parser::vte_handler::tests::assert_pending_response_count(&$term, 1);
         assert!(
-            !$term.meta.pending_responses.is_empty(),
-            "expected at least one queued response, got none"
-        );
-        assert!(
-            $term.meta.pending_responses[0].starts_with($prefix),
+            crate::parser::vte_handler::tests::first_pending_response_bytes(&$term)
+                .starts_with($prefix),
             "response should start with {:?}, got {:?}",
             $prefix,
-            &$term.meta.pending_responses[0]
+            crate::parser::vte_handler::tests::first_pending_response_bytes(&$term)
         );
     }};
 }
@@ -120,11 +150,7 @@ macro_rules! assert_no_response {
         #[test]
         fn $name() {
             let _t = term_with!($seq);
-            assert!(
-                _t.meta.pending_responses.is_empty(),
-                "sequence {:?} must not queue any response",
-                $seq
-            );
+            crate::parser::vte_handler::tests::assert_no_pending_responses(&_t);
         }
     };
 }

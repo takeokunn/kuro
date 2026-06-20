@@ -19,7 +19,7 @@
 (require 'kuro-ffi)
 
 ;; Forward reference: kuro--schedule-immediate-render is defined in kuro-input.el.
-(declare-function kuro--schedule-immediate-render "kuro-input" ())
+(declare-function kuro--schedule-immediate-render "kuro-input-render" ())
 
 ;;; Bracketed Paste State
 

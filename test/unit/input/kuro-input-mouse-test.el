@@ -164,8 +164,7 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 (ert-deftest kuro-input-mouse-encode-sgr-direct-press ()
   "kuro--encode-mouse-sgr in cell mode produces ESC[<btn;col1;row1M."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
+  (kuro-mouse-test--with-state 0 nil nil
     (kuro-mouse-test--with-event 2 3
       ;; col1=3, row1=4
       (let ((result (kuro--encode-mouse-sgr 'fake-event 0 t)))
@@ -173,16 +172,14 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 (ert-deftest kuro-input-mouse-encode-sgr-direct-release ()
   "kuro--encode-mouse-sgr with press=nil produces lowercase 'm' terminator."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
+  (kuro-mouse-test--with-state 0 nil nil
     (kuro-mouse-test--with-event 2 3
       (let ((result (kuro--encode-mouse-sgr 'fake-event 0 nil)))
         (should (equal result "\e[<0;3;4m"))))))
 
 (ert-deftest kuro-input-mouse-encode-sgr-pixel-uses-posn-x-y ()
   "kuro--encode-mouse-sgr in pixel mode uses posn-x-y coordinates directly."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode t)
+  (kuro-mouse-test--with-state 0 nil t
     (kuro-mouse-test--with-event 300 400
       (let ((result (kuro--encode-mouse-sgr 'fake-event 2 t)))
         (should (equal result "\e[<2;300;400M"))))))
@@ -217,8 +214,7 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 (ert-deftest kuro-input-mouse-coords-cell-mode-adds-one ()
   "In cell mode (pixel-mode nil), coords are posn-col-row incremented by 1."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode nil)
+  (kuro-mouse-test--with-state 0 nil nil
     (kuro-mouse-test--with-event 4 9
       ;; posn-col-row returns (4 . 9) → col1=5, row1=10
       (let ((coords (kuro--mouse-coords 'fake-event)))
@@ -227,8 +223,7 @@ posn-x-y returns (px . py); these are used directly without +1 offset."
 
 (ert-deftest kuro-input-mouse-coords-pixel-mode-no-offset ()
   "In pixel mode, coords come from posn-x-y with no +1 offset."
-  (with-temp-buffer
-    (setq-local kuro--mouse-pixel-mode t)
+  (kuro-mouse-test--with-state 0 nil t
     ;; kuro-mouse-test--with-event stubs posn-x-y with (col . row) as-is
     (kuro-mouse-test--with-event 100 200
       (let ((coords (kuro--mouse-coords 'fake-event)))

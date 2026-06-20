@@ -26,8 +26,10 @@
 (require 'kuro-ffi)
 (require 'kuro-faces)
 (require 'kuro-faces-attrs)
+(require 'kuro-overlays-macros)
 
 (declare-function kuro--get-image "kuro-ffi-osc" (image-id))
+(declare-function kuro--goto-row-start "kuro-render-buffer" (row))
 
 (defvar kuro--current-render-row -1
   "Forward reference; `defvar-local' in kuro-render-buffer.el.
@@ -123,29 +125,7 @@ when no Kitty Graphics images are present.")
   "Return the current visibility state for BLINK-TYPE (`slow' or `fast')."
   (if (eq blink-type 'slow) kuro--blink-visible-slow kuro--blink-visible-fast))
 
-(defmacro kuro--toggle-blink-state (blink-type)
-  "Toggle the visibility state variable for BLINK-TYPE and return the new value.
-Modifies `kuro--blink-visible-slow' or `kuro--blink-visible-fast' in-place."
-  `(if (eq ,blink-type 'slow)
-       (setq kuro--blink-visible-slow (not kuro--blink-visible-slow))
-     (setq kuro--blink-visible-fast (not kuro--blink-visible-fast))))
-
 ;;; Blink overlays
-
-(defmacro kuro--register-blink-overlay (ov blink-type row)
-  "Register OV with BLINK-TYPE and ROW in blink overlay structures.
-Maintains the invariant that every blink overlay simultaneously appears in:
-  `kuro--blink-overlays'           — full list for bulk iteration
-  `kuro--blink-overlays-slow/fast' — typed sub-list for O(1) per-phase toggling
-  `kuro--blink-overlays-by-row'    — row hash for O(1) per-row eviction
-Each removal path (`kuro--clear-line-blink-overlays') must mirror this."
-  `(progn
-     (push ,ov kuro--blink-overlays)
-     (if (eq ,blink-type 'slow)
-         (push ,ov kuro--blink-overlays-slow)
-       (push ,ov kuro--blink-overlays-fast))
-     (puthash ,row (cons ,ov (gethash ,row kuro--blink-overlays-by-row))
-              kuro--blink-overlays-by-row)))
 
 (defsubst kuro--apply-blink-overlay (start end blink-type)
   "Create a blink overlay covering buffer positions START to END.
@@ -214,23 +194,6 @@ deleted overlay after removing it from the buffer."
           (progn
             (delete-overlay ov)
             (when on-delete
-            (funcall on-delete ov)))
-        (push ov remaining)))
-    (nreverse remaining)))
-
-(defun kuro--filter-overlays-overlapping-range (overlays range-start range-end
-                                                        &optional on-delete)
-  "Delete overlays from OVERLAYS that overlap RANGE-START and RANGE-END.
-Return the surviving overlays in original order.  Call ON-DELETE for each
-deleted overlay after removing it from the buffer."
-  (let ((remaining nil))
-    (dolist (ov overlays)
-      (if (and (overlay-buffer ov)
-               (< (overlay-start ov) range-end)
-               (> (overlay-end ov) range-start))
-          (progn
-            (delete-overlay ov)
-            (when on-delete
               (funcall on-delete ov)))
         (push ov remaining)))
     (nreverse remaining)))
@@ -241,18 +204,16 @@ An overlay overlaps when it starts before row end
 and ends after row start.
 Uses `kuro--row-positions' cache for O(1) row navigation when available."
   (save-excursion
-    (let ((cached (and kuro--row-positions
-                       (< row (length kuro--row-positions))
-                       (aref kuro--row-positions row))))
-      (if cached
-          (goto-char cached)
-        (goto-char (point-min))
-        (forward-line row)))
+    (kuro--goto-row-start row)
     (let ((line-start (point))
           (line-end (1+ (line-end-position))))
       (setq kuro--image-overlays
-            (kuro--filter-overlays-overlapping-range
-             kuro--image-overlays line-start line-end))
+            (kuro--filter-overlays
+             kuro--image-overlays
+             (lambda (ov)
+               (and (overlay-buffer ov)
+                    (< (overlay-start ov) line-end)
+                    (> (overlay-end ov) line-start)))))
       (unless kuro--image-overlays
         (setq kuro--has-images nil)))))
 
@@ -269,8 +230,7 @@ Uses `forward-char' for column positioning so wide characters (2 terminal
 columns, 1 buffer position) are handled correctly.  Pushes the new overlay
 onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
   (let* ((start (save-excursion
-                  (goto-char (point-min))
-                  (forward-line row)
+                  (kuro--goto-row-start row)
                   (forward-char col)
                   (point)))
          (end (min (+ start cell-width) (point-max))))
@@ -323,8 +283,15 @@ operation instead of two separate `=' comparisons."
     (kuro--apply-blink-overlay start-pos end-pos 'fast))
    ((/= 0 (logand flags kuro--sgr-flag-blink-slow))
     (kuro--apply-blink-overlay start-pos end-pos 'slow)))
-    (when (/= 0 (logand flags kuro--sgr-flag-hidden))
+  (when (/= 0 (logand flags kuro--sgr-flag-hidden))
     (add-text-properties start-pos end-pos '(invisible t))))
+
+(defsubst kuro--apply-ffi-face-properties (start-pos end-pos face)
+  "Apply FACE to START-POS..END-POS using the active Emacs code path."
+  (if (>= emacs-major-version 29)
+      (add-face-text-property start-pos end-pos face)
+    (setcar (cdr kuro--face-prop-template) face)
+    (add-text-properties start-pos end-pos kuro--face-prop-template)))
 
 (defun kuro--remove-blink-overlay-from-lists (ov)
   "Remove OV from the blink overlay collections."
@@ -335,22 +302,35 @@ operation instead of two separate `=' comparisons."
     (setq kuro--blink-overlays-fast
           (delq ov kuro--blink-overlays-fast))))
 
-(defsubst kuro--call-with-normalized-ffi-face-range (face-range line-start line-end continuation)
-  "Normalize FACE-RANGE against LINE-START and LINE-END, then call CONTINUATION.
-FACE-RANGE is a 6-element vector of the form [start end fg bg flags ul].
+(defun kuro--reset-blink-overlays (remaining)
+  "Replace blink overlay collections with REMAINING and rebuild type lists."
+  (let ((remaining-slow nil)
+        (remaining-fast nil))
+    (dolist (ov remaining)
+      (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
+          (push ov remaining-slow)
+        (push ov remaining-fast)))
+    (setq kuro--blink-overlays remaining
+          kuro--blink-overlays-slow (nreverse remaining-slow)
+          kuro--blink-overlays-fast (nreverse remaining-fast))))
+
+(defsubst kuro--call-with-normalized-ffi-face-range (face-ranges base line-start line-end continuation)
+  "Normalize a FACE-RANGES chunk at BASE, then call CONTINUATION.
+FACE-RANGES is a flat stride-6 vector with layout
+[start end fg bg flags ul ...].  BASE points at the first slot of one range.
 The start and end offsets are relative to LINE-START.  If the normalized
 range is empty after clamping, return nil without invoking CONTINUATION."
   (let* ((start-pos (max line-start
-                         (min line-end (+ line-start (aref face-range 0)))))
+                         (min line-end (+ line-start (aref face-ranges base)))))
          (end-pos   (max line-start
-                         (min line-end (+ line-start (aref face-range 1))))))
+                         (min line-end (+ line-start (aref face-ranges (1+ base)))))))
     (when (> end-pos start-pos)
       (funcall continuation
                start-pos end-pos
-               (aref face-range 2)
-               (aref face-range 3)
-               (aref face-range 4)
-               (aref face-range 5)))))
+               (aref face-ranges (+ base 2))
+               (aref face-ranges (+ base 3))
+               (aref face-ranges (+ base 4))
+               (aref face-ranges (+ base 5))))))
 
 (defsubst kuro--apply-ffi-face-at (start-pos end-pos fg-enc bg-enc flags ul-color-enc)
   "Apply FFI face data to the buffer region from START-POS to END-POS.
@@ -364,12 +344,9 @@ Applies the face, blink overlays (SGR 5/6), and invisible property (SGR 8).
   not need to repeat this guard."
   (unless (kuro--ffi-face-default-p fg-enc bg-enc flags ul-color-enc)
     (let ((face (kuro--get-cached-face-raw fg-enc bg-enc flags ul-color-enc)))
-      (if (>= emacs-major-version 29)
-          (add-face-text-property start-pos end-pos face)
-        (setcar (cdr kuro--face-prop-template) face)
-        (add-text-properties start-pos end-pos kuro--face-prop-template)))
-    (when (kuro--ffi-face-has-visual-effects-p flags)
-      (kuro--apply-ffi-face-effects start-pos end-pos flags))))
+      (kuro--apply-ffi-face-properties start-pos end-pos face)
+      (when (kuro--ffi-face-has-visual-effects-p flags)
+        (kuro--apply-ffi-face-effects start-pos end-pos flags)))))
 
 (provide 'kuro-overlays)
 

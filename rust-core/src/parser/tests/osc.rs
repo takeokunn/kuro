@@ -7,44 +7,72 @@ use super::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+fn with_osc_core(f: impl FnOnce(&mut crate::TerminalCore)) {
+    let mut core = crate::TerminalCore::new(24, 80);
+    f(&mut core);
+}
+
+/// Shared setup for OSC parser test macros.
+macro_rules! assert_osc_dispatch {
+    ($body:expr) => {{
+        with_osc_core($body);
+    }};
+}
+
 /// Assert that an OSC title command stores `$title` and sets `title_dirty`.
 macro_rules! assert_osc_title_accepted {
     ($code:literal, $title:literal, $test_name:expr) => {{
-        let mut core = crate::TerminalCore::new(24, 80);
-        let params: &[&[u8]] = &[$code, $title];
-        handle_osc(&mut core, params, false);
-        assert_eq!(
-            core.meta.title,
-            std::str::from_utf8($title).unwrap(),
-            "{}: title must be stored",
-            $test_name
-        );
-        assert!(
-            core.meta.title_dirty,
-            "{}: title_dirty must be set",
-            $test_name
-        );
+        let test_name = $test_name;
+        assert_osc_dispatch!(|core| {
+            handle_osc(core, &[$code, $title], false);
+            assert_eq!(
+                core.meta.title,
+                std::str::from_utf8($title).unwrap(),
+                "{}: title must be stored",
+                test_name
+            );
+            assert!(
+                core.meta.title_dirty,
+                "{}: title_dirty must be set",
+                test_name
+            );
+        });
     }};
 }
 
 /// Assert that an OSC 7 command with a `file://` URL stores `$expected_cwd` and sets `cwd_dirty`.
 macro_rules! assert_osc7_cwd_accepted {
     ($url:literal, $expected_cwd:literal) => {{
-        let mut core = crate::TerminalCore::new(24, 80);
-        let params: &[&[u8]] = &[b"7", $url];
-        handle_osc(&mut core, params, false);
-        assert_eq!(
-            core.osc_data.cwd.as_deref(),
-            Some($expected_cwd),
-            "OSC 7 with {:?} must set CWD to {:?}",
-            $url,
-            $expected_cwd
-        );
-        assert!(
-            core.osc_data.cwd_dirty,
-            "cwd_dirty must be set after accepting OSC 7 url {:?}",
-            $url
-        );
+        assert_osc_dispatch!(|core| {
+            handle_osc(core, &[b"7", $url], false);
+            assert_eq!(
+                core.osc_data.cwd.as_deref(),
+                Some($expected_cwd),
+                "OSC 7 with {:?} must set CWD to {:?}",
+                $url,
+                $expected_cwd
+            );
+            assert!(
+                core.osc_data.cwd_dirty,
+                "cwd_dirty must be set after accepting OSC 7 url {:?}",
+                $url
+            );
+        });
+    }};
+}
+
+/// Assert that an OSC 22 command stores the requested pointer shape.
+macro_rules! assert_osc_pointer_shape_accepted {
+    ($shape:literal) => {{
+        assert_osc_dispatch!(|core| {
+            handle_osc(core, &[b"22", $shape], false);
+            assert_eq!(
+                core.osc_data.pointer_shape.as_deref(),
+                Some(std::str::from_utf8($shape).unwrap()),
+                "OSC 22 must set pointer_shape to {:?}",
+                $shape
+            );
+        });
     }};
 }
 
@@ -65,6 +93,48 @@ macro_rules! assert_osc7_rejected {
             $reason
         );
     }};
+}
+
+/// Assert that an OSC notification command is ignored and leaves the queue empty.
+macro_rules! assert_osc_notifications_empty {
+    ($handler:path, $params:expr, $test_name:expr) => {{
+        let test_name = $test_name;
+        assert_osc_dispatch!(|core| {
+            $handler(core, $params);
+            assert!(
+                core.osc_data.notifications.is_empty(),
+                "{}: notification queue must stay empty",
+                test_name
+            );
+        });
+    }};
+}
+
+/// Generate a reset test for one default color slot.
+macro_rules! test_osc_default_colors_reset {
+    ($name:ident, $reset_code:expr, $seed_code:expr, $field:ident) => {
+        #[test]
+        fn $name() {
+            let mut core = crate::TerminalCore::new(24, 80);
+            let seed_params: &[&[u8]] = &[$seed_code, b"#112233"];
+            handle_osc(&mut core, seed_params, false);
+
+            let reset_params: &[&[u8]] = &[$reset_code];
+            handle_osc(&mut core, reset_params, false);
+
+            assert!(
+                core.osc_data.$field.is_none(),
+                concat!(
+                    "OSC ",
+                    stringify!($reset_code),
+                    " must reset ",
+                    stringify!($field),
+                    " to None"
+                )
+            );
+            assert!(core.osc_data.default_colors_dirty);
+        }
+    };
 }
 
 /// OSC 0 sets the window title on the terminal core.
@@ -107,6 +177,12 @@ fn test_osc2_sets_title_same_as_osc0() {
     assert_osc_title_accepted!(b"2", b"window-title", "OSC 2");
 }
 
+/// OSC 22 stores the requested pointer shape override.
+#[test]
+fn test_osc22_sets_pointer_shape() {
+    assert_osc_pointer_shape_accepted!(b"pointer");
+}
+
 /// OSC 7 with a URL that does NOT start with `file://` must be silently
 /// ignored — the CWD field must remain unset.
 #[test]
@@ -140,6 +216,11 @@ fn test_osc8_hyperlink_lifecycle() {
         "hyperlink URI must be cleared after OSC 8 close"
     );
 }
+
+// OSC 110/111/112 reset the default fg/bg/cursor colors back to `None`.
+test_osc_default_colors_reset!(test_osc110_resets_default_fg, b"110", b"10", default_fg);
+test_osc_default_colors_reset!(test_osc111_resets_default_bg, b"111", b"11", default_bg);
+test_osc_default_colors_reset!(test_osc112_resets_cursor_color, b"112", b"12", cursor_color);
 
 /// OSC 0 title of exactly `MAX_TITLE_BYTES` must be accepted and stored intact.
 #[test]

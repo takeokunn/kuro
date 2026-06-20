@@ -108,14 +108,18 @@
 
 (ert-deftest kuro-input-mode-test-line-self-insert-appends ()
   "`kuro--line-self-insert' appends `last-command-event' to the buffer."
-  (kuro-input-mode-test--with-line "" 0
+  (kuro-input-mode-test--with-edit
+   (setq kuro--line-buffer ""
+         kuro--line-point 0)
    (setq last-command-event ?a)
    (kuro--line-self-insert)
    (should (string= kuro--line-buffer "a"))))
 
 (ert-deftest kuro-input-mode-test-line-self-insert-accumulates ()
   "Multiple `kuro--line-self-insert' calls accumulate in order."
-  (kuro-input-mode-test--with-line "" 0
+  (kuro-input-mode-test--with-edit
+   (setq kuro--line-buffer ""
+         kuro--line-point 0)
    (dolist (ch '(?h ?e ?l ?l ?o))
      (setq last-command-event ch)
      (kuro--line-self-insert))
@@ -123,7 +127,9 @@
 
 (ert-deftest kuro-input-mode-test-line-self-insert-ignores-non-char ()
   "`kuro--line-self-insert' ignores non-character events."
-  (kuro-input-mode-test--with-line "" 0
+  (kuro-input-mode-test--with-edit
+   (setq kuro--line-buffer ""
+         kuro--line-point 0)
    (setq last-command-event 'f1)  ; symbol, not character
    (kuro--line-self-insert)
    (should (string= kuro--line-buffer ""))))
@@ -160,36 +166,27 @@
   (kuro-input-mode-test--with-buffer
    (setq kuro--input-mode 'line)
    (setq kuro--line-buffer "ls -la")
-   (let ((sent nil))
-     (cl-letf (((symbol-function 'kuro--send-key)
-                (lambda (s) (setq sent s)))
-               ((symbol-function 'kuro--schedule-immediate-render)
-                #'ignore))
-       (kuro--line-commit)
-       (should (string= sent "ls -la\r"))))))
+   (should (string= (kuro-input-mode-test--capture-sent-string
+                     (kuro--line-commit))
+                    "ls -la\r"))))
 
 (ert-deftest kuro-input-mode-test-line-commit-clears-buffer ()
   "`kuro--line-commit' clears `kuro--line-buffer' after sending."
   (kuro-input-mode-test--with-buffer
    (setq kuro--input-mode 'line)
    (setq kuro--line-buffer "hello")
-   (cl-letf (((symbol-function 'kuro--send-key)    #'ignore)
-             ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-     (kuro--line-commit)
-     (should (string= kuro--line-buffer "")))))
+   (kuro-input-mode-test--with-send-key-stubs
+    (kuro--line-commit)
+    (should (string= kuro--line-buffer "")))))
 
 (ert-deftest kuro-input-mode-test-line-commit-empty-sends-only-cr ()
   "`kuro--line-commit' on empty buffer sends only carriage return."
   (kuro-input-mode-test--with-buffer
    (setq kuro--input-mode 'line)
    (setq kuro--line-buffer "")
-   (let ((sent nil))
-     (cl-letf (((symbol-function 'kuro--send-key)
-                (lambda (s) (setq sent s)))
-               ((symbol-function 'kuro--schedule-immediate-render)
-                #'ignore))
-       (kuro--line-commit)
-       (should (string= sent "\r"))))))
+   (should (string= (kuro-input-mode-test--capture-sent-string
+                     (kuro--line-commit))
+                    "\r"))))
 
 
 ;;; Group 6 — Overlay lifecycle
@@ -227,10 +224,9 @@
    (setq kuro--line-buffer "test")
    (kuro--line-mode-update-display)
    (should (overlayp kuro--line-overlay))
-   (cl-letf (((symbol-function 'kuro--send-key)    #'ignore)
-             ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-     (kuro--line-commit)
-     (should (null kuro--line-overlay)))))
+   (kuro-input-mode-test--with-send-key-stubs
+    (kuro--line-commit)
+    (should (null kuro--line-overlay)))))
 
 (provide 'kuro-input-mode-test)
 ;;; kuro-input-mode-test.el ends here

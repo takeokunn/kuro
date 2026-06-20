@@ -6,17 +6,8 @@ fn test_pbt_encode_screen_binary_row_index_and_text_len() {
     let lines: &[ScreenLine] = &[(42, "Hello".to_string(), vec![], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(pbt_read_u32(&out, 0), 2, "format_version must be 2");
-    assert_eq!(pbt_read_u32(&out, 4), 1, "num_rows must be 1");
-    assert_eq!(pbt_read_u32(&out, 8), 42, "row_index must be 42");
-    assert_eq!(pbt_read_u32(&out, 12), 0, "num_face_ranges must be 0");
-    assert_eq!(
-        pbt_read_u32(&out, 16),
-        5,
-        "text_byte_len must be 5 for 'Hello'"
-    );
-    assert_eq!(&out[20..25], b"Hello", "text bytes must match 'Hello'");
-    assert_eq!(pbt_read_u32(&out, 25), 0, "col_to_buf_len must be 0");
+    let next = assert_binary_row!(&out, 8, row 42, text "Hello", faces 0, ctb []);
+    assert_eq!(next, 8 + binary_row_len(5, 0, 0), "row payload length mismatch");
 }
 
 #[test]
@@ -25,38 +16,10 @@ fn test_pbt_encode_screen_binary_one_face_range() {
     let lines: &[ScreenLine] = &[(0, "AB".to_string(), vec![(0, 2, 1, 2, 3, 4)], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(pbt_read_u32(&out, 12), 1, "num_face_ranges must be 1");
-    let fr_base = 8 + 4 + 4 + 4 + 2;
-    assert_eq!(
-        pbt_read_u32(&out, fr_base),
-        0,
-        "face range start_buf must be 0"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, fr_base + 4),
-        2,
-        "face range end_buf must be 2"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, fr_base + 8),
-        1,
-        "face range fg must be 1"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, fr_base + 12),
-        2,
-        "face range bg must be 2"
-    );
-    assert_eq!(
-        pbt_read_u64(&out, fr_base + 16),
-        3,
-        "face range flags must be 3"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, fr_base + 24),
-        4,
-        "face range ul_color must be 4"
-    );
+    let next = assert_binary_row!(&out, 8, row 0, text "AB", faces 1, ctb []);
+    let fr_base = 8 + 12 + 2;
+    assert_binary_face!(&out, fr_base, buf 0, 2, fg 1, bg 2, flags 3, ul 4);
+    assert_eq!(next, 8 + binary_row_len(2, 1, 0), "row payload length mismatch");
 }
 
 #[test]
@@ -65,24 +28,9 @@ fn test_pbt_encode_screen_binary_col_to_buf_entries() {
     let lines: &[ScreenLine] = &[(0, "X".to_string(), vec![], vec![0, 0, 1])];
     let out = encode_screen_binary(lines);
 
-    let ctb_base = 8 + 4 + 4 + 4 + 1;
-    assert_eq!(pbt_read_u32(&out, ctb_base), 3, "col_to_buf_len must be 3");
-    assert_eq!(
-        pbt_read_u32(&out, ctb_base + 4),
-        0,
-        "col_to_buf[0] must be 0"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, ctb_base + 8),
-        0,
-        "col_to_buf[1] must be 0"
-    );
-    assert_eq!(
-        pbt_read_u32(&out, ctb_base + 12),
-        1,
-        "col_to_buf[2] must be 1"
-    );
-    assert_eq!(out.len(), ctb_base + 4 + 3 * 4, "total byte count mismatch");
+    let next = assert_binary_row!(&out, 8, row 0, text "X", faces 0, ctb [0, 0, 1]);
+    assert_eq!(next, out.len(), "row payload length mismatch");
+    assert_eq!(out.len(), 8 + binary_row_len(1, 0, 3), "total byte count mismatch");
 }
 
 #[test]
@@ -94,20 +42,11 @@ fn test_pbt_encode_screen_binary_two_rows() {
     ];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(pbt_read_u32(&out, 0), 2, "format_version must be 2");
-    assert_eq!(pbt_read_u32(&out, 4), 2, "num_rows must be 2");
-
-    assert_eq!(pbt_read_u32(&out, 8), 0, "row 0 row_index must be 0");
-    assert_eq!(pbt_read_u32(&out, 12), 0, "row 0 num_face_ranges must be 0");
-    assert_eq!(pbt_read_u32(&out, 16), 1, "row 0 text_byte_len must be 1");
-    assert_eq!(out[20], b'A', "row 0 text must be b'A'");
-    assert_eq!(pbt_read_u32(&out, 21), 0, "row 0 col_to_buf_len must be 0");
-
-    assert_eq!(pbt_read_u32(&out, 25), 1, "row 1 row_index must be 1");
-    assert_eq!(pbt_read_u32(&out, 29), 0, "row 1 num_face_ranges must be 0");
-    assert_eq!(pbt_read_u32(&out, 33), 1, "row 1 text_byte_len must be 1");
-    assert_eq!(out[37], b'B', "row 1 text must be b'B'");
-    assert_eq!(pbt_read_u32(&out, 38), 0, "row 1 col_to_buf_len must be 0");
+    assert_binary_header!(&out, rows 2);
+    let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb []);
+    let next = assert_binary_row!(&out, next, row 1, text "B", faces 0, ctb []);
+    assert_eq!(next, out.len(), "row payload length mismatch");
+    assert_eq!(out.len(), 8 + 2 * binary_row_len(1, 0, 0), "total byte count mismatch");
 }
 
 #[test]
@@ -118,16 +57,8 @@ fn test_pbt_encode_screen_binary_unicode_text() {
     let lines: &[ScreenLine] = &[(0, arrow.to_string(), vec![], vec![])];
     let out = encode_screen_binary(lines);
 
-    assert_eq!(
-        pbt_read_u32(&out, 16),
-        3,
-        "text_byte_len must be 3 for arrow"
-    );
-    assert_eq!(
-        &out[20..23],
-        arrow.as_bytes(),
-        "text bytes must match arrow"
-    );
+    let next = assert_binary_row!(&out, 8, row 0, text arrow, faces 0, ctb []);
+    assert_eq!(next, out.len(), "row payload length mismatch");
 }
 
 // -------------------------------------------------------------------------

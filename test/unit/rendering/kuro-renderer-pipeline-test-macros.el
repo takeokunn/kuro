@@ -92,6 +92,16 @@
                 (lambda (updates) (setq ,finalize-var updates))))
        ,@body)))
 
+(defmacro kuro-renderer-pipeline-test--deftest-table-cases
+    (test-name doc table pattern &rest body)
+  "Define TEST-NAME by iterating TABLE with PATTERN over each entry."
+  (declare (indent 4))
+  `(ert-deftest ,test-name ()
+     ,doc
+     (dolist (entry ,table)
+       (pcase-let ((,pattern entry))
+         ,@body))))
+
 (defmacro kuro-renderer-pipeline-test--with-render-cycle-stubs
     (resize-calls-var bell-calls-var dirty-calls-var poll-calls-var blink-calls-var tui-calls-var
      &rest body)
@@ -225,6 +235,29 @@
         (lambda (case)
           `(kuro-renderer-pipeline-test--def-render-env-gc-case ,case))
         kuro-renderer-pipeline-test--render-env-gc-cases)))
+
+(defmacro kuro-renderer-pipeline-test--def-apply-dirty-updates-case (case)
+  "Define one `kuro--apply-dirty-updates' dispatch test from CASE."
+  (pcase-let ((`(,name ,doc ,debug-perf ,core-calls ,timing-calls
+                       ,core-return ,timing-return ,expected-finalize) case))
+    `(ert-deftest ,name ()
+       ,doc
+       (kuro-renderer-pipeline-test--with-buffer
+         (let ((kuro-debug-perf ,debug-perf))
+           (kuro-renderer-pipeline-test--with-apply-dirty-updates-stubs
+               core-call-count timing-call-count finalize-arg ,core-return ,timing-return
+             (kuro--apply-dirty-updates)
+             (should (= core-call-count ,core-calls))
+             (should (= timing-call-count ,timing-calls))
+             (should (equal finalize-arg ,expected-finalize))))))))
+
+(defmacro kuro-renderer-pipeline-test--deftest-apply-dirty-updates-cases ()
+  "Define `kuro--apply-dirty-updates' dispatch and finalize tests."
+  `(progn
+     ,@(mapcar
+        (lambda (case)
+          `(kuro-renderer-pipeline-test--def-apply-dirty-updates-case ,case))
+        kuro-renderer-pipeline-test--apply-dirty-updates-cases)))
 
 (provide 'kuro-renderer-pipeline-test-macros)
 

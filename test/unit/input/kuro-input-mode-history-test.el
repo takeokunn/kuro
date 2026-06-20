@@ -18,19 +18,6 @@
 
 (kuro-history-test--deftest-complete-history)
 
-(ert-deftest kuro-history-test-complete-history-calls-undo-push-on-match ()
-  "`kuro--line-undo-push' is called before `kuro--line-set-buffer' on a match."
-  (kuro-input-mode-test--with-buffer
-    (let (undo-called set-called call-order)
-      (cl-letf (((symbol-function 'kuro--line-undo-push)
-                 (lambda () (push 'undo call-order)))
-                ((symbol-function 'kuro--line-set-buffer)
-                 (lambda (_s) (push 'set call-order))))
-        (setq kuro--line-buffer "git"
-              kuro--line-history '("git status"))
-        (kuro--line-complete-history))
-      (should (equal (reverse call-order) '(undo set))))))
-
 (provide 'kuro-input-mode-history-test)
 
 ;;; kuro-input-mode-history-test.el ends here

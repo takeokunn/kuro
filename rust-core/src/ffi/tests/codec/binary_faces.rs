@@ -16,7 +16,7 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
     let result = encode_screen_binary(lines);
 
     // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
-    assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags);
+    assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags, ul ul_color);
 }
 
 /// Two consecutive rows in one binary frame: row indices are written in order.
@@ -28,12 +28,11 @@ fn encode_screen_binary_two_rows_row_indices_in_order() {
     ];
     let result = encode_screen_binary(&lines);
     // format_version at offset 0, num_rows at offset 4
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(read_u32_le(&result, 4), 2, "num_rows must be 2");
+    assert_binary_header!(&result, rows 2);
     // First row header at offset 8: row_index = 7
     assert_eq!(read_u32_le(&result, 8), 7, "first row_index must be 7");
     // First row: 4(idx) + 4(ranges) + 4(text_len) + 1(text) + 4(ctb_len) = 17 bytes; next at 8+17=25
-    let row2_offset = 8 + 4 + 4 + 4 + 1 + 4;
+    let row2_offset = 8 + binary_row_len(1, 0, 0);
     assert_eq!(
         read_u32_le(&result, row2_offset),
         15,
@@ -230,7 +229,7 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
 
     // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
     assert_eq!(result.len(), 35);
-    let ctb_offset = 8 + 4 + 4 + 4 + text_len;
+    let ctb_offset = 8 + binary_row_len(text_len, 0, 0) - 4;
     assert_eq!(
         read_u32_le(&result, ctb_offset),
         2,
@@ -272,20 +271,10 @@ fn encode_screen_binary_two_face_ranges_same_row() {
 
     // First face range: header(8) + row_idx(4) + num_face(4) + text_len(4) + text(4) = offset 24
     // Layout: start_buf(4) + end_buf(4) + fg(4) + bg(4) + flags(8) + ul_color(4) = 28 bytes per face range
-    assert_eq!(read_u32_le(&result, 24), 0u32, "face1 start_buf");
-    assert_eq!(read_u32_le(&result, 28), 2u32, "face1 end_buf");
-    assert_eq!(read_u32_le(&result, 32), fg1, "face1 fg");
-    assert_eq!(read_u32_le(&result, 36), bg1, "face1 bg");
-    assert_eq!(read_u64_le(&result, 40), flags1, "face1 flags");
-    assert_eq!(read_u32_le(&result, 48), ul1, "face1 ul_color");
+    assert_binary_face!(&result, 24, buf 0, 2, fg fg1, bg bg1, flags flags1, ul ul1);
 
     // Second face range starts at 24 + 28 = 52.
-    assert_eq!(read_u32_le(&result, 52), 2u32, "face2 start_buf");
-    assert_eq!(read_u32_le(&result, 56), 4u32, "face2 end_buf");
-    assert_eq!(read_u32_le(&result, 60), fg2, "face2 fg");
-    assert_eq!(read_u32_le(&result, 64), bg2, "face2 bg");
-    assert_eq!(read_u64_le(&result, 68), flags2, "face2 flags");
-    assert_eq!(read_u32_le(&result, 76), ul2, "face2 ul_color");
+    assert_binary_face!(&result, 52, buf 2, 4, fg fg2, bg bg2, flags flags2, ul ul2);
 }
 
 /// `compute_row_hash` must differ when only the underline color changes, because

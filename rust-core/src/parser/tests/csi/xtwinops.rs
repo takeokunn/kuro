@@ -1,3 +1,5 @@
+use super::tests_support::*;
+
 // Tests for handle_xtwinops (CSI Ps t) and handle_decreqtparm (CSI Ps x).
 
 // ── XTWINOPS: CSI 14 t — pixel size query ────────────────────────────────────
@@ -6,15 +8,7 @@
 fn test_xtwinops_op14_queues_pixel_size_response() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[14t");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "CSI 14 t must enqueue exactly one response"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[4;0;0t",
-        "CSI 14 t response must be ESC[4;0;0t"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[4;0;0t");
 }
 
 // ── XTWINOPS: CSI 18 t — rows×cols query ─────────────────────────────────────
@@ -23,14 +17,7 @@ fn test_xtwinops_op14_queues_pixel_size_response() {
 fn test_xtwinops_op18_queues_rows_cols_response() {
     let mut term = term!(30, 100);
     term.advance(b"\x1b[18t");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "CSI 18 t must enqueue exactly one response"
-    );
-    let resp = std::str::from_utf8(&term.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
-    assert_eq!(resp, "\x1b[8;30;100t", "CSI 18 t must report actual rows;cols");
+    assert_single_pending_response_text(&term, "\x1b[8;30;100t");
 }
 
 // ── XTWINOPS: CSI 19 t — screen size in cells ────────────────────────────────
@@ -39,14 +26,7 @@ fn test_xtwinops_op18_queues_rows_cols_response() {
 fn test_xtwinops_op19_queues_screen_size_response() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[19t");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "CSI 19 t must enqueue exactly one response"
-    );
-    let resp = std::str::from_utf8(&term.meta.pending_responses[0])
-        .expect("response must be valid UTF-8");
-    assert_eq!(resp, "\x1b[9;24;80t", "CSI 19 t must report actual rows;cols with prefix 9");
+    assert_single_pending_response_text(&term, "\x1b[9;24;80t");
 }
 
 // ── XTWINOPS: CSI 22 t — XTPUSHTITLE ────────────────────────────────────────
@@ -65,10 +45,7 @@ fn test_xtwinops_op22_pushes_title_to_stack() {
         term.meta.title_stack[0], "my-title",
         "pushed title must match the current title"
     );
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "CSI 22 t must not queue any response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 #[test]
@@ -115,10 +92,7 @@ fn test_xtwinops_op23_empty_stack_is_noop() {
         term.meta.title, "original",
         "pop from empty stack must leave title unchanged"
     );
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "pop from empty stack must not enqueue any response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 // ── XTWINOPS: unknown op — silent no-op ──────────────────────────────────────
@@ -127,10 +101,7 @@ fn test_xtwinops_op23_empty_stack_is_noop() {
 fn test_xtwinops_unknown_op_is_noop() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[99t");
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "unknown XTWINOPS op must not enqueue any response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 // ── DECREQTPARM: CSI 0 x → sol=2 ────────────────────────────────────────────
@@ -139,15 +110,7 @@ fn test_xtwinops_unknown_op_is_noop() {
 fn test_decreqtparm_ps0_queues_report_sol2() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[0x");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "DECREQTPARM Ps=0 must enqueue exactly one response"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[2;1;1;128;128;1;0x",
-        "DECREQTPARM Ps=0 response must use sol=2"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[2;1;1;128;128;1;0x");
 }
 
 // ── DECREQTPARM: CSI 1 x → sol=3 ────────────────────────────────────────────
@@ -156,15 +119,7 @@ fn test_decreqtparm_ps0_queues_report_sol2() {
 fn test_decreqtparm_ps1_queues_report_sol3() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[1x");
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "DECREQTPARM Ps=1 must enqueue exactly one response"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[3;1;1;128;128;1;0x",
-        "DECREQTPARM Ps=1 response must use sol=3"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[3;1;1;128;128;1;0x");
 }
 
 // ── DECREQTPARM: CSI 2 x — unsupported → no response ────────────────────────
@@ -173,10 +128,7 @@ fn test_decreqtparm_ps1_queues_report_sol3() {
 fn test_decreqtparm_ps2_is_noop() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[2x");
-    assert!(
-        term.meta.pending_responses.is_empty(),
-        "DECREQTPARM Ps=2 must not enqueue any response"
-    );
+    assert_no_pending_responses(&term);
 }
 
 // ── DECREQTPARM: default (omitted param = 0) ─────────────────────────────────
@@ -185,13 +137,5 @@ fn test_decreqtparm_ps2_is_noop() {
 fn test_decreqtparm_default_param_treated_as_0() {
     let mut term = term!(24, 80);
     term.advance(b"\x1b[x"); // no param → defaults to 0
-    assert_eq!(
-        term.meta.pending_responses.len(),
-        1,
-        "DECREQTPARM with omitted param must default to Ps=0"
-    );
-    assert_eq!(
-        term.meta.pending_responses[0], b"\x1b[2;1;1;128;128;1;0x",
-        "default param must produce sol=2 response"
-    );
+    assert_single_pending_response_bytes(&term, b"\x1b[2;1;1;128;128;1;0x");
 }

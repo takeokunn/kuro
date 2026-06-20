@@ -122,7 +122,7 @@ fn test_ech_zero_param_treated_as_one() {
     assert_eq!(char_at(&term, 0, 5), ' '); // erased
     assert_eq!(char_at(&term, 0, 6), 'B'); // right neighbor untouched
     assert_eq!(char_at(&term, 0, 4), 'B'); // left neighbor untouched
-    // Cursor must not move
+                                           // Cursor must not move
     assert_eq!(term.screen.cursor().col, 5);
 }
 

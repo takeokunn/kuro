@@ -21,22 +21,67 @@ use crate::types::cursor::CursorShape;
 /// scroll-region margins. This matches CUU/CUD behaviour in this codebase.
 #[inline]
 pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c: char) {
+    if handle_csi_cursor_relative_dispatch(term, params, c) {
+        return;
+    }
+    if handle_csi_cursor_absolute_dispatch(term, params, c) {
+        return;
+    }
+    if handle_csi_cursor_report_dispatch(term, params, c) {
+        return;
+    }
+}
+
+#[inline]
+fn handle_csi_cursor_relative_dispatch(
+    term: &mut crate::TerminalCore,
+    params: &vte::Params,
+    c: char,
+) -> bool {
+    match c {
+        'A' => csi_cuu(term, params), // CUU - Cursor Up
+        'B' => csi_cud(term, params), // CUD - Cursor Down
+        'C' => csi_cuf(term, params), // CUF - Cursor Forward
+        'D' => csi_cub(term, params), // CUB - Cursor Back
+        'a' => csi_cuf(term, params), // HPR - Horizontal Position Relative (≡ CUF)
+        'e' => csi_cud(term, params), // VPR - Vertical Position Relative (≡ CUD)
+        _ => return false,
+    }
+
+    true
+}
+
+#[inline]
+fn handle_csi_cursor_absolute_dispatch(
+    term: &mut crate::TerminalCore,
+    params: &vte::Params,
+    c: char,
+) -> bool {
     match c {
         'H' => csi_cup(term, params),       // CUP - Cursor Position
-        'A' => csi_cuu(term, params),       // CUU - Cursor Up
-        'B' => csi_cud(term, params),       // CUD - Cursor Down
-        'C' => csi_cuf(term, params),       // CUF - Cursor Forward
-        'D' => csi_cub(term, params),       // CUB - Cursor Back
         'E' => csi_cnl(term, params),       // CNL - Cursor Next Line
         'F' => csi_cpl(term, params),       // CPL - Cursor Previous Line
         'd' => csi_vpa(term, params),       // VPA - Vertical Position Absolute
         'G' | '`' => csi_cha(term, params), // CHA / HPA — both move to absolute column
         'f' => csi_hvp(term, params),       // HVP - Horizontal and Vertical Position
-        'n' => csi_dsr(term, params),       // DSR - Device Status Report
-        'a' => csi_cuf(term, params),       // HPR - Horizontal Position Relative (≡ CUF)
-        'e' => csi_cud(term, params),       // VPR - Vertical Position Relative (≡ CUD)
-        _ => {}
+        _ => return false,
     }
+
+    true
+}
+
+#[inline]
+fn handle_csi_cursor_report_dispatch(
+    term: &mut crate::TerminalCore,
+    params: &vte::Params,
+    c: char,
+) -> bool {
+    match c {
+        'n' => csi_dsr(term, params), // DSR - Device Status Report
+        _ => return false,
+    }
+
+    true
 }
 
 /// Extract the first CSI parameter as `i32`, defaulting to 1 if absent or zero.
@@ -79,8 +124,7 @@ fn apply_xtwinops_title_stack(term: &mut crate::TerminalCore, op: u16) {
         // XTPOPTITLE — restore title from stack; same sub-param semantics as above.
         23 => {
             if let Some(saved) = term.meta.title_stack.pop() {
-                term.meta.title = saved;
-                term.meta.title_dirty = true;
+                term.meta.set_title(saved);
             }
         }
         _ => {}

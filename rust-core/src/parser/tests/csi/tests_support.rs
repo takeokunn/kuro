@@ -21,6 +21,50 @@ macro_rules! assert_cursor {
     };
 }
 
+/// Collect pending response bytes as UTF-8 text for assertion helpers.
+pub fn pending_response_texts(core: &crate::TerminalCore) -> Vec<&str> {
+    core.meta
+        .pending_responses
+        .iter()
+        .map(|response| std::str::from_utf8(response).expect("response must be valid UTF-8"))
+        .collect()
+}
+
+/// Assert that no pending responses were queued.
+pub fn assert_no_pending_responses(core: &crate::TerminalCore) {
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "expected no pending responses"
+    );
+}
+
+/// Assert the exact number of queued pending responses.
+pub fn assert_pending_response_count(core: &crate::TerminalCore, count: usize) {
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        count,
+        "unexpected pending response count"
+    );
+}
+
+/// Assert that the single pending response equals the expected bytes.
+pub fn assert_single_pending_response_bytes(core: &crate::TerminalCore, expected: &[u8]) {
+    assert_pending_response_count(core, 1);
+    assert_eq!(
+        core.meta.pending_responses[0], expected,
+        "single pending response mismatch"
+    );
+}
+
+/// Assert that the single pending response matches the expected UTF-8 text.
+pub fn assert_single_pending_response_text(core: &crate::TerminalCore, expected: &str) {
+    assert_eq!(
+        pending_response_texts(core).as_slice(),
+        [expected],
+        "single pending response text mismatch"
+    );
+}
+
 /// Table-driven macro for tests that: (a) create a fresh 24×80 terminal,
 /// (b) feed a single CSI byte sequence, and (c) assert the resulting cursor.
 ///

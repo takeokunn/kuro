@@ -24,8 +24,9 @@
 ;;
 ;; `kuro-renderer.el' calls `kuro--poll-terminal-modes' once per
 ;; coalesced render frame (budget-gated via `kuro--poll-within-budget').
-;; Adding a new shell-interaction-timescale poll: push its function
-;; symbol onto `kuro--tier1-poll-fns'.
+;; Adding a new shell-interaction-timescale poll: update
+;; `kuro--tier1-poll-fns' for tests/docs and
+;; `kuro--run-tier1-poll-fns' for runtime dispatch.
 
 ;;; Code:
 
@@ -38,6 +39,7 @@
 (require 'kuro-prompt-status)
 (require 'kuro-hyperlinks)
 (require 'kuro-tramp)
+(require 'kuro-poll-modes-macros)
 
 (declare-function kuro--apply-palette-updates     "kuro-faces"      ())
 (declare-function kuro--apply-default-colors      "kuro-faces"      ())
@@ -66,6 +68,20 @@
 (defvar kuro--prompt-positions nil
   "Forward reference; `defvar-local' in kuro-navigation.el.")
 
+(eval-and-compile
+  (defconst kuro--tier1-poll-fns
+    '(kuro--poll-terminal-mode-state  ; consolidated FFI - must stay first
+      kuro--poll-cwd
+      kuro--handle-clipboard-actions
+      kuro--poll-prompt-mark-updates
+      kuro--poll-eval-command-updates
+      kuro--poll-image-events
+      kuro--apply-hyperlink-ranges
+      kuro--check-process-exit)
+    "Tier-1 poll functions called at the configured poll cadence.
+Add new shell-interaction-timescale polls here; the dispatch loop needs
+no changes."))
+
 ;;; Cadence constants
 
 (defconst kuro--mode-poll-cadence 10
@@ -75,14 +91,6 @@ At 30 fps this yields approximately 333 ms between polls.")
 (defconst kuro--osc-rare-poll-cadence 30
   "Poll rare OSC events (color palette, default colors) every N render frames.
 At 30 fps this yields approximately 1 second between polls.")
-
-;;; Cadence-gating macro (CPS continuation dispatch)
-
-(defmacro kuro--gated-poll (cadence fn)
-  "Invoke FN when `kuro--mode-poll-frame-count' is an exact multiple of CADENCE.
-Built on `kuro--when-divisible': the function FN is only called at intervals
-of CADENCE frames, reducing per-frame Mutex acquisitions."
-  `(kuro--when-divisible kuro--mode-poll-frame-count ,cadence (funcall ,fn)))
 
 (defconst kuro--max-prompt-positions 1000
   "Maximum number of prompt positions to track.")
@@ -242,9 +250,7 @@ Drains the action queue from `kuro--poll-clipboard-actions' and dispatches:
   `write' → `kuro--clipboard-write'
   `query' → `kuro--clipboard-query'"
   (dolist (action (kuro--poll-clipboard-actions))
-    (pcase (car action)
-      ('write (kuro--clipboard-write (cdr action)))
-      ('query (kuro--clipboard-query)))))
+    (kuro--dispatch-clipboard-action action)))
 
 (defun kuro--poll-terminal-mode-state ()
   "Fetch all terminal mode state in a single consolidated FFI call (PERF-005).
@@ -254,24 +260,11 @@ any poll that reads mode variables populated by `kuro--apply-terminal-modes'."
   (when-let* ((modes (kuro--get-terminal-modes)))
     (kuro--apply-terminal-modes modes)))
 
-(defconst kuro--tier1-poll-fns
-  '(kuro--poll-terminal-mode-state  ; consolidated FFI - must stay first
-    kuro--poll-cwd
-    kuro--handle-clipboard-actions
-    kuro--poll-prompt-mark-updates
-    kuro--poll-eval-command-updates
-    kuro--poll-image-events
-    kuro--apply-hyperlink-ranges
-    kuro--check-process-exit)
-  "Tier-1 poll functions called at the configured poll cadence.
-Add new shell-interaction-timescale polls here; the dispatch loop needs
-no changes.")
-
 ;;; Tier-1 consolidated dispatcher
 
 (defun kuro--poll-tier1-modes ()
-  "Run all tier-1 poll functions from `kuro--tier1-poll-fns' in order."
-  (mapc #'funcall kuro--tier1-poll-fns))
+  "Run the fixed tier-1 poll sequence in order."
+  (kuro--run-tier1-poll-fns))
 
 ;;; Top-level gated dispatcher
 

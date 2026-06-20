@@ -1,4 +1,3 @@
-
 // Tests for `dispatch_kitty_apc` — the Kitty Graphics APC dispatcher.
 //
 // Covers:
@@ -14,9 +13,7 @@ use super::*;
 // Returns the image_id that was actually stored.
 fn transmit_image(core: &mut crate::TerminalCore, image_id: u32, row: usize, col: usize) {
     core.screen.move_cursor(row, col);
-    let seq = format!(
-        "\x1b_Ga=T,f=24,i={image_id},s=1,v=1,c=1,r=1;AAAA\x1b\\"
-    );
+    let seq = format!("\x1b_Ga=T,f=24,i={image_id},s=1,v=1,c=1,r=1;AAAA\x1b\\");
     core.advance(seq.as_bytes());
 }
 
@@ -28,7 +25,7 @@ fn test_dispatch_delete_a_lowercase_clears_all_placements() {
     transmit_image(&mut core, 1, 0, 0);
     transmit_image(&mut core, 2, 1, 0);
     // Confirm two notifications queued (one per transmit-and-display)
-    assert_eq!(core.kitty.pending_image_notifications.len(), 2);
+    assert_pending_image_notification_count(&core, 2);
 
     // Clear all placements: a=d,d=a (lowercase)
     core.advance(b"\x1b_Ga=d,d=a\x1b\\");
@@ -132,7 +129,7 @@ fn test_dispatch_delete_x_lowercase_removes_by_col() {
     // Place image at col 5
     core.screen.move_cursor(0, 5);
     core.advance(b"\x1b_Ga=T,f=24,i=50,s=1,v=1,c=1,r=1;AAAA\x1b\\");
-    assert_eq!(core.kitty.pending_image_notifications.len(), 1);
+    assert_pending_image_notification_count(&core, 1);
 
     // Move cursor to col 5 and delete by col: a=d,d=x
     core.screen.move_cursor(0, 5);
@@ -161,7 +158,7 @@ fn test_dispatch_delete_y_lowercase_removes_by_row() {
     let mut core = crate::TerminalCore::new(24, 80);
     core.screen.move_cursor(3, 0);
     core.advance(b"\x1b_Ga=T,f=24,i=60,s=1,v=1,c=1,r=1;AAAA\x1b\\");
-    assert_eq!(core.kitty.pending_image_notifications.len(), 1);
+    assert_pending_image_notification_count(&core, 1);
 
     // Delete placements at row 3: a=d,d=y
     core.screen.move_cursor(3, 0);
@@ -214,11 +211,7 @@ fn test_dispatch_transmit_stores_image_without_notification() {
     assert!(!png.is_empty(), "a=t must store image data");
 
     // Transmit-only must NOT queue a placement notification
-    assert_eq!(
-        core.kitty.pending_image_notifications.len(),
-        0,
-        "a=t must not queue placement notifications"
-    );
+    assert_no_pending_image_notifications(&core);
     assert!(core.kitty.apc_state == ApcScanState::Idle);
 }
 
@@ -236,15 +229,7 @@ fn test_dispatch_transmit_and_display_stores_and_notifies() {
     assert!(!png.is_empty(), "a=T must store image data");
 
     // Exactly one placement notification must be queued
-    assert_eq!(
-        core.kitty.pending_image_notifications.len(),
-        1,
-        "a=T must queue exactly one placement notification"
-    );
-    let notif = &core.kitty.pending_image_notifications[0];
-    assert_eq!(notif.image_id, 90);
-    assert_eq!(notif.cell_width, 2);
-    assert_eq!(notif.cell_height, 2);
+    assert_single_pending_image_notification(&core, 90, 2, 2);
 }
 
 // ── KittyCommand::Place (a=p) dispatch ───────────────────────────────────────
@@ -255,21 +240,13 @@ fn test_dispatch_place_queues_notification_for_stored_image() {
 
     // First store the image (transmit-only)
     core.advance(b"\x1b_Ga=t,f=24,i=100,s=1,v=1;AAAA\x1b\\");
-    assert_eq!(core.kitty.pending_image_notifications.len(), 0);
+    assert_no_pending_image_notifications(&core);
 
     // Now place it: a=p at cursor position (0, 0), 3×1 cells
     core.screen.move_cursor(0, 0);
     core.advance(b"\x1b_Ga=p,i=100,c=3,r=1\x1b\\");
 
     // A placement notification must be queued
-    assert_eq!(
-        core.kitty.pending_image_notifications.len(),
-        1,
-        "a=p must queue a placement notification for a previously stored image"
-    );
-    let notif = &core.kitty.pending_image_notifications[0];
-    assert_eq!(notif.image_id, 100);
-    assert_eq!(notif.cell_width, 3);
-    assert_eq!(notif.cell_height, 1);
+    assert_single_pending_image_notification(&core, 100, 3, 1);
     assert!(core.kitty.apc_state == ApcScanState::Idle);
 }

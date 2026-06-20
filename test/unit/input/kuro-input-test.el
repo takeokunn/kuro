@@ -14,6 +14,19 @@
 
 ;;; Helpers
 
+(defmacro kuro-input-test--deftest-cases (cases)
+  `(progn
+     ,@(mapcar
+        (lambda (case)
+          (pcase-let ((`(,name ,doc ,assert-form) case))
+            `(ert-deftest ,name ()
+               ,doc
+               ,assert-form)))
+        (pcase cases
+          ((pred symbolp) (symbol-value cases))
+          (`(quote ,value) value)
+          (_ cases)))))
+
 ;;; Group 1: kuro--send-key-sequence (normal vs. application cursor mode)
 
 (ert-deftest kuro-input-send-key-sequence-normal-mode ()
@@ -34,80 +47,75 @@
       (should (equal sent '("\eOA"))))))
 
 ;;; Group 2: Arrow keys
+(defconst kuro-input-test--arrow-key-cases
+  '((kuro-input-arrow-up-normal
+     "Arrow up in normal mode sends CSI A."
+     (kuro-input-test--assert-sends-in-buffer-mode nil (kuro--arrow-up) '("\e[A")))
+    (kuro-input-arrow-up-application
+     "Arrow up in application mode sends SS3 A."
+     (kuro-input-test--assert-sends-in-buffer-mode t (kuro--arrow-up) '("\eOA")))
+    (kuro-input-arrow-down-normal
+     "Arrow down in normal mode sends CSI B."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-down) '("\e[B")))
+    (kuro-input-arrow-left-normal
+     "Arrow left in normal mode sends CSI D."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-left) '("\e[D")))
+     (kuro-input-arrow-right-normal
+     "Arrow right in normal mode sends CSI C."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-right) '("\e[C")))))
 
-(ert-deftest kuro-input-arrow-up-normal ()
-  "Arrow up in normal mode sends CSI A."
-  (kuro-input-test--assert-sends-in-buffer-mode nil (kuro--arrow-up) '("\e[A")))
-
-(ert-deftest kuro-input-arrow-up-application ()
-  "Arrow up in application mode sends SS3 A."
-  (kuro-input-test--assert-sends-in-buffer-mode t (kuro--arrow-up) '("\eOA")))
-
-(ert-deftest kuro-input-arrow-down-normal ()
-  "Arrow down in normal mode sends CSI B."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-down) '("\e[B")))
-
-(ert-deftest kuro-input-arrow-left-normal ()
-  "Arrow left in normal mode sends CSI D."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-left) '("\e[D")))
-
-(ert-deftest kuro-input-arrow-right-normal ()
-  "Arrow right in normal mode sends CSI C."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-right) '("\e[C")))
+(kuro-input-test--deftest-cases kuro-input-test--arrow-key-cases)
 
 ;;; Group 3: Special keys
+(defconst kuro-input-test--special-key-cases
+  '((kuro-input-RET-sends-cr
+     "kuro--RET sends a carriage return (0x0D)."
+     (kuro-input-test--assert-sends (kuro--RET) (list (string ?\r))))
+    (kuro-input-TAB-sends-tab
+     "kuro--TAB sends a horizontal tab (0x09)."
+     (kuro-input-test--assert-sends (kuro--TAB) (list (string ?\t))))
+    (kuro-input-DEL-sends-delete
+     "kuro--DEL sends DEL (0x7F)."
+     (kuro-input-test--assert-sends (kuro--DEL) (list (string ?\x7f))))))
 
-(ert-deftest kuro-input-RET-sends-cr ()
-  "kuro--RET sends a carriage return (0x0D)."
-  (kuro-input-test--assert-sends (kuro--RET) (list (string ?\r))))
-
-(ert-deftest kuro-input-TAB-sends-tab ()
-  "kuro--TAB sends a horizontal tab (0x09)."
-  (kuro-input-test--assert-sends (kuro--TAB) (list (string ?\t))))
-
-(ert-deftest kuro-input-DEL-sends-delete ()
-  "kuro--DEL sends DEL (0x7F)."
-  (kuro-input-test--assert-sends (kuro--DEL) (list (string ?\x7f))))
+(kuro-input-test--deftest-cases kuro-input-test--special-key-cases)
 
 ;;; Group 4: Function keys
+(defconst kuro-input-test--function-key-cases
+  '((kuro-input-F1-sends-ss3-P
+     "F1 sends SS3 P (\\eOP)."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F1) '("\eOP")))
+    (kuro-input-F5-sends-csi-15
+     "F5 sends CSI 15~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F5) '("\e[15~")))
+    (kuro-input-F12-sends-csi-24
+     "F12 sends CSI 24~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F12) '("\e[24~")))))
 
-(ert-deftest kuro-input-F1-sends-ss3-P ()
-  "F1 sends SS3 P (\\eOP)."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--F1) '("\eOP")))
-
-(ert-deftest kuro-input-F5-sends-csi-15 ()
-  "F5 sends CSI 15~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--F5) '("\e[15~")))
-
-(ert-deftest kuro-input-F12-sends-csi-24 ()
-  "F12 sends CSI 24~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--F12) '("\e[24~")))
+(kuro-input-test--deftest-cases kuro-input-test--function-key-cases)
 
 ;;; Group 5: Home/End/Page keys
+(defconst kuro-input-test--navigation-key-cases
+  '((kuro-input-HOME-normal-sends-csi-H
+     "HOME in normal mode sends CSI H."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--HOME) '("\e[H")))
+    (kuro-input-END-normal-sends-csi-F
+     "END in normal mode sends CSI F."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--END) '("\e[F")))
+    (kuro-input-PAGE-UP-sends-csi-5
+     "Page Up sends CSI 5~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-UP) '("\e[5~")))
+    (kuro-input-PAGE-DOWN-sends-csi-6
+     "Page Down sends CSI 6~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-DOWN) '("\e[6~")))
+    (kuro-input-INSERT-sends-csi-2
+     "Insert key sends CSI 2~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--INSERT) '("\e[2~")))
+    (kuro-input-DELETE-sends-csi-3
+     "Delete key sends CSI 3~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--DELETE) '("\e[3~")))))
 
-(ert-deftest kuro-input-HOME-normal-sends-csi-H ()
-  "HOME in normal mode sends CSI H."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--HOME) '("\e[H")))
-
-(ert-deftest kuro-input-END-normal-sends-csi-F ()
-  "END in normal mode sends CSI F."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--END) '("\e[F")))
-
-(ert-deftest kuro-input-PAGE-UP-sends-csi-5 ()
-  "Page Up sends CSI 5~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-UP) '("\e[5~")))
-
-(ert-deftest kuro-input-PAGE-DOWN-sends-csi-6 ()
-  "Page Down sends CSI 6~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-DOWN) '("\e[6~")))
-
-(ert-deftest kuro-input-INSERT-sends-csi-2 ()
-  "Insert key sends CSI 2~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--INSERT) '("\e[2~")))
-
-(ert-deftest kuro-input-DELETE-sends-csi-3 ()
-  "Delete key sends CSI 3~."
-  (kuro-input-test--assert-sends-in-mode nil (kuro--DELETE) '("\e[3~")))
+(kuro-input-test--deftest-cases kuro-input-test--navigation-key-cases)
 
 ;;; Group 6: kuro--sanitize-paste
 

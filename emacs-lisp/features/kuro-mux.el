@@ -51,6 +51,8 @@
 ;;; Code:
 
 (require 'kuro-config)
+(require 'kuro-ffi)
+(require 'kuro-mux-macros)
 
 (declare-function kuro-create             "kuro-lifecycle"  (&optional command buffer-name))
 (declare-function derived-mode-p          "subr"            (&rest modes))
@@ -58,9 +60,6 @@
 (declare-function kuro-search-forward     "kuro"            ())
 (declare-function kuro--send-paste-or-raw "kuro-input-paste" (text))
 (declare-function kuro-list-sessions      "kuro-sessions"    ())
-
-(defvar kuro-shell nil "Forward ref; defcustom in kuro-config.el.")
-
 
 ;;;; Registry
 
@@ -87,28 +86,6 @@ Stored for layout persistence so the session can be recreated.")
 (kuro--defvar-permanent-local kuro-mux--directory nil
   "Working directory at session creation time.
 Stored for layout persistence.")
-
-(defvar-local kuro-mux--monitor-activity nil
-  "When non-nil, fire notifications when this session produces output off-screen.")
-
-(defvar-local kuro-mux--monitor-activity-last-notified 0
-  "Float-time of the last activity notification dispatched for this buffer.")
-
-(defvar-local kuro-mux--monitor-silence-seconds nil
-  "Seconds of silence before a silence notification fires, or nil when disabled.")
-
-(defvar-local kuro-mux--monitor-silence-timer nil
-  "Active countdown timer for silence monitoring in this buffer, or nil.")
-
-(defvar-local kuro-mux--pipe-pane-file nil
-  "Absolute path of the file currently receiving piped output.
-Nil when no pipe-pane capture is active for this buffer.")
-
-(defcustom kuro-mux-monitor-activity-debounce 2.0
-  "Minimum seconds between activity notifications for a monitored session.
-Prevents notification floods when a session produces continuous rapid output."
-  :type 'number
-  :group 'kuro)
 
 (defun kuro-mux--register ()
   "Add the current buffer to `kuro-mux--sessions' if it is a kuro buffer.
@@ -145,6 +122,12 @@ Prefers `kuro-mux--name' when set, falls back to the buffer name."
   (with-current-buffer buf
     (or kuro-mux--name (buffer-name))))
 
+(defun kuro-mux--find-session-by-name (name)
+  "Return the live session buffer named NAME, or nil when missing."
+  (seq-find (lambda (buf)
+              (string= (kuro-mux--session-display-name buf) name))
+            (kuro-mux--live-sessions)))
+
 
 ;;;; Navigation
 
@@ -156,20 +139,6 @@ Prefers `kuro-mux--name' when set, falls back to the buffer name."
 (defun kuro-mux--prev-buffer (buf sessions)
   "Return the buffer before BUF in SESSIONS, wrapping around."
   (kuro-mux--next-buffer buf (reverse sessions)))
-
-(defmacro kuro--def-mux-nav (name nav-fn docstring)
-  "Define NAME as a kuro-mux session cycle command.
-DOCSTRING becomes the generated command docstring.
-NAV-FN is called with (current-buffer sessions) to pick the target buffer."
-  `(defun ,name ()
-     ,docstring
-     (interactive)
-     (let ((sessions (kuro-mux--live-sessions)))
-       (cond
-        ((null sessions)       (message "kuro-mux: no active sessions"))
-        ((null (cdr sessions)) (switch-to-buffer (car sessions)))
-        (t                     (switch-to-buffer
-                                (,nav-fn (current-buffer) sessions)))))))
 
 ;;;###autoload
 (kuro--def-mux-nav kuro-mux-next kuro-mux--next-buffer
@@ -189,10 +158,7 @@ With prefix argument or when called interactively, use `completing-read'."
           (mapcar #'kuro-mux--session-display-name
                   (kuro-mux--live-sessions))
           nil t)))
-  (let ((target (seq-find
-                 (lambda (buf)
-                   (string= (kuro-mux--session-display-name buf) name))
-                 (kuro-mux--live-sessions))))
+  (let ((target (kuro-mux--find-session-by-name name)))
     (if target
         (switch-to-buffer target)
       (message "kuro-mux: no session named %s" name))))
@@ -314,6 +280,7 @@ first).  Index 1 is the oldest session; 0 selects the tenth.  Signals
 (require 'kuro-mux-windows)
 (require 'kuro-mux-layout)
 (require 'kuro-mux-ext)
+(require 'kuro-mux-monitor)
 (require 'kuro-mux-ext2)
 
 (provide 'kuro-mux)

@@ -75,5 +75,44 @@
      kuro--send-shifted-return "\e[13;2u"))
   "Table of (test-name command kkp-sequence) for generated shifted-key commands.")
 
+(eval-and-compile
+  (defconst kuro-input-keymap-test--built-binding-cases
+    '((kuro-input-keymap-build-c-m-is-ret
+       (kbd "C-m") kuro--RET)
+      (kuro-input-keymap-build-c-i-is-tab
+       (kbd "C-i") kuro--TAB)
+      (kuro-input-keymap-build-c-h-is-del
+       (kbd "C-h") kuro--DEL)
+      (kuro-input-keymap-build-del-is-del
+       (kbd "DEL") kuro--DEL)
+      (kuro-input-keymap-build-m-del-bound-to-meta-backspace
+       (kbd "M-DEL") kuro--send-meta-backspace)
+      (kuro-input-keymap-build-m-backspace-bound-to-meta-backspace
+       (kbd "M-<backspace>") kuro--send-meta-backspace))
+    "Table of (test-name key expected) for built keymap binding equality checks.")
+
+  (defconst kuro-input-keymap-test--built-live-binding-cases
+    '((kuro-input-keymap-escape-bound-is-live [escape])
+      (kuro-input-keymap-c-a-is-live (kbd "C-a"))
+      (kuro-input-keymap-c-z-is-live (kbd "C-z"))
+      (kuro-input-keymap-m-0-is-bound (kbd "M-0"))
+      (kuro-input-keymap-m-9-is-bound (kbd "M-9"))
+      (kuro-input-keymap-esc-letter-two-key-fallback-is-bound (vector ?\e ?a))
+      (kuro-input-keymap-esc-letter-two-key-upper-fallback-is-bound (vector ?\e ?Z)))
+    "Table of (test-name key) for built keymap presence checks.")
+
+  (defconst kuro-input-keymap-test--built-send-cases
+    '((kuro-input-keymap-escape-sends-ctrl-27
+       [escape] kuro--send-ctrl 27)
+      (kuro-input-keymap-c-a-sends-ctrl-1
+       (kbd "C-a") kuro--send-ctrl 1)
+      (kuro-input-keymap-c-z-sends-ctrl-26
+       (kbd "C-z") kuro--send-ctrl 26)
+      (kuro-input-keymap-m-digits-send-correct-char
+       (kbd "M-5") kuro--send-meta ?5)
+      (kuro-input-keymap-esc-letter-two-key-sends-correct-char
+       (vector ?\e ?b) kuro--send-meta ?b))
+    "Table of (test-name key sender-fn arg) for built keymap send checks."))
+
 (provide 'kuro-input-keymap-test-cases)
 ;;; kuro-input-keymap-test-cases.el ends here

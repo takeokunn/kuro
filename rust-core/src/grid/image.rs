@@ -105,6 +105,23 @@ impl Default for GraphicsStore {
 impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
+    fn rewrite_placements<F>(&mut self, mut f: F)
+    where
+        F: FnMut(ImagePlacement) -> Option<ImagePlacement>,
+    {
+        self.placements = std::mem::take(&mut self.placements)
+            .into_iter()
+            .filter_map(|placement| f(placement))
+            .collect();
+    }
+
+    fn retain_placements<F>(&mut self, mut predicate: F)
+    where
+        F: FnMut(&ImagePlacement) -> bool,
+    {
+        self.rewrite_placements(|placement| predicate(&placement).then_some(placement));
+    }
+
     /// Create a new empty graphics store with the default 256 MB capacity cap
     #[must_use]
     pub fn new() -> Self {
@@ -184,25 +201,23 @@ impl GraphicsStore {
     /// Shift all placement rows up by `n` lines (called on terminal `scroll_up`).
     /// Placements that scroll off the top (row < n) are discarded.
     pub fn scroll_up(&mut self, n: usize) {
-        self.placements = std::mem::take(&mut self.placements)
-            .into_iter()
-            .filter_map(|mut p| {
-                if p.row < n {
-                    None
-                } else {
-                    p.row -= n;
-                    Some(p)
-                }
-            })
-            .collect();
+        self.rewrite_placements(|mut placement| {
+            if placement.row < n {
+                None
+            } else {
+                placement.row -= n;
+                Some(placement)
+            }
+        });
     }
 
     /// Shift all placement rows down by `n` lines (called on terminal `scroll_down`).
     /// Placements are clamped to `max_row - 1` rather than discarded.
     pub fn scroll_down(&mut self, n: usize, max_row: usize) {
-        for p in &mut self.placements {
-            p.row = (p.row + n).min(max_row.saturating_sub(1));
-        }
+        self.rewrite_placements(|mut placement| {
+            placement.row = (placement.row + n).min(max_row.saturating_sub(1));
+            Some(placement)
+        });
     }
 
     /// Delete an image and all its placements by ID
@@ -211,23 +226,24 @@ impl GraphicsStore {
             self.current_bytes = self.current_bytes.saturating_sub(data.byte_count());
             self.lru_order.retain(|&i| i != image_id);
         }
-        self.placements.retain(|p| p.image_id != image_id);
+        self.retain_placements(|placement| placement.image_id != image_id);
     }
 
     /// Delete placements matching both image ID and placement ID (Kitty `a=d,p=`)
     pub fn delete_by_placement(&mut self, image_id: u32, placement_id: u32) {
-        self.placements
-            .retain(|p| !(p.image_id == image_id && p.placement_id == Some(placement_id)));
+        self.retain_placements(|placement| {
+            placement.image_id != image_id || placement.placement_id != Some(placement_id)
+        });
     }
 
     /// Delete all placements whose top-left row equals `row` (Kitty `a=d,d=y`)
     pub fn delete_by_row(&mut self, row: usize) {
-        self.placements.retain(|p| p.row != row);
+        self.retain_placements(|placement| placement.row != row);
     }
 
     /// Delete all placements whose top-left column equals `col` (Kitty `a=d,d=x`)
     pub fn delete_by_col(&mut self, col: usize) {
-        self.placements.retain(|p| p.col != col);
+        self.retain_placements(|placement| placement.col != col);
     }
 }
 

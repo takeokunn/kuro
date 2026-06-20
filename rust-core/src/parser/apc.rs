@@ -194,16 +194,27 @@ fn store_kitty_image(
     pixel_height: u32,
 ) -> u32 {
     let data = build_kitty_image_data(pixels, format, pixel_width, pixel_height);
-    core.screen.active_graphics_mut().store_image(image_id, data)
+    core.screen
+        .active_graphics_mut()
+        .store_image(image_id, data)
 }
 
-fn add_kitty_placement(
-    core: &mut TerminalCore,
-    placement: crate::grid::screen::ImagePlacement,
-) {
+fn add_kitty_placement(core: &mut TerminalCore, placement: crate::grid::screen::ImagePlacement) {
     if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
         core.kitty.pending_image_notifications.push(notif);
     }
+}
+
+fn add_kitty_image_placement(
+    core: &mut TerminalCore,
+    image_id: u32,
+    placement_id: Option<u32>,
+    columns: Option<u32>,
+    rows: Option<u32>,
+) {
+    let cursor = *core.screen.cursor();
+    let placement = build_kitty_image_placement(cursor, image_id, placement_id, columns, rows);
+    add_kitty_placement(core, placement);
 }
 
 fn handle_kitty_transmit(
@@ -229,9 +240,7 @@ fn handle_kitty_transmit_and_display(
     placement_id: Option<u32>,
 ) {
     let actual_id = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
-    let cursor = *core.screen.cursor();
-    let placement = build_kitty_image_placement(cursor, actual_id, placement_id, columns, rows);
-    add_kitty_placement(core, placement);
+    add_kitty_image_placement(core, actual_id, placement_id, columns, rows);
 }
 
 fn handle_kitty_place(
@@ -241,9 +250,7 @@ fn handle_kitty_place(
     columns: Option<u32>,
     rows: Option<u32>,
 ) {
-    let cursor = *core.screen.cursor();
-    let placement = build_kitty_image_placement(cursor, image_id, placement_id, columns, rows);
-    add_kitty_placement(core, placement);
+    add_kitty_image_placement(core, image_id, placement_id, columns, rows);
 }
 
 fn handle_kitty_delete(

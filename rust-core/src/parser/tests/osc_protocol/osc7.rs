@@ -1,51 +1,32 @@
-use crate::TerminalCore;
-
 // ── handle_osc_7 hostname preservation ───────────────────────────────────────
 
-#[test]
-fn osc7_localhost_yields_none_host() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file://localhost/home/user"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
-    assert!(core.osc_data().cwd_host.is_none());
-}
+test_osc_7_hostname!(
+    osc7_localhost_yields_none_host,
+    b"file://localhost/home/user",
+    cwd "/home/user",
+    host None
+);
 
-#[test]
-fn osc7_empty_host_yields_none() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file:///tmp"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/tmp"));
-    assert!(core.osc_data().cwd_host.is_none());
-}
+test_osc_7_hostname!(
+    osc7_empty_host_yields_none,
+    b"file:///tmp",
+    cwd "/tmp",
+    host None
+);
 
-#[test]
-fn osc7_remote_host_preserved() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file://myhost/home/user"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
-    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("myhost"));
-}
+test_osc_7_hostname!(
+    osc7_remote_host_preserved,
+    b"file://myhost/home/user",
+    cwd "/home/user",
+    host Some("myhost")
+);
 
-#[test]
-fn osc7_host_cleared_on_localhost() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    // First set a remote host
-    let params: &[&[u8]] = &[b"7", b"file://remotehost/srv"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("remotehost"));
-    // Then set localhost — host should be cleared
-    let params2: &[&[u8]] = &[b"7", b"file://localhost/home"];
-    crate::parser::osc::handle_osc(&mut core, params2, false);
-    assert!(core.osc_data().cwd_host.is_none());
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home"));
-}
+test_osc_7_hostname_reset!(
+    osc7_host_cleared_on_localhost,
+    first b"file://remotehost/srv",
+    second b"file://localhost/home",
+    cwd "/home"
+);
 
 // ── DA3 ordering / Mode 2031 default state (FR-115 / FR-117) ─────────────────
 
@@ -53,8 +34,7 @@ fn osc7_host_cleared_on_localhost() {
 /// order — DA1 response first, DA3 response second.
 #[test]
 fn da1_then_da3_responses_in_submission_order() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b[c\x1b[=c");
     let responses = core.pending_responses();
     assert_eq!(
@@ -91,7 +71,7 @@ fn dec_modes_new_mode_2031_default_false() {
 
 #[test]
 fn osc_9_iterm2_form_pushes_notification() {
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]9;Build finished\x07");
     assert_eq!(core.osc_data.notifications.len(), 1);
     assert_eq!(core.osc_data.notifications[0].title, None);
@@ -101,21 +81,21 @@ fn osc_9_iterm2_form_pushes_notification() {
 #[test]
 fn osc_9_conemu_progress_form_is_ignored() {
     // OSC 9 ; 4 ; ... is ConEmu progress, not an iTerm2 notification.
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]9;4;1;50\x07");
     assert!(core.osc_data.notifications.is_empty());
 }
 
 #[test]
 fn osc_9_empty_body_is_ignored() {
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]9;\x07");
     assert!(core.osc_data.notifications.is_empty());
 }
 
 #[test]
 fn osc_777_notify_pushes_title_and_body() {
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]777;notify;CI;passed\x07");
     assert_eq!(core.osc_data.notifications.len(), 1);
     assert_eq!(core.osc_data.notifications[0].title.as_deref(), Some("CI"));
@@ -124,7 +104,7 @@ fn osc_777_notify_pushes_title_and_body() {
 
 #[test]
 fn osc_777_empty_title_becomes_none() {
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]777;notify;;body only\x07");
     assert_eq!(core.osc_data.notifications.len(), 1);
     assert_eq!(core.osc_data.notifications[0].title, None);
@@ -133,7 +113,7 @@ fn osc_777_empty_title_becomes_none() {
 
 #[test]
 fn osc_777_non_notify_subcommand_is_ignored() {
-    let mut core = TerminalCore::new(24, 80);
+    let mut core = make_core!();
     core.advance(b"\x1b]777;other;x;y\x07");
     assert!(core.osc_data.notifications.is_empty());
 }

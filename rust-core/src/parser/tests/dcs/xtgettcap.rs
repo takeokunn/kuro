@@ -3,6 +3,7 @@
 // -------------------------------------------------------------------------
 
 use super::*;
+use crate::parser::dcs::build_xtgettcap_response;
 
 /// Test `build_xtgettcap_response` for a known capability: assert that the
 /// response starts with the DCS success prefix and (optionally) contains a
@@ -70,41 +71,15 @@ fn build_xtgettcap_response_name_alias_same_as_tn() {
     assert!(resp_name.starts_with("\x1bP1+r"));
 }
 
-#[test]
-fn build_xtgettcap_response_rgb_encodes_888() {
-    let resp = build_xtgettcap_response("RGB", "524742");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "RGB must succeed, got: {resp:?}"
-    );
-    // "8:8:8" hex-encoded is "383a383a38"
-    let expected_val = {
-        let mut s = String::new();
-        for b in b"8:8:8" {
-            use std::fmt::Write as _;
-            let _ = write!(s, "{b:02x}");
-        }
-        s
-    };
-    assert!(
-        resp.contains(&expected_val),
-        "RGB response must contain hex-encoded '8:8:8', got: {resp:?}"
-    );
-}
+test_build_response!(
+    build_xtgettcap_response_rgb_encodes_888,
+    "RGB", "524742" => success contains "383a383a38"
+);
 
-#[test]
-fn build_xtgettcap_response_tc_empty_value() {
-    let resp = build_xtgettcap_response("Tc", "5463");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "Tc must succeed, got: {resp:?}"
-    );
-    // The value part is empty: "...5463=\x1b\\"
-    assert!(
-        resp.contains("5463=\x1b\\"),
-        "Tc response value must be empty, got: {resp:?}"
-    );
-}
+test_build_response!(
+    build_xtgettcap_response_tc_empty_value,
+    "Tc", "5463" => success contains "5463=\x1b\\"
+);
 
 test_build_response!(
     build_xtgettcap_response_colors_encodes_256,

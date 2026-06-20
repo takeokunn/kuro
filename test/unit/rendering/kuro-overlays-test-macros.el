@@ -146,5 +146,15 @@ Sets the following buffer-local variables:
                  `(kuro-overlays-test--def-toggle-blink-phase-case ,@case))
                kuro-overlays-test--toggle-blink-phase-cases)))
 
+(defmacro kuro-overlays-test--deftest-table-cases
+    (test-name doc table pattern &rest body)
+  "Define TEST-NAME by iterating TABLE with PATTERN over each entry."
+  (declare (indent 4))
+  `(ert-deftest ,test-name ()
+     ,doc
+     (dolist (entry ,table)
+       (pcase-let ((,pattern entry))
+         ,@body))))
+
 (provide 'kuro-overlays-test-macros)
 ;;; kuro-overlays-test-macros.el ends here

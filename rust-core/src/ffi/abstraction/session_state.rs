@@ -30,25 +30,41 @@ impl TerminalSession {
         self.core.screen.scroll_offset()
     }
 
-    /// Check if the PTY channel has pending unread data (without consuming it).
-    ///
-    /// Used by Elisp to trigger immediate rendering when streaming output arrives.
     #[cfg(unix)]
-    #[must_use]
-    pub fn has_pending_output(&self) -> bool {
-        !self.pending_input.is_empty()
-            || self
-                .pty
-                .as_ref()
-                .is_some_and(crate::pty::posix::Pty::has_pending_data)
+    #[inline]
+    fn pty_has_pending_output(&self) -> bool {
+        self.pty
+            .as_ref()
+            .is_some_and(crate::pty::posix::Pty::has_pending_data)
+    }
+
+    #[cfg(not(unix))]
+    #[inline]
+    fn pty_has_pending_output(&self) -> bool {
+        false
     }
 
     /// Check if the PTY channel has pending unread data (without consuming it).
     ///
-    /// Always returns `false` on non-Unix platforms where PTY support is unavailable.
-    #[cfg(not(unix))]
+    /// Used by Elisp to trigger immediate rendering when streaming output arrives.
+    #[must_use]
     pub fn has_pending_output(&self) -> bool {
-        false
+        !self.pending_input.is_empty() || self.pty_has_pending_output()
+    }
+
+    #[cfg(unix)]
+    #[inline]
+    #[must_use]
+    fn pty_is_alive(&self) -> bool {
+        self.pty
+            .as_ref()
+            .is_none_or(crate::pty::posix::Pty::is_alive)
+    }
+
+    #[cfg(not(unix))]
+    #[inline]
+    fn pty_is_alive(&self) -> bool {
+        true
     }
 
     /// Returns true if the PTY child process has not yet exited.
@@ -57,19 +73,9 @@ impl TerminalSession {
     /// Returns `true` when `pty` is `None` (test sessions without a real PTY) so that
     /// test buffers are never auto-killed.
     /// On non-Unix: always returns `true` (no PTY process to track).
-    #[cfg(unix)]
-    #[inline]
     #[must_use]
     pub fn is_process_alive(&self) -> bool {
-        self.pty
-            .as_ref()
-            .is_none_or(crate::pty::posix::Pty::is_alive)
-    }
-
-    #[cfg(not(unix))]
-    #[inline]
-    pub fn is_process_alive(&self) -> bool {
-        true
+        self.pty_is_alive()
     }
 
     /// Return the shell command used to spawn this session.

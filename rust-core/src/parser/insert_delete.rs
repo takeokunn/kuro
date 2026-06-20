@@ -30,6 +30,42 @@ fn get_param(params: &vte::Params) -> usize {
         .max(1) as usize
 }
 
+fn blank_cell_with_background(background: crate::Color) -> crate::types::Cell {
+    let mut blank = crate::types::Cell::default();
+    blank.attrs.background = background;
+    blank
+}
+
+fn shift_cells_right(
+    line: &mut crate::grid::Line,
+    cursor_col: usize,
+    shift: usize,
+    blank: &crate::types::Cell,
+) {
+    let len = line.cells.len();
+    if cursor_col < len {
+        let shift = shift.min(len - cursor_col);
+        line.cells[cursor_col..].rotate_right(shift);
+        let fill_end = cursor_col + shift;
+        line.cells[cursor_col..fill_end].fill(blank.clone());
+    }
+}
+
+fn shift_cells_left(
+    line: &mut crate::grid::Line,
+    cursor_col: usize,
+    shift: usize,
+    blank: &crate::types::Cell,
+) {
+    let len = line.cells.len();
+    if cursor_col < len {
+        let shift = shift.min(len - cursor_col);
+        line.cells[cursor_col..].rotate_left(shift);
+        let fill_start = len - shift;
+        line.cells[fill_start..].fill(blank.clone());
+    }
+}
+
 /// IL — Insert Lines (CSI Ps L)
 fn csi_il(term: &mut crate::TerminalCore, params: &vte::Params) {
     let n = get_param(params);
@@ -62,62 +98,48 @@ fn csi_ech(term: &mut crate::TerminalCore, params: &vte::Params) {
     term.screen.erase_chars(n, attrs);
 }
 
-/// DECIC — Insert Column(s) (CSI Ps ' })
-///
-/// Inserts `Ps` blank columns at the cursor column in every row within the
-/// current scroll region. Existing content shifts right; columns that shift
-/// past the right margin are discarded.
-pub fn handle_decic(term: &mut crate::TerminalCore, params: &vte::Params) {
-    use crate::types::Cell;
-    let n = get_param(params);
-    let cursor_col = term.screen.cursor().col;
-    let cols = term.screen.cols() as usize;
-    let bg = term.current_attrs.background;
+fn for_each_scroll_region_line_mut<F>(term: &mut crate::TerminalCore, mut f: F)
+where
+    F: FnMut(usize, &mut crate::grid::Line),
+{
     let region = term.screen.get_scroll_region();
-    let shift = n.min(cols.saturating_sub(cursor_col));
-    if shift == 0 {
-        return;
-    }
-    let mut blank = Cell::default();
-    blank.attrs.background = bg;
     for row in region.top..region.bottom {
         if let Some(line) = term.screen.get_line_mut(row) {
-            let len = line.cells.len();
-            if cursor_col < len {
-                line.cells[cursor_col..].rotate_right(shift.min(len - cursor_col));
-                let fill_end = (cursor_col + shift).min(len);
-                line.cells[cursor_col..fill_end].fill(blank.clone());
-            }
+            f(row, line);
         }
         term.screen.mark_line_dirty(row);
     }
 }
 
-/// DECDC — Delete Column(s) (CSI Ps ' ~)
+/// DECIC — Insert Columns (VT500 private mode)
 ///
-/// Deletes `Ps` columns starting at the cursor column in every row within the
-/// current scroll region. Content to the right of the deleted columns shifts
-/// left; blank columns fill the right end of each row.
-pub fn handle_decdc(term: &mut crate::TerminalCore, params: &vte::Params) {
-    use crate::types::Cell;
+/// Inserts blank cells from the cursor position across the scroll region and
+/// shifts existing cells to the right.
+pub fn handle_decic(term: &mut crate::TerminalCore, params: &vte::Params) {
     let n = get_param(params);
     let cursor_col = term.screen.cursor().col;
-    let bg = term.current_attrs.background;
-    let region = term.screen.get_scroll_region();
-    let mut blank = Cell::default();
-    blank.attrs.background = bg;
-    for row in region.top..region.bottom {
-        if let Some(line) = term.screen.get_line_mut(row) {
-            let len = line.cells.len();
-            if cursor_col < len {
-                let shift = n.min(len - cursor_col);
-                line.cells[cursor_col..].rotate_left(shift);
-                let fill_start = len - shift;
-                line.cells[fill_start..].fill(blank.clone());
-            }
-        }
-        term.screen.mark_line_dirty(row);
+    let cols = term.screen.cols() as usize;
+    let shift = n.min(cols.saturating_sub(cursor_col));
+    if shift == 0 {
+        return;
     }
+    let blank = blank_cell_with_background(term.current_attrs.background);
+    for_each_scroll_region_line_mut(term, |_, line| {
+        shift_cells_right(line, cursor_col, shift, &blank);
+    });
+}
+
+/// DECDC — Delete Columns (VT500 private mode)
+///
+/// Deletes cells from the cursor position across the scroll region and shifts
+/// the remaining cells to the left.
+pub fn handle_decdc(term: &mut crate::TerminalCore, params: &vte::Params) {
+    let n = get_param(params);
+    let cursor_col = term.screen.cursor().col;
+    let blank = blank_cell_with_background(term.current_attrs.background);
+    for_each_scroll_region_line_mut(term, |_, line| {
+        shift_cells_left(line, cursor_col, n, &blank);
+    });
 }
 
 #[cfg(test)]

@@ -262,7 +262,10 @@ assert_to_png_base64_non_empty!(
     tiny_rgb(0x80)
 );
 
-assert_to_png_base64_non_empty!(to_png_base64_rgba_produces_non_empty_string, tiny_rgba(0x40));
+assert_to_png_base64_non_empty!(
+    to_png_base64_rgba_produces_non_empty_string,
+    tiny_rgba(0x40)
+);
 
 assert_image_survives!(
     scroll_up_zero_is_noop,

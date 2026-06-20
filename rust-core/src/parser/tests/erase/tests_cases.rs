@@ -211,7 +211,8 @@ fn test_erase_marks_dirty() {
 #[test]
 fn test_el_mode0_splits_wide_char() {
     let mut term = crate::TerminalCore::new(5, 20);
-    term.screen.print('\u{65E5}', SgrAttributes::default(), true);
+    term.screen
+        .print('\u{65E5}', SgrAttributes::default(), true);
 
     let line = term.screen.get_line(0).unwrap();
     assert_eq!(line.cells[0].width, CellWidth::Full);

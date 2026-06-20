@@ -1,6 +1,6 @@
 use super::tests_support::*;
 use crate::types::color::Color;
-use crate::types::osc::{ClipboardAction, HyperlinkState, OscData, PromptMark};
+use crate::types::osc::{ClipboardAction, DefaultColorSlot, HyperlinkState, OscData, PromptMark};
 
 // -------------------------------------------------------------------------
 // OscData construction
@@ -35,6 +35,39 @@ fn osc_data_default_palette_len_256_all_none() {
     let d = OscData::default();
     assert_eq!(d.palette.len(), 256);
     assert!(d.palette.iter().all(Option::is_none));
+}
+
+#[test]
+// MUTATION: set_cwd() stores host/path together and marks the directory dirty.
+fn osc_data_set_cwd_marks_dirty() {
+    let mut d = OscData::default();
+    d.set_cwd(
+        Some("example.com".to_owned()),
+        Some("/home/kuro".to_owned()),
+    );
+    assert_eq!(d.cwd_host.as_deref(), Some("example.com"));
+    assert_eq!(d.cwd.as_deref(), Some("/home/kuro"));
+    assert!(d.cwd_dirty);
+}
+
+#[test]
+// MUTATION: set_hyperlink_uri() opens and clears OSC 8 hyperlink state.
+fn osc_data_set_hyperlink_uri_updates_state() {
+    let mut d = OscData::default();
+    d.set_hyperlink_uri(Some("https://example.com".to_owned()));
+    assert_eq!(d.hyperlink.uri.as_deref(), Some("https://example.com"));
+    d.set_hyperlink_uri(None);
+    assert!(d.hyperlink.uri.is_none());
+}
+
+#[test]
+// MUTATION: set_pointer_shape() stores the requested cursor override.
+fn osc_data_set_pointer_shape_stores_override() {
+    let mut d = OscData::default();
+    d.set_pointer_shape(Some("pointer".to_owned()));
+    assert_eq!(d.pointer_shape.as_deref(), Some("pointer"));
+    d.set_pointer_shape(None);
+    assert!(d.pointer_shape.is_none());
 }
 
 #[test]
@@ -158,6 +191,36 @@ fn osc_data_set_cursor_color() {
         ..Default::default()
     };
     assert!(matches!(d.cursor_color, Some(Color::Default)));
+}
+
+#[test]
+// MUTATION: set_default_color() updates the requested slot and marks the defaults dirty.
+fn osc_data_set_default_color_updates_slot_and_dirty_flag() {
+    let mut d = OscData::default();
+    d.set_default_color(DefaultColorSlot::Foreground, Some(Color::Rgb(1, 2, 3)));
+    assert!(matches!(d.default_fg, Some(Color::Rgb(1, 2, 3))));
+    assert_eq!(d.default_color_rgb(DefaultColorSlot::Foreground), [1, 2, 3]);
+    assert!(d.default_colors_dirty);
+}
+
+#[test]
+// MUTATION: reset_default_color() clears the requested slot and still marks defaults dirty.
+fn osc_data_reset_default_color_clears_slot() {
+    let mut d = OscData::default();
+    d.default_bg = Some(Color::Rgb(4, 5, 6));
+    d.reset_default_color(DefaultColorSlot::Background);
+    assert!(d.default_bg.is_none());
+    assert!(d.default_colors_dirty);
+}
+
+#[test]
+// MUTATION: mark_palette_dirty() flips the palette dirty flag without touching entries.
+fn osc_data_mark_palette_dirty_sets_flag() {
+    let mut d = OscData::default();
+    assert!(!d.palette_dirty);
+    d.mark_palette_dirty();
+    assert!(d.palette_dirty);
+    assert!(d.palette.iter().all(Option::is_none));
 }
 
 #[test]

@@ -11,6 +11,9 @@
 
 ;;; Code:
 
+(require 'kuro-keymap)
+(require 'kuro-mux-monitor)
+
 (declare-function kuro-mux--live-sessions      "kuro-mux" ())
 (declare-function kuro-mux--for-each-live-session "kuro-mux" (fn &optional exclude))
 (declare-function kuro-mux--install-hooks      "kuro-mux-ext" ())
@@ -33,6 +36,10 @@
 (declare-function kuro-mux-swap-pane-forward   "kuro-mux-windows" ())
 (declare-function kuro-mux-swap-pane-backward  "kuro-mux-windows" ())
 (declare-function kuro-mux-resize-pane         "kuro-mux-windows" (direction &optional delta))
+(declare-function kuro-mux-break-pane          "kuro-mux-windows" ())
+(declare-function kuro-mux-join-pane           "kuro-mux-windows" ())
+(declare-function kuro-mux-rename              "kuro-mux-windows" ())
+(declare-function kuro-mux-send-to-session     "kuro-mux-windows" ())
 (declare-function kuro-mux-next-layout         "kuro-mux-layout" ())
 (declare-function kuro-mux-previous-layout     "kuro-mux-layout" ())
 (declare-function kuro-mux-select-layout       "kuro-mux-layout" (layout))
@@ -47,7 +54,6 @@
 (defvar kuro-mux--command)
 (defvar kuro-mux--directory)
 (defvar kuro-mux-mode-line-segment)
-(defvar kuro-shell)
 
 
 ;;;; Layout persistence
@@ -149,50 +155,81 @@ or missing :command) are silently dropped."
               raw))
 
 
-;;;; Prefix keymap (tmux-style)
+ (eval-and-compile
+  (defconst kuro-mux--prefix-bindings
+    '(("n" . kuro-mux-next)
+      ("p" . kuro-mux-prev)
+      ("s" . kuro-mux-switch-by-name)
+      ("L" . kuro-mux-last)
+      ("o" . kuro-mux-other-window)
+      ("C-o" . kuro-mux-rotate-panes)
+      ("M-o" . kuro-mux-rotate-panes-backward)
+      ("f" . kuro-mux-find-window)
+      ("%" . kuro-mux-split-right)
+      ("\"" . kuro-mux-split-below)
+      ("c" . kuro-mux-create)
+      ("," . kuro-mux-rename)
+      ("$" . kuro-mux-rename)
+      ("d" . kuro-mux-detach)
+      ("z" . kuro-mux-zoom)
+      ("&" . kuro-mux-kill)
+      ("S" . kuro-mux-save-layout)
+      ("R" . kuro-mux-restore-layout)
+      ("SPC" . kuro-mux-next-layout)
+      ("M-SPC" . kuro-mux-select-layout)
+      ("M-{" . kuro-mux-previous-layout)
+      ("M-}" . kuro-mux-next-layout)
+      ("{" . kuro-mux-swap-pane-backward)
+      ("}" . kuro-mux-swap-pane-forward)
+      ("!" . kuro-mux-break-pane)
+      ("@" . kuro-mux-join-pane)
+      ("[" . kuro-copy-mode)
+      ("/" . kuro-search-forward)
+      ("t" . kuro-mux-clock)
+      ("x" . kuro-mux-send-to-session)
+      ("B" . kuro-mux-broadcast-toggle)
+      ("P" . kuro-mux-pipe-pane)
+      ("m" . kuro-mux-monitor-activity-toggle)
+      ("M" . kuro-mux-monitor-silence)
+      ("w" . kuro-list-sessions)
+      ("?" . kuro-mux-help))
+    "Static prefix bindings for `kuro-mux-prefix-map'.
+Each entry is (KEY . COMMAND), where KEY is a `kbd' string.")
 
-(defconst kuro-mux--prefix-bindings
-  '(("n"     . kuro-mux-next)                  ("p"     . kuro-mux-prev)
-    ("s"     . kuro-mux-switch-by-name)         ("L"     . kuro-mux-last)
-    ("o"     . kuro-mux-other-window)           ("C-o"   . kuro-mux-rotate-panes)
-    ("M-o"   . kuro-mux-rotate-panes-backward)  ("f"     . kuro-mux-find-window)
-    ("%"     . kuro-mux-split-right)            ("\""    . kuro-mux-split-below)
-    ("c"     . kuro-mux-create)                 (","     . kuro-mux-rename)
-    ("$"     . kuro-mux-rename)                 ("d"     . kuro-mux-detach)
-    ("z"     . kuro-mux-zoom)                   ("&"     . kuro-mux-kill)
-    ("S"     . kuro-mux-save-layout)            ("R"     . kuro-mux-restore-layout)
-    ("SPC"   . kuro-mux-next-layout)            ("M-SPC" . kuro-mux-select-layout)
-    ("M-{"   . kuro-mux-previous-layout)        ("M-}"   . kuro-mux-next-layout)
-    ("{"     . kuro-mux-swap-pane-backward)     ("}"     . kuro-mux-swap-pane-forward)
-    ("!"     . kuro-mux-break-pane)             ("@"     . kuro-mux-join-pane)
-    ("["     . kuro-copy-mode)                  ("/"     . kuro-search-forward)
-    ("t"     . kuro-mux-clock)                  ("x"     . kuro-mux-send-to-session)
-    ("B"     . kuro-mux-broadcast-toggle)       ("P"     . kuro-mux-pipe-pane)
-    ("m"     . kuro-mux-monitor-activity-toggle) ("M"    . kuro-mux-monitor-silence)
-    ("w"     . kuro-list-sessions)              ("?"     . kuro-mux-help))
-  "Simple key→command binding table for `kuro-mux-prefix-map'.")
+  (defconst kuro-mux--prefix-resize-bindings
+    '(("<up>" up 2)
+      ("<down>" down 2)
+      ("<left>" left 5)
+      ("<right>" right 5))
+    "Resize bindings for `kuro-mux-prefix-map'.
+Each entry is (KEY DIRECTION DELTA).")
+  )
 
-(defconst kuro-mux--prefix-resize-bindings
-  '(("<up>" up 2) ("<down>" down 2) ("<left>" left 5) ("<right>" right 5))
-  "Arrow resize entries (key direction delta) for `kuro-mux-prefix-map'.")
+(eval-and-compile
+  (defun kuro-mux--prefix-resize-command (binding)
+    "Return a resize command closure for BINDING.
+BINDING is one entry from `kuro-mux--prefix-resize-bindings'."
+    (pcase-let ((`(,_key ,direction ,delta) binding))
+      (lambda () (interactive) (kuro-mux-resize-pane direction delta)))))
 
 (defvar kuro-mux-prefix-map
-  (let ((map (kuro--build-keymap-from-alist kuro-mux--prefix-bindings
-                                            (lambda (binding)
-                                              (kbd (car binding)))
-                                            #'cdr)))
+  (let ((map (make-sparse-keymap)))
+    (kuro--define-key-bindings map kuro-mux--prefix-bindings
+                               (lambda (binding) (kbd (car binding)))
+                               #'cdr)
     (dotimes (i 9)
       (let ((n (1+ i)))
         (define-key map (kbd (number-to-string n))
           (lambda () (interactive) (kuro-mux-select-by-index n)))))
-    (dolist (b kuro-mux--prefix-resize-bindings)
-      (let ((key (car b)) (dir (cadr b)) (delta (caddr b)))
-        (define-key map (kbd key)
-          (lambda () (interactive) (kuro-mux-resize-pane dir delta)))))
+    (kuro--define-key-bindings map kuro-mux--prefix-resize-bindings
+                               (lambda (binding) (kbd (car binding)))
+                               #'kuro-mux--prefix-resize-command)
     map)
   "Prefix keymap for kuro-mux multiplexer commands.
 Bound under `kuro-mux-prefix-key' by `kuro-mux-install-keys'.
-See `kuro-mux--prefix-bindings' for the full command table.")
+Static bindings are driven by `kuro-mux--prefix-bindings'; numeric and
+resize bindings are installed procedurally because they close over
+runtime values.")
 
 (defcustom kuro-mux-prefix-key "C-c m"
   "Key sequence under which `kuro-mux-prefix-map' is bound.
@@ -227,6 +264,12 @@ from `kuro-mux-setup' or your init file.  Returns the keymap modified."
 
 ;;;; Help
 
+(defun kuro-mux--help-insert ()
+  "Insert the standard `kuro-mux-help' content into the current buffer."
+  (insert (format "kuro-mux prefix key: %s\n\n" kuro-mux-prefix-key))
+  (insert "Available commands:\n\n")
+  (insert (substitute-command-keys "\\{kuro-mux-prefix-map}")))
+
 ;;;###autoload
 (defun kuro-mux-help ()
   "Show a help buffer listing all kuro-mux prefix keymap bindings.
@@ -234,9 +277,7 @@ Displays the formatted contents of `kuro-mux-prefix-map' and the
 configured `kuro-mux-prefix-key' via `with-help-window'."
   (interactive)
   (with-help-window "*kuro-mux help*"
-    (princ (format "kuro-mux prefix key: %s\n\n" kuro-mux-prefix-key))
-    (princ "Available commands:\n\n")
-    (princ (substitute-command-keys "\\{kuro-mux-prefix-map}"))))
+    (kuro-mux--help-insert)))
 
 ;;;###autoload
 (defun kuro-mux-clock ()

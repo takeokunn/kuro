@@ -26,6 +26,29 @@ impl TerminalSession {
 
         self.palette_epoch
     }
+
+    fn row_cache_is_current(
+        cached: Option<(u64, u64, u64)>,
+        line_version: u64,
+        epoch: u64,
+    ) -> bool {
+        matches!(
+            cached,
+            Some((stored_version, _, stored_epoch))
+                if stored_version == line_version && stored_epoch == epoch
+        )
+    }
+
+    fn row_cache_matches_hash(cached: Option<(u64, u64, u64)>, new_hash: u64, epoch: u64) -> bool {
+        matches!(
+            cached,
+            Some((_, stored_hash, stored_epoch)) if stored_hash == new_hash && stored_epoch == epoch
+        )
+    }
+
+    fn store_row_cache(&mut self, row: usize, line_version: u64, new_hash: u64, epoch: u64) {
+        self.row_hashes[row] = Some((line_version, new_hash, epoch));
+    }
 }
 
 impl TerminalSession {
@@ -96,7 +119,7 @@ impl TerminalSession {
                 if let Some((value, hash)) =
                     emit_row(&mut self.encode_pool, &mut self.buf_scratch, line, row)
                 {
-                    self.row_hashes[row] = Some((line.version, hash, epoch));
+                    self.store_row_cache(row, line.version, hash, epoch);
                     result.push(value);
                 }
             }
@@ -114,12 +137,10 @@ impl TerminalSession {
         Vec<usize>,
         u64,
     ) {
-        let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line_with_pool(
-            &line.cells,
-            line.has_wide,
-            encode_pool,
-        );
-        let hash = crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
+        let (text, face_ranges, col_to_buf) =
+            crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, encode_pool);
+        let hash =
+            crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
         (text, face_ranges, col_to_buf, hash)
     }
 
@@ -138,11 +159,7 @@ impl TerminalSession {
         )
     }
 
-    fn collect_dirty_rows_with_cache<T, F>(
-        &mut self,
-        epoch: u64,
-        mut emit_row: F,
-    ) -> Vec<T>
+    fn collect_dirty_rows_with_cache<T, F>(&mut self, epoch: u64, mut emit_row: F) -> Vec<T>
     where
         F: FnMut(
             &mut crate::ffi::codec::EncodePool,
@@ -153,19 +170,20 @@ impl TerminalSession {
             u64,
         ) -> Option<(T, u64)>,
     {
-        self.core.screen.take_dirty_lines_into(&mut self.dirty_scratch);
+        self.core
+            .screen
+            .take_dirty_lines_into(&mut self.dirty_scratch);
         let screen_rows = self.core.screen.rows() as usize;
         self.ensure_row_hash_capacity(screen_rows);
 
-        let mut result: Vec<T> = Vec::with_capacity(self.dirty_scratch.len());
-        for &row in &self.dirty_scratch {
+        let dirty_rows = self.dirty_scratch.clone();
+        let mut result: Vec<T> = Vec::with_capacity(dirty_rows.len());
+        for row in dirty_rows {
             if let Some(line) = self.core.screen.get_line(row) {
                 let cached = self.row_hashes[row];
 
-                if let Some((stored_ver, _stored_hash, stored_epoch)) = cached {
-                    if line.version == stored_ver && epoch == stored_epoch {
-                        continue;
-                    }
+                if Self::row_cache_is_current(cached, line.version, epoch) {
+                    continue;
                 }
 
                 let buf_snapshot = self.buf_scratch.len();
@@ -177,14 +195,12 @@ impl TerminalSession {
                     cached,
                     epoch,
                 ) {
-                    if let Some((_stored_ver, stored_hash, stored_epoch)) = cached {
-                        if stored_hash == new_hash && stored_epoch == epoch {
-                            self.buf_scratch.truncate(buf_snapshot);
-                            continue;
-                        }
+                    if Self::row_cache_matches_hash(cached, new_hash, epoch) {
+                        self.buf_scratch.truncate(buf_snapshot);
+                        continue;
                     }
 
-                    self.row_hashes[row] = Some((line.version, new_hash, epoch));
+                    self.store_row_cache(row, line.version, new_hash, epoch);
                     result.push(value);
                 } else {
                     self.buf_scratch.truncate(buf_snapshot);
@@ -222,7 +238,6 @@ impl TerminalSession {
     ///
     /// This reuses the session scratch buffers for both text rows and the
     /// serialized binary payload so callers can avoid per-frame heap churn.
-
     pub fn get_dirty_lines_binary_direct(&mut self) -> (Vec<String>, Vec<u8>) {
         // Scrollback viewport path: when scroll_dirty, encode all scrollback rows.
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
@@ -268,9 +283,8 @@ impl TerminalSession {
         let num_rows_offset = self.begin_binary_dirty_frame();
 
         if self.core.screen.is_full_dirty() {
-            self.texts_scratch = self.collect_full_dirty_rows(
-                epoch,
-                |encode_pool, buf_scratch, line, row| {
+            self.texts_scratch =
+                self.collect_full_dirty_rows(epoch, |encode_pool, buf_scratch, line, row| {
                     let (text, hash) = Self::encode_line_into_binary_frame_and_hash(
                         encode_pool,
                         buf_scratch,
@@ -278,8 +292,7 @@ impl TerminalSession {
                         row,
                     );
                     Some((text, hash))
-                },
-            );
+                });
         } else {
             let epoch = self.palette_epoch;
             let rows = self.collect_dirty_rows_with_cache(

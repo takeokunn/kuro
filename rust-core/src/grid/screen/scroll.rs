@@ -180,9 +180,9 @@ impl Screen {
     /// Dispatches to the active screen and computes `is_primary` from the outer screen.
     pub fn scroll_up(&mut self, n: usize, bg: Color) {
         let is_primary = !self.is_alternate_active;
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.scroll_up_impl(n, bg, is_primary);
-        }
+        });
     }
 
     /// Internal scroll-down implementation that operates on `self` directly.
@@ -207,9 +207,9 @@ impl Screen {
     /// Dispatches to the active screen and computes `is_primary` from the outer screen.
     pub fn scroll_down(&mut self, n: usize, bg: Color) {
         let is_primary = !self.is_alternate_active;
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.scroll_down_impl(n, bg, is_primary);
-        }
+        });
     }
 
     /// Set scroll region
@@ -226,12 +226,8 @@ impl Screen {
     /// Get scroll region
     #[must_use]
     pub fn get_scroll_region(&self) -> &ScrollRegion {
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_ref() {
-                return &alt.scroll_region;
-            }
-        }
-        &self.scroll_region
+        self.with_active_screen(|screen| &screen.scroll_region)
+            .unwrap_or(&self.scroll_region)
     }
 
     /// Atomically consume pending full-screen scroll event counts.

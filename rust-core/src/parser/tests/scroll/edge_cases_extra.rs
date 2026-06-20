@@ -1,4 +1,3 @@
-
 use super::*;
 
 /// SU (CSI S) does not move the cursor — cursor stays at its row even after

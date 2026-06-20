@@ -19,6 +19,31 @@ then executes BODY.  Kills `snap' on cleanup if still live."
            (progn ,@body)
          (when (buffer-live-p snap) (kill-buffer snap))))))
 
+(defun kuro-test-keymap--bound-p (command keymap key)
+  "Return non-nil when COMMAND is bound in KEYMAP at KEY.
+This walks the raw keymap tree because nested prefix/composed maps make
+`lookup-key' return prefix-depth integers instead of terminal bindings."
+  (let ((events (kbd key))
+        (chars (string-to-vector (key-description (kbd key)))))
+    (cl-labels ((walk (map sequence index)
+                  (when (and (keymapp map) (< index (length sequence)))
+                    (let ((event (aref sequence index))
+                          (found nil))
+                      (map-keymap
+                       (lambda (candidate-event binding)
+                         (when (and (not found)
+                                    (equal candidate-event event))
+                           (setq found
+                                 (if (= (1+ index) (length sequence))
+                                     (eq binding command)
+                                   (walk binding sequence (1+ index))))))
+                       map)
+                      found)))
+                (matches (sequence)
+                  (walk keymap sequence 0)))
+      (or (matches events)
+          (matches chars)))))
+
 ;;; ── Group 10 (keymap): kuro-mode-map keymap ─────────────────────────────────
 
 (ert-deftest kuro-el-test--mode-map-is-sparse-keymap ()
@@ -163,14 +188,14 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--mode-map-has-c-spc-copy-mode-binding ()
   "kuro-mode-map binds C-c C-SPC to kuro-copy-mode."
-  (should (eq (lookup-key kuro-mode-map (kbd "C-c C-SPC")) #'kuro-copy-mode)))
+  (should (kuro-test-keymap--bound-p 'kuro-copy-mode kuro-mode-map "C-c C-SPC")))
 
 (ert-deftest kuro-el-test--copy-mode-keymap-has-c-spc-exit-binding ()
   "The copy-mode local keymap binds C-c C-SPC for exiting copy mode."
   (kuro-el-test--with-kuro-mode-buffer
     (kuro--enter-copy-mode)
-    (should (eq (lookup-key (current-local-map) (kbd "C-c C-SPC"))
-                #'kuro-copy-mode))))
+    (should (kuro-test-keymap--bound-p 'kuro-copy-mode (current-local-map)
+                                       "C-c C-SPC"))))
 
 (ert-deftest kuro-el-test--enter-copy-mode-propertizes-mode-name ()
   "kuro--enter-copy-mode sets mode-name with font-lock-warning-face."
@@ -191,8 +216,8 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--mode-map-has-c-c-s-search-binding ()
   "kuro-mode-map binds C-c C-s to kuro-search-forward."
-  (should (eq (lookup-key kuro-mode-map (kbd "C-c C-s"))
-              #'kuro-search-forward)))
+  (should (kuro-test-keymap--bound-p 'kuro-search-forward kuro-mode-map
+                                     "C-c C-s")))
 
 (ert-deftest kuro-el-test--copy-map-binds-isearch-forward ()
   "kuro--enter-copy-mode installs C-s → isearch-forward in the copy keymap."
@@ -288,18 +313,20 @@ This is the same guard that kuro--assert-terminal-p would implement."
 
 (ert-deftest kuro-el-test--mode-map-has-c-c-e-edit-scrollback ()
   "kuro-mode-map binds C-c C-e to kuro-edit-scrollback."
-  (should (eq (lookup-key kuro-mode-map (kbd "C-c C-e"))
-              #'kuro-edit-scrollback)))
+  (should (kuro-test-keymap--bound-p 'kuro-edit-scrollback kuro-mode-map
+                                     "C-c C-e")))
 
 (ert-deftest kuro-el-test--scrollback-edit-keymap-binds-send ()
   "kuro--scrollback-edit-keymap binds C-c C-c to kuro-scrollback-send."
-  (should (eq (lookup-key kuro--scrollback-edit-keymap (kbd "C-c C-c"))
-              #'kuro-scrollback-send)))
+  (should (kuro-test-keymap--bound-p 'kuro-scrollback-send
+                                     kuro--scrollback-edit-keymap
+                                     "C-c C-c")))
 
 (ert-deftest kuro-el-test--scrollback-edit-keymap-binds-discard ()
   "kuro--scrollback-edit-keymap binds C-c C-k to kuro-scrollback-discard."
-  (should (eq (lookup-key kuro--scrollback-edit-keymap (kbd "C-c C-k"))
-              #'kuro-scrollback-discard)))
+  (should (kuro-test-keymap--bound-p 'kuro-scrollback-discard
+                                     kuro--scrollback-edit-keymap
+                                     "C-c C-k")))
 
 (ert-deftest kuro-el-test--edit-scrollback-errors-outside-kuro ()
   "kuro-edit-scrollback signals user-error outside a kuro-mode buffer."

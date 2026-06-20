@@ -4,8 +4,10 @@
 
 use std::collections::HashMap;
 
-const MAX_SIXEL_SIZE: usize = 4096 * 4096; // 4K x 4K pixel limit
-const MAX_COLOR_REGISTERS: u16 = 1024; // matches WezTerm / Ghostty / foot (VT340 = 16, xterm = 256)
+use support::{
+    resized_sixel_canvas, seed_default_palette, seed_osc4_palette_overrides, sixel_color_rgb,
+    sixel_dimensions_are_usable, sixel_draw_limits, sixel_painted_rows, MAX_COLOR_REGISTERS,
+};
 
 /// In-progress sixel decoder state.
 pub struct SixelDecoder {
@@ -63,7 +65,37 @@ macro_rules! accumulate_digit {
     }};
 }
 
+#[path = "sixel_support.rs"]
+mod support;
+
 impl SixelDecoder {
+    fn sixel_color_register(params: &[u32]) -> Option<u16> {
+        params
+            .first()
+            .copied()
+            .map(|reg| (reg as u16).min(MAX_COLOR_REGISTERS - 1))
+    }
+
+    fn sixel_color_definition_rgb(params: &[u32]) -> Option<[u8; 3]> {
+        if params.len() < 5 {
+            return None;
+        }
+
+        sixel_color_rgb(params[1], params[2], params[3], params[4])
+    }
+
+    fn sixel_raster_declared_dimensions(params: &[u32]) -> Option<(u32, u32)> {
+        if params.len() < 4 {
+            return None;
+        }
+
+        let declared_width = params[2];
+        let declared_height = params[3];
+
+        sixel_dimensions_are_usable(declared_width, declared_height)
+            .then_some((declared_width, declared_height))
+    }
+
     #[must_use]
     #[expect(
         clippy::cast_possible_truncation,
@@ -77,14 +109,7 @@ impl SixelDecoder {
     pub fn new_with_palette(p2: u16, osc4_palette: &[Option<[u8; 3]>]) -> Self {
         let mut decoder = Self::new(p2);
         // Override VT340 defaults with any OSC 4 terminal palette entries.
-        for (idx, entry) in osc4_palette.iter().enumerate() {
-            if let Some(rgb) = entry {
-                let reg = idx as u16;
-                if reg < MAX_COLOR_REGISTERS {
-                    decoder.color_map.insert(reg, *rgb);
-                }
-            }
-        }
+        seed_osc4_palette_overrides(&mut decoder.color_map, osc4_palette);
         decoder
     }
 
@@ -94,36 +119,7 @@ impl SixelDecoder {
     /// (0/2 = pixels default to background color, 1 = leave untouched).
     pub fn new(p2: u16) -> Self {
         let mut color_map = HashMap::new();
-        // VT340-like default palette (first 16 entries, 0-100 mapped to 0-255).
-        let defaults = [
-            (0, [0, 0, 0]),
-            (1, [20, 20, 80]),
-            (2, [80, 13, 13]),
-            (3, [20, 80, 20]),
-            (4, [80, 20, 80]),
-            (5, [20, 80, 80]),
-            (6, [80, 80, 20]),
-            (7, [53, 53, 53]),
-            (8, [26, 26, 26]),
-            (9, [33, 33, 60]),
-            (10, [60, 26, 26]),
-            (11, [33, 60, 33]),
-            (12, [60, 33, 60]),
-            (13, [33, 60, 60]),
-            (14, [60, 60, 33]),
-            (15, [80, 80, 80]),
-        ];
-
-        for (idx, rgb100) in defaults {
-            color_map.insert(
-                idx,
-                [
-                    (rgb100[0] as u32 * 255 / 100) as u8,
-                    (rgb100[1] as u32 * 255 / 100) as u8,
-                    (rgb100[2] as u32 * 255 / 100) as u8,
-                ],
-            );
-        }
+        seed_default_palette(&mut color_map);
 
         Self {
             color_map,
@@ -152,20 +148,6 @@ impl SixelDecoder {
         }
     }
 
-    fn current_draw_limits(&self) -> (u32, u32) {
-        let max_w = if self.declared_width > 0 {
-            self.declared_width
-        } else {
-            4096
-        };
-        let max_h = if self.declared_height > 0 {
-            self.declared_height
-        } else {
-            4096
-        };
-        (max_w, max_h)
-    }
-
     fn current_rgb(&self) -> [u8; 3] {
         self.color_map
             .get(&self.current_color)
@@ -182,6 +164,17 @@ impl SixelDecoder {
         self.params.clear();
         self.num_buf = 0;
         self.state = SixelParseState::Normal;
+    }
+
+    fn begin_parameterized_command(&mut self, state: SixelParseState) {
+        self.state = state;
+        self.num_buf = 0;
+        self.params.clear();
+    }
+
+    fn begin_repeat_command(&mut self) {
+        self.state = SixelParseState::Repeat;
+        self.num_buf = 0;
     }
 
     fn write_sixel_pixel(&mut self, x: u32, y: u32, rgb: [u8; 3]) {
@@ -209,18 +202,13 @@ impl SixelDecoder {
     fn handle_normal(&mut self, byte: u8) {
         match byte {
             b'#' => {
-                self.state = SixelParseState::Color;
-                self.num_buf = 0;
-                self.params.clear();
+                self.begin_parameterized_command(SixelParseState::Color);
             }
             b'!' => {
-                self.state = SixelParseState::Repeat;
-                self.num_buf = 0;
+                self.begin_repeat_command();
             }
             b'"' => {
-                self.state = SixelParseState::Raster;
-                self.num_buf = 0;
-                self.params.clear();
+                self.begin_parameterized_command(SixelParseState::Raster);
             }
             b'-' => {
                 // Next band: advance 6 rows and reset x.
@@ -260,12 +248,7 @@ impl SixelDecoder {
     fn handle_repeat(&mut self, byte: u8) {
         match byte {
             b'0'..=b'9' => accumulate_digit!(self, byte),
-            0x3F..=0x7E => {
-                let count = self.num_buf.max(1);
-                self.paint_sixel(byte - 0x3F, count);
-                self.num_buf = 0;
-                self.state = SixelParseState::Normal;
-            }
+            0x3F..=0x7E => self.finish_repeat_command(byte),
             _ => {
                 self.num_buf = 0;
                 self.state = SixelParseState::Normal;
@@ -274,15 +257,18 @@ impl SixelDecoder {
         }
     }
 
+    fn finish_repeat_command(&mut self, byte: u8) {
+        let count = self.num_buf.max(1);
+        self.paint_sixel(byte - 0x3F, count);
+        self.num_buf = 0;
+        self.state = SixelParseState::Normal;
+    }
+
     fn handle_raster(&mut self, byte: u8) {
         self.handle_parameterized_command(byte, Self::apply_raster_command);
     }
 
-    fn finish_parameterized_command(
-        &mut self,
-        byte: u8,
-        apply: fn(&mut Self),
-    ) {
+    fn finish_parameterized_command(&mut self, byte: u8, apply: fn(&mut Self)) {
         self.push_current_param();
         apply(self);
         self.reset_parameterized_command();
@@ -299,74 +285,35 @@ impl SixelDecoder {
         reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation"
     )]
     fn apply_color_command(&mut self) {
-        if self.params.is_empty() {
+        let Some(reg) = Self::sixel_color_register(&self.params) else {
             return;
-        }
-
-        let reg = (self.params[0] as u16).min(MAX_COLOR_REGISTERS - 1);
+        };
         self.current_color = reg;
 
-        // #N;2;R;G;B (0-100 each) or #N;1;H;L;S.
-        if self.params.len() < 5 {
+        let Some(rgb) = Self::sixel_color_definition_rgb(&self.params) else {
             return;
-        }
-
-        let color_type = self.params[1];
-        let a = self.params[2];
-        let b = self.params[3];
-        let c = self.params[4];
-
-        let rgb = match color_type {
-            2 => [
-                (a.min(100) * 255 / 100) as u8,
-                (b.min(100) * 255 / 100) as u8,
-                (c.min(100) * 255 / 100) as u8,
-            ],
-            1 => hls_to_rgb(a as f32, b as f32, c as f32),
-            _ => return,
         };
 
         self.color_map.insert(reg, rgb);
     }
 
     fn apply_raster_command(&mut self) {
-        // "Pan;Pad;Ph;Pv where Ph=width, Pv=height.
-        if self.params.len() < 4 {
-            return;
-        }
-
-        let declared_width = self.params[2];
-        let declared_height = self.params[3];
-
-        if declared_width > 0
-            && declared_height > 0
-            && (declared_width as usize).saturating_mul(declared_height as usize) <= MAX_SIXEL_SIZE
-        {
-            self.declared_width = declared_width;
-            self.declared_height = declared_height;
-            self.ensure_size(self.declared_width, self.declared_height);
-        } else {
+        let Some((declared_width, declared_height)) =
+            Self::sixel_raster_declared_dimensions(&self.params)
+        else {
             self.declared_width = 0;
             self.declared_height = 0;
-        }
+            return;
+        };
+
+        self.declared_width = declared_width;
+        self.declared_height = declared_height;
+        self.ensure_size(self.declared_width, self.declared_height);
     }
 
     /// Paint one repeated sixel column at `x`.
     fn paint_sixel_column(&mut self, x: u32, bits: u8, y_base: u32, max_h: u32, rgb: [u8; 3]) {
-        if bits == 0 {
-            return;
-        }
-
-        for bit_idx in 0..6u32 {
-            if (bits >> bit_idx) & 1 == 0 {
-                continue;
-            }
-
-            let y = y_base.saturating_add(bit_idx);
-            if y >= max_h {
-                continue;
-            }
-
+        for y in sixel_painted_rows(bits, y_base, max_h) {
             self.write_sixel_pixel(x, y, rgb);
         }
     }
@@ -379,7 +326,7 @@ impl SixelDecoder {
 
         let rgb = self.current_rgb();
         let y_base = self.band.saturating_mul(6);
-        let (max_w, max_h) = self.current_draw_limits();
+        let (max_w, max_h) = sixel_draw_limits(self.declared_width, self.declared_height);
 
         for dx in 0..count {
             let x = self.cursor_x.saturating_add(dx);
@@ -395,44 +342,19 @@ impl SixelDecoder {
     }
 
     fn ensure_size(&mut self, min_w: u32, min_h: u32) {
-        let new_w = self.width.max(min_w);
-        let new_h = self.height.max(min_h);
-
-        if new_w == self.width && new_h == self.height {
-            return;
+        if let Some((new_w, new_h, new_pixels)) = resized_sixel_canvas(
+            self.width,
+            self.height,
+            min_w,
+            min_h,
+            self.p2,
+            &self.color_map,
+            &self.pixels,
+        ) {
+            self.pixels = new_pixels;
+            self.width = new_w;
+            self.height = new_h;
         }
-
-        if (new_w as usize).saturating_mul(new_h as usize) > MAX_SIXEL_SIZE {
-            return;
-        }
-
-        let mut new_pixels = vec![0u8; new_w as usize * new_h as usize * 4];
-
-        // P2=1 means background should be initialized as opaque color register 0.
-        if self.p2 == 1 {
-            let bg = self.color_map.get(&0).copied().unwrap_or([0, 0, 0]);
-            for px in new_pixels.chunks_exact_mut(4) {
-                px[0] = bg[0];
-                px[1] = bg[1];
-                px[2] = bg[2];
-                px[3] = 255;
-            }
-        }
-
-        // Copy old rows into resized backing store.
-        for row in 0..self.height as usize {
-            let src_start = row * self.width as usize * 4;
-            let src_end = src_start + self.width as usize * 4;
-            let dst_start = row * new_w as usize * 4;
-            if src_end <= self.pixels.len() {
-                new_pixels[dst_start..dst_start + self.width as usize * 4]
-                    .copy_from_slice(&self.pixels[src_start..src_end]);
-            }
-        }
-
-        self.pixels = new_pixels;
-        self.width = new_w;
-        self.height = new_h;
     }
 
     fn flush_pending_parameterized_command_at_end(&mut self) {
@@ -453,24 +375,13 @@ impl SixelDecoder {
     }
 
     fn resolve_output_dimensions(&self) -> Option<(u32, u32)> {
-        let declared_pixels =
-            (self.declared_width as usize).saturating_mul(self.declared_height as usize);
-        let declared_usable = self.declared_width > 0
-            && self.declared_height > 0
-            && declared_pixels <= MAX_SIXEL_SIZE
-            && self.pixels.len() >= declared_pixels.saturating_mul(4);
-
-        let (w, h) = if declared_usable {
-            (self.declared_width, self.declared_height)
-        } else {
-            (self.width, self.height)
-        };
-
-        if w == 0 || h == 0 || self.pixels.is_empty() {
-            None
-        } else {
-            Some((w, h))
-        }
+        sixel_resolved_output_dimensions(
+            self.declared_width,
+            self.declared_height,
+            self.width,
+            self.height,
+            self.pixels.len(),
+        )
     }
 
     /// Finalize decoding.
@@ -487,9 +398,10 @@ impl SixelDecoder {
 #[path = "sixel_color.rs"]
 mod color;
 
-use color::hls_to_rgb;
 #[cfg(test)]
-use color::hue_to_rgb;
+use color::{hls_to_rgb, hue_to_rgb};
+
+pub(crate) use support::sixel_resolved_output_dimensions;
 
 #[cfg(test)]
 #[path = "tests/sixel.rs"]

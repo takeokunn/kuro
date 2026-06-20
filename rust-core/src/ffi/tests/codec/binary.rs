@@ -13,12 +13,7 @@ fn encode_screen_binary_empty_input_produces_8_byte_header() {
         8,
         "empty input must produce an 8-byte header only (format_version + num_rows)"
     );
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(
-        read_u32_le(&result, 4),
-        0,
-        "num_rows header must be 0 for empty input"
-    );
+    assert_binary_header!(&result, rows 0);
 }
 
 /// An explicit empty `Vec` (0 rows) must also produce only the 8-byte header,
@@ -32,12 +27,7 @@ fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
         8,
         "explicit empty Vec must produce an 8-byte header only (format_version + num_rows)"
     );
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(
-        read_u32_le(&result, 4),
-        0,
-        "num_rows header must be 0 for empty Vec"
-    );
+    assert_binary_header!(&result, rows 0);
 }
 
 #[test]
@@ -49,8 +39,7 @@ fn encode_screen_binary_single_row_no_text_no_faces_no_col_to_buf() {
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + col_to_buf_len (4) = 24 bytes total
     assert_eq!(result.len(), 24);
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_binary_header!(&result, rows 1);
     assert_eq!(read_u32_le(&result, 8), 0, "row_index must be 0");
     assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
     assert_eq!(read_u32_le(&result, 16), 0, "text_byte_len must be 0");
@@ -68,8 +57,7 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + text_bytes (5) + col_to_buf_len (4) = 29 bytes total
     assert_eq!(result.len(), 29);
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_binary_header!(&result, rows 1);
     assert_eq!(read_u32_le(&result, 8), 3, "row_index must be 3");
     assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
     assert_eq!(
@@ -95,42 +83,12 @@ fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + text (5) + face_range (28) + col_to_buf_len (4) = 57 bytes
     assert_eq!(result.len(), 57);
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(read_u32_le(&result, 4), 1, "num_rows must be 1");
+    assert_binary_header!(&result, rows 1);
     assert_eq!(read_u32_le(&result, 12), 1, "num_face_ranges must be 1");
 
     // Face range starts at offset 8(header)+4(row_idx)+4(num_fr)+4(text_len)+5(text) = 25
     let face_base = 25usize;
-    assert_eq!(
-        read_u32_le(&result, face_base),
-        0,
-        "face start_buf must be 0"
-    );
-    assert_eq!(
-        read_u32_le(&result, face_base + 4),
-        5,
-        "face end_buf must be 5"
-    );
-    assert_eq!(
-        read_u32_le(&result, face_base + 8),
-        fg,
-        "face fg must match"
-    );
-    assert_eq!(
-        read_u32_le(&result, face_base + 12),
-        bg,
-        "face bg must match"
-    );
-    assert_eq!(
-        read_u64_le(&result, face_base + 16),
-        flags,
-        "face flags must match"
-    );
-    assert_eq!(
-        read_u32_le(&result, face_base + 24),
-        ul_color,
-        "face ul_color must match"
-    );
+    assert_binary_face!(&result, face_base, buf 0, 5, fg fg, bg bg, flags flags, ul ul_color);
 
     // col_to_buf_len follows at face_base + 28
     assert_eq!(
@@ -181,8 +139,7 @@ fn encode_screen_binary_multiple_rows_num_rows_header() {
         .map(|i| (i, String::from("x"), vec![], vec![]))
         .collect();
     let result = encode_screen_binary(&lines);
-    assert_eq!(read_u32_le(&result, 0), 2, "format_version must be 2");
-    assert_eq!(read_u32_le(&result, 4), 5, "num_rows must be 5");
+    assert_binary_header!(&result, rows 5);
 }
 
 // -------------------------------------------------------------------------

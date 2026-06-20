@@ -21,7 +21,7 @@
 ;;     Group 13: kuro--reset-cursor-cache
 ;;     Group 14: kuro--sanitize-title edge cases
 ;;     Group 16: kuro--recompute-budget-vars
-;;     Group 25: kuro--timed, kuro--pipeline-face-count, kuro--pipeline-step-apply
+;;     Group 25: kuro--timed
 ;;     FR-007:   render cycle timing (performance)
 ;;     FR-008:   post-insert face position correctness
 ;;

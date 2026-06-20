@@ -4,63 +4,47 @@ use super::*;
 
 /// `parse_color_spec` must trim trailing whitespace (`.trim()` handles both sides).
 #[test]
-fn test_parse_color_spec_trailing_whitespace_trimmed() {
-    assert_eq!(parse_color_spec("#ff0000  "), Some([255, 0, 0]));
+fn test_parse_color_spec_trims_whitespace_cases() {
+    for (input, expected) in [
+        ("#ff0000  ", Some([255, 0, 0])),
+        ("  #00ff00  ", Some([0, 255, 0])),
+        ("rgb:ff/00/00 ", Some([0xff, 0x00, 0x00])),
+    ] {
+        assert_eq!(parse_color_spec(input), expected);
+    }
 }
 
-/// `parse_color_spec` must trim leading AND trailing whitespace simultaneously.
-#[test]
-fn test_parse_color_spec_leading_and_trailing_whitespace_trimmed() {
-    assert_eq!(parse_color_spec("  #00ff00  "), Some([0, 255, 0]));
-}
+// `parse_iterm2_params` must strip `px` suffix from height values.
+test_iterm2_params!(
+    test_parse_iterm2_params_height_px_suffix,
+    input "inline=1;height=48px",
+    inline true,
+    cols None,
+    rows Some(48)
+);
 
-/// `parse_color_spec` must trim whitespace for `rgb:` prefix too.
-#[test]
-fn test_parse_color_spec_rgb_trailing_whitespace_trimmed() {
-    assert_eq!(parse_color_spec("rgb:ff/00/00 "), Some([0xff, 0x00, 0x00]));
-}
+// `parse_iterm2_params` must strip `%` suffix from height values.
+test_iterm2_params!(
+    test_parse_iterm2_params_height_percent_suffix,
+    input "inline=1;height=25%",
+    inline true,
+    cols None,
+    rows Some(25)
+);
 
-/// `parse_iterm2_params` must strip `px` suffix from height values.
-#[test]
-fn test_parse_iterm2_params_height_px_suffix() {
-    let p = super::parse_iterm2_params("inline=1;height=48px");
-    assert_eq!(
-        p.display_rows,
-        Some(48),
-        "height=48px must strip 'px' and parse to 48"
-    );
-}
-
-/// `parse_iterm2_params` must strip `%` suffix from height values.
-#[test]
-fn test_parse_iterm2_params_height_percent_suffix() {
-    let p = super::parse_iterm2_params("inline=1;height=25%");
-    assert_eq!(
-        p.display_rows,
-        Some(25),
-        "height=25% must strip '%' and parse to 25"
-    );
-}
-
-/// `handle_osc_default_colors` must accept a 4-digit `rgb:` spec for OSC 10.
-///
-/// This exercises the `parse_color_spec` → `rgb:RRRR/GGGG/BBBB` branch when
-/// called from `handle_osc_default_colors`.
-#[test]
-fn test_handle_osc_default_colors_set_fg_via_rgb_4digit() {
-    use crate::TerminalCore;
-    use crate::types::Color;
-    let mut core = TerminalCore::new(24, 80);
-    // "rgb:ff00/8000/0000" → R=0xff, G=0x80, B=0x00 (upper 8 bits of each channel)
-    let params: &[&[u8]] = &[b"10", b"rgb:ff00/8000/0000"];
-    super::handle_osc_default_colors(&mut core, params);
-    assert_eq!(
-        core.osc_data().default_fg,
-        Some(Color::Rgb(0xff, 0x80, 0x00)),
-        "4-digit rgb: spec must set default_fg correctly"
-    );
-    assert!(core.osc_data().default_colors_dirty);
-}
+// `handle_osc_default_colors` must accept a 4-digit `rgb:` spec for OSC 10.
+//
+// This exercises the `parse_color_spec` → `rgb:RRRR/GGGG/BBBB` branch when
+// called from `handle_osc_default_colors`.
+test_osc_default_colors_set!(
+    test_handle_osc_default_colors_set_fg_via_rgb_4digit,
+    b"10",
+    b"rgb:ff00/8000/0000",
+    default_fg,
+    0xff,
+    0x80,
+    0x00
+);
 
 /// `decode_iterm2_image` must decode a 1×1 RGB PNG and convert it to RGBA.
 ///
@@ -68,19 +52,7 @@ fn test_handle_osc_default_colors_set_fg_via_rgb_4digit() {
 /// (the `_ => ImageFormat::Rgb` path in `decode_iterm2_image`).
 #[test]
 fn test_decode_iterm2_image_rgb_png_converts_to_rgba() {
-    // Build a minimal 1×1 RGB PNG at runtime so the test does not depend on
-    // any hardcoded binary blob.
-    let mut png_bytes: Vec<u8> = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut png_bytes, 1, 1);
-        enc.set_color(png::ColorType::Rgb);
-        enc.set_depth(png::BitDepth::Eight);
-        let mut writer = enc.write_header().expect("PNG header");
-        writer
-            .write_image_data(&[0xDE, 0xAD, 0xBE])
-            .expect("PNG data");
-    }
-    let b64 = crate::util::base64::encode(&png_bytes);
+    let b64 = test_1x1_png_b64!(png::ColorType::Rgb, [0xDE, 0xAD, 0xBE]);
     let result = super::decode_iterm2_image(&b64);
     assert!(result.is_some(), "valid RGB PNG must decode successfully");
     let (pixels, w, h) = result.unwrap();
@@ -105,18 +77,7 @@ fn test_decode_iterm2_image_rgb_png_converts_to_rgba() {
 fn test_handle_osc_1337_inline_png_advances_cursor() {
     use crate::TerminalCore;
 
-    // Build a 1×1 RGBA PNG.
-    let mut png_bytes: Vec<u8> = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut png_bytes, 1, 1);
-        enc.set_color(png::ColorType::Rgba);
-        enc.set_depth(png::BitDepth::Eight);
-        let mut writer = enc.write_header().expect("PNG header");
-        writer
-            .write_image_data(&[0xFF, 0xFF, 0xFF, 0xFF])
-            .expect("PNG data");
-    }
-    let b64 = crate::util::base64::encode(&png_bytes);
+    let b64 = test_1x1_png_b64!(png::ColorType::Rgba, [0xFF, 0xFF, 0xFF, 0xFF]);
 
     // Compose the OSC 1337 param string: inline=1, explicit 2-col × 1-row display.
     let param_str = format!("File=inline=1;width=2;height=1:{b64}");
@@ -185,8 +146,8 @@ fn test_handle_osc_104_double_reset_is_idempotent() {
 /// Sending A → B → C → D must push exactly four events in that order.
 #[test]
 fn test_handle_osc_133_multiple_marks_accumulate_in_order() {
-    use crate::TerminalCore;
     use crate::types::osc::PromptMark;
+    use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     for mark_byte in [b"A" as &[u8], b"B", b"C", b"D"] {
         let params: &[&[u8]] = &[b"133", mark_byte];
@@ -208,16 +169,11 @@ fn test_handle_osc_133_multiple_marks_accumulate_in_order() {
 #[test]
 fn test_handle_osc_52_non_c_selection_records_write() {
     use crate::TerminalCore;
-    use crate::types::osc::ClipboardAction;
     let mut core = TerminalCore::new(24, 80);
     // base64("hi") = "aGk="
     let params: &[&[u8]] = &[b"52", b"p", b"aGk="];
     super::handle_osc_52(&mut core, params);
-    assert_eq!(core.osc_data().clipboard_actions.len(), 1);
-    match &core.osc_data().clipboard_actions[0] {
-        ClipboardAction::Write(s) => assert_eq!(s, "hi"),
-        other @ ClipboardAction::Query => panic!("expected Write(\"hi\"), got {other:?}"),
-    }
+    assert_osc_52_action!(core, ClipboardAction::Write(s) if s == "hi");
 }
 
 // `handle_osc_default_colors` set-then-query for OSC 10 returns the exact
@@ -246,15 +202,17 @@ test_osc_default_colors_set_then_query!(
     "1010/2020/3030"
 );
 
-/// `parse_iterm2_params` — when `inline` appears twice the last value wins.
-///
-/// The parser iterates semicolon-separated key=value pairs in order; the
-/// second `inline=0` must overwrite the first `inline=1`.
-#[test]
-fn test_parse_iterm2_params_duplicate_inline_last_wins() {
-    let p = super::parse_iterm2_params("inline=1;inline=0");
-    assert!(!p.inline, "last inline= value must take precedence");
-}
+// `parse_iterm2_params` — when `inline` appears twice the last value wins.
+//
+// The parser iterates semicolon-separated key=value pairs in order; the
+// second `inline=0` must overwrite the first `inline=1`.
+test_iterm2_params!(
+    test_parse_iterm2_params_duplicate_inline_last_wins,
+    input "inline=1;inline=0",
+    inline false,
+    cols None,
+    rows None
+);
 
 /// `handle_osc_1337` with `File=inline=1:` and an empty base64 payload must
 /// be a noop — `decode_iterm2_image("")` returns `None`.

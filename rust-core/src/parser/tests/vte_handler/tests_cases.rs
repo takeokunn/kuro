@@ -3,6 +3,10 @@
 //! Module under test: `parser/vte_handler.rs`
 //! Tier: T3 — `ProptestConfig::with_cases(256)`
 
+pub(crate) use super::tests_support::{
+    assert_no_pending_responses, assert_pending_response_count,
+    assert_single_pending_response_bytes, first_pending_response_bytes,
+};
 use crate::types::cell::SgrFlags;
 use crate::TerminalCore;
 
@@ -180,11 +184,8 @@ fn test_hook_put_unhook_unknown_dcs_no_panic() {
 #[test]
 fn test_hook_put_unhook_xtgettcap_tn_queues_response() {
     let term = term_with!(b"\x1bP+q544e\x1b\\");
-    assert!(
-        !term.meta.pending_responses.is_empty(),
-        "XTGETTCAP TN query should queue at least one response"
-    );
-    let resp = String::from_utf8_lossy(&term.meta.pending_responses[0]);
+    assert_pending_response_count(&term, 1);
+    let resp = String::from_utf8_lossy(first_pending_response_bytes(&term));
     assert!(
         resp.contains("544e"),
         "response should echo the capability hex name"

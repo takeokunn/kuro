@@ -30,14 +30,7 @@
     (should (string= kuro--line-buffer ""))
     (should (= kuro--line-point 0))))
 
-;;; Group 43 — kuro--def-line-word-case macro + upcase/downcase/capitalize
-
-(ert-deftest kuro-input-mode-test-def-line-word-case-macroexpands-to-defun ()
-  "`kuro--def-line-word-case' single-step expands to a `defun' with `(interactive)'."
-  (let ((exp (macroexpand-1
-              '(kuro--def-line-word-case kuro-test--wc-dummy "doc" (upcase (substring s start end))))))
-    (should (eq (car exp) 'defun))
-    (should (member '(interactive) (cddr exp)))))
+;;; Group 43 — kuro--line-upcase-word / downcase / capitalize
 
 (defconst kuro-input-mode-edit-test--word-case-table
   '((kuro-input-mode-test-upcase-word-upcases-next-word
@@ -82,18 +75,10 @@
 
 (ert-deftest kuro-input-mode-test-line-edit-send-errors-on-dead-source ()
   "`kuro-line-edit-send' signals `user-error' when the source buffer is dead."
-  (let ((edit-buf (get-buffer-create "*kuro-edit-send-dead-test*")))
-    (unwind-protect
-        (with-current-buffer edit-buf
-          (kuro-line-edit-mode)
-          (insert "some text")
-          (setq kuro--line-edit-source-buffer
-                (let ((b (get-buffer-create "*kuro-dead-source*")))
-                  (kill-buffer b)
-                  b))
-          (should-error (kuro-line-edit-send) :type 'user-error))
-      (when (buffer-live-p edit-buf)
-        (kill-buffer edit-buf)))))
+  (kuro-input-mode-edit-test--with-line-edit "send-dead-test" "some text" 9
+    (kill-buffer term-buf)
+    (with-current-buffer edit-buf
+      (should-error (kuro-line-edit-send) :type 'user-error))))
 
 (ert-deftest kuro-input-mode-test-line-edit-send-outside-edit-mode-errors ()
   "`kuro-line-edit-send' signals `user-error' when not in `kuro-line-edit-mode'."
@@ -102,32 +87,22 @@
 
 (ert-deftest kuro-input-mode-test-line-edit-discard-dead-source-kills-buffer ()
   "`kuro-line-edit-discard' kills the edit buffer even when the source is dead."
-  (let ((edit-buf (get-buffer-create "*kuro-edit-discard-dead-test*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer edit-buf
-            (kuro-line-edit-mode)
-            (setq kuro--line-edit-original "orig")
-            (setq kuro--line-edit-source-buffer
-                  (let ((b (get-buffer-create "*kuro-dead-src*")))
-                    (kill-buffer b)
-                    b))
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (kuro-line-edit-discard)))
-          (should-not (buffer-live-p edit-buf)))
-      (when (buffer-live-p edit-buf)
-        (kill-buffer edit-buf)))))
+  (kuro-input-mode-edit-test--with-line-edit "discard-dead-test" "orig" 4
+    (kill-buffer term-buf)
+    (with-current-buffer edit-buf
+      (cl-letf (((symbol-function 'message) #'ignore))
+        (kuro-line-edit-discard)))
+    (should-not (buffer-live-p edit-buf))))
 
 (ert-deftest kuro-input-mode-test-line-edit-discard-outside-edit-mode-ok ()
   "`kuro-line-edit-discard' runs even outside `kuro-line-edit-mode' — it kills the buffer."
   (let ((edit-buf (get-buffer-create "*kuro-edit-discard-mode-test*")))
     (unwind-protect
-        (progn
-          (with-current-buffer edit-buf
-            (setq kuro--line-edit-original nil)
-            (setq kuro--line-edit-source-buffer nil)
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (kuro-line-edit-discard)))
+        (with-current-buffer edit-buf
+          (setq kuro--line-edit-original nil)
+          (setq kuro--line-edit-source-buffer nil)
+          (cl-letf (((symbol-function 'message) #'ignore))
+            (kuro-line-edit-discard))
           (should-not (buffer-live-p edit-buf)))
       (when (buffer-live-p edit-buf)
         (kill-buffer edit-buf)))))

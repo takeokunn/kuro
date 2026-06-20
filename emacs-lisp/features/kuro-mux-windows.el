@@ -11,11 +11,13 @@
 
 ;;; Code:
 
+(require 'kuro-config)
+(require 'kuro-mux-macros)
+
 (declare-function kuro-mux--live-sessions "kuro-mux" ())
 (declare-function kuro-mux-next           "kuro-mux" ())
 (declare-function kuro-create             "kuro-lifecycle" (&optional command buffer-name))
 
-(defvar kuro-shell nil "Forward ref; defcustom in kuro-config.el.")
 (defvar kuro-mux--zoom-config) ; defined in kuro-mux.el
 
 
@@ -73,17 +75,6 @@ otherwise calls `switch-to-buffer'."
 
 
 ;;;; Splitting
-
-(defmacro kuro--def-mux-split (name split-fn docstring)
-  "Define NAME as a kuro-mux split command.
-DOCSTRING becomes the generated command docstring.
-SPLIT-FN is called with no arguments to create the new window."
-  `(defun ,name (&optional command)
-     ,docstring
-     (interactive)
-     (let ((win (,split-fn)))
-       (select-window win)
-       (kuro-create (or command kuro-shell)))))
 
 ;;;###autoload
 (kuro--def-mux-split kuro-mux-split-right split-window-right
@@ -147,18 +138,6 @@ When `kuro-mux-kill-confirm' is non-nil, prompts for confirmation first."
              (y-or-n-p (format "Kill kuro session %s? " (buffer-name))))
      (kill-buffer (current-buffer)))))
 
-(defmacro kuro--def-mux-swap (name window-nav-fn docstring)
-  "Define NAME as a kuro-mux pane-swap command.
-DOCSTRING becomes the generated command docstring.
-WINDOW-NAV-FN is called with (selected-window nil \\='visible) to pick the peer."
-  `(defun ,name ()
-     ,docstring
-     (interactive)
-     (let ((peer (,window-nav-fn (selected-window) nil 'visible)))
-       (if (eq peer (selected-window))
-          (user-error "Kuro-mux: only one window visible")
-         (window-swap-states (selected-window) peer)))))
-
 ;;;###autoload
 (kuro--def-mux-swap kuro-mux-swap-pane-forward next-window
   "Swap the current window's buffer with the next visible window (tmux: `}').")
@@ -190,11 +169,7 @@ Analogous to tmux's resize-pane command."
          (if current-prefix-arg
              (prefix-numeric-value current-prefix-arg)
            1)))
-  (let ((n    (max 1 (or delta 1)))
-        (cell (assq direction kuro--mux-resize-directions)))
-    (if cell
-        (funcall (cdr cell) n)
-      (user-error "Kuro-mux: invalid direction: %s" direction))))
+  (kuro--mux-resize-dispatch direction (max 1 (or delta 1))))
 
 
 (provide 'kuro-mux-windows)

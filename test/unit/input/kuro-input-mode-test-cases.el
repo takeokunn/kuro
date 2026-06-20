@@ -141,21 +141,15 @@
      (kuro--def-input-mode kuro-test--fake-mode fake-mode
        "test mode" (ignore))
      defun kuro-test--fake-mode)
+    (kuro-input-mode-macros-def-line-command-expands-to-defun
+     (kuro--def-line-command kuro-test--fake-cmd "Test command." (ignore))
+     defun kuro-test--fake-cmd)
     (kuro-input-mode-macros-def-line-nav-expands-to-defun
      (kuro--def-line-nav kuro-test--fake-nav "Test nav command." (ignore))
      defun kuro-test--fake-nav)
-    (kuro-input-mode-macros-def-line-word-case-expands-to-defun
-     (kuro--def-line-word-case kuro-test--upcase-word
-       "Test upcase." (upcase (substring s start end)))
-     defun kuro-test--upcase-word)
-    (kuro-input-mode-macros-def-line-kill-word-expands-to-defun
-     (kuro--def-line-kill-word kuro-test--kw
-       kuro--line-skip-non-word-fwd kuro--line-skip-word-fwd
-       p bound p "Test kill-word.")
-     defun kuro-test--kw)
     (kuro-input-mode-macros-with-line-edit-expands-to-progn
-     (kuro--with-line-edit (setq x 1))
-     progn nil)
+      (kuro--with-line-edit (setq x 1))
+      progn nil)
     (kuro-input-mode-macros-with-line-edit-undo-expands-to-progn
      (kuro--with-line-edit-undo (setq x 1))
      progn nil)
@@ -168,18 +162,13 @@
   '((kuro-input-mode-macros-def-input-mode-expansion-has-interactive
      (kuro--def-input-mode kuro-test--fake-mode2 fake-mode "test mode")
      (interactive))
+    (kuro-input-mode-macros-def-line-command-expansion-has-interactive
+     (kuro--def-line-command kuro-test--fake-cmd2 "Test command.")
+     (interactive))
     (kuro-input-mode-macros-def-line-nav-expansion-has-interactive
      (kuro--def-line-nav kuro-test--fake-nav2 "Test." (ignore))
      (interactive))
-    (kuro-input-mode-macros-def-line-word-case-expansion-has-interactive
-     (kuro--def-line-word-case kuro-test--wc2 "doc"
-       (downcase (substring s start end)))
-     (interactive))
-    (kuro-input-mode-macros-def-line-kill-word-expansion-has-interactive
-     (kuro--def-line-kill-word kuro-test--kw2
-       kuro--line-skip-non-word-bwd kuro--line-skip-word-bwd
-       bound p bound "Test backward kill-word.")
-     (interactive)))
+    )
   "Table of (test-name macro-form expected-member) expansion membership checks.")
 
 (defconst kuro-input-mode-macros-test--macro-tail-cases
@@ -212,11 +201,11 @@
     (kuro-input-mode-macros-def-line-nav-generated-cmds-are-interactive
      kuro--line-beginning-of-line kuro--line-end-of-line
      kuro--line-forward-char kuro--line-backward-char)
-    (kuro-input-mode-macros-def-line-word-case-generated-cmds-are-interactive
-     kuro--line-upcase-word kuro--line-downcase-word kuro--line-capitalize-word)
-    (kuro-input-mode-macros-def-line-kill-word-generated-cmds-are-interactive
-     kuro--line-kill-word kuro--line-backward-kill-word))
-  "Table of (test-name . commands) for generated interactive commands.")
+    (kuro-input-mode-macros-line-word-case-cmds-are-interactive
+      kuro--line-upcase-word kuro--line-downcase-word kuro--line-capitalize-word)
+    (kuro-input-mode-macros-line-kill-word-cmds-are-interactive
+      kuro--line-kill-word kuro--line-backward-kill-word))
+  "Table of (test-name . commands) for interactive commands.")
 
 (provide 'kuro-input-mode-test-cases)
 ;;; kuro-input-mode-test-cases.el ends here

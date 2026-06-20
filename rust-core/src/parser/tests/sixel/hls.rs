@@ -70,16 +70,14 @@ fn hls_to_rgb_values_clamped_above_100() {
 #[test]
 fn digit_accumulation_in_color_command() {
     // Feed `#255` — the index should be parsed as 255
-    let mut d = make_decoder();
-    feed(&mut d, b"#255$");
+    let d = decode(b"#255$");
     assert_eq!(d.current_color, 255);
 }
 
 #[test]
 fn digit_accumulation_multi_digit_repeat() {
     // !12~ should paint 12 columns
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;12;6!12~");
+    let d = decode(b"\"1;1;12;6!12~");
     assert_eq!(d.cursor_x, 12);
 }
 
@@ -88,8 +86,7 @@ fn digit_accumulation_saturating_on_overflow() {
     // Feed a number larger than u32::MAX digits — saturating_mul/add must not panic
     let huge = "9".repeat(20);
     let seq = format!("#{}$", huge);
-    let mut d = make_decoder();
-    feed(&mut d, seq.as_bytes());
+    let d = decode(seq.as_bytes());
     // current_color is u16; the parsed u32 saturates then casts — just no panic
     let _ = d.current_color;
 }
@@ -143,7 +140,7 @@ fn hue_to_rgb_t_in_half_range_returns_q() {
 #[test]
 fn color_index_zero_can_be_redefined() {
     // Register 0 is black by default; redefine it as pure white
-    let mut d = make_decoder();
+    let mut d = decode(b"");
     assert_eq!(d.color_map.get(&0), Some(&[0u8, 0, 0]));
     feed(&mut d, b"#0;2;100;100;100$");
     assert_eq!(
@@ -156,18 +153,10 @@ fn color_index_zero_can_be_redefined() {
 #[test]
 fn color_redefined_register_zero_used_for_painting() {
     // Redefine register 0 as red, then paint with it using `~`
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;1;6#0;2;100;0;0#0~");
-    let result = d.finish();
-    assert!(result.is_some());
-    let (pixels, _, _) = result.unwrap();
+    let d = decode(b"\"1;1;1;6#0;2;100;0;0#0~");
+    let (pixels, _, _) = finish_pixels(d);
     // Row 0, pixel (0,0): should be red because we redefined register 0
-    assert_eq!(
-        pixels[0], 255,
-        "R must be 255 after redefining reg 0 as red"
-    );
-    assert_eq!(pixels[1], 0, "G must be 0");
-    assert_eq!(pixels[2], 0, "B must be 0");
+    assert_pixel_rgba!(pixels pixels, offset 0, rgba [255, 0, 0, 255]);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,11 +168,9 @@ fn finish_unterminated_repeat_does_not_paint() {
     // `!5` without a data byte or raster declaration: finish() must not paint.
     // The Repeat state is the no-op arm in finish() — accumulated count is dropped.
     // Without any prior pixel allocation the result is None.
-    let mut d = make_decoder();
-    feed(&mut d, b"!5"); // repeat count accumulating, no data byte, no raster
-    // finish() hits the `Repeat | Normal` no-op arm
-    let result = d.finish();
-    // No sixel data was painted so finish returns None
+    let result = decode(b"!5").finish(); // repeat count accumulating, no data byte, no raster
+                                         // finish() hits the `Repeat | Normal` no-op arm
+                                         // No sixel data was painted so finish returns None
     assert!(
         result.is_none(),
         "unterminated !N with no prior pixels must return None"
@@ -197,17 +184,15 @@ fn finish_unterminated_repeat_does_not_paint() {
 #[test]
 fn band_advance_places_pixels_at_correct_y_offset() {
     // Band 0: paint row 0 only (`@` = bit 0); band 1: paint row 6 only
-    let mut d = make_decoder();
+    let mut d = decode(b"");
     // `@` = 0x40 = bit 0 set; `-` advances band; `@` again in band 1
     feed(&mut d, b"\"1;1;1;12#0;2;100;0;0#0@-@");
-    let result = d.finish();
-    assert!(result.is_some());
-    let (pixels, w, h) = result.unwrap();
+    let (pixels, w, h) = finish_pixels(d);
     assert_eq!(w, 1);
     assert_eq!(h, 12);
 
     // Band 0, row 0 (pixel offset 0*4): painted red, alpha=255
-    assert_eq!(pixels[3], 255, "band 0 row 0 alpha should be 255");
+    assert_pixel_rgba!(pixels pixels, offset 0, rgba [255, 0, 0, 255]);
     // Band 0, rows 1-5 (pixel offsets 4..24): transparent
     for row in 1..6usize {
         assert_eq!(
@@ -235,8 +220,7 @@ fn band_advance_places_pixels_at_correct_y_offset() {
 #[test]
 fn color_definition_mid_range_rgb_scales_correctly() {
     // #6;2;50;25;75 → R=50*255/100=127, G=25*255/100=63, B=75*255/100=191
-    let mut d = make_decoder();
-    feed(&mut d, b"#6;2;50;25;75$");
+    let d = decode(b"#6;2;50;25;75$");
     let rgb = d.color_map.get(&6).copied().unwrap_or([0, 0, 0]);
     assert_eq!(rgb[0], 127, "R=50% should be 127, got {}", rgb[0]);
     assert_eq!(rgb[1], 63, "G=25% should be 63, got {}", rgb[1]);
@@ -266,24 +250,21 @@ fn color_register_boundary_index_255_rgb() {
 #[test]
 fn repeat_count_one_advances_cursor_by_one() {
     // !1~ is the minimum non-trivial repeat; cursor must advance by exactly 1.
-    let mut d = make_decoder();
-    feed(&mut d, b"!1~");
+    let d = decode(b"!1~");
     assert_eq!(d.cursor_x, 1, "!1~ must advance cursor by 1");
 }
 
 #[test]
 fn repeat_count_255_advances_cursor_by_255() {
     // !255~ — maximum u8-range repeat; cursor must advance by 255.
-    let mut d = make_decoder();
-    feed(&mut d, b"!255~");
+    let d = decode(b"!255~");
     assert_eq!(d.cursor_x, 255, "!255~ must advance cursor by 255");
 }
 
 #[test]
 fn repeat_count_256_advances_cursor_by_256() {
     // !256~ — one beyond u8; decoded as u32; cursor must advance by 256.
-    let mut d = make_decoder();
-    feed(&mut d, b"!256~");
+    let d = decode(b"!256~");
     assert_eq!(d.cursor_x, 256, "!256~ must advance cursor by 256");
 }
 
@@ -294,7 +275,7 @@ fn repeat_count_256_advances_cursor_by_256() {
 #[test]
 fn multiple_color_registers_in_one_stream() {
     // Define three registers in a single stream and verify each independently.
-    let mut d = make_decoder();
+    let mut d = decode(b"");
     // Define register 10=red, 11=green, 12=blue in one byte sequence.
     feed(&mut d, b"#10;2;100;0;0$#11;2;0;100;0$#12;2;0;0;100$");
     assert_eq!(
@@ -317,23 +298,14 @@ fn multiple_color_registers_in_one_stream() {
 #[test]
 fn multiple_registers_paint_independent_colors() {
     // Paint col 0 with register 10 (red) and col 1 with register 11 (green).
-    let mut d = make_decoder();
-    feed(&mut d, b"\"1;1;2;6#10;2;100;0;0#10~#11;2;0;100;0#11~");
-    let result = d.finish();
-    assert!(result.is_some(), "finish() must return Some");
-    let (pixels, w, h) = result.unwrap();
+    let d = decode(b"\"1;1;2;6#10;2;100;0;0#10~#11;2;0;100;0#11~");
+    let (pixels, w, h) = finish_pixels(d);
     assert_eq!(w, 2);
     assert_eq!(h, 6);
     // Col 0, row 0 (offset 0): red
-    assert_eq!(pixels[0], 255, "col 0 R should be 255");
-    assert_eq!(pixels[1], 0, "col 0 G should be 0");
-    assert_eq!(pixels[2], 0, "col 0 B should be 0");
-    assert_eq!(pixels[3], 255, "col 0 A should be 255");
+    assert_pixel_rgba!(pixels pixels, offset 0, rgba [255, 0, 0, 255]);
     // Col 1, row 0 (offset 4): green
-    assert_eq!(pixels[4], 0, "col 1 R should be 0");
-    assert_eq!(pixels[5], 255, "col 1 G should be 255");
-    assert_eq!(pixels[6], 0, "col 1 B should be 0");
-    assert_eq!(pixels[7], 255, "col 1 A should be 255");
+    assert_pixel_rgba!(pixels pixels, offset 4, rgba [0, 255, 0, 255]);
 }
 
 // ---------------------------------------------------------------------------

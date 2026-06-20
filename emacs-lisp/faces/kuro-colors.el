@@ -26,6 +26,8 @@
 
 (declare-function kuro--clear-face-cache "kuro-faces" ())
 
+(require 'kuro-colors-macros)
+
 ;;; Customization Group
 
 (defgroup kuro-colors nil
@@ -99,16 +101,6 @@ during `defcustom' initialization before all 16 colors are defined)."
     (kuro--clear-face-cache)))
 
 ;;; ANSI Color Palette
-
-(defmacro kuro--defcolor (suffix default label index)
-  "Define a `defcustom' for ANSI palette entry SUFFIX with DEFAULT hex value.
-LABEL is the color name string; INDEX is the palette index integer."
-  `(defcustom ,(intern (concat "kuro-color-" suffix)) ,default
-     ,(concat "Color for ANSI " label " (palette index " (number-to-string index)
-              ").\nValue must be a 6-digit hex string, e.g. #rrggbb.")
-     :type '(string :tag "Hex color (#rrggbb)")
-     :group 'kuro-colors
-     :set #'kuro--set-color))
 
 (kuro--defcolor "black"          "#000000" "black"                    0)
 (kuro--defcolor "red"            "#c23621" "red"                      1)

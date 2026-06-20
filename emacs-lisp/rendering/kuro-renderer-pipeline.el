@@ -7,7 +7,7 @@
 ;;; Commentary:
 
 ;; Render pipeline execution: dirty-line polling, application, resize,
-;; col-to-buf cache eviction, title/scroll updates, and adaptive frame budget.
+;; col-to-buf cache eviction, title/scroll updates, and budget-gated polling.
 ;;
 ;; # Responsibilities
 ;;
@@ -17,9 +17,6 @@
 ;;   display work so no race exists between the window-change hook and timer.
 ;; - col-to-buf cache eviction: removes stale entries after resize or CJK→ASCII
 ;;   transitions, using 2× hysteresis to prevent churn.
-;; - Adaptive frame budget: 10-frame rolling average adjusts
-;;   `kuro--frame-budget-ratio' to protect the Emacs event loop from high-
-;;   throughput TUI apps.
 ;; - `kuro--poll-within-budget': budget-gated mode polling (DECCKM, mouse,
 ;;   CWD, OSC events); process-exit check always runs regardless of budget.
 ;;
@@ -39,6 +36,7 @@
 (require 'kuro-binary-decoder)
 (require 'kuro-debug-perf)
 (require 'kuro-poll-modes)
+(require 'kuro-renderer-pipeline-macros)
 
 ;; kuro-kill is defined in kuro-lifecycle.el which requires kuro-renderer.el;
 ;; use declare-function to avoid a circular require.
@@ -57,6 +55,9 @@
 ;; External C function used via kuro-binary-decoder.el.
 (declare-function kuro-core-poll-updates-binary-with-strings
                   "ext:kuro-core" (session-id))
+;; Frame-budget mutation lives in kuro-renderer.el, which owns the cached
+;; timer-rate state.
+(declare-function kuro--update-frame-budget-ratio "kuro-renderer" (duration))
 
 ;; Forward references: defvar-local symbols defined in other modules.
 ;; kuro-ffi.el
@@ -95,57 +96,6 @@
   "Forward reference; `defvar-local' in kuro-renderer.el.")
 (defvar kuro--budget-absolute-seconds (* 0.8 (/ 1.0 60.0))
   "Forward reference; `defvar-local' in kuro-renderer.el.")
-
-;;; Render pipeline macros
-
-(defmacro kuro--timed (ms-var &rest body)
-  "Execute BODY, store elapsed milliseconds in MS-VAR, return BODY's value.
-Uses a private time variable so BODY cannot accidentally shadow it."
-  (declare (indent 1))
-  `(let ((--timed-start (float-time)))
-     (prog1 (progn ,@body)
-       (setq ,ms-var (* 1000.0 (- (float-time) --timed-start))))))
-
-(defmacro kuro--with-render-env (&rest body)
-  "Execute BODY under render-optimized GC and `inhibit-redisplay' settings.
-Sets `gc-cons-threshold' and `gc-cons-percentage' to suppress collection
-jitter, then wraps BODY in `inhibit-redisplay' to prevent partial redraws."
-  (declare (indent 0))
-  `(let* ((gc-cons-threshold kuro--render-gc-threshold)
-          (gc-cons-percentage kuro--render-gc-percentage)
-          (inhibit-redisplay t))
-     ,@body))
-
-(defmacro kuro--reset-cursor-cache ()
-  "Clear all cached cursor state so the next render recomputes from scratch.
-Must be called after resize, attach, or any operation that invalidates the
-cursor's grid position.  The nil values cause `kuro--update-cursor' to skip
-the unchanged-state fast path and always query Rust for fresh cursor data."
-  `(setq kuro--last-cursor-row     nil
-         kuro--last-cursor-col     nil
-         kuro--last-cursor-visible nil
-         kuro--last-cursor-shape   nil))
-
-(defmacro kuro--with-render-buffer-mutation (&rest body)
-  "Execute BODY with bindings required for renderer buffer mutation."
-  (declare (indent 0))
-  `(let ((inhibit-read-only t)
-         (inhibit-modification-hooks t))
-     ,@body))
-
-(defmacro kuro--with-update-entry (entry-form row text face-ranges col-to-buf &rest body)
-  "Bind flat UPDATE-ENTRY fields from ENTRY-FORM and execute BODY.
-ENTRY-FORM is the `[row text face-ranges col-to-buf]' vector produced by the
-polling pipeline.  Centralizing the layout here keeps `aref' indexing out of
-the render logic and makes the data shape explicit at the boundary."
-  (declare (indent 5))
-  (let ((entry (make-symbol "entry")))
-    `(let ((,entry ,entry-form))
-       (let ((,row (aref ,entry 0))
-             (,text (aref ,entry 1))
-             (,face-ranges (aref ,entry 2))
-             (,col-to-buf (aref ,entry 3)))
-         ,@body))))
 
 ;;; Utility
 
@@ -250,35 +200,34 @@ scroll shifts to a frozen scrollback view would corrupt the display."
 When the hash map has more than this factor times the terminal row count,
 stale entries are pruned to prevent unbounded growth during long sessions.")
 
+(defun kuro--col-to-buf-map-should-evict-p ()
+  "Return non-nil when stale col-to-buf entries should be pruned."
+  (and (> kuro--last-rows 0)
+       (> (hash-table-count kuro--col-to-buf-map)
+          (* kuro--col-to-buf-evict-factor kuro--last-rows))))
+
+(defun kuro--evict-out-of-bounds-col-to-buf-rows ()
+  "Remove rows >= `kuro--last-rows' from `kuro--col-to-buf-map'."
+  (maphash (lambda (k _v)
+             (when (>= k kuro--last-rows)
+               (remhash k kuro--col-to-buf-map)))
+           kuro--col-to-buf-map))
+
+(defun kuro--evict-empty-dirty-col-to-buf-rows (dirty-rows)
+  "Remove dirty rows whose updated col-to-buf vector is empty."
+  (kuro--do-update-list dirty-rows row _text _face-ranges col-to-buf
+    (when (zerop (length col-to-buf))
+      (remhash row kuro--col-to-buf-map))))
+
 (defun kuro--evict-stale-col-to-buf-entries (dirty-rows)
   "Remove stale col-to-buf mappings from `kuro--col-to-buf-map'.
 DIRTY-ROWS is the update vector from the most recent render pipeline poll.
-Evicts entries for:
-  1. Rows >= `kuro--last-rows' (out-of-bounds after resize).
-  2. Dirty rows whose updated col-to-buf is empty (transitioned from CJK
-     to ASCII) — the identity fallback is correct for these rows, so the
-     stale CJK mapping must not linger.
-Guard `kuro--last-rows' > 0 to avoid spurious eviction before the first resize.
-2x hysteresis: only triggers when the map exceeds 2x the current row count.
+Rows >= `kuro--last-rows' are evicted after a resize, and dirty rows whose
+updated col-to-buf vector is empty lose their stale CJK mapping.
 Returns nil."
-  (when (and (> kuro--last-rows 0)
-             (> (hash-table-count kuro--col-to-buf-map) (* kuro--col-to-buf-evict-factor kuro--last-rows)))
-    ;; Remove out-of-bounds rows directly inside maphash (safe: remhash during
-    ;; maphash is permitted in Emacs and does not invalidate the iteration).
-    ;; Eliminates the stale-keys intermediate list and a third pass over it.
-    (maphash (lambda (k _v)
-               (when (>= k kuro--last-rows)
-                 (remhash k kuro--col-to-buf-map)))
-             kuro--col-to-buf-map)
-    ;; Remove dirty rows whose col-to-buf transitioned to empty (CJK → ASCII).
-    ;; Structure: flat 4-element vector [row text face-ranges col-to-buf].
-    (let ((n (length dirty-rows))
-          (i 0))
-      (while (< i n)
-        (kuro--with-update-entry (aref dirty-rows i) row _text _face-ranges col-to-buf
-          (when (zerop (length col-to-buf))
-            (remhash row kuro--col-to-buf-map)))
-        (setq i (1+ i))))))
+  (when (kuro--col-to-buf-map-should-evict-p)
+    (kuro--evict-out-of-bounds-col-to-buf-rows)
+    (kuro--evict-empty-dirty-col-to-buf-rows dirty-rows)))
 
 ;;; GC tuning constants
 
@@ -297,85 +246,36 @@ a flat 4-element vector [row text face-ranges col-to-buf].
 A single `condition-case' wraps the entire loop (not each iteration) to avoid
 installing a C-level setjmp target ~3,600 times per second.  In practice
 `kuro--update-line-full' never signals, so the handler is a safety net only."
-  ;; Structure: [row text face-ranges col-to-buf] — aref at fixed indices is faster
-  ;; than the old 6-deep car/cdr chain on the 3-level nested cons structure.
-  ;; dotimes + aref on a pre-allocated vector avoids list spine pointer-chasing.
-  ;; `while' with explicit counter produces tighter bytecode than `dotimes'
-  ;; (no implicit CL return-value handling); consistent with codebase pattern.
   (condition-case err
-      (let ((n (length update-list))
-            (i 0))
-        (while (< i n)
-          (kuro--with-update-entry (aref update-list i) row text face-ranges col-to-buf
-            (kuro--update-line-full row text face-ranges col-to-buf))
-          (setq i (1+ i))))
+      (kuro--do-update-list update-list row text face-ranges col-to-buf
+        (kuro--update-line-full row text face-ranges col-to-buf))
     (error (message "kuro: apply-dirty-lines error: %S" err))))
-
-;;; Core render pipeline steps (data/logic separation)
-
-(defsubst kuro--pipeline-step-ffi ()
-  "Poll dirty lines from Rust and return the update list."
-  (if kuro-use-binary-ffi
-      (kuro--poll-updates-binary-optimised kuro--session-id)
-    (kuro--poll-updates-with-faces)))
-
-(defsubst kuro--pipeline-step-apply (update-list)
-  "Apply UPDATE-LIST to the buffer when non-nil.
-This tiny gate keeps the `when' boundary explicit so the pipeline can test
-and time the apply step independently from the low-level line rewrite."
-  (when update-list
-    (kuro--apply-dirty-lines update-list)))
-
-(defsubst kuro--pipeline-face-count (update-list)
-  "Sum face ranges across all entries in UPDATE-LIST; return 0 when nil.
-Each element is a flat [row text face-ranges col-to-buf] vector.
-face-ranges is a stride-6 flat vector: each range occupies 6 consecutive slots,
-so (/ (length fr) 6) gives the range count without inner-vector indirection."
-  (let ((total 0)
-        (n (length update-list))
-        (i 0))
-    (while (< i n)
-      (kuro--with-update-entry (aref update-list i) _row _text face-ranges _col-to-buf
-        (setq total (+ total (/ (length face-ranges) 6))))
-      (setq i (1+ i)))
-    total))
 
 ;;; Core render pipeline
 
 (defun kuro--core-render-pipeline ()
   "Execute the core render pipeline and return the dirty-line update list.
 Runs title update, scroll events, dirty-line polling, line rewrite, and
-cursor positioning under a single `inhibit-redisplay' block.
+  cursor positioning under a single `inhibit-redisplay' block.
 GC is suppressed during the render to reduce pause jitter."
-  (let (updates)
-    (kuro--with-render-env
-      (kuro--apply-title-update)
-      (kuro--process-scroll-events)
-      (setq updates (kuro--pipeline-step-ffi))
-      (kuro--pipeline-step-apply updates)
-      (kuro--update-cursor)
-      (kuro--update-scroll-indicator))
-    updates))
+  (kuro--core-render-pipeline-run updates
+    (setq updates (if kuro-use-binary-ffi
+                      (kuro--poll-updates-binary-optimised kuro--session-id)
+                    (kuro--poll-updates-with-faces)))
+    (when updates
+      (kuro--apply-dirty-lines updates))
+    (kuro--update-cursor)))
 
 (defun kuro--core-render-pipeline-with-timing ()
   "Execute the core render pipeline with per-step timing.
 Return the update list.  Appends one timing line to *kuro-perf* per
 `kuro--perf-sample-interval' frames."
-  (let ((t-total (float-time))
-        ffi-ms apply-ms cursor-ms updates)
-    (kuro--with-render-env
-      (kuro--apply-title-update)
-      (kuro--process-scroll-events)
-      (kuro--timed ffi-ms    (setq updates (kuro--pipeline-step-ffi)))
-      (kuro--timed apply-ms  (kuro--pipeline-step-apply updates))
-      (kuro--timed cursor-ms (kuro--update-cursor))
-      (kuro--update-scroll-indicator))
-    (setq kuro--perf-frame-count (1+ kuro--perf-frame-count))
-    (kuro--when-divisible kuro--perf-frame-count kuro--perf-sample-interval
-      (let ((total-ms   (* 1000.0 (- (float-time) t-total)))
-            (face-count (kuro--pipeline-face-count updates)))
-        (kuro--perf-report ffi-ms apply-ms cursor-ms total-ms (length updates) face-count)))
-    updates))
+  (kuro--core-render-pipeline-run-with-timing updates t-total ffi-ms apply-ms cursor-ms
+    (kuro--timed ffi-ms    (setq updates (if kuro-use-binary-ffi
+                                             (kuro--poll-updates-binary-optimised kuro--session-id)
+                                           (kuro--poll-updates-with-faces))))
+    (kuro--timed apply-ms  (when updates (kuro--apply-dirty-lines updates)))
+    (kuro--timed cursor-ms (kuro--update-cursor))))
 
 (defun kuro--finalize-dirty-updates (update-list)
   "Evict stale col-to-buf entries and record the dirty-line count.
@@ -388,91 +288,18 @@ new CJK entries, so `hash-table-count' is not worth calling."
                    (length update-list))
           0)))
 
-;;; Adaptive frame budget
-
-(defconst kuro--frame-duration-ring-size 10
-  "Number of frame durations tracked for budget averaging.")
-
-(defvar kuro--frame-budget-ratio 0.8
-  "Fraction of frame interval available for render work before yielding.
-When dirty-line updates consume more than this fraction of the frame
-interval, mode polling is deferred to the next frame.  This prevents
-high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
-loop.  Process-exit detection is always performed regardless of budget.")
-
-(defvar kuro--frame-duration-ring (make-vector kuro--frame-duration-ring-size 0.0)
-  "Ring buffer of recent frame durations in seconds.
-Length is `kuro--frame-duration-ring-size'.")
-
-(defvar kuro--frame-duration-ring-index 0
-  "Current write index into `kuro--frame-duration-ring'.")
-
-(defvar kuro--frame-duration-ring-sum 0.0
-  "Running sum of all entries in `kuro--frame-duration-ring'.
-Maintained incrementally (subtract old, add new) so the per-frame average
-is O(1) — a single division — instead of a `dotimes'-10 scan.")
-
-(defsubst kuro--frame-budget-ring-next-index ()
-  "Return the next write index for the frame-duration ring."
-  (let ((n (1+ kuro--frame-duration-ring-index)))
-    (if (= n 10) 0 n)))
-
-(defsubst kuro--frame-budget-ring-record (duration)
-  "Record DURATION in the frame-duration ring and return the new average.
-The average is computed in O(1) via the running sum."
-  (let ((old (aref kuro--frame-duration-ring kuro--frame-duration-ring-index)))
-    (aset kuro--frame-duration-ring kuro--frame-duration-ring-index duration)
-    ;; O(1) running sum: subtract evicted entry, add new entry.
-    (setq kuro--frame-duration-ring-sum
-          (+ (- kuro--frame-duration-ring-sum old) duration))
-    (setq kuro--frame-duration-ring-index (kuro--frame-budget-ring-next-index))
-    ;; Inline literal 10.0 (= kuro--frame-duration-ring-size) to avoid symbol lookup;
-    ;; float denominator keeps the division in float arithmetic (consistent with EL-35).
-    (/ kuro--frame-duration-ring-sum 10.0)))
-
-(defsubst kuro--frame-budget-apply-average (avg)
-  "Nudge `kuro--frame-budget-ratio' based on AVG frame duration."
-  (cond
-   ((> avg kuro--budget-threshold-high)
-    (setq kuro--frame-budget-ratio (max 0.5 (- kuro--frame-budget-ratio 0.05)))
-    (setq kuro--budget-absolute-seconds
-          (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))
-   ((< avg kuro--budget-threshold-low)
-    (setq kuro--frame-budget-ratio (min 0.8 (+ kuro--frame-budget-ratio 0.02)))
-    (setq kuro--budget-absolute-seconds
-          (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))))
-
-(defun kuro--update-frame-budget-ratio (duration)
-  "Record frame DURATION and adjust `kuro--frame-budget-ratio' dynamically.
-Maintains a rolling average of the last 10 frame durations.  When
-consistently over-budget the ratio is nudged down; when consistently
-under-budget it is nudged back toward 0.8.
-
-The average is computed in O(1) via a running sum: subtract the slot
-being overwritten, add the new value, divide by 10.  This replaces the
-previous `dotimes'-10 scan (21 ops/frame) with 3 float ops/frame."
-  (kuro--frame-budget-apply-average (kuro--frame-budget-ring-record duration)))
-
 ;;; Pipeline entry point
-
-(defsubst kuro--run-dirty-update-pipeline ()
-  "Run the dirty-update pipeline and return the update list."
-  (if kuro-debug-perf
-      (kuro--core-render-pipeline-with-timing)
-    (kuro--core-render-pipeline)))
-
-(defsubst kuro--finalize-dirty-update-cycle (updates elapsed)
-  "Apply post-pipeline housekeeping for UPDATES and ELAPSED seconds."
-  (kuro--update-frame-budget-ratio elapsed)
-  (kuro--finalize-dirty-updates updates))
 
 (defun kuro--apply-dirty-updates ()
   "Apply dirty-line update data from Rust and advance the cursor position.
 Called once per render frame after `kuro--handle-pending-resize' and
 `kuro--poll-terminal-modes'."
   (let* ((t0 (float-time))
-         (updates (kuro--run-dirty-update-pipeline)))
-    (kuro--finalize-dirty-update-cycle updates (- (float-time) t0))))
+         (updates (if kuro-debug-perf
+                      (kuro--core-render-pipeline-with-timing)
+                    (kuro--core-render-pipeline))))
+    (kuro--update-frame-budget-ratio (- (float-time) t0))
+    (kuro--finalize-dirty-updates updates)))
 
 ;;; Budget-gated mode polling
 

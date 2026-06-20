@@ -83,17 +83,13 @@
   (interactive)
   (tabulated-list-revert))
 
-(defconst kuro-sessions-mode-bindings
-  '(("RET" . kuro-sessions-attach)
+(defvar kuro-sessions-mode-map
+  (kuro--define-keymap
+    ((kbd "RET") . kuro-sessions-attach)
     ("a" . kuro-sessions-attach)
     ("d" . kuro-sessions-destroy)
     ("g" . kuro-sessions-refresh)
-    ("q" . quit-window)))
-
-(defvar kuro-sessions-mode-map
-  (kuro--build-keymap-from-alist kuro-sessions-mode-bindings
-                                 (lambda (binding) (kbd (car binding)))
-                                 #'cdr)
+    ("q" . quit-window))
   "Keymap for `kuro-sessions-mode'.")
 
 ;;;###autoload

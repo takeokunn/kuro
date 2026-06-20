@@ -13,10 +13,8 @@ test_osc_default_colors_query_set!(
 
 #[test]
 fn test_handle_osc_default_colors_unknown_osc_number_set_changes_no_color() {
-    // OSC number "99" is not 10/11/12 — the `_ => {}` match arm fires, so no
-    // color field is written.  However, `default_colors_dirty` is set
-    // unconditionally inside `if let Some([r,g,b])` once the color spec parses,
-    // which is the existing behavior.
+    // OSC number "99" is not 10/11/12, so the handler returns before any
+    // default color slot is resolved or dirtied.
     let mut core = make_core!();
     let params: &[&[u8]] = &[b"99", b"#ff0000"];
     super::handle_osc_default_colors(&mut core, params);
@@ -32,9 +30,7 @@ fn test_handle_osc_default_colors_unknown_osc_number_set_changes_no_color() {
         core.osc_data().cursor_color.is_none(),
         "unknown OSC must not set cursor_color"
     );
-    // default_colors_dirty is set by the current implementation after any valid
-    // color-spec parse, even for unknown OSC numbers.
-    assert!(core.osc_data().default_colors_dirty);
+    assert!(!core.osc_data().default_colors_dirty);
 }
 
 #[test]
@@ -49,19 +45,11 @@ fn test_handle_osc_default_colors_unknown_osc_number_query_is_noop() {
     );
 }
 
-#[test]
-fn test_handle_osc_default_colors_query_unset_cursor_color_responds_grey() {
-    // cursor_color is None — query must respond with fallback grey (128, 128, 128).
-    let mut core = make_core!();
-    let params: &[&[u8]] = &[b"12", b"?"];
-    super::handle_osc_default_colors(&mut core, params);
-    assert_eq!(core.pending_responses().len(), 1);
-    let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-    assert!(
-        resp.contains("8080"),
-        "unset cursor color query must respond with grey (0x8080): got {resp:?}"
-    );
-}
+test_osc_default_colors_query_unset!(
+    test_handle_osc_default_colors_query_unset_cursor_color_responds_grey,
+    b"12",
+    cursor_color
+);
 
 // ── New edge-case tests ────────────────────────────────────────────────────────
 

@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'kuro-config)
 (require 'kuro-ffi)
+(require 'kuro-copy-macros)
 
 ;; kuro-mode-map is defined in kuro.el (required before kuro-copy.el).
 (defvar kuro-mode-map)
@@ -69,6 +70,21 @@ When CANCEL-RECT is non-nil, also cancel `rectangle-mark-mode'."
     (rectangle-mark-mode -1))
   (setq kuro--copy-linewise nil))
 
+(defun kuro--copy-begin-selection (&optional linewise)
+  "Start a fresh copy-mode selection.
+When LINEWISE is non-nil, snap point to the beginning of the current
+line and mark the selection as line-wise."
+  (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))
+  (when linewise
+    (setq kuro--copy-linewise t)
+    (beginning-of-line))
+  (set-mark-command nil))
+
+(defun kuro--copy-clear-selection-and-deactivate ()
+  "Clear copy selection state and deactivate the active mark."
+  (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))
+  (deactivate-mark))
+
 (defun kuro--copy-mode-save-and-exit ()
   "Copy the region with `kill-ring-save', optionally exiting copy mode.
 When `kuro-copy-mode-auto-exit' is non-nil, also exits copy mode."
@@ -121,8 +137,7 @@ active."
 Clears any line-wise or rectangle selection so the three modes stay
 mutually exclusive."
   (interactive)
-  (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))
-  (set-mark-command nil)
+  (kuro--copy-begin-selection)
   (message "kuro: mark set — move cursor to select region, then M-w or y to copy"))
 
 (defun kuro--copy-set-mark-line ()
@@ -132,10 +147,7 @@ current line, sets the mark there, and flags the selection line-wise so
 \\[kuro--copy-copy-region-and-exit] grabs complete lines including their
 trailing newlines."
   (interactive)
-  (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))
-  (setq kuro--copy-linewise t)
-  (beginning-of-line)
-  (set-mark-command nil)
+  (kuro--copy-begin-selection t)
   (message "kuro: line-wise selection — move by lines, then y/M-w copies whole lines"))
 
 (defun kuro--copy-append-region ()
@@ -153,8 +165,7 @@ region is active."
     (if (null kill-ring)
         (kill-new text)
       (kill-append (concat "\n" text) nil))
-    (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))
-    (deactivate-mark)
+    (kuro--copy-clear-selection-and-deactivate)
     (message "kuro: appended %d chars (kill now %d chars)"
              (length text) (length (current-kill 0)))))
 
@@ -174,40 +185,10 @@ to return to linear selection."
                "kuro: rectangle (block) selection ON — move, then y/M-w copies the block"
              "kuro: rectangle selection OFF")))
 
-
-;;;; Window-move commands (data-driven via defmacro)
-
-(defmacro kuro--def-copy-window-move (name arg docstring)
-  "Define NAME as a copy-mode command for window-relative movement.
-DOCSTRING becomes the generated command docstring.
-ARG is passed directly to `move-to-window-line'."
-  `(defun ,name () ,docstring (interactive) (move-to-window-line ,arg)))
-
 (kuro--def-copy-window-move kuro--copy-move-to-top    0   "Move point to the first visible line in the window (H in vim).")
 (kuro--def-copy-window-move kuro--copy-move-to-middle nil "Move point to the middle visible line in the window (M in vim).")
 (kuro--def-copy-window-move kuro--copy-move-to-bottom -1  "Move point to the last visible line in the window (L in vim).")
 
-
-;;;; Search commands (data-driven via defmacro)
-
-(defmacro kuro--def-copy-search (name search-fn fallback-fn wrap-pos docstring)
-  "Define NAME as a copy-mode command that repeats the last isearch pattern.
-DOCSTRING becomes the generated command docstring.
-SEARCH-FN is `search-forward' or `search-backward'.
-FALLBACK-FN is called interactively when no prior pattern exists.
-WRAP-POS is `(point-min)' or `(point-max)' for wrap-around."
-  `(defun ,name ()
-     ,docstring
-     (interactive)
-     (let ((s (and (boundp 'isearch-string)
-                   (not (string-empty-p isearch-string))
-                   isearch-string)))
-       (if (not s)
-           (call-interactively #',fallback-fn)
-         (unless (,search-fn s nil t)
-           (goto-char ,wrap-pos)
-           (unless (,search-fn s nil t)
-             (message "Search failed: %s" s)))))))
 
 (kuro--def-copy-search kuro--copy-search-next
   search-forward isearch-forward (point-min)
@@ -229,9 +210,6 @@ Sets `isearch-string' to the word token so `n'/`N' can repeat it."
       (forward-word 1)
       (kuro--copy-search-next))))
 
-
-;;;; Prompt navigation
-
 (defun kuro--prompt-overlay-positions ()
   "Return sorted buffer positions carrying a `kuro-prompt-status' overlay.
 Used by copy-mode prompt navigation to enumerate shell-prompt marks set
@@ -250,18 +228,6 @@ by the OSC 133 annotation system."
         (cl-find-if (lambda (p) (> p pos)) marks)
       (cl-find-if (lambda (p) (< p pos)) (reverse marks)))))
 
-(defmacro kuro--def-copy-goto-prompt (name direction fallback docstring)
-  "Define NAME as a copy-mode prompt navigation command.
-DOCSTRING becomes the generated command docstring.
-NAME jumps to the nearest OSC 133 prompt in DIRECTION (:fwd or :bwd),
-falling back to FALLBACK when no overlay marks exist."
-  `(defun ,name ()
-     ,docstring
-     (interactive)
-     (if-let* ((target (kuro--copy-find-prompt ,direction)))
-         (goto-char target)
-       (,fallback))))
-
 (kuro--def-copy-goto-prompt kuro--copy-goto-next-prompt :fwd forward-paragraph
   "Jump to the next shell-prompt overlay in copy mode (vim: }).
 Falls back to `forward-paragraph' when no prompt overlays exist.")
@@ -269,9 +235,6 @@ Falls back to `forward-paragraph' when no prompt overlays exist.")
 (kuro--def-copy-goto-prompt kuro--copy-goto-prev-prompt :bwd backward-paragraph
   "Jump to the previous shell-prompt overlay in copy mode (vim: {).
 Falls back to `backward-paragraph' when no prompt overlays exist.")
-
-
-;;;; Keymap
 
 (defconst kuro--copy-mode-bindings
   '(([?\C-c ?\C-t] . kuro-copy-mode)
@@ -310,16 +273,6 @@ Falls back to `backward-paragraph' when no prompt overlays exist.")
     ("{" . kuro--copy-goto-prev-prompt)
     ("}" . kuro--copy-goto-next-prompt))
   "Key bindings installed in `kuro--copy-mode-map'.")
-
-(defmacro kuro--define-copy-mode-bindings (map bindings)
-  "Install BINDINGS into MAP.
-Each BINDINGS entry is (KEY . COMMAND).  KEY may be a vector or a
-string accepted by `kbd'."
-  `(dolist (binding ,bindings)
-     (pcase-let ((`(,key . ,command) binding))
-       (define-key ,map
-                   (if (vectorp key) key (kbd key))
-                   command))))
 
 (defvar kuro--copy-mode-map
   (let ((map (make-sparse-keymap)))
@@ -366,9 +319,6 @@ Saves the current window start in `kuro--copy-mode-saved-window-start'."
     (kuro--render-cycle))
   (message "Kuro copy mode off"))
 
-
-;;;; Public commands
-
 ;;;###autoload
 (defun kuro-copy-mode ()
   "Toggle Kuro copy mode.
@@ -382,17 +332,6 @@ are enabled.  Call \\[kuro-copy-mode] again to return to terminal mode."
    (if kuro--copy-mode
        (kuro--exit-copy-mode)
      (kuro--enter-copy-mode))))
-
-(defmacro kuro--def-copy-search-enter (name search-fn docstring)
-  "Define NAME as a command that enters copy mode before SEARCH-FN.
-DOCSTRING becomes the generated command docstring."
-  `(defun ,name ()
-     ,docstring
-     (interactive)
-     (kuro--with-kuro-mode
-      (unless kuro--copy-mode
-        (kuro--enter-copy-mode))
-      (,search-fn))))
 
 ;;;###autoload
 (kuro--def-copy-search-enter kuro-search-forward isearch-forward

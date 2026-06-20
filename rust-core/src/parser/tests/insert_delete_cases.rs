@@ -8,8 +8,8 @@
 )]
 #![allow(unused_macros)]
 
-use super::*;
 use super::support::{char_at, fill_line};
+use super::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -33,15 +33,16 @@
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-timer kuro-renderer-pipeline-ext3-enter-tui-mode-stops-idle-timer   kuro--enter-tui-mode stopped t)
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-timer kuro-renderer-pipeline-ext3-exit-tui-mode-restarts-idle-timer kuro--exit-tui-mode  started t)
 
-(ert-deftest kuro-renderer-pipeline-ext3-test--all-timer-side-effects-correct ()
-  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-timer-table' match behavior."
-  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-timer-table)
-    (pcase-let ((`(,_name ,fn ,check-sym ,expectedp) entry))
-      (kuro-renderer-pipeline-test--with-buffer
-        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-          (funcall fn)
-          (let ((val (if (eq check-sym 'stopped) stopped started)))
-            (if expectedp (should val) (should-not val))))))))
+(kuro-renderer-pipeline-test--deftest-table-cases
+    kuro-renderer-pipeline-ext3-test--all-timer-side-effects-correct
+    "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-timer-table' match behavior."
+    kuro-renderer-pipeline-ext3-test--enter-exit-timer-table
+    (`(,_name ,fn ,check-sym ,expectedp)
+     (kuro-renderer-pipeline-test--with-buffer
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (funcall fn)
+         (let ((val (if (eq check-sym 'stopped) stopped started)))
+           (if expectedp (should val) (should-not val)))))))
 
 ;; ── Rate-switch assertions ──────────────────────────────────────────────────
 
@@ -62,16 +63,17 @@
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-rate kuro-renderer-pipeline-ext3-enter-tui-mode-switches-to-tui-rate   kuro--enter-tui-mode kuro-tui-frame-rate t)
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-rate kuro-renderer-pipeline-ext3-exit-tui-mode-switches-to-normal-rate kuro--exit-tui-mode  kuro-frame-rate     t)
 
-(ert-deftest kuro-renderer-pipeline-ext3-test--all-rate-switches-correct ()
-  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-rate-table' match behavior."
-  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-rate-table)
-    (pcase-let ((`(,_name ,fn ,rate ,expectedp) entry))
-      (kuro-renderer-pipeline-test--with-buffer
-        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-          (funcall fn)
-          (if expectedp
-              (should (= switched (symbol-value rate)))
-            (should-not (= switched (symbol-value rate)))))))))
+(kuro-renderer-pipeline-test--deftest-table-cases
+    kuro-renderer-pipeline-ext3-test--all-rate-switches-correct
+    "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-rate-table' match behavior."
+    kuro-renderer-pipeline-ext3-test--enter-exit-rate-table
+    (`(,_name ,fn ,rate ,expectedp)
+     (kuro-renderer-pipeline-test--with-buffer
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (funcall fn)
+         (if expectedp
+             (should (= switched (symbol-value rate)))
+           (should-not (= switched (symbol-value rate))))))))
 
 ;; ── Active-flag assertions ──────────────────────────────────────────────────
 
@@ -92,17 +94,18 @@
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-flag kuro-renderer-pipeline-ext3-enter-tui-mode-sets-active-flag   kuro--enter-tui-mode nil t)
 (kuro-renderer-pipeline-ext3-test--def-enter-exit-flag kuro-renderer-pipeline-ext3-exit-tui-mode-clears-active-flag  kuro--exit-tui-mode  t   nil)
 
-(ert-deftest kuro-renderer-pipeline-ext3-test--all-flag-toggles-correct ()
-  "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-flag-table' match behavior."
-  (dolist (entry kuro-renderer-pipeline-ext3-test--enter-exit-flag-table)
-    (pcase-let ((`(,_name ,fn ,init-val ,expected-val) entry))
-      (kuro-renderer-pipeline-test--with-buffer
-        (setq kuro--tui-mode-active init-val)
-        (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
-          (funcall fn)
-          (if expected-val
-              (should kuro--tui-mode-active)
-            (should-not kuro--tui-mode-active)))))))
+(kuro-renderer-pipeline-test--deftest-table-cases
+    kuro-renderer-pipeline-ext3-test--all-flag-toggles-correct
+    "All entries in `kuro-renderer-pipeline-ext3-test--enter-exit-flag-table' match behavior."
+    kuro-renderer-pipeline-ext3-test--enter-exit-flag-table
+    (`(,_name ,fn ,init-val ,expected-val)
+     (kuro-renderer-pipeline-test--with-buffer
+       (setq kuro--tui-mode-active init-val)
+       (kuro-renderer-pipeline-test--with-tui-stubs stopped started switched
+         (funcall fn)
+         (if expected-val
+             (should kuro--tui-mode-active)
+          (should-not kuro--tui-mode-active))))))
 
 ;;; Group 18: kuro--finalize-dirty-updates
 

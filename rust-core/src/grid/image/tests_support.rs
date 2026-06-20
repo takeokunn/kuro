@@ -81,7 +81,11 @@ pub(crate) fn assert_image_missing(store: &GraphicsStore, image_id: u32) {
 }
 
 pub(crate) fn assert_placement_rows(store: &GraphicsStore, rows: &[usize]) {
-    let actual: Vec<usize> = store.placements.iter().map(|placement| placement.row).collect();
+    let actual: Vec<usize> = store
+        .placements
+        .iter()
+        .map(|placement| placement.row)
+        .collect();
     assert_eq!(actual, rows);
 }
 

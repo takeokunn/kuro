@@ -12,22 +12,20 @@ macro_rules! test_sgr_flag {
         fn $on_name() {
             let mut term = crate::TerminalCore::new(24, 80);
             term.advance($on_seq);
-            assert!(
-                term.current_attrs
-                    .flags
-                    .contains(crate::types::cell::SgrFlags::$flag)
-            );
+            assert!(term
+                .current_attrs
+                .flags
+                .contains(crate::types::cell::SgrFlags::$flag));
         }
 
         #[test]
         fn $off_name() {
             let mut term = crate::TerminalCore::new(24, 80);
             term.advance($on_seq);
-            assert!(
-                term.current_attrs
-                    .flags
-                    .contains(crate::types::cell::SgrFlags::$flag)
-            );
+            assert!(term
+                .current_attrs
+                .flags
+                .contains(crate::types::cell::SgrFlags::$flag));
             term.advance($off_seq);
             assert!(
                 !term

@@ -1,4 +1,3 @@
-
 use crate::types::cell::{SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::Color;
 

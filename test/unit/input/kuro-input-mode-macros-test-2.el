@@ -34,9 +34,7 @@
    ;; Use prefix "git s" — matches only "git status", not "git commit"
    (setq kuro--line-buffer "git s" kuro--line-point 5
          kuro--line-history '("git status" "git commit"))
-   (cl-letf (((symbol-function 'kuro--line-undo-push) #'ignore)
-             ((symbol-function 'kuro--line-set-buffer) (lambda (s) (setq kuro--line-buffer s))))
-     (kuro--line-complete-history-multi))
+   (kuro--line-complete-history-multi)
    (should (equal kuro--line-buffer "git status"))))
 
 ;;; ── kuro--line-complete-word ──────────────────────────────────────────────────
@@ -92,40 +90,37 @@
 
 (ert-deftest kuro-input-mode-macros-history-search-selection-sets-buffer ()
   "`kuro--line-history-search' sets the line buffer to the selected entry."
-  (let ((kuro--line-history '("git status" "ls"))
-        (kuro--line-buffer "")
-        set-to)
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _) "git status"))
-              ((symbol-function 'kuro--line-undo-push) #'ignore)
-              ((symbol-function 'kuro--line-set-buffer)
-               (lambda (s) (setq set-to s))))
-      (kuro--line-history-search))
-    (should (equal set-to "git status"))))
+  (kuro-input-mode-test--with-buffer
+   (let ((kuro--line-history '("git status" "ls")))
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (&rest _) "git status")))
+       (kuro--line-history-search))
+     (should (equal kuro--line-buffer "git status"))
+     (should (= kuro--line-point (length "git status"))))))
 
 (ert-deftest kuro-input-mode-macros-history-search-quit-leaves-buffer-unchanged ()
   "`kuro--line-history-search' swallows C-g quit and leaves buffer unchanged."
-  (let ((kuro--line-history '("git status"))
-        (kuro--line-buffer "orig")
-        changed)
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _) (signal 'quit nil)))
-              ((symbol-function 'kuro--line-set-buffer)
-               (lambda (_) (setq changed t))))
-      (kuro--line-history-search))
-    (should-not changed)))
+  (kuro-input-mode-test--with-buffer
+   (let ((kuro--line-history '("git status")))
+     (setq kuro--line-buffer "orig"
+           kuro--line-point 4)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (&rest _) (signal 'quit nil))))
+       (kuro--line-history-search))
+     (should (equal kuro--line-buffer "orig"))
+     (should (= kuro--line-point 4)))))
 
 (ert-deftest kuro-input-mode-macros-history-search-empty-selection-no-set ()
   "`kuro--line-history-search' does not call `kuro--line-set-buffer' for empty selection."
-  (let ((kuro--line-history '("git status"))
-        set-called)
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _) ""))
-              ((symbol-function 'kuro--line-undo-push) #'ignore)
-              ((symbol-function 'kuro--line-set-buffer)
-               (lambda (_) (setq set-called t))))
-      (kuro--line-history-search))
-    (should-not set-called)))
+  (kuro-input-mode-test--with-buffer
+   (let ((kuro--line-history '("git status")))
+     (setq kuro--line-buffer "orig"
+           kuro--line-point 4)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (&rest _) "")))
+       (kuro--line-history-search))
+     (should (equal kuro--line-buffer "orig"))
+     (should (= kuro--line-point 4)))))
 
 ;;; Group 6-10 — macro structural tests
 

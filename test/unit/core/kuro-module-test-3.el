@@ -2,14 +2,7 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-
-(unless (fboundp 'module-load)
-  (fset 'module-load (lambda (_path) nil)))
-
-(require 'kuro-config)
-(require 'kuro-module)
+(require 'kuro-module-test-support)
 
 ;;; Group 14: kuro-module--lib-name helper
 
@@ -175,26 +168,20 @@
 
 (ert-deftest kuro-module--verify-sha256-matching-hash-returns-t ()
   "`kuro-module--verify-sha256' returns t when hash matches file content."
-  (let* ((content "hello kuro")
-         (tmpfile (make-temp-file "kuro-test-sha256-"))
-         (expected (with-temp-buffer
-                     (set-buffer-multibyte nil)
-                     (insert content)
-                     (secure-hash 'sha256 (current-buffer)))))
-    (unwind-protect
-        (progn
-          (with-temp-file tmpfile (insert content))
-          (should (kuro-module--verify-sha256 tmpfile expected)))
-      (delete-file tmpfile))))
+  (kuro-module-test--with-temp-file (tmpfile "kuro-test-sha256-")
+    (let* ((content "hello kuro")
+           (expected (with-temp-buffer
+                       (set-buffer-multibyte nil)
+                       (insert content)
+                       (secure-hash 'sha256 (current-buffer)))))
+      (with-temp-file tmpfile (insert content))
+      (should (kuro-module--verify-sha256 tmpfile expected)))))
 
 (ert-deftest kuro-module--verify-sha256-wrong-hash-returns-nil ()
   "`kuro-module--verify-sha256' returns nil when hash does not match."
-  (let ((tmpfile (make-temp-file "kuro-test-sha256-")))
-    (unwind-protect
-        (progn
-          (with-temp-file tmpfile (insert "actual content"))
-          (should-not (kuro-module--verify-sha256 tmpfile "0000deadbeef")))
-      (delete-file tmpfile))))
+  (kuro-module-test--with-temp-file (tmpfile "kuro-test-sha256-")
+    (with-temp-file tmpfile (insert "actual content"))
+    (should-not (kuro-module--verify-sha256 tmpfile "0000deadbeef"))))
 
 ;;; Group 25: kuro-module--locate-cargo-toml direct tests
 
@@ -209,27 +196,20 @@
 
 (ert-deftest kuro-module-test--locate-cargo-toml-returns-nil-from-unrelated-dir ()
   "`kuro-module--locate-cargo-toml' returns nil when started in a temp dir with no Cargo.toml parent."
-  (let* ((tmp (make-temp-file "kuro-test-" t))
-         (load-file-name (expand-file-name "fake.el" tmp)))
-    (unwind-protect
-        (should-not (kuro-module--locate-cargo-toml))
-      (delete-directory tmp t))))
+  (kuro-module-test--with-temp-dir (tmp "kuro-test-")
+    (let ((load-file-name (expand-file-name "fake.el" tmp)))
+      (should-not (kuro-module--locate-cargo-toml)))))
 
 (ert-deftest kuro-module-test--locate-cargo-toml-finds-in-nested-subdir ()
   "`kuro-module--locate-cargo-toml' walks up from nested dirs and finds Cargo.toml."
-  (let* ((tmp      (make-temp-file "kuro-locate-" t))
-         (rust-dir (expand-file-name "rust-core" tmp))
-         (sub-dir  (expand-file-name "a/b/c" tmp)))
-    (unwind-protect
-        (progn
-          (make-directory rust-dir t)
-          (make-directory sub-dir t)
-          (write-region "" nil (expand-file-name "Cargo.toml" rust-dir))
-          (let* ((load-file-name (expand-file-name "test.el" sub-dir))
-                 (result (kuro-module--locate-cargo-toml)))
-            (should (stringp result))
-            (should (string-suffix-p "rust-core/Cargo.toml" result))))
-      (delete-directory tmp t))))
+  (kuro-module-test--with-cargo-toml-tree (tmp rust-dir sub-dir "kuro-locate-")
+    (let ((load-file-name nil)
+          (buffer-file-name (expand-file-name "test.el" sub-dir)))
+      (cl-letf (((symbol-function 'locate-library) (lambda (_name) nil)))
+        (let ((result (kuro-module--locate-cargo-toml)))
+          (should (stringp result))
+          (should (string= result (expand-file-name "rust-core/Cargo.toml" tmp)))
+          (should (file-exists-p result)))))))
 
 ;;; kuro--module-try macro structural tests
 

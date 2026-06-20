@@ -56,6 +56,15 @@
      gc-cons-percentage kuro--render-gc-percentage))
   "Cases of (test-name gc-var expected-const) for `kuro--with-render-env'.")
 
+(defconst kuro-renderer-pipeline-test--apply-dirty-updates-cases
+  '((kuro-renderer-pipeline-apply-dirty-updates-non-debug-path
+     "kuro--apply-dirty-updates calls the core pipeline and finalizes its result when kuro-debug-perf is nil."
+     nil 1 0 '(a b c) nil '(a b c))
+    (kuro-renderer-pipeline-apply-dirty-updates-debug-path
+     "kuro--apply-dirty-updates calls the timing pipeline and finalizes its result when kuro-debug-perf is non-nil."
+     t 0 1 nil '(a b c) '(a b c)))
+  "Cases of (name doc debug-perf core-calls timing-calls core-return timing-return expected-finalize).")
+
 (provide 'kuro-renderer-pipeline-test-cases)
 
 ;;; kuro-renderer-pipeline-test-cases.el ends here

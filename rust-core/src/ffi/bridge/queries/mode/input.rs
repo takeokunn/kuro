@@ -3,38 +3,25 @@
 use emacs::defun;
 use emacs::{Env, Result as EmacsResult, Value};
 
-use super::super::super::query_session;
+use super::super::super::{define_session_query_default, query_session};
 
-macro_rules! define_mode_query {
-    (
-        $(#[$doc:meta])*
-        fn $name:ident,
-        default = $default:expr,
-        body = $body:expr
-    ) => {
-        $(#[$doc])*
-        #[defun]
-        fn $name(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-            query_session(env, session_id, $default, $body)
-        }
-    };
-}
-
-define_mode_query!(
+define_session_query_default!(
     /// Get application cursor keys mode (DECCKM state: t if active, nil if not)
-    fn kuro_core_get_app_cursor_keys,
-    default = false,
-    body = |s| Ok(s.get_app_cursor_keys())
+    kuro_core_get_app_cursor_keys,
+    false,
+    query_session,
+    |s| s.get_app_cursor_keys()
 );
 
-define_mode_query!(
+define_session_query_default!(
     /// Get application keypad mode state (t if DECKPAM active, nil if DECKPNM)
-    fn kuro_core_get_app_keypad,
-    default = false,
-    body = |s| Ok(s.get_app_keypad())
+    kuro_core_get_app_keypad,
+    false,
+    query_session,
+    |s| s.get_app_keypad()
 );
 
-define_mode_query!(
+define_session_query_default!(
     /// Get current Kitty keyboard protocol flags as an integer
     ///
     /// Returns the current keyboard flags bitmask:
@@ -43,7 +30,8 @@ define_mode_query!(
     ///   Bit 2 (4): Report alternate keys
     ///   Bit 3 (8): Report all keys as escape codes
     ///   Bit 4 (16): Report associated text
-    fn kuro_core_get_keyboard_flags,
-    default = 0i64,
-    body = |s| Ok(i64::from(s.get_keyboard_flags()))
+    kuro_core_get_keyboard_flags,
+    0i64,
+    query_session,
+    |s| i64::from(s.get_keyboard_flags())
 );

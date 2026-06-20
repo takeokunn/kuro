@@ -1,4 +1,3 @@
-
 // Tests for DECIC (Insert Column, CSI Ps ' }) and DECDC (Delete Column, CSI Ps ' ~).
 //
 // Both sequences use a single-quote intermediate byte (0x27) to distinguish
@@ -52,7 +51,7 @@ fn test_decic_applies_to_all_rows_in_scroll_region() {
     term.advance(b"\x1b[3;6r");
     term.screen.move_cursor(2, 2); // cursor at col 2 in scroll region
     term.advance(b"\x1b[1'}"); // DECIC 1
-    // Rows outside scroll region must be unchanged
+                               // Rows outside scroll region must be unchanged
     assert_eq!(col_chars(&term, 0, 10), "ABCDEFGHIJ");
     assert_eq!(col_chars(&term, 6, 10), "ABCDEFGHIJ");
     // Rows inside scroll region: blank inserted at col 2

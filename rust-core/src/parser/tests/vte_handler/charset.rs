@@ -157,7 +157,7 @@ fn dec_line_drawing_decsc_saves_g0_charset() {
     // Designate G0 = line drawing, then save
     term.advance(b"\x1b(0");
     term.advance(b"\x1b7"); // DECSC
-    // Switch G0 back to ASCII
+                            // Switch G0 back to ASCII
     term.advance(b"\x1b(B");
     // 'j' should be literal ASCII now
     term.advance(b"j");
@@ -178,7 +178,7 @@ fn dec_line_drawing_decsc_saves_g1_charset() {
     // Designate G1 = line drawing, then save
     term.advance(b"\x1b)0");
     term.advance(b"\x1b7"); // DECSC
-    // Switch G1 back to ASCII
+                            // Switch G1 back to ASCII
     term.advance(b"\x1b)B");
     // SO to use G1 — should be ASCII now
     term.advance(b"\x0Ej");
@@ -188,7 +188,7 @@ fn dec_line_drawing_decsc_saves_g1_charset() {
     term.advance(b"\x0F");
     term.advance(b"\x1b8"); // DECRC
     term.advance(b"\x1b[1C"); // CUF 1: move cursor right to col 1
-    // SO again — G1 should be line drawing again
+                              // SO again — G1 should be line drawing again
     term.advance(b"\x0Ej");
     assert_cell_char!(term, row 0, col 1, '\u{2518}');
 }
@@ -202,7 +202,7 @@ fn dec_line_drawing_decsc_saves_gl_shift() {
     // SO to shift GL to G1, then save
     term.advance(b"\x0E");
     term.advance(b"\x1b7"); // DECSC
-    // SI to shift GL back to G0
+                            // SI to shift GL back to G0
     term.advance(b"\x0F");
     // 'j' should be ASCII (GL=G0=ASCII)
     term.advance(b"j");
@@ -224,7 +224,7 @@ fn dec_line_drawing_decrc_without_save_uses_defaults() {
     // DECRC without prior DECSC — charset state should NOT change
     // (no saved state to restore from)
     term.advance(b"\x1b8"); // DECRC
-    // G0 should still be line drawing since nothing was saved/restored
+                            // G0 should still be line drawing since nothing was saved/restored
     term.advance(b"j");
     assert_cell_char!(term, row 0, col 0, '\u{2518}');
 }

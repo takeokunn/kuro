@@ -12,10 +12,9 @@
 ;;; Code:
 
 (require 'bookmark)
+(require 'kuro-config)
 
 (declare-function kuro-create "kuro-lifecycle" (&optional command buffer-name))
-
-(defvar kuro-shell)
 
 (defun kuro-bookmark-make-record ()
   "Create a bookmark record for the current Kuro terminal buffer.

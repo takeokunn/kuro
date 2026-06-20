@@ -30,20 +30,11 @@ fn test_handle_osc_default_colors_missing_spec_is_noop() {
     assert!(core.pending_responses().is_empty());
 }
 
-#[test]
-fn test_handle_osc_default_colors_query_unset_produces_grey_response() {
-    let mut core = make_core!();
-    // default_fg is None — query must respond with the fallback grey (128, 128, 128)
-    let params: &[&[u8]] = &[b"10", b"?"];
-    super::handle_osc_default_colors(&mut core, params);
-    assert_eq!(core.pending_responses().len(), 1);
-    let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-    // rgb:8080/8080/8080 is the expected grey spec for (128, 128, 128)
-    assert!(
-        resp.contains("8080"),
-        "unset fg query must respond with grey (0x8080)"
-    );
-}
+test_osc_default_colors_query_unset!(
+    test_handle_osc_default_colors_query_unset_produces_grey_response,
+    b"10",
+    default_fg
+);
 
 // ── handle_osc_52 (extended) ──────────────────────────────────────────────────
 
@@ -246,23 +237,10 @@ fn test_handle_osc_52_exactly_at_size_cap_is_accepted_or_rejected_without_panic(
 
 #[test]
 fn test_handle_osc_52_empty_data_is_noop() {
-    // Zero-length data at index 2 is not "?" and not valid base64 text.
     let mut core = make_core!();
     let params: &[&[u8]] = &[b"52", b"c", b""];
     super::handle_osc_52(&mut core, params);
-    // Empty string is a valid base64 input that decodes to zero bytes,
-    // which produces an empty String — so Write("") is pushed.
-    // Either way, we verify no panic and the result is consistent.
-    // (An empty clipboard write is valid per the protocol.)
-    let actions = &core.osc_data().clipboard_actions;
-    // If pushed, it must be Write("") — not Query.
-    if let Some(action) = actions.first() {
-        use crate::types::osc::ClipboardAction;
-        assert!(
-            matches!(action, ClipboardAction::Write(s) if s.is_empty()),
-            "empty data must produce Write(\"\") if anything"
-        );
-    }
+    assert_osc_52_action!(core, ClipboardAction::Write(s) if s.is_empty());
 }
 
 // ── handle_osc_104 (out-of-range index) ───────────────────────────────────────
@@ -315,4 +293,3 @@ fn test_handle_osc_133_empty_mark_is_noop() {
         "empty mark byte must produce no prompt mark event"
     );
 }
-

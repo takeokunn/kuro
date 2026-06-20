@@ -38,6 +38,7 @@
 (require 'kuro-ffi)
 (require 'kuro-faces)
 (require 'kuro-keymap)
+(require 'kuro-scrollback)
 (require 'kuro-overlays)
 (require 'kuro-navigation)
 (require 'kuro-input)
@@ -48,23 +49,14 @@
 (require 'kuro-renderer)
 (require 'kuro-lifecycle)
 
-;; kuro-send-next-key is defined in kuro-input.el (loaded before kuro.el uses it).
-(declare-function kuro-send-next-key    "kuro-input"      ())
+;; kuro-send-next-key is defined in kuro-input-encode.el (loaded via kuro-input).
+(declare-function kuro-send-next-key    "kuro-input-encode" ())
 (declare-function kuro--handle-focus-in  "kuro-navigation" ())
 (declare-function kuro--handle-focus-out "kuro-navigation" ())
 
 ;; Input mode commands are in kuro-input-mode.el.
 (declare-function kuro-cycle-input-mode  "kuro-input-mode" ())
 (declare-function kuro--input-mode-lighter "kuro-input-mode" ())
-
-;; Scrollback search and editing commands are defined later in this file;
-;; same-file forward references are resolved by the byte-compiler at end of
-;; file, so no `declare-function' stubs are needed (and self-referential ones
-;; would be flagged as duplicate definitions under Emacs 30).
-
-;; kuro-input-paste.el — used by kuro-scrollback-send
-(declare-function kuro--send-paste-or-raw        "kuro-input-paste" (text))
-(declare-function kuro--schedule-immediate-render "kuro-input"       ())
 
 ;; EA-Ambiguous font assignment and glyph-metric refinement are in kuro-char-width.el.
 (declare-function kuro--setup-char-width-table "kuro-char-width" ())
@@ -75,8 +67,9 @@
 ;; Color palette table is rebuilt lazily on first kuro-mode entry; defined in kuro-colors.el.
 (declare-function kuro--rebuild-named-colors "kuro-colors" ())
 
-(defconst kuro--mode-key-bindings
-  '(("C-c C-c" . kuro-send-interrupt)
+(defvar kuro-mode-map
+  (kuro--define-keymap
+    ("C-c C-c" . kuro-send-interrupt)
     ("C-c C-z" . kuro-send-sigstop)
     ("C-c C-\\" . kuro-send-sigquit)
     ("C-c C-p" . kuro-previous-prompt)
@@ -91,12 +84,6 @@
     ("C-c C-i" . kuro-cycle-input-mode)
     ("C-c C-s" . kuro-search-forward)
     ("C-c C-e" . kuro-edit-scrollback))
-  "Key bindings installed in `kuro-mode-map'.")
-
-(defvar kuro-mode-map
-  (kuro--build-keymap-from-alist kuro--mode-key-bindings
-                                 (lambda (binding) (kbd (car binding)))
-                                 #'cdr)
   "Keymap for Kuro major mode.")
 
 ;; Load kuro-input-mode here — AFTER kuro-mode-map is defined — so the
@@ -125,93 +112,6 @@ cycle independently call `kuro--resize'."
               ;; Record pending resize; the render cycle will process it
               ;; synchronously, avoiding a race where both paths call kuro--resize.
               (setq kuro--resize-pending (cons new-rows new-cols)))))))))
-
-;;;; Scrollback edit mode — writable snapshot for full Emacs editing
-
-(defvar-local kuro-edit-scrollback--source-buffer nil
-  "The `kuro-mode' buffer this scrollback snapshot was created from.
-Set by `kuro-edit-scrollback' in the snapshot buffer.")
-
-(defconst kuro--scrollback-edit-bindings
-  '(("C-c C-c" . kuro-scrollback-send)
-    ("C-c C-k" . kuro-scrollback-discard))
-  "Key bindings installed in `kuro--scrollback-edit-keymap'.")
-
-(defvar kuro--scrollback-edit-keymap
-  (kuro--build-keymap-from-alist kuro--scrollback-edit-bindings
-                                 (lambda (binding) (car binding))
-                                 #'cdr)
-  "Keymap installed in buffers created by `kuro-edit-scrollback'.")
-
-;;;###autoload
-(define-derived-mode kuro-scrollback-edit-mode text-mode "Kuro-Edit"
-  "Major mode for editing a writable snapshot of Kuro terminal output.
-Created by `kuro-edit-scrollback'.
-
-The buffer holds a verbatim copy of the terminal content at the time
-the snapshot was taken.  All Emacs editing commands apply: `isearch',
-`query-replace', `string-rectangle', `delete-rectangle', `swiper',
-and similar extended commands.
-
-\\[kuro-scrollback-send]    — send entire buffer to the PTY and close
-\\[kuro-scrollback-discard] — discard edits and close this buffer"
-  (setq buffer-read-only nil)
-  (use-local-map (make-composed-keymap kuro--scrollback-edit-keymap
-                                       (current-local-map))))
-
-;;;###autoload
-(defun kuro-edit-scrollback ()
-  "Open a writable snapshot of the terminal scrollback buffer for editing.
-Creates a dedicated buffer named `*kuro-scrollback: <name>*' containing
-the current terminal content.  The snapshot is fully editable: apply
-`query-replace', `string-rectangle', `occur', `isearch', or any other
-Emacs command freely.
-
-When done:
-  \\[kuro-scrollback-send]    — send the result to the PTY (C-c C-c)
-  \\[kuro-scrollback-discard] — discard without sending   (C-c C-k)
-
-The original terminal buffer is not modified; the PTY continues to run."
-  (interactive)
-  (kuro--with-kuro-mode
-   (let* ((source (current-buffer))
-          (snap-name (format "*kuro-scrollback: %s*" (buffer-name source)))
-          (snap (get-buffer-create snap-name)))
-     (with-current-buffer snap
-       (kuro-scrollback-edit-mode)
-       (let ((inhibit-read-only t))
-         (erase-buffer)
-         (insert-buffer-substring source))
-       (setq kuro-edit-scrollback--source-buffer source)
-       (goto-char (point-min)))
-     (switch-to-buffer snap)
-     (message "Kuro scrollback edit — C-c C-c: send to PTY, C-c C-k: discard"))))
-
-;;;###autoload
-(defun kuro-scrollback-send ()
-  "Send the snapshot buffer contents to the source Kuro PTY and close.
-The entire buffer is sent via `kuro--send-paste-or-raw' which applies
-bracketed-paste wrapping when the target terminal has mode 2004 active.
-Signals `user-error' when the source buffer no longer exists."
-  (interactive)
-  (kuro--with-mode kuro-scrollback-edit-mode "Not in a Kuro scrollback edit buffer"
-    (let ((text   (buffer-string))
-          (source kuro-edit-scrollback--source-buffer))
-      (unless (buffer-live-p source)
-        (user-error "Source Kuro buffer no longer exists"))
-      (kill-buffer (current-buffer))
-      (with-current-buffer source
-        (kuro--send-paste-or-raw text)
-        (kuro--schedule-immediate-render)
-        (message "kuro: scrollback content sent to PTY")))))
-
-;;;###autoload
-(defun kuro-scrollback-discard ()
-  "Discard the scrollback snapshot without sending to the PTY."
-  (interactive)
-  (kill-buffer (current-buffer))
-  (message "kuro: scrollback snapshot discarded"))
-
 
 (kuro--defvar-permanent-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")

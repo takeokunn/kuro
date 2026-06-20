@@ -11,12 +11,8 @@ impl Screen {
     #[inline]
     #[must_use]
     pub fn cursor(&self) -> &Cursor {
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_ref() {
-                return &alt.cursor;
-            }
-        }
-        &self.cursor
+        self.with_active_screen(|screen| &screen.cursor)
+            .unwrap_or(&self.cursor)
     }
 
     /// Get mutable reference to the active screen's cursor
@@ -36,52 +32,52 @@ impl Screen {
     /// Move cursor to absolute position (clears pending wrap)
     #[inline]
     pub fn move_cursor(&mut self, row: usize, col: usize) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.cursor.row = row.min(screen.rows as usize - 1);
             screen.cursor.col = col.min(screen.cols as usize - 1);
             screen.cursor.pending_wrap = false;
-        }
+        });
     }
 
     /// Move cursor relative (clears pending wrap)
     #[inline]
     pub fn move_cursor_by(&mut self, row_offset: i32, col_offset: i32) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.cursor.move_by(col_offset, row_offset);
             screen.cursor.row = screen.cursor.row.min(screen.rows as usize - 1);
             screen.cursor.col = screen.cursor.col.min(screen.cols as usize - 1);
             screen.cursor.pending_wrap = false;
-        }
+        });
     }
 
     /// Carriage return (CR) — clears pending wrap
     #[inline]
     pub fn carriage_return(&mut self) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.cursor.col = 0;
             screen.cursor.pending_wrap = false;
-        }
+        });
     }
 
     /// Backspace (BS) — clears pending wrap
     #[inline]
     pub fn backspace(&mut self) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             if screen.cursor.col > 0 {
                 screen.cursor.col -= 1;
             }
             screen.cursor.pending_wrap = false;
-        }
+        });
     }
 
     /// Horizontal tab (HT) — clears pending wrap
     #[inline]
     pub fn tab(&mut self) {
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             let tab_stop = (screen.cursor.col / 8 + 1) * 8;
             screen.cursor.col = tab_stop.min(screen.cols as usize - 1);
             screen.cursor.pending_wrap = false;
-        }
+        });
     }
 
     /// Internal line-feed that operates on an already-dispatched screen.
@@ -187,9 +183,9 @@ impl Screen {
     #[inline]
     pub fn line_feed(&mut self, bg: Color) {
         let is_primary = !self.is_alternate_active;
-        if let Some(screen) = self.active_screen_mut() {
+        self.with_active_screen_mut(|screen| {
             screen.line_feed_impl(bg, is_primary);
-        }
+        });
     }
 
     /// Print a character at the cursor position.

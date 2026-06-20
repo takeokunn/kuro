@@ -70,17 +70,25 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
      ,(format "kuro--ctrl-key-table: %S → byte %d." key-str byte)
      (should (= (cdr (assoc ,key-str kuro--ctrl-key-table)) ,byte))))
 
-(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-a          "C-a"  1)
-(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-z          "C-z"  26)
-(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-backslash  "C-\\" 28)
-(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-bracket    "C-]"  29)
-(kuro-input-keymap-test--def-ctrl-key-spot kuro-input-keymap-ctrl-table-spot-check-c-underscore "C-_"  31)
+(defmacro kuro-input-keymap-test--deftest-ctrl-key-spots ()
+  "Define all control-key spot checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key-str ,byte) entry))
+            `(kuro-input-keymap-test--def-ctrl-key-spot
+              ,test-name ,key-str ,byte)))
+        kuro-input-keymap-test--ctrl-key-spot-table)))
+
+(kuro-input-keymap-test--deftest-ctrl-key-spots)
 
 (ert-deftest kuro-input-keymap-test--all-ctrl-key-spots-correct ()
   "All kuro-input-keymap-test--ctrl-key-spot-table entries map to the correct byte."
-  (dolist (entry kuro-input-keymap-test--ctrl-key-spot-table)
-    (pcase-let ((`(,_name ,key-str ,byte) entry))
-      (should (= (cdr (assoc key-str kuro--ctrl-key-table)) byte)))))
+  (kuro-input-keymap-test--each-entry
+   kuro-input-keymap-test--ctrl-key-spot-table
+   (lambda (entry)
+     (pcase-let ((`(,_name ,key-str ,byte) entry))
+       (should (= (cdr (assoc key-str kuro--ctrl-key-table)) byte))))))
 
 (ert-deftest kuro-input-keymap-ctrl-table-no-duplicate-bytes ()
   "kuro--ctrl-key-table has no duplicate control-byte values."
@@ -105,15 +113,25 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
      ,(format "kuro--xterm-modifier-codes: %s → %d." sym code)
      (should (= (cdr (assq ',sym kuro--xterm-modifier-codes)) ,code))))
 
-(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-shift-is-2 S 2)
-(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-meta-is-3  M 3)
-(kuro-input-keymap-test--def-modifier-code kuro-input-keymap-modifier-codes-ctrl-is-5  C 5)
+(defmacro kuro-input-keymap-test--deftest-modifier-codes ()
+  "Define all modifier-code spot checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,sym ,code) entry))
+            `(kuro-input-keymap-test--def-modifier-code
+              ,test-name ,sym ,code)))
+        kuro-input-keymap-test--modifier-codes-table)))
+
+(kuro-input-keymap-test--deftest-modifier-codes)
 
 (ert-deftest kuro-input-keymap-test--all-modifier-codes-correct ()
   "All kuro-input-keymap-test--modifier-codes-table entries match kuro--xterm-modifier-codes."
-  (dolist (entry kuro-input-keymap-test--modifier-codes-table)
-    (pcase-let ((`(,_name ,sym ,code) entry))
-      (should (= (cdr (assq sym kuro--xterm-modifier-codes)) code)))))
+  (kuro-input-keymap-test--each-entry
+   kuro-input-keymap-test--modifier-codes-table
+   (lambda (entry)
+     (pcase-let ((`(,_name ,sym ,code) entry))
+       (should (= (cdr (assq sym kuro--xterm-modifier-codes)) code))))))
 
 
 ;;; Group 3: kuro--xterm-arrow-codes table
@@ -134,10 +152,17 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
      ,(format "kuro--xterm-arrow-codes: %s → ?%c." sym byte)
      (should (= (cdr (assq ',sym kuro--xterm-arrow-codes)) ,byte))))
 
-(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-up    up    ?A)
-(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-down  down  ?B)
-(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-right right ?C)
-(kuro-input-keymap-test--def-arrow-code kuro-input-keymap-arrow-code-left  left  ?D)
+(defmacro kuro-input-keymap-test--deftest-arrow-codes ()
+  "Define all arrow-code spot checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,sym ,byte) entry))
+            `(kuro-input-keymap-test--def-arrow-code
+              ,test-name ,sym ,byte)))
+        kuro-input-keymap-test--arrow-codes-table)))
+
+(kuro-input-keymap-test--deftest-arrow-codes)
 
 (ert-deftest kuro-input-keymap-arrow-codes-all-correct ()
   "Every entry in `kuro-input-keymap-test--arrow-codes-table' maps to the correct final byte."
@@ -204,21 +229,26 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
      ,(format "Built keymap has binding for %S." key)
      (should (lookup-key (kuro-keymap-test--built-map) ,key))))
 
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-up           [up])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-down         [down])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-left         [left])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-right        [right])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-down-mouse-1 [down-mouse-1])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-1      [mouse-1])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-4      [mouse-4])
-(kuro-input-keymap-test--def-build-has-key kuro-input-keymap-build-has-mouse-5      [mouse-5])
+(defmacro kuro-input-keymap-test--deftest-build-has-keys ()
+  "Define all built-keymap binding checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key) entry))
+            `(kuro-input-keymap-test--def-build-has-key
+              ,test-name ,key)))
+        kuro-input-keymap-test--build-key-table)))
+
+(kuro-input-keymap-test--deftest-build-has-keys)
 
 (ert-deftest kuro-input-keymap-build-has-all-arrow-and-mouse-keys ()
   "Every entry in `kuro-input-keymap-test--build-key-table' is bound in the built keymap."
   (let ((map (kuro-keymap-test--built-map)))
-    (dolist (entry kuro-input-keymap-test--build-key-table)
-      (pcase-let ((`(,_name ,key) entry))
-        (should (lookup-key map key))))))
+    (kuro-input-keymap-test--each-entry
+     kuro-input-keymap-test--build-key-table
+     (lambda (entry)
+       (pcase-let ((`(,_name ,key) entry))
+         (should (lookup-key map key)))))))
 
 
 ;;; Group 5: kuro--build-full-keymap
@@ -248,22 +278,26 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
      ,(format "kuro--build-full-keymap has binding for %S." key)
      (should (lookup-key (kuro--build-full-keymap) ,key))))
 
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-return    [return])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-tab       [tab])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-backspace [backspace])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-escape    [escape])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-up        [up])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-down      [down])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-left      [left])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-right     [right])
-(kuro-input-keymap-test--def-full-has-key kuro-input-keymap-full-has-mouse-1   [mouse-1])
+(defmacro kuro-input-keymap-test--deftest-full-has-keys ()
+  "Define all full-keymap binding checks from the case table."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key) entry))
+            `(kuro-input-keymap-test--def-full-has-key
+              ,test-name ,key)))
+        kuro-input-keymap-test--full-key-table)))
+
+(kuro-input-keymap-test--deftest-full-has-keys)
 
 (ert-deftest kuro-input-keymap-full-keymap-all-keys-invariant ()
   "Every key in `kuro-input-keymap-test--full-key-table' is bound in full keymap."
   (let ((map (kuro--build-full-keymap)))
-    (dolist (entry kuro-input-keymap-test--full-key-table)
-      (pcase-let ((`(,_name ,key) entry))
-        (should (lookup-key map key))))))
+    (kuro-input-keymap-test--each-entry
+     kuro-input-keymap-test--full-key-table
+     (lambda (entry)
+       (pcase-let ((`(,_name ,key) entry))
+         (should (lookup-key map key)))))))
 
 (ert-deftest kuro-input-keymap-full-keymap-ignores-exceptions ()
   "kuro--build-full-keymap is unaffected by `kuro-keymap-exceptions'."

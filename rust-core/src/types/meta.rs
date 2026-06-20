@@ -41,6 +41,14 @@ impl Default for TerminalMeta {
     }
 }
 
+impl TerminalMeta {
+    /// Stores a new window title and marks it dirty for the UI layer.
+    pub(crate) fn set_title(&mut self, title: String) {
+        self.title = title;
+        self.title_dirty = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +94,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(m.title, "xterm-kitty");
+        assert!(m.title_dirty);
+    }
+
+    #[test]
+    // MUTATION: set_title() stores the title and marks the metadata dirty.
+    fn terminal_meta_set_title_helper_sets_dirty() {
+        let mut m = TerminalMeta::default();
+        m.set_title("kuro".to_owned());
+        assert_eq!(m.title, "kuro");
         assert!(m.title_dirty);
     }
 

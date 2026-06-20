@@ -13,9 +13,13 @@
 ;;; Code:
 
 (require 'seq)
+(require 'kuro-faces-macros)
+(require 'kuro-lifecycle-commands-macros)
+(require 'kuro-lifecycle-module)
 
-;; Functions defined in kuro-lifecycle.el (loaded before this file at runtime).
-(declare-function kuro--ensure-module-installed    "kuro-lifecycle" ())
+;; Functions defined in kuro-lifecycle.el or kuro-lifecycle-module.el
+;; (loaded before this file at runtime).
+(declare-function kuro--ensure-module-installed    "kuro-lifecycle-module" ())
 (declare-function kuro--start-session-in-buffer    "kuro-lifecycle" (buffer command))
 (declare-function kuro--create-session-buffer      "kuro-lifecycle" (&optional buffer-name))
 (declare-function kuro--show-buffer-if-interactive "kuro-lifecycle" (buffer))
@@ -112,17 +116,6 @@ to send it to a running shell or REPL without using the kill ring."
       (with-current-buffer target
         (kuro--send-paste-or-raw text)
         (kuro--schedule-immediate-render)))))
-
-(defmacro kuro--def-control-key (name sequence doc)
-  "Define an interactive command NAME that sends SEQUENCE to the terminal.
-DOC is the docstring for the generated command."
-  `(defun ,name () ,doc (interactive) (kuro--send-key ,sequence)))
-
-(defconst kuro--control-key-commands
-  '((kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
-    (kuro-send-sigstop   [?\C-z]  "Send SIGSTOP (C-z) to the terminal process.")
-    (kuro-send-sigquit   [?\C-\\] "Send quit signal (C-\\) to the terminal process."))
-  "Control key command data: each entry is (NAME SEQUENCE DOCSTRING).")
 
 (kuro--def-control-key kuro-send-interrupt [?\C-c]  "Send interrupt signal (C-c) to the terminal.")
 ;;;###autoload (autoload 'kuro-send-interrupt "kuro-lifecycle-commands" nil t)

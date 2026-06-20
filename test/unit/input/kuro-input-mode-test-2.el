@@ -40,11 +40,12 @@
 (kuro-input-mode-test--def-mode-clears-buffer kuro-input-mode-test-kuro-semi-char-mode-clears-line-buffer kuro-semi-char-mode)
 (kuro-input-mode-test--def-mode-clears-buffer kuro-input-mode-test-kuro-line-mode-clears-line-buffer      kuro-line-mode)
 
-(defconst kuro-input-mode-test--fails-outside-kuro-table
-  '((kuro-input-mode-test-kuro-char-mode-fails-outside-kuro      kuro-char-mode)
-    (kuro-input-mode-test-kuro-line-mode-fails-outside-kuro      kuro-line-mode)
-    (kuro-input-mode-test-kuro-semi-char-mode-fails-outside-kuro kuro-semi-char-mode))
-  "Table of (test-name mode-fn): mode functions that must signal user-error outside kuro-mode.")
+(eval-and-compile
+  (defconst kuro-input-mode-test--fails-outside-kuro-table
+    '((kuro-input-mode-test-kuro-char-mode-fails-outside-kuro      kuro-char-mode)
+      (kuro-input-mode-test-kuro-line-mode-fails-outside-kuro      kuro-line-mode)
+      (kuro-input-mode-test-kuro-semi-char-mode-fails-outside-kuro kuro-semi-char-mode))
+    "Table of (test-name mode-fn): mode functions that must signal user-error outside kuro-mode."))
 
 (defmacro kuro-input-mode-test--def-fails-outside-kuro (test-name mode-fn)
   `(ert-deftest ,test-name ()
@@ -52,25 +53,27 @@
      (with-temp-buffer
        (should-error (,mode-fn) :type 'user-error))))
 
-(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-char-mode-fails-outside-kuro      kuro-char-mode)
-(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-line-mode-fails-outside-kuro      kuro-line-mode)
-(kuro-input-mode-test--def-fails-outside-kuro kuro-input-mode-test-kuro-semi-char-mode-fails-outside-kuro kuro-semi-char-mode)
+(defmacro kuro-input-mode-test--deftest-fails-outside-kuro ()
+  "Define tests that verify mode commands fail outside kuro-mode."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,mode-fn) entry))
+            `(kuro-input-mode-test--def-fails-outside-kuro
+              ,test-name ,mode-fn)))
+        kuro-input-mode-test--fails-outside-kuro-table)))
 
-(ert-deftest kuro-input-mode-test--all-mode-fns-fail-outside-kuro ()
-  "Invariant: all mode functions signal user-error outside a kuro-mode buffer."
-  (dolist (entry kuro-input-mode-test--fails-outside-kuro-table)
-    (pcase-let ((`(,_name ,mode-fn) entry))
-      (with-temp-buffer
-        (should-error (funcall mode-fn) :type 'user-error)))))
+(kuro-input-mode-test--deftest-fails-outside-kuro)
 
 
 ;;; Group 8 — kuro-cycle-input-mode
 
-(defconst kuro-input-mode-test--cycle-table
-  '((kuro-input-mode-test-cycle-semi-char-to-char semi-char char)
-    (kuro-input-mode-test-cycle-char-to-line       char      line)
-    (kuro-input-mode-test-cycle-line-to-semi-char  line      semi-char))
-  "Table of (test-name initial-mode next-mode) for `kuro-cycle-input-mode' ring transitions.")
+(eval-and-compile
+  (defconst kuro-input-mode-test--cycle-table
+    '((kuro-input-mode-test-cycle-semi-char-to-char semi-char char)
+      (kuro-input-mode-test-cycle-char-to-line       char      line)
+      (kuro-input-mode-test-cycle-line-to-semi-char  line      semi-char))
+    "Table of (test-name initial-mode next-mode) for `kuro-cycle-input-mode' ring transitions."))
 
 (defmacro kuro-input-mode-test--def-cycle (test-name initial-mode next-mode)
   `(ert-deftest ,test-name ()
@@ -80,18 +83,17 @@
        (kuro-cycle-input-mode)
        (should (eq kuro--input-mode ',next-mode)))))
 
-(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-semi-char-to-char semi-char char)
-(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-char-to-line       char      line)
-(kuro-input-mode-test--def-cycle kuro-input-mode-test-cycle-line-to-semi-char  line      semi-char)
+(defmacro kuro-input-mode-test--deftest-cycle ()
+  "Define transition tests for `kuro-cycle-input-mode'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,initial-mode ,next-mode) entry))
+            `(kuro-input-mode-test--def-cycle
+              ,test-name ,initial-mode ,next-mode)))
+        kuro-input-mode-test--cycle-table)))
 
-(ert-deftest kuro-input-mode-test-cycle--all-transitions-correct ()
-  "Every transition in `kuro-input-mode-test--cycle-table' is verified."
-  (dolist (entry kuro-input-mode-test--cycle-table)
-    (pcase-let ((`(,_name ,initial-mode ,next-mode) entry))
-      (kuro-input-mode-test--with-buffer
-        (setq kuro--input-mode initial-mode)
-        (kuro-cycle-input-mode)
-        (should (eq kuro--input-mode next-mode))))))
+(kuro-input-mode-test--deftest-cycle)
 
 (ert-deftest kuro-input-mode-test-cycle-full-round-trip ()
   "Three full cycles returns to the original mode."
@@ -110,14 +112,15 @@
 
 ;;; Group 9 — Line mode keymap shape
 
-(defconst kuro-input-mode-test--line-keymap-bindings
-  '((kuro-input-mode-test-line-keymap-binds-commit          [return]                    kuro--line-commit)
-    (kuro-input-mode-test-line-keymap-binds-delete          [backspace]                 kuro--line-delete)
-    (kuro-input-mode-test-line-keymap-binds-abort           (kbd "C-g")                 kuro--line-abort)
-    (kuro-input-mode-test-line-keymap-binds-kill-line       (kbd "C-k")                 kuro--line-kill-line)
-    (kuro-input-mode-test-line-keymap-remaps-self-insert    [remap self-insert-command] kuro--line-self-insert)
-    (kuro-input-mode-test-line-keymap-binds-minibuffer-send (kbd "C-c C-r")             kuro-line-minibuffer-send))
-  "Table of (test-name key fn) for `kuro--line-mode-keymap' binding assertions.")
+(eval-and-compile
+  (defconst kuro-input-mode-test--line-keymap-bindings
+    '((kuro-input-mode-test-line-keymap-binds-commit          [return]                    kuro--line-commit)
+      (kuro-input-mode-test-line-keymap-binds-delete          [backspace]                 kuro--line-delete)
+      (kuro-input-mode-test-line-keymap-binds-abort           (kbd "C-g")                 kuro--line-abort)
+      (kuro-input-mode-test-line-keymap-binds-kill-line       (kbd "C-k")                 kuro--line-kill-line)
+      (kuro-input-mode-test-line-keymap-remaps-self-insert    [remap self-insert-command] kuro--line-self-insert)
+      (kuro-input-mode-test-line-keymap-binds-minibuffer-send (kbd "C-c C-r")             kuro-line-minibuffer-send))
+    "Table of (test-name key fn) for `kuro--line-mode-keymap' binding assertions."))
 
 (defmacro kuro-input-mode-test--def-line-keymap-binding (test-name key fn)
   "Define a test asserting `kuro--line-mode-keymap' binds KEY to FN."
@@ -128,12 +131,17 @@
       (kuro--build-line-mode-keymap)
       (should (eq (lookup-key kuro--line-mode-keymap ,key) #',fn)))))
 
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-commit          [return]                    kuro--line-commit)
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-delete          [backspace]                 kuro--line-delete)
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-abort           (kbd "C-g")                 kuro--line-abort)
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-kill-line       (kbd "C-k")                 kuro--line-kill-line)
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-remaps-self-insert    [remap self-insert-command] kuro--line-self-insert)
-(kuro-input-mode-test--def-line-keymap-binding kuro-input-mode-test-line-keymap-binds-minibuffer-send (kbd "C-c C-r")             kuro-line-minibuffer-send)
+(defmacro kuro-input-mode-test--deftest-line-keymap-bindings ()
+  "Define all line keymap binding tests."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (pcase-let ((`(,test-name ,key ,fn) entry))
+            `(kuro-input-mode-test--def-line-keymap-binding
+              ,test-name ,key ,fn)))
+        kuro-input-mode-test--line-keymap-bindings)))
+
+(kuro-input-mode-test--deftest-line-keymap-bindings)
 
 
 ;;; Group 10 — Minibuffer path (IME support)

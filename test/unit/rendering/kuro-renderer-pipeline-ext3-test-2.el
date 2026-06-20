@@ -158,35 +158,7 @@
         (kuro--apply-dirty-lines (vector (vector 0 "hello" nil nil)))
         (should (= call-count 1))))))
 
-;;; Group 25: kuro--pipeline-step-ffi
-
-(ert-deftest kuro-renderer-pipeline-step-ffi-binary-path ()
-  "kuro--pipeline-step-ffi calls kuro--poll-updates-binary-optimised when kuro-use-binary-ffi is t."
-  (kuro-renderer-pipeline-test--with-buffer
-    (let ((kuro-use-binary-ffi t)
-          (called nil))
-      (cl-letf (((symbol-function 'kuro--poll-updates-binary-optimised)
-                 (lambda (_id) (setq called t) '(sentinel)))
-                ((symbol-function 'kuro--poll-updates-with-faces)
-                 (lambda () (error "must not call faces path"))))
-        (let ((result (kuro--pipeline-step-ffi)))
-          (should called)
-          (should (equal result '(sentinel))))))))
-
-(ert-deftest kuro-renderer-pipeline-step-ffi-faces-path ()
-  "kuro--pipeline-step-ffi calls kuro--poll-updates-with-faces when kuro-use-binary-ffi is nil."
-  (kuro-renderer-pipeline-test--with-buffer
-    (let ((kuro-use-binary-ffi nil)
-          (called nil))
-      (cl-letf (((symbol-function 'kuro--poll-updates-with-faces)
-                 (lambda () (setq called t) '(sentinel)))
-                ((symbol-function 'kuro--poll-updates-binary-optimised)
-                 (lambda (_id) (error "must not call binary path"))))
-        (let ((result (kuro--pipeline-step-ffi)))
-          (should called)
-          (should (equal result '(sentinel))))))))
-
-;;; Group 26: kuro--update-frame-budget-ratio
+;;; Group 25: kuro--update-frame-budget-ratio
 
 (ert-deftest kuro-renderer-update-frame-budget-ratio-decreases-when-over-budget ()
   "kuro--update-frame-budget-ratio nudges ratio down when avg frame time exceeds 0.9 * budget."

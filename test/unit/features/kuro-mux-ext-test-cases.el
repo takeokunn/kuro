@@ -22,11 +22,11 @@
   '((kuro-mux-ext-tab-bar-update-creates-tab-for-new-session
      nil
      t
-     (tab-bar-tabs tab-bar-select-tab-by-name tab-bar-rename-tab))
+     (tab-bar-tabs tab-bar-rename-tab))
     (kuro-mux-ext-tab-bar-update-skips-existing-tab
      (((name . "test-session")))
      nil
-     (tab-bar-tabs tab-bar-select-tab-by-name)))
+     (tab-bar-tabs)))
   "Cases for `kuro-mux--tab-bar-update' active path.")
 
 (provide 'kuro-mux-ext-test-cases)

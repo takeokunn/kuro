@@ -8,33 +8,7 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-
-;; Stub module-load before loading kuro-module so the file can be required
-;; safely in batch mode without a compiled Rust binary present.
-(unless (fboundp 'module-load)
-  (fset 'module-load (lambda (_path) nil)))
-
-(require 'kuro-config)
-(require 'kuro-module)
-
-;;; Helpers
-
-(defmacro kuro-module-test--with-kuro-path (path &rest body)
-  "Stub `getenv' so KURO_MODULE_PATH returns PATH; all other vars pass through."
-  `(cl-letf (((symbol-function 'getenv)
-              (lambda (var)
-                (if (equal var "KURO_MODULE_PATH") ,path
-                  (getenv var)))))
-     ,@body))
-
-(defmacro kuro-module-test--with-dev-stubs (&rest body)
-  "Stub `locate-library' and `file-exists-p' for tier-dev tests."
-  `(cl-letf (((symbol-function 'locate-library)
-              (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
-             ((symbol-function 'file-exists-p) (lambda (_) t)))
-     ,@body))
+(require 'kuro-module-test-support)
 
 ;;; Group 1: kuro-module--platform-extension
 
@@ -99,29 +73,23 @@
 
 (ert-deftest kuro-module-test--find-library-env-var-existing ()
   "Tier 2: KURO_MODULE_PATH pointing to a dir with the lib returns its path."
-  (let* ((tmpdir (make-temp-file "kuro-env-test-" t))
-         (ext (kuro-module--platform-extension))
-         (lib-name (format "libkuro_core.%s" ext))
-         (tmpfile (expand-file-name lib-name tmpdir)))
-    (write-region "" nil tmpfile)
-    (unwind-protect
-        (let ((kuro-module-binary-path nil))
-          (kuro-module-test--with-kuro-path tmpdir
-            (let ((result (kuro-module--find-library)))
-              (should (equal result tmpfile)))))
-      (delete-directory tmpdir t))))
+  (let ((kuro-module-binary-path nil))
+    (kuro-module-test--with-temp-dir-env (tmpdir "kuro-env-test-" "KURO_MODULE_PATH")
+      (let* ((ext (kuro-module--platform-extension))
+             (lib-name (format "libkuro_core.%s" ext))
+             (tmpfile (expand-file-name lib-name tmpdir)))
+        (write-region "" nil tmpfile)
+        (let ((result (kuro-module--find-library)))
+          (should (equal result tmpfile)))))))
 
 (ert-deftest kuro-module-test--find-library-env-var-nonexistent-falls-through ()
   "Tier 2: KURO_MODULE_PATH pointing to a dir without the lib falls through."
-  (let* ((tmpdir (make-temp-file "kuro-env-empty-" t)))
-    (unwind-protect
-        (let ((kuro-module-binary-path nil))
-          (kuro-module-test--with-kuro-path tmpdir
-            ;; No lib file in tmpdir — must fall through (no error, different path)
-            (let ((result (kuro-module--find-library)))
-              (should (stringp result))
-              (should-not (string-prefix-p tmpdir result)))))
-      (delete-directory tmpdir t))))
+  (let ((kuro-module-binary-path nil))
+    (kuro-module-test--with-temp-dir-env (tmpdir "kuro-env-empty-" "KURO_MODULE_PATH")
+      ;; No lib file in tmpdir - must fall through (no error, different path)
+      (let ((result (kuro-module--find-library)))
+        (should (stringp result))
+        (should-not (string-prefix-p tmpdir result))))))
 
 ;;; Group 4: kuro-module--find-library — lib name in result
 
@@ -137,7 +105,7 @@
   "Tier 4 dev path includes target/release in the resolved path."
   ;; Force tier 4 by providing nil custom path and ensuring env var is unset.
   (let ((kuro-module-binary-path nil))
-    (kuro-module-test--with-kuro-path nil
+    (kuro-module-test--with-env-var "KURO_MODULE_PATH" nil
       ;; Only assert when XDG path does not exist (dev environment).
       (let* ((ext (kuro-module--platform-extension))
              (lib-name (format "libkuro_core.%s" ext))
@@ -150,13 +118,11 @@
 
 (ert-deftest kuro-module-tier-custom-returns-path-when-exists ()
   "kuro-module--tier-custom returns kuro-module-binary-path when file exists."
-  (let* ((tmpdir (make-temp-file "kuro-tier1-" t))
-         (tmpfile (expand-file-name "libkuro_core.so" tmpdir)))
-    (write-region "" nil tmpfile)
-    (unwind-protect
-        (let ((kuro-module-binary-path tmpfile))
-          (should (equal (kuro-module--tier-custom) tmpfile)))
-      (delete-directory tmpdir t))))
+  (kuro-module-test--with-temp-dir (tmpdir "kuro-tier1-")
+    (let* ((tmpfile (expand-file-name "libkuro_core.so" tmpdir)))
+      (write-region "" nil tmpfile)
+      (let ((kuro-module-binary-path tmpfile))
+        (should (equal (kuro-module--tier-custom) tmpfile))))))
 
 (ert-deftest kuro-module-tier-custom-returns-nil-when-missing ()
   "kuro-module--tier-custom returns nil when the file does not exist."
@@ -171,19 +137,16 @@
 
 (ert-deftest kuro-module-tier-env-uses-env-var ()
   "kuro-module--tier-env returns the expanded lib path when env dir and file exist."
-  (let* ((tmpdir (make-temp-file "kuro-tier2-" t))
-         (ext (kuro-module--platform-extension))
-         (lib-name (format "libkuro_core.%s" ext))
-         (tmpfile (expand-file-name lib-name tmpdir)))
-    (write-region "" nil tmpfile)
-    (unwind-protect
-        (kuro-module-test--with-kuro-path tmpdir
-          (should (equal (kuro-module--tier-env) tmpfile)))
-      (delete-directory tmpdir t))))
+  (kuro-module-test--with-temp-dir-env (tmpdir "kuro-tier2-" "KURO_MODULE_PATH")
+    (let* ((ext (kuro-module--platform-extension))
+           (lib-name (format "libkuro_core.%s" ext))
+           (tmpfile (expand-file-name lib-name tmpdir)))
+      (write-region "" nil tmpfile)
+      (should (equal (kuro-module--tier-env) tmpfile)))))
 
 (ert-deftest kuro-module-tier-env-returns-nil-when-env-unset ()
   "kuro-module--tier-env returns nil when KURO_MODULE_PATH is unset."
-  (kuro-module-test--with-kuro-path nil
+  (kuro-module-test--with-env-var "KURO_MODULE_PATH" nil
     (should-not (kuro-module--tier-env))))
 
 (ert-deftest kuro-module-search-tiers-is-defconst ()
@@ -221,12 +184,10 @@
 
 (ert-deftest kuro-module-test--module-try-returns-path-when-file-exists ()
   "`kuro--module-try' returns the path string when the file exists."
-  (let* ((tmpdir (make-temp-file "kuro-try-test-" t))
-         (tmpfile (expand-file-name "test.so" tmpdir)))
-    (write-region "" nil tmpfile)
-    (unwind-protect
-        (should (equal (kuro--module-try tmpfile) tmpfile))
-      (delete-directory tmpdir t))))
+  (kuro-module-test--with-temp-dir (tmpdir "kuro-try-test-")
+    (let ((tmpfile (expand-file-name "test.so" tmpdir)))
+      (write-region "" nil tmpfile)
+      (should (equal (kuro--module-try tmpfile) tmpfile)))))
 
 (ert-deftest kuro-module-test--module-try-returns-nil-when-file-missing ()
   "`kuro--module-try' returns nil when the file does not exist."
@@ -314,6 +275,14 @@
                    kuro-module--tier-env
                    kuro-module--tier-xdg
                    kuro-module--tier-dev))))
+
+(ert-deftest kuro-module-run-search-tiers-macroexpands-to-or-chain ()
+  "`kuro--run-module-search-tiers' expands to a direct `or' chain."
+  (should (equal (macroexpand-1 '(kuro--run-module-search-tiers))
+                 '(or (kuro-module--tier-custom)
+                      (kuro-module--tier-env)
+                      (kuro-module--tier-xdg)
+                      (kuro-module--tier-dev)))))
 
 ;;; Group 11: kuro-module--find-library — all tiers return nil
 

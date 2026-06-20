@@ -6,12 +6,8 @@ impl Screen {
     /// Get reference to the active screen's graphics store
     #[must_use]
     pub fn active_graphics(&self) -> &GraphicsStore {
-        if self.is_alternate_active {
-            if let Some(alt) = self.alternate_screen.as_ref() {
-                return &alt.graphics;
-            }
-        }
-        &self.graphics
+        self.with_active_screen(|screen| &screen.graphics)
+            .unwrap_or(&self.graphics)
     }
 
     /// Get mutable reference to the active screen's graphics store

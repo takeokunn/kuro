@@ -17,17 +17,21 @@ use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_B
 /// Handles:
 /// - OSC 0 / OSC 2: set window title.
 /// - OSC 4: Set/query individual palette color entries.
+/// - OSC 3/5/6: X-property / special-color ops — parsed, safe no-op.
 /// - OSC 7: Current Working Directory notification (`file://host/path`).
 /// - OSC 8: Hyperlinks (`ESC]8;params;uri ST`).
+/// - OSC 9: iTerm2 notification (`OSC 9 ; body`) and ConEmu progress (`OSC 9 ; 4 ; state ; pct`).
 /// - OSC 10/11/12: Set/query default foreground/background/cursor colors.
+/// - OSC 18/19: Window / text-area size queries (respond like CSI 18 t / 19 t).
 /// - OSC 22: Window pointer cursor shape (CSS cursor name, e.g. "pointer", "default").
+/// - OSC 23: Query current cursor shape — respond `OSC 23 ; <decscusr> ST`.
 /// - OSC 110/111/112: Reset default foreground/background/cursor color to terminal default.
 /// - OSC 51: Emacs eval command request (security: Elisp-side whitelist filtering).
 /// - OSC 52: Clipboard access.
 /// - OSC 99: Kitty desktop notifications (`metadata ; payload`, colon-separated metadata).
 /// - OSC 104: Reset color palette.
 /// - OSC 133: Shell integration prompt marks.
-/// - OSC 1337: iTerm2 inline images.
+/// - OSC 1337: iTerm2 inline images + `CurrentDirectory=`/`SetUserVar=`/`RemoteHost=`.
 /// - All other OSC numbers are silently discarded.
 pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_terminated: bool) {
     if params.is_empty() {
@@ -46,6 +50,17 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         // OSC 22 — window pointer cursor shape (e.g. "default", "pointer", "text", "crosshair").
         // Applications set this to change the OS mouse cursor within the terminal area.
         b"22" => handle_osc_pointer_shape(core, params),
+        // OSC 18 / OSC 19 — window / text-area size queries. Respond like xterm's
+        // CSI 18 t / CSI 19 t (character-cell size report) by delegating to the
+        // XTWINOPS size-report builder. Pixel metrics are not tracked, so we use
+        // the cell-based report (CSI 8;rows;cols / CSI 9;rows;cols).
+        b"18" => handle_osc_size_query(core, 18),
+        b"19" => handle_osc_size_query(core, 19),
+        // OSC 23 — query the current cursor shape; respond via OSC.
+        b"23" => handle_osc_cursor_shape_query(core, params),
+        // OSC 3/5/6 — X property / special-color / dynamic special-color ops.
+        // Parsed and treated as a safe no-op rather than left unrecognized.
+        b"3" | b"5" | b"6" => {} // graceful no-op
         // OSC 110/111/112: reset default fg/bg/cursor color to terminal default.
         // Symmetric counterparts to OSC 10/11/12 set/query.
         b"110" => reset_osc_default_color(core, DefaultColorSlot::Foreground),
@@ -109,6 +124,40 @@ fn handle_osc_pointer_shape(core: &mut TerminalCore, params: &[&[u8]]) {
     osc_apply_param(params, 1, osc_pointer_shape_from_raw, |name| {
         core.osc_data.set_pointer_shape(Some(name));
     });
+}
+
+/// Handle OSC 18 / OSC 19 — window / text-area size queries.
+///
+/// xterm answers these with the same character-cell report as the equivalent
+/// XTWINOPS query (`CSI 18 t` → `CSI 8 ; rows ; cols t`, `CSI 19 t` →
+/// `CSI 9 ; rows ; cols t`). We reuse [`build_xtwinops_size_report`] so the two
+/// paths stay in lockstep. `op` is the equivalent CSI t operation number
+/// (18 or 19). Pixel metrics are not tracked by this cell-based core.
+fn handle_osc_size_query(core: &mut TerminalCore, op: u16) {
+    let rows = core.screen.rows();
+    let cols = core.screen.cols();
+    if let Some(response) =
+        crate::parser::csi::build_xtwinops_size_report(op, rows.into(), cols.into())
+    {
+        core.meta.pending_responses.push(response);
+    }
+}
+
+/// Handle OSC 23 — query the current cursor shape, responding via OSC 23.
+///
+/// Responds `OSC 23 ; <decscusr> ST` where `<decscusr>` is the DECSCUSR
+/// parameter integer for the current cursor shape (0/2/3/4/5/6). This mirrors
+/// the DECSCUSR set sequence so applications can round-trip the cursor shape.
+fn handle_osc_cursor_shape_query(core: &mut TerminalCore, params: &[&[u8]]) {
+    // Only the bare query form `OSC 23 ; ?` (or no second param) reports.
+    match params.get(1) {
+        None => {}
+        Some(p) if p.is_empty() || *p == b"?" => {}
+        Some(_) => return,
+    }
+    let decscusr = i64::from(core.dec_modes.cursor_shape);
+    let resp = format!("\x1b]23;{decscusr}\x07");
+    core.meta.pending_responses.push(resp.into_bytes());
 }
 
 fn osc7_host_and_path(after_scheme: &str) -> (&str, &str) {

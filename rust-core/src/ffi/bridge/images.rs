@@ -108,7 +108,11 @@ fn kuro_core_image_animation_state(
 // Poll for pending Kitty Graphics image placement notifications.
 //
 // Returns a list of image placement descriptors, each of the form:
-//   (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT)
+//   (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT PIXEL-X-OFFSET PIXEL-Y-OFFSET)
+//
+// PIXEL-X-OFFSET / PIXEL-Y-OFFSET are the Kitty `X=`/`Y=` cell-internal pixel
+// offsets (0 when unset), letting Emacs draw the image shifted inside its anchor
+// cell.
 //
 // This is separate from `kuro-core-poll-updates-with-faces` for backward compatibility.
 // Call this after `kuro-core-poll-updates-with-faces` to check for new image placements.
@@ -121,7 +125,12 @@ define_drain_session_vec_to_lisp!(
         let col_val = (notif.col as i64).into_lisp(env)?;
         let cw_val = i64::from(notif.cell_width).into_lisp(env)?;
         let ch_val = i64::from(notif.cell_height).into_lisp(env)?;
+        let px_val = i64::from(notif.pixel_x_offset).into_lisp(env)?;
+        let py_val = i64::from(notif.pixel_y_offset).into_lisp(env)?;
 
-        build_emacs_list_from_values(env, [id_val, row_val, col_val, cw_val, ch_val])
+        build_emacs_list_from_values(
+            env,
+            [id_val, row_val, col_val, cw_val, ch_val, px_val, py_val],
+        )
     }
 );

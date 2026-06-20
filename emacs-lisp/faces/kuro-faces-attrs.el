@@ -64,6 +64,14 @@ Must match encode_attrs in rust-core/src/ffi/codec.rs.")
   "Bit shift for underline style field.
 Must match encode_attrs in rust-core/src/ffi/codec.rs.")
 
+(defconst kuro--native-blink-face-p (>= emacs-major-version 29)
+  "Non-nil when this Emacs supports the native face `:blink' attribute.
+Emacs 29 added a `:blink' face attribute (rendered by toggling text
+visibility on the blink-cursor timer).  When supported, SGR blink (5/6) is
+expressed directly as a face property in addition to the overlay-based blink
+animation; on older Emacs the overlay path (`kuro-overlays.el') is the only
+mechanism.")
+
 (defsubst kuro--sgr-flag-set-p (attr-flags flag)
   "Return t if FLAG bit is set in ATTR-FLAGS bitmask, nil otherwise.
 Uses (/= 0 ...) since 0 is truthy in Elisp — only nil is falsy."
@@ -166,6 +174,11 @@ that `kuro--decode-attrs' would allocate on every call."
          (superscript   (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-superscript))
          (subscript     (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-subscript))
          (inverse       (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-inverse))
+         ;; SGR blink (5 slow / 6 fast): on Emacs 29+ also set the native face
+         ;; :blink attribute; the overlay path remains the animation fallback.
+         (blink         (and kuro--native-blink-face-p
+                             (or (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-blink-slow)
+                                 (kuro--sgr-flag-set-p attr-flags kuro--sgr-flag-blink-fast))))
          (underline-style (ash (logand attr-flags kuro--sgr-underline-style-mask)
                                (- kuro--sgr-underline-style-shift)))
          ;; Build :underline value: prefer explicit style if underline bit is set
@@ -182,6 +195,7 @@ that `kuro--decode-attrs' would allocate on every call."
       ;; that the previous nconc pattern required per attribute.
       ;; Push in reverse desired order so the final plist has :foreground first.
       (when inverse     (push t result) (push :inverse-video result))
+      (when blink       (push t result) (push :blink result))
       (when strikethrough (push t result) (push :strike-through result))
       (when overline    (push t result) (push :overline result))
       ;; Superscript/subscript via :display raise property (mutually exclusive)

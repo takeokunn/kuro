@@ -148,6 +148,10 @@ fn apply_kitty_control_param(params: &mut KittyParams, key: char, val: &[u8]) ->
             set_kitty_u32_param(&mut params.read_offset, val);
             true
         }
+        'I' => {
+            set_kitty_u32_param(&mut params.image_number, val);
+            true
+        }
         _ => false,
     }
 }
@@ -226,6 +230,9 @@ fn build_kitty_transmit_command(
             columns: params.columns,
             rows: params.rows,
             placement_id: params.placement_id,
+            z_index: params.gap.unwrap_or(0),
+            pixel_x_offset: params.x_offset,
+            pixel_y_offset: params.y_offset,
         }
     } else {
         KittyCommand::Transmit {
@@ -246,6 +253,12 @@ fn build_kitty_place_command(params: KittyParams) -> Option<KittyCommand> {
         placement_id: params.placement_id,
         columns: params.columns,
         rows: params.rows,
+        // In the place context, lowercase z is the stacking z-index and
+        // uppercase X/Y are cell-internal pixel offsets. (Contrast with the
+        // delete context, where x/y/z address a cell/z-layer.)
+        z_index: params.gap.unwrap_or(0),
+        pixel_x_offset: params.x_offset,
+        pixel_y_offset: params.y_offset,
     })
 }
 
@@ -254,6 +267,12 @@ fn build_kitty_delete_command(params: KittyParams) -> KittyCommand {
         delete_sub: params.delete_sub.unwrap_or('a'),
         image_id: params.image_id,
         placement_id: params.placement_id,
+        image_number: params.image_number,
+        // In the delete context lowercase x/y are cell column/row and z is the
+        // z-index; these reuse the same param slots as the frame x/y/z keys.
+        cell_col: params.frame_x,
+        cell_row: params.frame_y,
+        z_index: params.gap.unwrap_or(0),
     }
 }
 

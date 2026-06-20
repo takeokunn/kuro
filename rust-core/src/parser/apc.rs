@@ -163,12 +163,19 @@ fn build_kitty_image_data(
     crate::grid::screen::ImageData::new(pixels, format, pixel_width, pixel_height)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the kitty placement key set (geometry + z + pixel offsets); a struct adds indirection without clarity"
+)]
 fn build_kitty_image_placement(
     cursor: crate::types::cursor::Cursor,
     image_id: u32,
     placement_id: Option<u32>,
     columns: Option<u32>,
     rows: Option<u32>,
+    z_index: i32,
+    pixel_x_offset: u32,
+    pixel_y_offset: u32,
 ) -> crate::grid::screen::ImagePlacement {
     crate::grid::screen::ImagePlacement {
         image_id,
@@ -177,6 +184,9 @@ fn build_kitty_image_placement(
         col: cursor.col,
         display_cols: columns.unwrap_or(1),
         display_rows: rows.unwrap_or(1),
+        z_index,
+        pixel_x_offset,
+        pixel_y_offset,
     }
 }
 
@@ -200,15 +210,31 @@ fn add_kitty_placement(core: &mut TerminalCore, placement: crate::grid::screen::
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the kitty placement key set (geometry + z + pixel offsets)"
+)]
 fn add_kitty_image_placement(
     core: &mut TerminalCore,
     image_id: u32,
     placement_id: Option<u32>,
     columns: Option<u32>,
     rows: Option<u32>,
+    z_index: i32,
+    pixel_x_offset: u32,
+    pixel_y_offset: u32,
 ) {
     let cursor = *core.screen.cursor();
-    let placement = build_kitty_image_placement(cursor, image_id, placement_id, columns, rows);
+    let placement = build_kitty_image_placement(
+        cursor,
+        image_id,
+        placement_id,
+        columns,
+        rows,
+        z_index,
+        pixel_x_offset,
+        pixel_y_offset,
+    );
     add_kitty_placement(core, placement);
 }
 
@@ -223,6 +249,10 @@ fn handle_kitty_transmit(
     let _ = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "forwards the kitty a=T key set (image data + placement geometry + z + pixel offsets)"
+)]
 fn handle_kitty_transmit_and_display(
     core: &mut TerminalCore,
     image_id: Option<u32>,
@@ -233,44 +263,109 @@ fn handle_kitty_transmit_and_display(
     columns: Option<u32>,
     rows: Option<u32>,
     placement_id: Option<u32>,
+    z_index: i32,
+    pixel_x_offset: u32,
+    pixel_y_offset: u32,
 ) {
     let actual_id = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
-    add_kitty_image_placement(core, actual_id, placement_id, columns, rows);
+    add_kitty_image_placement(
+        core,
+        actual_id,
+        placement_id,
+        columns,
+        rows,
+        z_index,
+        pixel_x_offset,
+        pixel_y_offset,
+    );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "forwards the kitty a=p key set (image + placement geometry + z + pixel offsets)"
+)]
 fn handle_kitty_place(
     core: &mut TerminalCore,
     image_id: u32,
     placement_id: Option<u32>,
     columns: Option<u32>,
     rows: Option<u32>,
+    z_index: i32,
+    pixel_x_offset: u32,
+    pixel_y_offset: u32,
 ) {
-    add_kitty_image_placement(core, image_id, placement_id, columns, rows);
+    add_kitty_image_placement(
+        core,
+        image_id,
+        placement_id,
+        columns,
+        rows,
+        z_index,
+        pixel_x_offset,
+        pixel_y_offset,
+    );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the full kitty a=d key set; threading a struct adds indirection"
+)]
 fn handle_kitty_delete(
     core: &mut TerminalCore,
     delete_sub: char,
     image_id: Option<u32>,
     placement_id: Option<u32>,
+    image_number: Option<u32>,
+    cell_col: u32,
+    cell_row: u32,
+    z_index: i32,
 ) {
     let cursor = *core.screen.cursor();
     let graphics = core.screen.active_graphics_mut();
 
-    match delete_sub {
-        'a' | 'A' => graphics.clear_all_placements(),
-        'i' | 'I' => {
+    // Uppercase delete targets ALSO free the backing image data, not just the
+    // placement(s). Lowercase drops placements only.
+    let free_data = delete_sub.is_ascii_uppercase();
+
+    match delete_sub.to_ascii_lowercase() {
+        // a: all visible placements.
+        'a' => graphics.delete_all(free_data),
+        // i: by image id (i=).
+        'i' => {
             if let Some(id) = image_id {
-                graphics.delete_by_id(id);
+                graphics.delete_id(id, free_data);
             }
         }
-        'p' | 'P' => {
+        // n: newest by image number (I=); no number → most recently stored.
+        'n' => graphics.delete_newest(image_number, free_data),
+        // c: at cursor cell.
+        'c' => graphics.delete_at_cursor(cursor.row, cursor.col, free_data),
+        // p: at cell (x=,y=). With both id and placement id present this also
+        // covers the targeted-placement case (a=d,p=).
+        'p' => {
             if let (Some(id), Some(pid)) = (image_id, placement_id) {
                 graphics.delete_by_placement(id, pid);
+            } else {
+                graphics.delete_at_cell(cell_row as usize, cell_col as usize, free_data);
             }
         }
-        'x' | 'X' => graphics.delete_by_col(cursor.col),
-        'y' | 'Y' => graphics.delete_by_row(cursor.row),
+        // q: at cell with z (x=,y=,z=).
+        'q' => {
+            graphics.delete_at_cell_with_z(
+                cell_row as usize,
+                cell_col as usize,
+                z_index,
+                free_data,
+            );
+        }
+        // x: intersecting column (x=).
+        'x' => graphics.delete_intersecting_col(cell_col as usize, free_data),
+        // y: intersecting row (y=).
+        'y' => graphics.delete_intersecting_row(cell_row as usize, free_data),
+        // z: by z-index (z=).
+        'z' => graphics.delete_by_z(z_index, free_data),
+        // r: id range (x=min, y=max).
+        'r' => graphics.delete_id_range(cell_col, cell_row, free_data),
         _ => {}
     }
 }
@@ -375,6 +470,9 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             columns,
             rows,
             placement_id,
+            z_index,
+            pixel_x_offset,
+            pixel_y_offset,
         } => {
             handle_kitty_transmit_and_display(
                 core,
@@ -386,6 +484,9 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
                 columns,
                 rows,
                 placement_id,
+                z_index,
+                pixel_x_offset,
+                pixel_y_offset,
             );
         }
         KittyCommand::Place {
@@ -393,15 +494,40 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
             placement_id,
             columns,
             rows,
+            z_index,
+            pixel_x_offset,
+            pixel_y_offset,
         } => {
-            handle_kitty_place(core, image_id, placement_id, columns, rows);
+            handle_kitty_place(
+                core,
+                image_id,
+                placement_id,
+                columns,
+                rows,
+                z_index,
+                pixel_x_offset,
+                pixel_y_offset,
+            );
         }
         KittyCommand::Delete {
             delete_sub,
             image_id,
             placement_id,
+            image_number,
+            cell_col,
+            cell_row,
+            z_index,
         } => {
-            handle_kitty_delete(core, delete_sub, image_id, placement_id);
+            handle_kitty_delete(
+                core,
+                delete_sub,
+                image_id,
+                placement_id,
+                image_number,
+                cell_col,
+                cell_row,
+                z_index,
+            );
         }
         KittyCommand::Query { image_id } => {
             handle_kitty_query(core, image_id);

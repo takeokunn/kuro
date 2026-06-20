@@ -100,6 +100,19 @@ impl vte::Perform for TerminalCore {
 
         self.last_printed_char = Some(c);
         self.stamp_printed_hyperlink(pre_cursor, width.unwrap_or(1));
+
+        // Kitty Unicode placeholder: a printed U+10EEEE cell is a virtual image
+        // placement anchor. Decode the referenced image (id from fg color,
+        // placement id from underline color) and associate it with the cell.
+        // Diacritics (row/col) may still be pending; finalize again as each one
+        // attaches in handle_combining_char.
+        if crate::grid::placeholder::is_placeholder_char(c) {
+            let cursor_after = *self.screen.cursor();
+            let (row, col) = hyperlink_write_position(pre_cursor, cursor_after);
+            if let Some(info) = self.finalize_placeholder_cell(row, col) {
+                self.notify_placeholder_placement(row, col, info);
+            }
+        }
     }
 
     #[inline]
@@ -327,11 +340,84 @@ impl TerminalCore {
         let cursor = *self.screen.cursor();
         if let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) {
             self.screen.attach_combining(row, col, c);
+            // If the cell we just extended is a Kitty Unicode placeholder, the
+            // newly-attached diacritic carries row/column (or high-id-byte)
+            // metadata — re-decode the placeholder association.
+            if self
+                .screen
+                .get_cell(row, col)
+                .is_some_and(|cell| crate::grid::placeholder::is_placeholder_char(cell.char()))
+            {
+                self.finalize_placeholder_cell(row, col);
+            }
         } else {
             self.screen
                 .print(c, self.current_attrs, self.dec_modes.auto_wrap);
         }
         true
+    }
+
+    /// Decode the Kitty Unicode placeholder cell at (`row`, `col`) and associate
+    /// it with its referenced image.
+    ///
+    /// Reads the cell's grapheme (placeholder base + row/col diacritics) and its
+    /// foreground/underline colors, decodes the `(image_id, placement_id, img_row,
+    /// img_col)` association, and stamps `image_id` onto the cell so the encoder /
+    /// Emacs treats it as an image cell. Returns the decoded
+    /// [`crate::grid::placeholder::PlaceholderInfo`] (so the caller can emit a
+    /// notification on first print), or `None` for a malformed placeholder (no
+    /// image id encoded in the foreground), which is ignored.
+    #[inline]
+    fn finalize_placeholder_cell(
+        &mut self,
+        row: usize,
+        col: usize,
+    ) -> Option<crate::grid::placeholder::PlaceholderInfo> {
+        let cell = self.screen.get_cell(row, col)?;
+        let info = crate::grid::placeholder::decode_placeholder(
+            cell.grapheme(),
+            cell.attrs.foreground,
+            cell.attrs.underline_color,
+        )?;
+
+        if let Some(cell) = self.screen.get_cell_mut(row, col) {
+            cell.set_image_id(Some(info.image_id));
+        }
+        Some(info)
+    }
+
+    /// Emit a redisplay notification for a Unicode-placeholder anchor at
+    /// (`row`, `col`) when the referenced image is present in the store. Orphan
+    /// placeholders (unknown image id) draw nothing and are silently skipped.
+    /// The placement records `placement_id` (from the underline color) so it can
+    /// be targeted by Kitty `a=d,p=` deletion.
+    #[inline]
+    fn notify_placeholder_placement(
+        &mut self,
+        row: usize,
+        col: usize,
+        info: crate::grid::placeholder::PlaceholderInfo,
+    ) {
+        if self
+            .screen
+            .active_graphics()
+            .get_image_png_base64(info.image_id)
+            .is_empty()
+        {
+            return;
+        }
+        let placement = crate::grid::screen::ImagePlacement {
+            image_id: info.image_id,
+            placement_id: info.placement_id,
+            row,
+            col,
+            display_cols: 1,
+            display_rows: 1,
+            ..crate::grid::screen::ImagePlacement::default()
+        };
+        if let Some(notif) = self.screen.active_graphics_mut().add_placement(placement) {
+            self.kitty.pending_image_notifications.push(notif);
+        }
     }
 
     #[inline]

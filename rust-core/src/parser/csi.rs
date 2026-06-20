@@ -107,7 +107,7 @@ fn xtwinops_param1(params: &vte::Params) -> u16 {
         .unwrap_or(0)
 }
 
-fn build_xtwinops_size_report(op: u16, rows: usize, cols: usize) -> Option<Vec<u8>> {
+pub(crate) fn build_xtwinops_size_report(op: u16, rows: usize, cols: usize) -> Option<Vec<u8>> {
     match op {
         14 => Some(b"\x1b[4;0;0t".to_vec()),
         18 => Some(format!("\x1b[8;{rows};{cols}t").into_bytes()),

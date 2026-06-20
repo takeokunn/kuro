@@ -42,15 +42,21 @@ fn test_dispatch_delete_a_lowercase_clears_all_placements() {
 }
 
 #[test]
-fn test_dispatch_delete_a_uppercase_clears_all_placements() {
+fn test_dispatch_delete_a_uppercase_frees_image_data() {
     let mut core = crate::TerminalCore::new(24, 80);
     transmit_image(&mut core, 10, 0, 0);
 
-    // Clear all placements: a=d,d=A (uppercase — integration_kitty.rs arm)
+    // Clear all placements AND free image data: a=d,d=A (uppercase).
+    // Per the Kitty graphics protocol, uppercase delete targets also free the
+    // backing image data of every image that had a placement, not just the
+    // placement(s).
     core.advance(b"\x1b_Ga=d,d=A\x1b\\");
 
-    // Image data persists; APC state is Idle
-    assert!(!core.get_image_png_base64(10).is_empty());
+    // Image data is now gone; APC state is Idle.
+    assert!(
+        core.get_image_png_base64(10).is_empty(),
+        "d=A must free image data of placed images"
+    );
     assert!(core.kitty.apc_state == ApcScanState::Idle);
 }
 
@@ -186,8 +192,8 @@ fn test_dispatch_delete_unknown_sub_is_noop() {
     let mut core = crate::TerminalCore::new(24, 80);
     transmit_image(&mut core, 70, 0, 0);
 
-    // d=z — unknown sub-command, must not panic
-    core.advance(b"\x1b_Ga=d,d=z\x1b\\");
+    // d=w — unknown sub-command, must not panic and must be a no-op
+    core.advance(b"\x1b_Ga=d,d=w\x1b\\");
 
     // Image data and state machine must be unaffected
     assert!(

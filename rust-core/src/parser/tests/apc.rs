@@ -325,3 +325,9 @@ mod binary_payload;
 
 #[path = "apc/dispatch.rs"]
 mod dispatch;
+
+#[path = "apc/delete_targets.rs"]
+mod delete_targets;
+
+#[path = "apc/placeholder.rs"]
+mod placeholder;

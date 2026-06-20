@@ -9,3 +9,6 @@ mod cwd;
 
 #[path = "tests_unit_osc_hyperlink.rs"]
 mod hyperlink;
+
+#[path = "tests_unit_osc_iterm2.rs"]
+mod iterm2;

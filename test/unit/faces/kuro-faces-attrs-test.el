@@ -398,5 +398,30 @@ kuro--attrs-to-face-props silently ignores them — they have no Emacs face equi
     (should-not (eq (plist-get props :weight) 'bold))))
 
 
+;;; Group 9: native :blink face attribute (Emacs 29+) for SGR blink
+
+(ert-deftest kuro-faces-attrs--blink-slow-sets-native-blink-on-29+ ()
+  "SGR blink-slow (0x10) sets face :blink t when native blink is supported."
+  (let ((props (kuro--attrs-to-face-props :default :default #x10 nil)))
+    (if kuro--native-blink-face-p
+        (should (eq (plist-get props :blink) t))
+      (should-not (plist-member props :blink)))))
+
+(ert-deftest kuro-faces-attrs--blink-fast-sets-native-blink-on-29+ ()
+  "SGR blink-fast (0x20) sets face :blink t when native blink is supported."
+  (let ((props (kuro--attrs-to-face-props :default :default #x20 nil)))
+    (if kuro--native-blink-face-p
+        (should (eq (plist-get props :blink) t))
+      (should-not (plist-member props :blink)))))
+
+(ert-deftest kuro-faces-attrs--no-blink-flag-omits-native-blink ()
+  "No SGR blink bit → no :blink key regardless of Emacs version."
+  (let ((props (kuro--attrs-to-face-props :default :default #x01 nil)))
+    (should-not (plist-member props :blink))))
+
+(ert-deftest kuro-faces-attrs--native-blink-flag-tracks-emacs-version ()
+  "`kuro--native-blink-face-p' tracks (>= emacs-major-version 29)."
+  (should (eq kuro--native-blink-face-p (>= emacs-major-version 29))))
+
 (provide 'kuro-faces-attrs-test)
 ;;; kuro-faces-attrs-test.el ends here

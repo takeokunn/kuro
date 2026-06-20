@@ -245,6 +245,8 @@ that reads terminal mode variables set by `kuro--apply-terminal-modes'."
                  '(progn
                     (kuro--poll-terminal-mode-state)
                     (kuro--poll-cwd)
+                    (kuro--poll-progress)
+                    (kuro--poll-user-vars)
                     (kuro--handle-clipboard-actions)
                     (kuro--poll-prompt-mark-updates)
                     (kuro--poll-eval-command-updates)

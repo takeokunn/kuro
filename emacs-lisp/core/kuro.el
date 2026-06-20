@@ -57,6 +57,7 @@
 ;; Input mode commands are in kuro-input-mode.el.
 (declare-function kuro-cycle-input-mode  "kuro-input-mode" ())
 (declare-function kuro--input-mode-lighter "kuro-input-mode" ())
+(declare-function kuro--progress-mode-line "kuro-poll-modes" ())
 
 ;; EA-Ambiguous font assignment and glyph-metric refinement are in kuro-char-width.el.
 (declare-function kuro--setup-char-width-table "kuro-char-width" ())
@@ -141,6 +142,9 @@ When PREV is a function it is called at the end; nil is ignored."
   ;; Show current input mode in the mode line: [C]=char [S]=semi-char [L]=line
   (setq-local mode-name
               '("Kuro" (:eval (kuro--input-mode-lighter))))
+  ;; Surface the ConEmu OSC 9;4 progress indicator (e.g. " ⏳50% ") in the
+  ;; mode-line process slot; nil when no foreground task reports progress.
+  (setq-local mode-line-process '(:eval (kuro--progress-mode-line)))
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
   (setq-local bidi-paragraph-direction 'left-to-right)

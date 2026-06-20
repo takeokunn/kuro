@@ -315,17 +315,119 @@
                  (lambda () (push 'images calls)))
                 ((symbol-function 'kuro--apply-hyperlink-ranges)
                  (lambda () (push 'hyperlinks calls)))
+                ((symbol-function 'kuro--poll-progress)
+                 (lambda () (push 'progress calls)))
+                ((symbol-function 'kuro--poll-user-vars)
+                 (lambda () (push 'user-vars calls)))
                 ((symbol-function 'kuro--check-process-exit)
                  (lambda () (push 'exit calls))))
         (kuro--poll-tier1-modes)
         (should (memq 'modes calls))
         (should (memq 'cwd calls))
+        (should (memq 'progress calls))
+        (should (memq 'user-vars calls))
         (should (memq 'clipboard calls))
         (should (memq 'prompts calls))
         (should (memq 'eval calls))
         (should (memq 'images calls))
         (should (memq 'hyperlinks calls))
         (should (memq 'exit calls))))))
+
+;;; Group: OSC 9;4 progress (ConEmu) mode-line indicator
+
+(ert-deftest kuro-poll-modes-progress-state-glyph-known ()
+  "kuro--progress-state-glyph maps known states to their glyph strings."
+  (let ((kuro-progress-state-glyphs '((1 . "A") (2 . "B"))))
+    (should (equal (kuro--progress-state-glyph 1) "A"))
+    (should (equal (kuro--progress-state-glyph 2) "B"))))
+
+(ert-deftest kuro-poll-modes-progress-state-glyph-unknown ()
+  "kuro--progress-state-glyph returns empty string for unknown states."
+  (let ((kuro-progress-state-glyphs '((1 . "A"))))
+    (should (equal (kuro--progress-state-glyph 9) ""))))
+
+(ert-deftest kuro-poll-modes-progress-mode-line-string-formats ()
+  "kuro--progress-mode-line-string formats glyph + percent via kuro-progress-format."
+  (let ((kuro-progress-format " %s%d%% ")
+        (kuro-progress-state-glyphs '((1 . "X"))))
+    (should (equal (kuro--progress-mode-line-string 1 42) " X42% "))))
+
+(ert-deftest kuro-poll-modes-progress-mode-line-string-nil-format ()
+  "kuro--progress-mode-line-string returns nil when kuro-progress-format is nil."
+  (let ((kuro-progress-format nil))
+    (should-not (kuro--progress-mode-line-string 1 42))))
+
+(ert-deftest kuro-poll-modes-apply-progress-stores-active ()
+  "kuro--apply-progress stores a non-zero-state progress cons when enabled."
+  (kuro-poll-test--with-buffer
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(1 . 50)))
+      (should (equal kuro--progress-state '(1 . 50))))))
+
+(ert-deftest kuro-poll-modes-apply-progress-state-zero-clears ()
+  "kuro--apply-progress clears the indicator on state 0 (done)."
+  (kuro-poll-test--with-buffer
+    (setq kuro--progress-state '(1 . 50))
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(0 . 0)))
+      (should-not kuro--progress-state))))
+
+(ert-deftest kuro-poll-modes-apply-progress-disabled-clears ()
+  "kuro--apply-progress clears the indicator when kuro-progress-enabled is nil."
+  (kuro-poll-test--with-buffer
+    (let ((kuro-progress-enabled nil))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(2 . 75)))
+      (should-not kuro--progress-state))))
+
+(ert-deftest kuro-poll-modes-poll-progress-applies-ffi ()
+  "kuro--poll-progress routes a non-nil FFI result into kuro--progress-state."
+  (kuro-poll-test--with-buffer
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'kuro--get-progress) (lambda () '(2 . 80)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--poll-progress)
+        (should (equal kuro--progress-state '(2 . 80)))))))
+
+(ert-deftest kuro-poll-modes-poll-progress-nil-leaves-state ()
+  "kuro--poll-progress leaves the cached indicator untouched on nil FFI result."
+  (kuro-poll-test--with-buffer
+    (setq kuro--progress-state '(1 . 10))
+    (cl-letf (((symbol-function 'kuro--get-progress) (lambda () nil))
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (kuro--poll-progress)
+      (should (equal kuro--progress-state '(1 . 10))))))
+
+(ert-deftest kuro-poll-modes-progress-mode-line-active-and-inactive ()
+  "kuro--progress-mode-line yields a string when active, nil when inactive."
+  (kuro-poll-test--with-buffer
+    (let ((kuro-progress-format " %s%d%% ")
+          (kuro-progress-state-glyphs '((1 . "X"))))
+      (setq kuro--progress-state '(1 . 33))
+      (should (equal (kuro--progress-mode-line) " X33% "))
+      (setq kuro--progress-state nil)
+      (should-not (kuro--progress-mode-line)))))
+
+;;; Group: OSC 1337 SetUserVar user variables
+
+(ert-deftest kuro-poll-modes-poll-user-vars-stores-alist ()
+  "kuro--poll-user-vars stores the FFI alist into kuro--user-vars."
+  (kuro-poll-test--with-buffer
+    (cl-letf (((symbol-function 'kuro--poll-user-vars-raw)
+               (lambda () '(("FOO" . "bar") ("BAZ" . "qux")))))
+      (kuro--poll-user-vars)
+      (should (equal kuro--user-vars '(("FOO" . "bar") ("BAZ" . "qux"))))
+      (should (equal (cdr (assoc "FOO" kuro--user-vars)) "bar")))))
+
+(ert-deftest kuro-poll-modes-poll-user-vars-nil-leaves-cache ()
+  "kuro--poll-user-vars leaves the cached alist untouched on nil FFI result."
+  (kuro-poll-test--with-buffer
+    (setq kuro--user-vars '(("OLD" . "v")))
+    (cl-letf (((symbol-function 'kuro--poll-user-vars-raw) (lambda () nil)))
+      (kuro--poll-user-vars)
+      (should (equal kuro--user-vars '(("OLD" . "v")))))))
 
 (provide 'kuro-poll-modes-test)
 ;;; kuro-poll-modes-test.el ends here

@@ -118,6 +118,7 @@ fn add_placement_returns_notification_with_correct_fields() {
         col: 7,
         display_cols: 12,
         display_rows: 4,
+        ..ImagePlacement::default()
     };
 
     let notif = store.add_placement(placement).expect("must return Some");

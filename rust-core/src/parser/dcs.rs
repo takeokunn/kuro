@@ -379,6 +379,7 @@ fn build_sixel_image_placement(
         col: cursor.col,
         display_cols: cell_w,
         display_rows: cell_h,
+        ..crate::grid::screen::ImagePlacement::default()
     }
 }
 

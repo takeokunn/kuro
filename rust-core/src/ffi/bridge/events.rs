@@ -289,6 +289,66 @@ define_session_data_query_or_false!(
 );
 
 define_session_data_query_mut!(
+    /// Get the iTerm2 OSC 1337 `RemoteHost=<user@host>` value if it changed.
+    ///
+    /// Returns the remote-host string when it has been updated since the last
+    /// call (clearing the dirty flag), or nil otherwise.
+    kuro_core_get_remote_host,
+    "get_remote_host",
+    |session| session.take_remote_host_if_dirty(),
+    |env, result| match result {
+        Some(host) => host.into_lisp(env),
+        None => false.into_lisp(env),
+    },
+    |env| false.into_lisp(env)
+);
+
+define_session_data_query_mut!(
+    /// Poll iTerm2 OSC 1337 `SetUserVar` user variables if they changed.
+    ///
+    /// Returns a list of `(NAME . VALUE)` cons cells (the full current set) when
+    /// the user-vars changed since the last call (clearing the dirty flag), or
+    /// nil when unchanged. `VALUE` is the base64-decoded user-variable value.
+    kuro_core_poll_user_vars,
+    "poll_user_vars",
+    |session| session.take_user_vars_if_dirty(),
+    |env, result| match result {
+        Some(vars) => {
+            let mut values = Vec::with_capacity(vars.len());
+            for (name, value) in vars {
+                let name_val = name.into_lisp(env)?;
+                let value_val = value.into_lisp(env)?;
+                values.push(env.cons(name_val, value_val)?);
+            }
+            build_emacs_list_from_values(env, values)
+        }
+        None => false.into_lisp(env),
+    },
+    |env| false.into_lisp(env)
+);
+
+define_session_data_query_mut!(
+    /// Get the ConEmu OSC 9;4 progress state if it changed.
+    ///
+    /// Returns a `(STATE . PERCENT)` cons cell when the progress state changed
+    /// since the last call (clearing the dirty flag), or nil when unchanged.
+    /// STATE is 0=none, 1=set, 2=error, 3=indeterminate, 4=warning; PERCENT is
+    /// 0–100 (0 for the stateless none/indeterminate variants).
+    kuro_core_get_progress,
+    "get_progress",
+    |session| session.take_progress_if_dirty(),
+    |env, result| match result {
+        Some((state, percent)) => {
+            let state_val = i64::from(state).into_lisp(env)?;
+            let percent_val = i64::from(percent).into_lisp(env)?;
+            env.cons(state_val, percent_val)
+        }
+        None => false.into_lisp(env),
+    },
+    |env| false.into_lisp(env)
+);
+
+define_session_data_query_mut!(
     /// Get default terminal colors (OSC 10/11/12) as encoded u32 values.
     ///
     /// Returns a cons cell (FG-ENC . (BG-ENC . CURSOR-ENC)) where each value is

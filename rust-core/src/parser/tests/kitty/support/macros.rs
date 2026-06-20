@@ -293,6 +293,7 @@ macro_rules! assert_place_fields {
                 placement_id,
                 columns,
                 rows,
+                ..
             } => {
                 assert_eq!(image_id, $image_id);
                 assert_eq!(placement_id, $placement_id);

@@ -55,6 +55,8 @@
 (declare-function kuro--apply-hyperlink-ranges    "kuro-hyperlinks" ())
 (declare-function kuro--apply-text-size-ranges    "kuro-text-size"  ())
 (declare-function kuro--apply-cwd-with-tramp     "kuro-tramp"      ())
+(declare-function kuro--get-progress             "kuro-ffi-osc"    ())
+(declare-function kuro--poll-user-vars-raw       "kuro-ffi-osc"    ())
 
 ;; Forward references: these defvar-locals live in their respective modules.
 ;; kuro-input.el
@@ -75,6 +77,8 @@
   (defconst kuro--tier1-poll-fns
     '(kuro--poll-terminal-mode-state  ; consolidated FFI - must stay first
       kuro--poll-cwd
+      kuro--poll-progress
+      kuro--poll-user-vars
       kuro--handle-clipboard-actions
       kuro--poll-prompt-mark-updates
       kuro--poll-eval-command-updates
@@ -211,8 +215,75 @@ MODES is the 7-element list from `kuro--get-terminal-modes':
 
 (defun kuro--poll-cwd ()
   "Apply a pending working-directory change from OSC 7 (if any).
-Uses Tramp path construction when a remote hostname is detected."
+Uses Tramp path construction when a remote hostname is detected.
+The Rust core feeds both OSC 7 and the iTerm2 OSC 1337 `CurrentDirectory='
+notification into the same cwd slot, so this single poll handles both."
   (kuro--apply-cwd-with-tramp))
+
+;;; Tier-1: OSC 9;4 progress (ConEmu) mode-line indicator
+
+(kuro--defvar-permanent-local kuro--progress-state nil
+  "Current ConEmu OSC 9;4 progress as a cons cell (STATE . PERCENT), or nil.
+STATE is the ConEmu state code (1=set, 2=error, 3=indeterminate, 4=warning);
+PERCENT is 0-100.  nil means no progress is active (state 0 / done).
+Updated by `kuro--poll-progress'; rendered into `mode-line-process'.")
+
+(defun kuro--progress-state-glyph (state)
+  "Return the mode-line glyph string for OSC 9;4 progress STATE.
+Looks up STATE in `kuro-progress-state-glyphs'; unknown states yield \"\"."
+  (or (cdr (assq state kuro-progress-state-glyphs)) ""))
+
+(defun kuro--progress-mode-line-string (state percent)
+  "Build the mode-line indicator string for progress STATE and PERCENT.
+Returns nil when `kuro-progress-format' is nil (textual indicator disabled)."
+  (when kuro-progress-format
+    (format kuro-progress-format (kuro--progress-state-glyph state) percent)))
+
+(defun kuro--apply-progress (progress)
+  "Apply a polled PROGRESS cons cell (STATE . PERCENT) to mode-line state.
+A nil or state-0 PROGRESS clears the indicator; any other state stores the
+cons in `kuro--progress-state' and refreshes the mode line.  Honors
+`kuro-progress-enabled': when nil the indicator is cleared even on a
+non-zero state."
+  (let ((state (and (consp progress) (car progress))))
+    (setq kuro--progress-state
+          (and kuro-progress-enabled
+               state
+               (/= state 0)
+               progress))
+    (force-mode-line-update)))
+
+(defun kuro--progress-mode-line ()
+  "Return the mode-line indicator string for the current progress, or nil.
+Designed for use as a `mode-line-process' `:eval' form: returns nil when no
+progress is active so nothing is shown."
+  (when (consp kuro--progress-state)
+    (kuro--progress-mode-line-string (car kuro--progress-state)
+                                     (cdr kuro--progress-state))))
+
+(defun kuro--poll-progress ()
+  "Poll the ConEmu OSC 9;4 progress state and update the mode-line indicator.
+Drains the dirty progress slot from the Rust core (so it cannot get stuck)
+and routes it through `kuro--apply-progress'.  A nil result means unchanged
+since the last poll, so the existing indicator is left untouched."
+  (when-let* ((progress (kuro--get-progress)))
+    (kuro--apply-progress progress)))
+
+;;; Tier-1: OSC 1337 SetUserVar user variables
+
+(kuro--defvar-permanent-local kuro--user-vars nil
+  "Alist of iTerm2 OSC 1337 `SetUserVar' user variables for this buffer.
+Each entry is (NAME . VALUE), both strings; VALUE is base64-decoded by the
+Rust core.  Replaced wholesale (the Rust core sends the full current set)
+whenever the user-vars change.  Other Lisp can read this to react to shell-
+exported variables.")
+
+(defun kuro--poll-user-vars ()
+  "Poll iTerm2 OSC 1337 `SetUserVar' user variables into `kuro--user-vars'.
+The Rust core returns the full current set as a list of (NAME . VALUE) cons
+cells when changed, or nil when unchanged (leaving the cache intact)."
+  (when-let* ((vars (kuro--poll-user-vars-raw)))
+    (setq kuro--user-vars vars)))
 
 (defvar kuro-on-command-complete-functions nil
   "Abnormal hook run for each OSC 133 command-end mark received.

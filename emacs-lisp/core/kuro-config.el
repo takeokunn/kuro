@@ -143,6 +143,34 @@ back to the terminal application."
   :type 'function
   :group 'kuro)
 
+(defcustom kuro-progress-enabled t
+  "Whether to surface ConEmu OSC 9;4 progress reports in the mode line.
+When non-nil, a progress indicator built with `kuro-progress-format' is shown
+in the mode line of kuro-mode buffers while a foreground task reports
+progress, and cleared when the task reports state 0 (done/removed).
+Pending progress is always drained from the Rust core regardless of this
+setting, so it cannot accumulate."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-progress-format " %s%d%% "
+  "Format string for the OSC 9;4 progress mode-line indicator.
+Receives two arguments via `format': a state-glyph string (see
+`kuro-progress-state-glyphs') and the integer percentage (0-100).
+Set to nil to suppress the textual indicator entirely (the underlying state
+is still tracked in `kuro--progress-state')."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'kuro)
+
+(defcustom kuro-progress-state-glyphs
+  '((1 . "⏳") (2 . "❌") (3 . "…") (4 . "⚠"))
+  "Alist mapping OSC 9;4 progress state codes to mode-line glyph strings.
+Keys are the state integers: 1=set (normal), 2=error, 3=indeterminate,
+4=warning.  State 0 (none) clears the indicator and is never looked up here.
+A state with no entry falls back to the empty string."
+  :type '(alist :key-type integer :value-type string)
+  :group 'kuro)
+
 ;;; Display Settings
 
 (defcustom kuro-frame-rate 120

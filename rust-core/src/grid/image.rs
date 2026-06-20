@@ -384,7 +384,7 @@ fn alpha_blend(dst: &mut [u8], src: &[u8]) {
 }
 
 /// A placed image instance on the terminal grid
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ImagePlacement {
     /// ID of the stored image being placed
     pub image_id: u32,
@@ -398,6 +398,17 @@ pub struct ImagePlacement {
     pub display_cols: u32,
     /// Height of the placement in terminal rows
     pub display_rows: u32,
+    /// Z-index (Kitty `z=` key, signed). Larger values draw on top; negative
+    /// values draw behind text. Default 0. Used for `a=d,d=z`/`a=d,d=q` deletion
+    /// and to control stacking order (placements are kept sorted by `z_index`).
+    pub z_index: i32,
+    /// Cell-internal pixel X offset within the top-left cell (Kitty `X=` key in
+    /// the place/transmit context). Surfaced to Emacs so the image can be drawn
+    /// shifted inside its anchor cell.
+    pub pixel_x_offset: u32,
+    /// Cell-internal pixel Y offset within the top-left cell (Kitty `Y=` key in
+    /// the place/transmit context).
+    pub pixel_y_offset: u32,
 }
 
 /// Notification emitted to Elisp when an image is placed on the terminal
@@ -413,6 +424,10 @@ pub struct ImageNotification {
     pub cell_width: u32,
     /// Height of the placement in terminal rows
     pub cell_height: u32,
+    /// Cell-internal pixel X offset (Kitty `X=` key); 0 when unset.
+    pub pixel_x_offset: u32,
+    /// Cell-internal pixel Y offset (Kitty `Y=` key); 0 when unset.
+    pub pixel_y_offset: u32,
 }
 
 /// LRU image store with 256 MB capacity cap
@@ -612,7 +627,12 @@ impl GraphicsStore {
         }
     }
 
-    /// Add a placement and return an `ImageNotification` (or None if `image_id` unknown)
+    /// Add a placement and return an `ImageNotification` (or None if `image_id` unknown).
+    ///
+    /// Placements are stored in ascending `z_index` order so that later rendering
+    /// honors the Kitty `z=` stacking key: a placement with a larger `z_index`
+    /// draws on top of (after) one with a smaller `z_index`. Insertion uses a
+    /// stable position so equal-z placements preserve arrival order.
     pub fn add_placement(&mut self, placement: ImagePlacement) -> Option<ImageNotification> {
         if !self.images.contains_key(&placement.image_id) {
             return None;
@@ -623,8 +643,14 @@ impl GraphicsStore {
             col: placement.col,
             cell_width: placement.display_cols,
             cell_height: placement.display_rows,
+            pixel_x_offset: placement.pixel_x_offset,
+            pixel_y_offset: placement.pixel_y_offset,
         };
-        self.placements.push(placement);
+        // Insert keeping the vector sorted by z_index (stable for ties).
+        let pos = self
+            .placements
+            .partition_point(|p| p.z_index <= placement.z_index);
+        self.placements.insert(pos, placement);
         Some(notif)
     }
 
@@ -643,6 +669,8 @@ impl GraphicsStore {
                 col: p.col,
                 cell_width: p.display_cols,
                 cell_height: p.display_rows,
+                pixel_x_offset: p.pixel_x_offset,
+                pixel_y_offset: p.pixel_y_offset,
             })
             .collect()
     }
@@ -650,6 +678,19 @@ impl GraphicsStore {
     /// Clear all image placements (called on ED mode 2/3, screen clear)
     pub fn clear_all_placements(&mut self) {
         self.placements.clear();
+    }
+
+    /// Number of active placements (test/introspection helper).
+    #[must_use]
+    pub fn placement_count(&self) -> usize {
+        self.placements.len()
+    }
+
+    /// The `z_index` values of all placements, in stored (ascending-z) order.
+    /// Test/introspection helper for verifying z-ordering.
+    #[must_use]
+    pub fn placement_z_indices(&self) -> Vec<i32> {
+        self.placements.iter().map(|p| p.z_index).collect()
     }
 
     /// Shift all placement rows up by `n` lines (called on terminal `scroll_up`).
@@ -699,6 +740,147 @@ impl GraphicsStore {
     pub fn delete_by_col(&mut self, col: usize) {
         self.retain_placements(|placement| placement.col != col);
     }
+
+    /// Remove the underlying image data (and byte accounting / LRU) for every
+    /// `image_id` that currently has at least one placement matched by
+    /// `should_delete`, then drop those placements.
+    ///
+    /// Used by the uppercase Kitty delete targets (`A`/`I`/`N`/`C`/`P`/`Q`/`X`/
+    /// `Y`/`Z`/`R`) which "also free the stored image data", not just the
+    /// placement. The image is freed only when a matching placement exists.
+    fn delete_placements_freeing<F>(&mut self, should_delete: F)
+    where
+        F: Fn(&ImagePlacement) -> bool,
+    {
+        // Collect distinct image ids whose placements are being removed.
+        let mut freed_ids: Vec<u32> = Vec::new();
+        for placement in &self.placements {
+            if should_delete(placement) && !freed_ids.contains(&placement.image_id) {
+                freed_ids.push(placement.image_id);
+            }
+        }
+        self.retain_placements(|placement| !should_delete(placement));
+        for id in freed_ids {
+            // delete_by_id is idempotent and also clears any *other* placements
+            // of this image; that is correct — freeing image data invalidates
+            // every placement that references it.
+            self.delete_by_id(id);
+        }
+    }
+
+    /// Generic placement deletion. `free_data` selects the uppercase semantics
+    /// (also free the backing image) vs lowercase (drop placements only).
+    fn delete_matching<F>(&mut self, free_data: bool, predicate: F)
+    where
+        F: Fn(&ImagePlacement) -> bool,
+    {
+        if free_data {
+            self.delete_placements_freeing(predicate);
+        } else {
+            self.retain_placements(|placement| !predicate(placement));
+        }
+    }
+
+    /// Delete every placement (Kitty `a=d,d=a`/`A`). When `free_data`, also free
+    /// the backing image data for every image that had a placement.
+    pub fn delete_all(&mut self, free_data: bool) {
+        if free_data {
+            self.delete_placements_freeing(|_| true);
+        } else {
+            self.placements.clear();
+        }
+    }
+
+    /// Delete placements by image id (Kitty `a=d,d=i`/`I`). Lowercase drops the
+    /// placements (and, matching kitty, the image); uppercase additionally frees
+    /// the image data. Both end with the image gone, so they coincide here, but
+    /// `free_data` is threaded for symmetry and clarity.
+    pub fn delete_id(&mut self, image_id: u32, _free_data: bool) {
+        self.delete_by_id(image_id);
+    }
+
+    /// Delete the newest placement(s) referencing the highest stored image
+    /// number (Kitty `a=d,d=n`/`N`, key `I=` selects the image number). With no
+    /// explicit number, the most-recently-stored image (`next_auto_id - 1`,
+    /// falling back to the max known id) is used.
+    pub fn delete_newest(&mut self, image_number: Option<u32>, free_data: bool) {
+        let target = match image_number {
+            Some(n) => n,
+            None => {
+                // Highest image id currently stored.
+                match self.images.keys().copied().max() {
+                    Some(id) => id,
+                    None => return,
+                }
+            }
+        };
+        self.delete_matching(free_data, |p| p.image_id == target);
+    }
+
+    /// Delete placements intersecting the cursor cell (Kitty `a=d,d=c`/`C`).
+    pub fn delete_at_cursor(&mut self, row: usize, col: usize, free_data: bool) {
+        self.delete_at_cell(row, col, free_data);
+    }
+
+    /// Delete placements intersecting cell (`row`,`col`) (Kitty `a=d,d=p`/`P`,
+    /// keys `x=`column `y=`row). A placement intersects the cell when the cell
+    /// falls inside its `display_cols`×`display_rows` rectangle anchored at its
+    /// top-left.
+    pub fn delete_at_cell(&mut self, row: usize, col: usize, free_data: bool) {
+        self.delete_matching(free_data, |p| placement_covers(p, row, col));
+    }
+
+    /// Delete placements intersecting cell (`row`,`col`) with the given
+    /// `z_index` (Kitty `a=d,d=q`/`Q`, keys `x=`,`y=`,`z=`).
+    pub fn delete_at_cell_with_z(&mut self, row: usize, col: usize, z: i32, free_data: bool) {
+        self.delete_matching(free_data, |p| {
+            p.z_index == z && placement_covers(p, row, col)
+        });
+    }
+
+    /// Delete placements intersecting column `col` (Kitty `a=d,d=x`/`X`, key
+    /// `x=`). Intersection spans the placement's full `display_cols` width.
+    pub fn delete_intersecting_col(&mut self, col: usize, free_data: bool) {
+        self.delete_matching(free_data, |p| placement_covers_col(p, col));
+    }
+
+    /// Delete placements intersecting row `row` (Kitty `a=d,d=y`/`Y`, key `y=`).
+    /// Intersection spans the placement's full `display_rows` height.
+    pub fn delete_intersecting_row(&mut self, row: usize, free_data: bool) {
+        self.delete_matching(free_data, |p| placement_covers_row(p, row));
+    }
+
+    /// Delete placements with the given `z_index` (Kitty `a=d,d=z`/`Z`, key
+    /// `z=`).
+    pub fn delete_by_z(&mut self, z: i32, free_data: bool) {
+        self.delete_matching(free_data, |p| p.z_index == z);
+    }
+
+    /// Delete placements whose image id is in the inclusive range
+    /// `min..=max` (Kitty `a=d,d=r`/`R`, keys `x=`min `y=`max).
+    pub fn delete_id_range(&mut self, min: u32, max: u32, free_data: bool) {
+        self.delete_matching(free_data, |p| p.image_id >= min && p.image_id <= max);
+    }
+}
+
+/// True when cell (`row`,`col`) falls inside the placement's display rectangle.
+#[inline]
+fn placement_covers(p: &ImagePlacement, row: usize, col: usize) -> bool {
+    placement_covers_row(p, row) && placement_covers_col(p, col)
+}
+
+/// True when `col` falls inside the placement's horizontal span.
+#[inline]
+fn placement_covers_col(p: &ImagePlacement, col: usize) -> bool {
+    let span = (p.display_cols.max(1)) as usize;
+    col >= p.col && col < p.col + span
+}
+
+/// True when `row` falls inside the placement's vertical span.
+#[inline]
+fn placement_covers_row(p: &ImagePlacement, row: usize) -> bool {
+    let span = (p.display_rows.max(1)) as usize;
+    row >= p.row && row < p.row + span
 }
 
 #[cfg(test)]

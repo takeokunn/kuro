@@ -2,6 +2,22 @@
 
 use super::TerminalSession;
 
+/// Encode a [`ProgressState`] as the `(state, percent)` pair sent over FFI.
+///
+/// `state` is the ConEmu OSC 9;4 state code (0=none, 1=set, 2=error,
+/// 3=indeterminate, 4=warning); `percent` is 0–100 (and 0 for the stateless
+/// none/indeterminate variants).
+const fn encode_progress(progress: crate::types::osc::ProgressState) -> (u8, u8) {
+    use crate::types::osc::ProgressState;
+    match progress {
+        ProgressState::None => (0, 0),
+        ProgressState::Set(p) => (1, p),
+        ProgressState::Error(p) => (2, p),
+        ProgressState::Indeterminate => (3, 0),
+        ProgressState::Warning(p) => (4, p),
+    }
+}
+
 impl TerminalSession {
     dec_mode_getter!(
         /// Get mouse pixel mode state (?1016)
@@ -88,6 +104,41 @@ impl TerminalSession {
     #[must_use]
     pub fn get_cwd_host(&self) -> Option<String> {
         self.core.osc_data.cwd_host.clone()
+    }
+
+    take_option_field_if_dirty!(
+        /// Return the iTerm2 OSC 1337 `RemoteHost=<user@host>` value if it changed
+        /// since the last call, clearing the dirty flag. None if unset/unchanged.
+        fn take_remote_host_if_dirty from osc_data when remote_host_dirty take remote_host : String
+    );
+
+    /// Return all iTerm2 OSC 1337 `SetUserVar` user variables if they changed
+    /// since the last call, clearing the dirty flag.
+    ///
+    /// Returns `Some(vec![(name, value), ...])` when dirty (the full current set,
+    /// cloned), or `None` when unchanged since the last poll.
+    pub fn take_user_vars_if_dirty(&mut self) -> Option<Vec<(String, String)>> {
+        if self.core.osc_data.user_vars_dirty {
+            self.core.osc_data.user_vars_dirty = false;
+            Some(self.core.osc_data.user_vars.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Return the ConEmu OSC 9;4 progress state if it changed since the last
+    /// call, clearing the dirty flag.
+    ///
+    /// Returns `Some((state, percent))` when dirty, or `None` when unchanged.
+    /// `state` is `0`=none, `1`=set, `2`=error, `3`=indeterminate, `4`=warning;
+    /// `percent` is 0–100 (0 for the stateless none/indeterminate variants).
+    pub fn take_progress_if_dirty(&mut self) -> Option<(u8, u8)> {
+        if self.core.osc_data.progress_dirty {
+            self.core.osc_data.progress_dirty = false;
+            Some(encode_progress(self.core.osc_data.progress))
+        } else {
+            None
+        }
     }
 
     take_vec_field!(

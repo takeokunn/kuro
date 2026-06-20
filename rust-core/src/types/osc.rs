@@ -163,6 +163,29 @@ pub struct Notification {
     pub report: bool,
 }
 
+/// ConEmu OSC 9;4 progress report state.
+///
+/// Wire form: `OSC 9 ; 4 ; <state> ; <progress> ST`. `state` selects one of the
+/// variants below; `progress` (0–100) is only meaningful for [`Set`] and
+/// [`Warning`]. The display layer (Emacs mode-line) reads this via FFI.
+///
+/// [`Set`]: ProgressState::Set
+/// [`Warning`]: ProgressState::Warning
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProgressState {
+    /// state 0 — no progress / remove the indicator.
+    #[default]
+    None,
+    /// state 1 — normal progress at the given percent (0–100).
+    Set(u8),
+    /// state 2 — error state (percent retained from the last `Set`, if any).
+    Error(u8),
+    /// state 3 — indeterminate / busy (no percent).
+    Indeterminate,
+    /// state 4 — warning / paused at the given percent (0–100).
+    Warning(u8),
+}
+
 /// OSC data storage
 #[derive(Debug)]
 pub struct OscData {
@@ -203,6 +226,19 @@ pub struct OscData {
     /// In-progress OSC 99 (Kitty notification) chunk keyed by the `i=<id>` field.
     /// `d=0` chunks accumulate here; `d=1` finalizes and pushes to `notifications`.
     pub(crate) notification_chunk: Option<NotificationChunk>,
+    /// iTerm2 OSC 1337 `SetUserVar=<name>=<base64value>` user variables.
+    /// Stored decoded as `(name, value)`; later sets of the same name overwrite.
+    pub(crate) user_vars: Vec<(String, String)>,
+    /// Whether `user_vars` changed since the last FFI poll.
+    pub(crate) user_vars_dirty: bool,
+    /// iTerm2 OSC 1337 `RemoteHost=<user@host>` remote-host identity.
+    pub(crate) remote_host: Option<String>,
+    /// Whether `remote_host` changed since the last FFI poll.
+    pub(crate) remote_host_dirty: bool,
+    /// ConEmu OSC 9;4 progress report state.
+    pub(crate) progress: ProgressState,
+    /// Whether `progress` changed since the last FFI poll.
+    pub(crate) progress_dirty: bool,
 }
 
 /// Accumulator for a chunked OSC 99 (Kitty desktop notification).
@@ -274,6 +310,39 @@ impl OscData {
         self.cwd_host = cwd_host;
         self.cwd = cwd;
         self.cwd_dirty = true;
+    }
+
+    /// Stores an iTerm2 OSC 1337 `SetUserVar` user variable, overwriting any
+    /// existing entry with the same name, and marks user_vars dirty.
+    pub(crate) fn set_user_var(&mut self, name: String, value: String) {
+        if let Some(existing) = self.user_vars.iter_mut().find(|(n, _)| *n == name) {
+            existing.1 = value;
+        } else {
+            self.user_vars.push((name, value));
+        }
+        self.user_vars_dirty = true;
+    }
+
+    /// Stores the iTerm2 OSC 1337 `RemoteHost` value and marks it dirty.
+    pub(crate) fn set_remote_host(&mut self, host: Option<String>) {
+        self.remote_host = host;
+        self.remote_host_dirty = true;
+    }
+
+    /// Returns the current remote host identity (OSC 1337 RemoteHost).
+    pub fn remote_host(&self) -> Option<&str> {
+        self.remote_host.as_deref()
+    }
+
+    /// Stores the ConEmu OSC 9;4 progress state and marks it dirty.
+    pub(crate) fn set_progress(&mut self, progress: ProgressState) {
+        self.progress = progress;
+        self.progress_dirty = true;
+    }
+
+    /// Returns the current ConEmu OSC 9;4 progress state.
+    pub fn progress(&self) -> ProgressState {
+        self.progress
     }
 
     /// Stores the OSC 22 pointer shape override.
@@ -374,6 +443,12 @@ impl Default for OscData {
             pointer_shape: None,
             palette_stack: Vec::new(),
             notification_chunk: None,
+            user_vars: Vec::new(),
+            user_vars_dirty: false,
+            remote_host: None,
+            remote_host_dirty: false,
+            progress: ProgressState::None,
+            progress_dirty: false,
         }
     }
 }

@@ -88,15 +88,73 @@ pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)>
     })
 }
 
-/// Handle OSC 1337 — iTerm2 inline images.
+/// Handle OSC 1337 — iTerm2 proprietary extensions.
+///
+/// Dispatches on the subcommand prefix:
+/// - `File=…` — inline image (see [`handle_iterm2_file`]).
+/// - `CurrentDirectory=<path>` — working-directory notification (like OSC 7,
+///   but with no `file://host/` wrapper; host is cleared).
+/// - `SetUserVar=<name>=<base64value>` — store a user variable (value decoded).
+/// - `RemoteHost=<user@host>` — store the remote-host identity.
+///
+/// VTE splits the OSC on `;`, so a payload (e.g. a base64 blob containing `;`)
+/// arriving as multiple params is rejoined with `;` before dispatch.
 pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
-    let rest = params
-        .get(1)
-        .and_then(|raw| std::str::from_utf8(raw).ok())
-        .unwrap_or("");
-    let Some(stripped) = rest.strip_prefix("File=") else {
+    // Rejoin params[1..] with ';' so values containing ';' survive VTE splitting.
+    let joined: Vec<u8> = if params.len() <= 2 {
+        params.get(1).copied().unwrap_or(b"").to_vec()
+    } else {
+        params[1..].join(&b';')
+    };
+    let Ok(rest) = std::str::from_utf8(&joined) else {
         return;
     };
+
+    if let Some(stripped) = rest.strip_prefix("File=") {
+        handle_iterm2_file(core, stripped);
+    } else if let Some(path) = rest.strip_prefix("CurrentDirectory=") {
+        handle_iterm2_current_directory(core, path);
+    } else if let Some(kv) = rest.strip_prefix("SetUserVar=") {
+        handle_iterm2_set_user_var(core, kv);
+    } else if let Some(host) = rest.strip_prefix("RemoteHost=") {
+        handle_iterm2_remote_host(core, host);
+    }
+}
+
+/// OSC 1337 `CurrentDirectory=<path>` — set cwd like OSC 7 (no host).
+fn handle_iterm2_current_directory(core: &mut TerminalCore, path: &str) {
+    if path.is_empty() {
+        return;
+    }
+    core.osc_data.set_cwd(None, Some(path.to_owned()));
+}
+
+/// OSC 1337 `SetUserVar=<name>=<base64value>` — decode and store a user var.
+/// Malformed (no `=`, empty name, or invalid base64) is ignored.
+fn handle_iterm2_set_user_var(core: &mut TerminalCore, kv: &str) {
+    let Some((name, b64)) = kv.split_once('=') else {
+        return;
+    };
+    if name.is_empty() {
+        return;
+    }
+    let Ok(decoded) = crate::util::base64::decode(b64.as_bytes()) else {
+        return;
+    };
+    let value = String::from_utf8_lossy(&decoded).into_owned();
+    core.osc_data.set_user_var(name.to_owned(), value);
+}
+
+/// OSC 1337 `RemoteHost=<user@host>` — store the remote-host identity.
+fn handle_iterm2_remote_host(core: &mut TerminalCore, host: &str) {
+    if host.is_empty() {
+        return;
+    }
+    core.osc_data.set_remote_host(Some(host.to_owned()));
+}
+
+/// OSC 1337 `File=<params>:<base64>` — iTerm2 inline image.
+fn handle_iterm2_file(core: &mut TerminalCore, stripped: &str) {
     let Some(colon_pos) = stripped.find(':') else {
         return;
     };
@@ -128,6 +186,7 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
         col: cursor.col,
         display_cols: cols,
         display_rows: rows,
+        ..ImagePlacement::default()
     };
     if let Some(notif) = core.screen.active_graphics_mut().add_placement(placement) {
         core.kitty.pending_image_notifications.push(notif);

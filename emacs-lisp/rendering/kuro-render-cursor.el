@@ -82,14 +82,44 @@ drift can accumulate even with `auto-hscroll-mode' disabled."
   (when (> (window-hscroll win) 0)
     (set-window-hscroll win 0)))
 
+(defconst kuro--decscusr-blinking-shapes '(0 1 3 5)
+  "DECSCUSR shape codes that request a BLINKING cursor.
+Per CSI Ps SP q: 0/1=blinking block, 3=blinking underline, 5=blinking bar.
+The steady variants are 2 (block), 4 (underline), 6 (bar).")
+
+(defsubst kuro--decscusr-blinking-p (shape)
+  "Return non-nil when DECSCUSR SHAPE requests a blinking cursor.
+Codes 0/1/3/5 blink; 2/4/6 are steady.  A non-integer or unknown SHAPE is
+treated as the default (blinking) so it matches the DECSCUSR 0 default."
+  (or (not (integerp shape))
+      (memq shape kuro--decscusr-blinking-shapes)))
+
+(defun kuro--apply-cursor-blink (visible shape)
+  "Drive `blink-cursor-mode' from the DECSCUSR VISIBLE flag and SHAPE.
+A visible blinking shape (DECSCUSR 0/1/3/5) enables `blink-cursor-mode';
+a visible steady shape (2/4/6) disables it; a hidden cursor leaves blink
+state untouched (nothing is shown anyway).  `blink-cursor-mode' is a global
+minor mode, so it is only toggled when its state actually needs to change,
+avoiding redundant timer churn."
+  (when visible
+    (let ((want (kuro--decscusr-blinking-p shape)))
+      (cond
+       ((and want (not (bound-and-true-p blink-cursor-mode)))
+        (blink-cursor-mode 1))
+       ((and (not want) (bound-and-true-p blink-cursor-mode))
+        (blink-cursor-mode -1))))))
+
 (defun kuro--apply-cursor-display (visible shape)
   "Set buffer-local `cursor-type' from VISIBLE flag and SHAPE integer.
 SHAPE is a DECSCUSR value (0-6, see `kuro--decscusr-to-cursor-type').
-When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil."
+When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil.
+Also drives `blink-cursor-mode' so DECSCUSR blinking shapes (0/1/3/5)
+blink and steady shapes (2/4/6) do not (see `kuro--apply-cursor-blink')."
   (setq-local cursor-type
               (if visible
                   (kuro--decscusr-to-cursor-type (or shape 0))
-                nil)))
+                nil))
+  (kuro--apply-cursor-blink visible shape))
 
 (defsubst kuro--cursor-state-changed-p (row col visible shape)
   "Return non-nil when (ROW COL VISIBLE SHAPE) differs from the cached state."

@@ -40,6 +40,9 @@
                kuro-core-is-process-alive
                kuro-core-poll-clipboard-actions
                kuro-core-poll-image-notifications
+               kuro-core-get-progress
+               kuro-core-poll-user-vars
+               kuro-core-get-remote-host
                kuro-core-poll-prompt-marks
                kuro-core-scroll-up
                kuro-core-scroll-down

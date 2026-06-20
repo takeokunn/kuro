@@ -42,6 +42,9 @@
 (declare-function kuro-core-get-cwd-host             "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-hyperlink-ranges    "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-text-size-ranges    "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-progress             "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-user-vars           "ext:kuro-core" (session-id))
+(declare-function kuro-core-get-remote-host          "ext:kuro-core" (session-id))
 (declare-function kuro-core-image-frame-count        "ext:kuro-core" (session-id image-id))
 (declare-function kuro-core-image-frame-png          "ext:kuro-core" (session-id image-id frame-index))
 (declare-function kuro-core-image-frame-gap          "ext:kuro-core" (session-id image-id frame-index))
@@ -144,6 +147,27 @@ Returns a list of command strings, or nil if none are pending.")
   kuro-core-get-cwd-host nil
   "Get the hostname from the last OSC 7 notification.
 Returns the hostname string or nil if localhost/unset.")
+
+ (kuro--get-progress
+  kuro-core-get-progress nil
+  "Poll the ConEmu OSC 9;4 progress state if it changed since the last call.
+Returns a cons cell (STATE . PERCENT) when the progress state changed
+\(clearing the dirty flag), or nil when unchanged.
+STATE is 0=none, 1=set, 2=error, 3=indeterminate, 4=warning; PERCENT is
+0-100 (0 for the stateless none/indeterminate variants).")
+
+ (kuro--poll-user-vars-raw
+  kuro-core-poll-user-vars nil
+  "Poll iTerm2 OSC 1337 `SetUserVar' user variables if they changed.
+Returns a list of (NAME . VALUE) cons cells (the full current set) when the
+user-vars changed since the last call (clearing the dirty flag), or nil when
+unchanged.  VALUE is the base64-decoded user-variable value string.")
+
+ (kuro--get-remote-host
+  kuro-core-get-remote-host nil
+  "Get the iTerm2 OSC 1337 `RemoteHost=<user@host>' value if it changed.
+Returns the remote-host string when updated since the last call (clearing the
+dirty flag), or nil otherwise.")
 
  (kuro--poll-hyperlink-ranges
   kuro-core-poll-hyperlink-ranges nil

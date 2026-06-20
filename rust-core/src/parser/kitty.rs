@@ -63,6 +63,8 @@ pub struct KittyParams {
     pub read_size: Option<u32>,
     /// Starting byte offset for file/temp/shm reads (key `O`, t=f/t/s only)
     pub read_offset: Option<u32>,
+    /// Image *number* (key `I`) — for `a=d,d=n/N` newest-by-number deletion.
+    pub image_number: Option<u32>,
 }
 
 impl KittyParams {
@@ -109,6 +111,12 @@ pub enum KittyCommand {
         columns: Option<u32>,
         rows: Option<u32>,
         placement_id: Option<u32>,
+        /// Z-index (key `z`, signed).
+        z_index: i32,
+        /// Cell-internal pixel X offset (key `X`).
+        pixel_x_offset: u32,
+        /// Cell-internal pixel Y offset (key `Y`).
+        pixel_y_offset: u32,
     },
     /// Place a previously stored image at current cursor (a=p)
     Place {
@@ -116,12 +124,28 @@ pub enum KittyCommand {
         placement_id: Option<u32>,
         columns: Option<u32>,
         rows: Option<u32>,
+        /// Z-index (key `z`, signed); controls stacking order.
+        z_index: i32,
+        /// Cell-internal pixel X offset (key `X`).
+        pixel_x_offset: u32,
+        /// Cell-internal pixel Y offset (key `Y`).
+        pixel_y_offset: u32,
     },
     /// Delete image(s) or placement(s) (a=d)
     Delete {
         delete_sub: char,
         image_id: Option<u32>,
         placement_id: Option<u32>,
+        /// Image *number* (key `I`) for d=n/N newest-by-number.
+        image_number: Option<u32>,
+        /// Cell column (key `x`, default 0) for cell-targeted deletes; for d=r
+        /// it is the range minimum.
+        cell_col: u32,
+        /// Cell row (key `y`, default 0) for cell-targeted deletes; for d=r it
+        /// is the range maximum.
+        cell_row: u32,
+        /// Z-index (key `z`, default 0, signed) for z-targeted deletes.
+        z_index: i32,
     },
     /// Query terminal graphics capability (a=q)
     Query { image_id: Option<u32> },

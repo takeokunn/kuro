@@ -24,6 +24,7 @@ pub(crate) fn placement(image_id: u32, row: usize, col: usize) -> ImagePlacement
         col,
         display_cols: DEFAULT_DISPLAY_COLS,
         display_rows: DEFAULT_DISPLAY_ROWS,
+        ..ImagePlacement::default()
     }
 }
 
@@ -40,6 +41,7 @@ pub(crate) fn placement_with_id(
         col,
         display_cols: 1,
         display_rows: 1,
+        ..ImagePlacement::default()
     }
 }
 

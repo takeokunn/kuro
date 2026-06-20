@@ -20,6 +20,7 @@ macro_rules! make_placement {
             col: $c,
             display_cols: $w,
             display_rows: $h,
+            ..crate::grid::image::ImagePlacement::default()
         }
     };
 }

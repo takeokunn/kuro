@@ -4,8 +4,8 @@ use crate::parser::limits::{
     OSC133_MAX_ERR_PATH_BYTES, OSC51_MAX_EVAL_BYTES,
 };
 use crate::types::osc::{
-    ClipboardAction, DefaultColorSlot, Notification, NotificationChunk, PromptMark, PromptMarkEvent,
-    SelectionTarget,
+    ClipboardAction, DefaultColorSlot, Notification, NotificationChunk, ProgressState, PromptMark,
+    PromptMarkEvent, SelectionTarget,
 };
 use crate::TerminalCore;
 
@@ -102,7 +102,54 @@ fn push_notification(core: &mut TerminalCore, title_raw: Option<&[u8]>, body_raw
     }
 }
 
+/// Parse a ConEmu OSC 9;4 progress payload into a [`ProgressState`].
+///
+/// Wire form: `OSC 9 ; 4 ; <state> ; <progress> ST`.
+/// - state 0 → [`ProgressState::None`] (remove); progress ignored.
+/// - state 1 → [`ProgressState::Set`] at `progress` (0–100, clamped).
+/// - state 2 → [`ProgressState::Error`] at `progress` (0–100, clamped).
+/// - state 3 → [`ProgressState::Indeterminate`]; progress ignored.
+/// - state 4 → [`ProgressState::Warning`] at `progress` (0–100, clamped).
+///
+/// A missing/unparseable `progress` defaults to 0. An unrecognised state, or a
+/// non-numeric state field, yields `None` (caller ignores it).
+fn parse_osc9_4_progress(state_raw: &[u8], progress_raw: Option<&[u8]>) -> Option<ProgressState> {
+    let state: u8 = std::str::from_utf8(state_raw).ok()?.parse().ok()?;
+    let percent = progress_raw
+        .and_then(|raw| std::str::from_utf8(raw).ok())
+        .and_then(|s| s.parse::<u32>().ok())
+        .map_or(0, |p| p.min(100) as u8);
+
+    match state {
+        0 => Some(ProgressState::None),
+        1 => Some(ProgressState::Set(percent)),
+        2 => Some(ProgressState::Error(percent)),
+        3 => Some(ProgressState::Indeterminate),
+        4 => Some(ProgressState::Warning(percent)),
+        _ => None,
+    }
+}
+
+/// Handle OSC 9 — iTerm2 notification (`OSC 9 ; body`) and ConEmu progress
+/// (`OSC 9 ; 4 ; state ; progress`).
+///
+/// The two forms are distinguished by the second field: the ConEmu progress
+/// form always begins with `4`. The single-param iTerm2 form (`OSC 9 ; body`)
+/// is routed to the desktop-notification queue; the multi-param ConEmu progress
+/// form updates `core.osc_data.progress` (NOT a notification).
 pub(super) fn handle_osc_9(core: &mut TerminalCore, params: &[&[u8]]) {
+    // ConEmu progress: OSC 9 ; 4 ; state ; progress
+    if params.get(1).copied() == Some(b"4".as_ref()) {
+        if let Some(state) = parse_osc9_4_progress(
+            params.get(2).copied().unwrap_or(b""),
+            params.get(3).copied(),
+        ) {
+            core.osc_data.set_progress(state);
+        }
+        return;
+    }
+
+    // iTerm2 notification: OSC 9 ; body
     if params.len() != 2 {
         return;
     }

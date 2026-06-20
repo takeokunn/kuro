@@ -194,6 +194,27 @@ Called once per render cycle from `kuro--render-cycle'."
 
 ;;; Image overlays (Kitty Graphics Protocol)
 
+;; U+10EEEE Unicode placeholder image display
+;; ------------------------------------------
+;; The Rust grid recognises Kitty Unicode placeholders (the U+10EEEE base
+;; character plus row/column diacritics, with image-id and placement-id encoded
+;; in the cell foreground/underline colors — see
+;; `rust-core/src/grid/placeholder.rs').  Placeholder cells are decoded into
+;; `PlaceholderInfo' (image-id, placement-id, row, col) on the Rust side.
+;;
+;; There is currently NO FFI endpoint that exports the resolved placeholder
+;; cell rectangles to the Emacs display layer (the per-frame poll surface in
+;; `kuro-ffi-osc.el' covers explicit Kitty image *placements* via
+;; `kuro--poll-image-notifications', but not in-band Unicode placeholders).
+;; Until such an endpoint exists, placeholder cells render as their underlying
+;; glyphs with the encoded colors; image overlays cannot be attached because
+;; Emacs never learns which (image-id, row, col) span each placeholder covers.
+;;
+;; To wire this up later: add a `poll_placeholder_placements' bridge fn that
+;; returns (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT) descriptors (mirroring
+;; `kuro--poll-image-notifications'), poll it in tier-1, fetch the PNG via
+;; `kuro--get-image', and reuse `kuro--place-image-overlay'.
+
 (defun kuro--clear-all-image-overlays ()
   "Remove all Kitty Graphics image overlays from the current buffer.
 Also cancels any in-flight animation playback timers."

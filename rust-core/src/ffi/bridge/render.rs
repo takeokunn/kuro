@@ -176,7 +176,14 @@ define_poll_updates_handler!(
             |env, byte| i64::from(byte).into_lisp(env),
         )?;
 
-        build_emacs_list_from_values(env, [strings_vec, bytes_vec])
+        // Return a true cons cell `(TEXT-STRINGS . BINARY-DATA)` as documented:
+        // the Elisp decoder (`kuro--poll-updates-binary-optimised`) reads
+        // `(cdr result)` AS the binary vector. Using `build_emacs_list_from_values`
+        // here would instead produce the 2-element list `(TEXT-STRINGS BINARY-DATA)`,
+        // whose `cdr` is `(BINARY-DATA)` — a list, not the vector — causing the
+        // decoder to throw `wrong-type-argument arrayp` every frame and leaving the
+        // terminal buffer blank under the default `kuro-use-binary-ffi` path.
+        env.cons(strings_vec, bytes_vec)
     }
 );
 

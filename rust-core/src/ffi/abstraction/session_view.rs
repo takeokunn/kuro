@@ -161,4 +161,16 @@ impl TerminalSession {
     pub fn image_animation_state(&self, image_id: u32) -> Option<(bool, usize, u32)> {
         self.core.screen.active_graphics().animation_state(image_id)
     }
+
+    /// Walk the active grid for Kitty Unicode placeholder (`U+10EEEE`) cells and
+    /// return one descriptor per contiguous same-image / same-placement
+    /// rectangle, so Emacs can slice the referenced image into per-cell tiles.
+    ///
+    /// Orphan placeholders (referencing an image not in the store) are excluded.
+    /// Cheap when no placeholders exist (single linear grid scan, no allocation
+    /// until the first placeholder is found).
+    #[must_use]
+    pub fn collect_placeholder_regions(&self) -> Vec<crate::grid::placeholder::PlaceholderRegion> {
+        self.core.screen.collect_placeholder_regions()
+    }
 }

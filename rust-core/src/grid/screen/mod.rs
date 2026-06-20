@@ -14,6 +14,8 @@ mod cursor;
 mod dirty;
 mod edit;
 mod graphics;
+mod placeholder;
+mod reflow;
 mod resize;
 pub mod scroll;
 mod scrollback;

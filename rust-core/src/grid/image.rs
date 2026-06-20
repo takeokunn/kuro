@@ -515,6 +515,17 @@ impl GraphicsStore {
         actual_id
     }
 
+    /// Returns true when an image with `image_id` is currently stored.
+    ///
+    /// Used by the Unicode-placeholder region walk to exclude *orphan*
+    /// placeholders (cells that reference an image id no longer in the store) so
+    /// they are never emitted as renderable tiles.
+    #[inline]
+    #[must_use]
+    pub fn contains_image(&self, image_id: u32) -> bool {
+        self.images.contains_key(&image_id)
+    }
+
     /// Return the image as a base64-encoded PNG string.
     /// Returns an empty string if the `image_id` is not found (orphan reference).
     #[must_use]

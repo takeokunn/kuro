@@ -231,3 +231,57 @@ fn test_handle_osc_1337_empty_base64_after_colon_is_noop() {
     assert_eq!(core.screen.cursor().row, 0);
     assert_eq!(core.screen.cursor().col, 0);
 }
+
+/// INTENT: iTerm2 `ReportCellSize` with a host-pushed size must respond with the
+/// exact `OSC 1337 ; ReportCellSize=<height>;<width>;1 ST` bytes (points; scale
+/// fixed at 1). Emacs sets the size via `set_cell_pixel_size(width, height)`.
+#[test]
+fn test_handle_osc_1337_report_cell_size_set_responds_exact_bytes() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    core.osc_data.set_cell_pixel_size(9, 19);
+    let params: &[&[u8]] = &[b"1337", b"ReportCellSize"];
+    super::handle_osc_1337(&mut core, params);
+    assert_eq!(core.pending_responses().len(), 1);
+    assert_eq!(
+        core.pending_responses()[0],
+        b"\x1b]1337;ReportCellSize=19;9;1\x1b\\".to_vec()
+    );
+}
+
+/// INTENT: iTerm2 `ReportCellSize` with no host size set must fall back to the
+/// documented default cell size (height;width = 16;8 points, scale 1).
+#[test]
+fn test_handle_osc_1337_report_cell_size_default_responds_default_bytes() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    assert!(core.osc_data().cell_pixel_size().is_none());
+    let params: &[&[u8]] = &[b"1337", b"ReportCellSize"];
+    super::handle_osc_1337(&mut core, params);
+    assert_eq!(core.pending_responses().len(), 1);
+    assert_eq!(
+        core.pending_responses()[0],
+        b"\x1b]1337;ReportCellSize=16;8;1\x1b\\".to_vec()
+    );
+}
+
+/// INTENT: a malformed/unknown OSC 1337 subcommand resembling `ReportCellSize`
+/// (here with a trailing `=` it never uses) must be ignored — no response queued.
+#[test]
+fn test_handle_osc_1337_report_cell_size_malformed_is_noop() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"1337", b"ReportCellSize="];
+    super::handle_osc_1337(&mut core, params);
+    assert!(core.pending_responses().is_empty());
+}
+
+/// INTENT: `set_cell_pixel_size` stores `(width, height)` on `OscData`, readable
+/// via the `cell_pixel_size()` accessor used by the FFI and OSC handler.
+#[test]
+fn test_osc_data_set_cell_pixel_size_round_trips() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    core.osc_data.set_cell_pixel_size(7, 14);
+    assert_eq!(core.osc_data().cell_pixel_size(), Some((7, 14)));
+}

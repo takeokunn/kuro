@@ -1,7 +1,7 @@
 //! Kitty Graphics Protocol: image store and placement notifications
 
 use super::{
-    build_emacs_list_from_values, define_session_data_query_or_false,
+    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_or_false,
     query_session_data_to_lisp_or_false,
 };
 use emacs::defun;
@@ -134,3 +134,52 @@ define_drain_session_vec_to_lisp!(
         )
     }
 );
+
+/// Poll for Kitty Unicode-placeholder (`U+10EEEE`) image regions on the active
+/// grid.
+///
+/// Returns a list of placeholder-region descriptors, each of the form:
+///   `(IMAGE-ID PLACEMENT-ID SCREEN-ROW SCREEN-COL CELL-COLS CELL-ROWS IMG-ROW
+///    IMG-COL IMG-ROWS IMG-COLS)`
+///
+/// where SCREEN-ROW/SCREEN-COL are the 0-based top-left of the placeholder
+/// rectangle, CELL-COLS×CELL-ROWS its size in terminal cells, IMG-ROW/IMG-COL
+/// the image-grid tile origin, and IMG-ROWS×IMG-COLS the total image-grid extent
+/// the rectangle covers. Emacs uses these to slice the referenced PNG into
+/// per-cell tiles (fit-to-rectangle). Contiguous same-image / same-placement
+/// runs are grouped into one rectangle; orphan placeholders (image not stored)
+/// are excluded.
+///
+/// Unlike `kuro-core-poll-image-notifications`, this is a non-draining *query*:
+/// it re-derives regions from the grid each call, so the placeholder image
+/// survives scrolling/reflow exactly like the underlying text cells.
+#[defun]
+fn kuro_core_poll_placeholder_placements(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
+    query_session_data_to_lisp_or_false(
+        env,
+        "poll_placeholder_placements",
+        session_id,
+        |session| Ok(session.collect_placeholder_regions()),
+        |regions| {
+            build_emacs_list_from_rev(env, regions, |env, region| {
+                #[expect(
+                    clippy::cast_possible_wrap,
+                    reason = "screen/cell dimensions are terminal-bounded (≤ 65535); usize→i64 never wraps"
+                )]
+                let values = [
+                    i64::from(region.image_id).into_lisp(env)?,
+                    i64::from(region.placement_id).into_lisp(env)?,
+                    (region.screen_row as i64).into_lisp(env)?,
+                    (region.screen_col as i64).into_lisp(env)?,
+                    (region.cell_cols as i64).into_lisp(env)?,
+                    (region.cell_rows as i64).into_lisp(env)?,
+                    i64::from(region.img_row).into_lisp(env)?,
+                    i64::from(region.img_col).into_lisp(env)?,
+                    i64::from(region.img_rows).into_lisp(env)?,
+                    i64::from(region.img_cols).into_lisp(env)?,
+                ];
+                build_emacs_list_from_values(env, values)
+            })
+        },
+    )
+}

@@ -134,6 +134,47 @@ has not been loaded yet."
       (should (= (nth 2 received-args) 24))  ; default rows
       (should (= (nth 3 received-args) 80))))) ; default cols
 
+;;; Group 2b: kuro--init pushes cell pixel size
+
+(ert-deftest kuro-ffi-init-sets-cell-pixel-size-when-fn-bound ()
+  "kuro--init forwards default-font-width/height to kuro-core-set-cell-pixel-size."
+  (let ((kuro--initialized nil)
+        (kuro--session-id 0)
+        (received nil))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_c _a _r _co) 7))
+              ((symbol-function 'kuro-core-set-cell-pixel-size)
+               (lambda (id w h) (setq received (list id w h)) t))
+              ((symbol-function 'default-font-width) (lambda () 9))
+              ((symbol-function 'default-font-height) (lambda () 19)))
+      (kuro--init "bash")
+      (should (equal received '(7 9 19))))))
+
+(ert-deftest kuro-ffi-init-skips-cell-pixel-size-when-fn-unbound ()
+  "kuro--init does not error when kuro-core-set-cell-pixel-size is unavailable."
+  (let ((kuro--initialized nil)
+        (kuro--session-id 0))
+    (cl-letf (((symbol-function 'kuro-core-init) (lambda (_c _a _r _co) 3))
+              ((symbol-function 'default-font-width) (lambda () 9))
+              ((symbol-function 'default-font-height) (lambda () 19)))
+      ;; Ensure the FFI fn is unbound for the duration of this test.
+      (let ((had (fboundp 'kuro-core-set-cell-pixel-size)))
+        (when had (fmakunbound 'kuro-core-set-cell-pixel-size))
+        (unwind-protect
+            (should (kuro--init "bash"))
+          (when had
+            (fset 'kuro-core-set-cell-pixel-size (lambda (_id _w _h) t))))))))
+
+(ert-deftest kuro-ffi-set-cell-pixel-size-noop-when-fn-unbound ()
+  "kuro--set-cell-pixel-size returns nil and does not error when fn unbound."
+  (let ((kuro--initialized t)
+        (kuro--session-id 1))
+    (let ((had (fboundp 'kuro-core-set-cell-pixel-size)))
+      (when had (fmakunbound 'kuro-core-set-cell-pixel-size))
+      (unwind-protect
+          (should-not (kuro--set-cell-pixel-size 9 19))
+        (when had
+          (fset 'kuro-core-set-cell-pixel-size (lambda (_id _w _h) t)))))))
+
 ;;; Group 3: kuro--shutdown
 
 (ert-deftest kuro-ffi-shutdown-clears-initialized ()

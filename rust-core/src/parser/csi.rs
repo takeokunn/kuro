@@ -110,6 +110,10 @@ fn xtwinops_param1(params: &vte::Params) -> u16 {
 pub(crate) fn build_xtwinops_size_report(op: u16, rows: usize, cols: usize) -> Option<Vec<u8>> {
     match op {
         14 => Some(b"\x1b[4;0;0t".to_vec()),
+        // XTWINOPS 16 — report cell size in pixels: `CSI 6 ; height ; width t`.
+        // Emacs-hosted core owns no pixels, so report the documented default cell
+        // size (height;width = 16;8 points) to satisfy size-probing applications.
+        16 => Some(b"\x1b[6;16;8t".to_vec()),
         18 => Some(format!("\x1b[8;{rows};{cols}t").into_bytes()),
         19 => Some(format!("\x1b[9;{rows};{cols}t").into_bytes()),
         _ => None,

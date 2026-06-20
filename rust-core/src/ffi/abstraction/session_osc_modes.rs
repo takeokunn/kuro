@@ -141,6 +141,17 @@ impl TerminalSession {
         }
     }
 
+    /// Store the host-pushed cell pixel size `(width, height)` in points.
+    ///
+    /// Emacs calls this from `default-font-width` / `default-font-height` so the
+    /// terminal can answer iTerm2 OSC 1337 `ReportCellSize` with real metrics
+    /// instead of the documented default. Returns `true` (the FFI bridge maps the
+    /// boolean to a Lisp success value).
+    pub fn set_cell_pixel_size(&mut self, width: u16, height: u16) -> bool {
+        self.core.osc_data.set_cell_pixel_size(width, height);
+        true
+    }
+
     take_vec_field!(
         /// Drain and return all pending prompt mark events (OSC 133).
         fn take_prompt_marks from osc_data take prompt_marks : crate::types::osc::PromptMarkEvent

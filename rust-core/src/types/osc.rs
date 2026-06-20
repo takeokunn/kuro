@@ -239,6 +239,10 @@ pub struct OscData {
     pub(crate) progress: ProgressState,
     /// Whether `progress` changed since the last FFI poll.
     pub(crate) progress_dirty: bool,
+    /// Cell pixel size `(width, height)` in points, pushed from Emacs via
+    /// `kuro_core_set_cell_pixel_size`. Reported by iTerm2 OSC 1337 `ReportCellSize`.
+    /// `None` means no host metrics set; the OSC handler falls back to a default.
+    pub(crate) cell_pixel_size: Option<(u16, u16)>,
 }
 
 /// Accumulator for a chunked OSC 99 (Kitty desktop notification).
@@ -345,6 +349,20 @@ impl OscData {
         self.progress
     }
 
+    /// Stores the host-pushed cell pixel size `(width, height)` in points.
+    ///
+    /// Set by Emacs via `kuro_core_set_cell_pixel_size` from `default-font-width`
+    /// / `default-font-height`; consumed when iTerm2 OSC 1337 `ReportCellSize` is
+    /// requested.
+    pub(crate) fn set_cell_pixel_size(&mut self, width: u16, height: u16) {
+        self.cell_pixel_size = Some((width, height));
+    }
+
+    /// Returns the host-pushed cell pixel size `(width, height)` in points, if set.
+    pub fn cell_pixel_size(&self) -> Option<(u16, u16)> {
+        self.cell_pixel_size
+    }
+
     /// Stores the OSC 22 pointer shape override.
     pub(crate) fn set_pointer_shape(&mut self, pointer_shape: Option<String>) {
         self.pointer_shape = pointer_shape;
@@ -449,6 +467,7 @@ impl Default for OscData {
             remote_host_dirty: false,
             progress: ProgressState::None,
             progress_dirty: false,
+            cell_pixel_size: None,
         }
     }
 }

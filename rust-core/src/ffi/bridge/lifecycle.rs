@@ -101,6 +101,15 @@ define_session_query_bool!(
     |session| session.resize(rows, cols).is_ok()
 );
 
+define_session_query_bool!(
+    /// Set the cell pixel size `(width, height)` in points for iTerm2 OSC 1337
+    /// `ReportCellSize` replies. Emacs pushes `default-font-width` /
+    /// `default-font-height` so size-probing apps see real metrics.
+    kuro_core_set_cell_pixel_size,
+    |width: u16, height: u16| query_session_mut,
+    |session| session.set_cell_pixel_size(width, height)
+);
+
 define_catch_panic_true_action!(
     /// Shutdown the terminal session and release all resources.
     ///

@@ -108,6 +108,13 @@ Each overlay has a `kuro-image' property and a `display' image spec.")
 Used as a fast guard to skip `kuro--clear-row-image-overlays' on rows
 when no Kitty Graphics images are present.")
 
+(kuro--defvar-permanent-local kuro--placeholder-overlays nil
+  "List of Unicode-placeholder (U+10EEEE) image tile overlays in this buffer.
+Each overlay shows one CELL's TILE of a referenced image via a `(slice ...)'
+display property.  Re-derived from the grid every frame by
+`kuro--render-placeholder-regions', so the whole list is cleared and rebuilt
+on each poll (unlike explicit Kitty placements, which are notification-driven).")
+
 (defconst kuro--animation-default-gap-ms 100
   "Default per-frame gap in milliseconds when a Kitty frame specifies z=0.
 Used by `kuro--animation-advance' to clamp the playback timer interval.")
@@ -194,26 +201,24 @@ Called once per render cycle from `kuro--render-cycle'."
 
 ;;; Image overlays (Kitty Graphics Protocol)
 
-;; U+10EEEE Unicode placeholder image display
-;; ------------------------------------------
+;; U+10EEEE Unicode placeholder image display (fit-to-rectangle tiling)
+;; -------------------------------------------------------------------
 ;; The Rust grid recognises Kitty Unicode placeholders (the U+10EEEE base
 ;; character plus row/column diacritics, with image-id and placement-id encoded
 ;; in the cell foreground/underline colors — see
 ;; `rust-core/src/grid/placeholder.rs').  Placeholder cells are decoded into
-;; `PlaceholderInfo' (image-id, placement-id, row, col) on the Rust side.
+;; `PlaceholderInfo' and contiguous same-image / same-placement runs are grouped
+;; into rectangles by `Screen::collect_placeholder_regions'.
 ;;
-;; There is currently NO FFI endpoint that exports the resolved placeholder
-;; cell rectangles to the Emacs display layer (the per-frame poll surface in
-;; `kuro-ffi-osc.el' covers explicit Kitty image *placements* via
-;; `kuro--poll-image-notifications', but not in-band Unicode placeholders).
-;; Until such an endpoint exists, placeholder cells render as their underlying
-;; glyphs with the encoded colors; image overlays cannot be attached because
-;; Emacs never learns which (image-id, row, col) span each placeholder covers.
-;;
-;; To wire this up later: add a `poll_placeholder_placements' bridge fn that
-;; returns (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT) descriptors (mirroring
-;; `kuro--poll-image-notifications'), poll it in tier-1, fetch the PNG via
-;; `kuro--get-image', and reuse `kuro--place-image-overlay'.
+;; The `kuro-core-poll-placeholder-placements' bridge fn exports those rectangles
+;; as descriptors of the form
+;;   (IMAGE-ID PLACEMENT-ID SCREEN-ROW SCREEN-COL CELL-COLS CELL-ROWS
+;;    IMG-ROW IMG-COL IMG-ROWS IMG-COLS)
+;; which `kuro--poll-placeholder-events' polls in tier-1 and feeds to
+;; `kuro--render-placeholder-regions' below.  Each placeholder CELL displays its
+;; own TILE of the referenced image via a `(slice X Y W H)' display property
+;; (fit-to-rectangle), so the image is sliced across the cell grid exactly as
+;; kitty intends, rather than drawn whole at a single anchor.
 
 (defun kuro--clear-all-image-overlays ()
   "Remove all Kitty Graphics image overlays from the current buffer.
@@ -223,7 +228,8 @@ Also cancels any in-flight animation playback timers."
     (when (overlay-buffer ov)
       (delete-overlay ov)))
   (setq kuro--image-overlays nil)
-  (setq kuro--has-images nil))
+  (setq kuro--has-images nil)
+  (kuro--clear-placeholder-overlays))
 
 (defun kuro--filter-overlays (overlays predicate &optional on-delete)
   "Delete overlays from OVERLAYS when PREDICATE returns non-nil.
@@ -304,6 +310,71 @@ playback loop is (re)started via `kuro--maybe-start-animation'."
             (kuro--maybe-start-animation image-id))
         (error
          (message "kuro: image render error for id %d: %s" image-id err))))))
+
+;;; Unicode-placeholder (U+10EEEE) fit-to-rectangle tiling
+
+(defun kuro--clear-placeholder-overlays ()
+  "Remove all Unicode-placeholder image tile overlays from this buffer."
+  (dolist (ov kuro--placeholder-overlays)
+    (when (overlay-buffer ov)
+      (delete-overlay ov)))
+  (setq kuro--placeholder-overlays nil))
+
+(defun kuro--place-placeholder-tile (img row col slice)
+  "Overlay a single placeholder TILE of IMG at grid (ROW, COL).
+SLICE is the `(slice X Y W H)' pixel rectangle (image-relative) shown in this
+cell, so each placeholder cell renders its own sub-rectangle of IMG.  Pushes
+the overlay onto `kuro--placeholder-overlays'.  Returns the overlay, or nil
+when the grid position is beyond the buffer."
+  (let ((start (save-excursion
+                 (kuro--goto-row-start row)
+                 (forward-char col)
+                 (point))))
+    (when (< start (point-max))
+      (let ((ov (make-overlay start (min (1+ start) (point-max)))))
+        (overlay-put ov 'kuro-placeholder t)
+        (overlay-put ov 'display (cons slice img))
+        (overlay-put ov 'evaporate t)
+        (push ov kuro--placeholder-overlays)
+        ov))))
+
+(defun kuro--render-placeholder-region (region)
+  "Render one placeholder REGION as per-cell image tiles (fit-to-rectangle).
+REGION is (IMAGE-ID PLACEMENT-ID SCREEN-ROW SCREEN-COL CELL-COLS CELL-ROWS
+IMG-ROW IMG-COL IMG-ROWS IMG-COLS).  Fetches the referenced PNG via
+`kuro--get-image', then attaches one overlay per cell whose `display' property
+slices the image so cell (dr, dc) shows image tile (IMG-ROW+dr, IMG-COL+dc).
+Orphan / missing images and decode errors are skipped quietly."
+  (pcase-let* ((`(,image-id ,_placement ,srow ,scol ,ccols ,crows
+                            ,img-row ,img-col ,img-rows ,img-cols)
+                region)
+               (b64 (and (> image-id 0) (kuro--get-image image-id))))
+    (when (and b64 (stringp b64) (not (string-empty-p b64))
+               (> ccols 0) (> crows 0) (> img-rows 0) (> img-cols 0))
+      (condition-case err
+          (when-let* ((img (kuro--decode-png-image b64)))
+            (pcase-let* ((`(,px-w . ,px-h) (image-size img t))
+                         (tile-w (/ px-w img-cols))
+                         (tile-h (/ px-h img-rows)))
+              (dotimes (dr crows)
+                (dotimes (dc ccols)
+                  (let ((x (* (+ img-col dc) tile-w))
+                        (y (* (+ img-row dr) tile-h)))
+                    (kuro--place-placeholder-tile
+                     img (+ srow dr) (+ scol dc)
+                     (list 'slice x y tile-w tile-h)))))))
+        (error
+         (message "kuro: placeholder render error for id %d: %s"
+                  image-id err))))))
+
+(defun kuro--render-placeholder-regions (regions)
+  "Re-render all Unicode-placeholder image REGIONS for the current frame.
+Clears the previous frame's placeholder tile overlays, then renders each region
+in REGIONS via `kuro--render-placeholder-region'.  A nil REGIONS list simply
+clears any stale tiles (e.g. after the placeholders scrolled off screen)."
+  (kuro--clear-placeholder-overlays)
+  (dolist (region regions)
+    (kuro--render-placeholder-region region)))
 
 ;;; Animation playback (Kitty a=f frames + a=a control)
 

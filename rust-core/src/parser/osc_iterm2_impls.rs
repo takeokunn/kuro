@@ -96,6 +96,8 @@ pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)>
 ///   but with no `file://host/` wrapper; host is cleared).
 /// - `SetUserVar=<name>=<base64value>` — store a user variable (value decoded).
 /// - `RemoteHost=<user@host>` — store the remote-host identity.
+/// - `ReportCellSize` — respond with the cell pixel size (see
+///   [`handle_iterm2_report_cell_size`]).
 ///
 /// VTE splits the OSC on `;`, so a payload (e.g. a base64 blob containing `;`)
 /// arriving as multiple params is rejoined with `;` before dispatch.
@@ -118,7 +120,30 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
         handle_iterm2_set_user_var(core, kv);
     } else if let Some(host) = rest.strip_prefix("RemoteHost=") {
         handle_iterm2_remote_host(core, host);
+    } else if rest == "ReportCellSize" {
+        handle_iterm2_report_cell_size(core);
     }
+}
+
+/// Default cell pixel size `(width, height)` in points, used when Emacs has not
+/// pushed real font metrics via `kuro_core_set_cell_pixel_size`. A typical
+/// monospace cell is roughly twice as tall as it is wide.
+pub(crate) const DEFAULT_CELL_PIXEL_SIZE: (u16, u16) = (8, 16);
+
+/// OSC 1337 `ReportCellSize` — respond with the cell pixel size.
+///
+/// iTerm2 replies `OSC 1337 ; ReportCellSize=<height>;<width>;<scale> ST` where
+/// the dimensions are in points and `scale` is the backing scale factor. kuro is
+/// Emacs-hosted and owns no pixels, so it reports the size pushed from Emacs
+/// (`default-font-width`/`default-font-height`) or the documented
+/// [`DEFAULT_CELL_PIXEL_SIZE`] fallback, always with `scale=1`.
+fn handle_iterm2_report_cell_size(core: &mut TerminalCore) {
+    let (width, height) = core
+        .osc_data
+        .cell_pixel_size()
+        .unwrap_or(DEFAULT_CELL_PIXEL_SIZE);
+    let response = format!("\x1b]1337;ReportCellSize={height};{width};1\x1b\\");
+    core.meta.pending_responses.push(response.into_bytes());
 }
 
 /// OSC 1337 `CurrentDirectory=<path>` — set cwd like OSC 7 (no host).

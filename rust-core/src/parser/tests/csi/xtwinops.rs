@@ -11,6 +11,17 @@ fn test_xtwinops_op14_queues_pixel_size_response() {
     assert_single_pending_response_bytes(&term, b"\x1b[4;0;0t");
 }
 
+// ── XTWINOPS: CSI 16 t — cell size in pixels ─────────────────────────────────
+
+#[test]
+fn test_xtwinops_op16_queues_cell_pixel_size_response() {
+    // CSI 16 t reports cell size as `CSI 6 ; height ; width t`. The Emacs-hosted
+    // core owns no pixels, so it replies with the documented default 16;8.
+    let mut term = term!(24, 80);
+    term.advance(b"\x1b[16t");
+    assert_single_pending_response_text(&term, "\x1b[6;16;8t");
+}
+
 // ── XTWINOPS: CSI 18 t — rows×cols query ─────────────────────────────────────
 
 #[test]

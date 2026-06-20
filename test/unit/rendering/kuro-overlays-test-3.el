@@ -279,6 +279,83 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
   (should (and (integerp kuro--blink-fast-frames-cached) (> kuro--blink-fast-frames-cached 0)))
   (should (and (integerp kuro--blink-slow-frames-cached) (> kuro--blink-slow-frames-cached 0))))
 
+;;; Group 30: Unicode-placeholder (U+10EEEE) fit-to-rectangle tiling
+
+(defmacro kuro-overlays-test--with-placeholder-stubs (&rest body)
+  "Run BODY with image fetch/decode/size stubbed for placeholder tiling.
+`kuro--get-image' returns a fixed base64 string, `kuro--decode-png-image'
+returns a fake image object, and `image-size' reports a 100x100 pixel image
+so slice math is deterministic without a real PNG decoder."
+  `(cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) "ZmFrZQ=="))
+             ((symbol-function 'kuro--decode-png-image)
+              (lambda (_b64) '(image :type png :fake t)))
+             ((symbol-function 'image-size) (lambda (_img &optional _pixels) '(100 . 100))))
+     ,@body))
+
+(ert-deftest kuro-overlays-placeholder-region-creates-one-tile-overlay-per-cell ()
+  "A 2x2 placeholder region yields one slice-display overlay per cell (4 total).
+Each overlay carries a `kuro-placeholder' marker and a `display' property whose
+car is a `(slice X Y W H)' rectangle, so each cell shows its TILE of the image."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil))
+      (insert "ab\ncd\n")
+      (kuro-overlays-test--with-placeholder-stubs
+       ;; (IMAGE-ID PLACEMENT SROW SCOL CCOLS CROWS IMG-ROW IMG-COL IMG-ROWS IMG-COLS)
+       (kuro--render-placeholder-regions '((7 0 0 0 2 2 0 0 2 2)))
+       (should (= (length kuro--placeholder-overlays) 4))
+       (dolist (ov kuro--placeholder-overlays)
+         (should (overlay-get ov 'kuro-placeholder))
+         (let ((disp (overlay-get ov 'display)))
+           (should (consp disp))
+           (should (eq (car (car disp)) 'slice))
+           ;; tile size = 100px / 2 = 50px in both axes
+           (should (= (nth 3 (car disp)) 50))
+           (should (= (nth 4 (car disp)) 50))))))))
+
+(ert-deftest kuro-overlays-placeholder-tile-origin-offsets-slice-coordinates ()
+  "Tile (IMG-ROW+dr, IMG-COL+dc) selects the matching pixel sub-rectangle.
+A region whose tile origin is (1,1) on a 2x2 grid must slice the bottom-right
+quadrant for its single cell: x=y=50 on a 100x100 image."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil))
+      (insert "ab\ncd\n")
+      (kuro-overlays-test--with-placeholder-stubs
+       (kuro--render-placeholder-regions '((7 0 1 1 1 1 1 1 2 2)))
+       (should (= (length kuro--placeholder-overlays) 1))
+       (let ((slice (car (overlay-get (car kuro--placeholder-overlays) 'display))))
+         (should (equal slice '(slice 50 50 50 50))))))))
+
+(ert-deftest kuro-overlays-placeholder-empty-poll-creates-no-overlays ()
+  "An empty region list clears stale tiles and creates no new overlays."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil))
+      (insert "ab\ncd\n")
+      (kuro-overlays-test--with-placeholder-stubs
+       (kuro--render-placeholder-regions nil)
+       (should (null kuro--placeholder-overlays))))))
+
+(ert-deftest kuro-overlays-placeholder-re-render-clears-previous-tiles ()
+  "Re-rendering deletes the prior frame's placeholder overlays before rebuilding.
+The list is re-derived each frame, so two renders of a single-cell region must
+leave exactly one live overlay, not accumulate."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil))
+      (insert "ab\ncd\n")
+      (kuro-overlays-test--with-placeholder-stubs
+       (kuro--render-placeholder-regions '((7 0 0 0 1 1 0 0 1 1)))
+       (kuro--render-placeholder-regions '((7 0 0 0 1 1 0 0 1 1)))
+       (should (= (length kuro--placeholder-overlays) 1))
+       (should (overlay-buffer (car kuro--placeholder-overlays)))))))
+
+(ert-deftest kuro-overlays-placeholder-missing-image-creates-no-overlays ()
+  "A region whose image is missing (kuro--get-image returns nil) creates nothing."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil))
+      (insert "ab\ncd\n")
+      (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) nil)))
+        (kuro--render-placeholder-regions '((7 0 0 0 2 2 0 0 2 2)))
+        (should (null kuro--placeholder-overlays))))))
+
 (provide 'kuro-overlays-test-3)
 
 ;;; kuro-overlays-test-3.el ends here

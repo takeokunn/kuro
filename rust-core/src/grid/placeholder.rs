@@ -156,6 +156,43 @@ pub struct PlaceholderInfo {
     pub img_col: u32,
 }
 
+/// A contiguous rectangular run of Unicode-placeholder cells that all reference
+/// the *same* image and placement, with a regular tile grid — i.e. one
+/// renderable image region.
+///
+/// This is the descriptor surfaced to Emacs so it can fetch the referenced PNG
+/// once and slice it into per-cell tiles ("fit-to-rectangle"). It records where
+/// on screen the placeholder rectangle sits ([`screen_row`](Self::screen_row) /
+/// [`screen_col`](Self::screen_col)), its size in cells
+/// ([`cell_cols`](Self::cell_cols) × [`cell_rows`](Self::cell_rows)), the tile
+/// origin within the image grid ([`img_row`](Self::img_row) /
+/// [`img_col`](Self::img_col)), and the full image-grid extent the rectangle
+/// maps to ([`img_rows`](Self::img_rows) × [`img_cols`](Self::img_cols)) so
+/// Emacs can compute each cell's `(slice X Y W H)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceholderRegion {
+    /// Referenced image id (shared by every cell in the region).
+    pub image_id: u32,
+    /// Placement id shared by the region (`0` when no explicit placement).
+    pub placement_id: u32,
+    /// Top-left screen row of the rectangle (0-based).
+    pub screen_row: usize,
+    /// Top-left screen column of the rectangle (0-based).
+    pub screen_col: usize,
+    /// Width of the rectangle in terminal columns.
+    pub cell_cols: usize,
+    /// Height of the rectangle in terminal rows.
+    pub cell_rows: usize,
+    /// Image-grid row of the top-left tile (from the 1st diacritic).
+    pub img_row: u32,
+    /// Image-grid column of the top-left tile (from the 2nd diacritic).
+    pub img_col: u32,
+    /// Number of distinct image-grid rows the rectangle spans.
+    pub img_rows: u32,
+    /// Number of distinct image-grid columns the rectangle spans.
+    pub img_cols: u32,
+}
+
 /// Decode a placeholder cell from its grapheme and colors.
 ///
 /// `grapheme` is the cell's full grapheme cluster: the base [`PLACEHOLDER_CHAR`]

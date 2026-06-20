@@ -251,6 +251,7 @@ that reads terminal mode variables set by `kuro--apply-terminal-modes'."
                     (kuro--poll-prompt-mark-updates)
                     (kuro--poll-eval-command-updates)
                     (kuro--poll-image-events)
+                    (kuro--poll-placeholder-events)
                     (kuro--apply-hyperlink-ranges)
                     (kuro--apply-text-size-ranges)
                     (kuro--check-process-exit)))))

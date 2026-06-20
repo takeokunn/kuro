@@ -81,6 +81,7 @@ and `insert' for speed (no echo-area overhead)."
 (declare-function kuro-core-send-key                "ext:kuro-core" (session-id bytes))
 (declare-function kuro-core-poll-updates-with-faces "ext:kuro-core" (session-id))
 (declare-function kuro-core-resize                  "ext:kuro-core" (session-id rows cols))
+(declare-function kuro-core-set-cell-pixel-size     "ext:kuro-core" (session-id width height))
 (declare-function kuro-core-shutdown                "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-cursor              "ext:kuro-core" (session-id))
 (declare-function kuro-core-is-process-alive        "ext:kuro-core" (session-id))
@@ -124,7 +125,10 @@ Returns the session ID (a positive integer) on success, nil otherwise."
              (result (kuro-core-init command (or shell-args nil) r c)))
         (when result
           (setq kuro--session-id result)
-          (setq kuro--initialized t))
+          (setq kuro--initialized t)
+          ;; Push real cell pixel metrics so OSC 1337 ReportCellSize replies
+          ;; reflect this frame's font; guarded for headless/older modules.
+          (kuro--push-cell-pixel-size-from-font))
         result)
     (error
      (message "Kuro initialization error: %s" err)
@@ -165,6 +169,24 @@ grid columns to buffer character offsets.  FACE-RANGES is a list of
   "Resize the terminal to ROWS x COLS.
 Returns t if successful, nil otherwise."
   (kuro--call nil (kuro-core-resize kuro--session-id rows cols)))
+
+(defun kuro--set-cell-pixel-size (width height)
+  "Report the terminal cell pixel size as WIDTH x HEIGHT points to the core.
+Used to answer iTerm2 OSC 1337 `ReportCellSize' queries with real font
+metrics.  No-op when the `kuro-core-set-cell-pixel-size' FFI function is
+unavailable (older module).  Returns t if successful, nil otherwise."
+  (when (fboundp 'kuro-core-set-cell-pixel-size)
+    (kuro--call nil
+      (kuro-core-set-cell-pixel-size kuro--session-id width height))))
+
+(defun kuro--push-cell-pixel-size-from-font ()
+  "Push the current frame font cell metrics to the core.
+Reads `default-font-width' / `default-font-height' (guarded by `fboundp')
+and forwards them via `kuro--set-cell-pixel-size'.  Safe to call when the
+metrics functions are unavailable (returns nil)."
+  (when (and (fboundp 'default-font-width)
+             (fboundp 'default-font-height))
+    (kuro--set-cell-pixel-size (default-font-width) (default-font-height))))
 
 ;;; Process state
 

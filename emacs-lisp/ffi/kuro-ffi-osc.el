@@ -27,6 +27,7 @@
 (declare-function kuro-core-poll-prompt-marks        "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-image                "ext:kuro-core" (session-id image-id))
 (declare-function kuro-core-poll-image-notifications "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-placeholder-placements "ext:kuro-core" (session-id))
 (declare-function kuro-core-consume-scroll-events    "ext:kuro-core" (session-id))
 (declare-function kuro-core-has-pending-output       "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-palette-updates      "ext:kuro-core" (session-id))
@@ -96,6 +97,20 @@ OSC 133 extras (semantic prompt extensions).")
   "Poll for pending Kitty Graphics image placement notifications.
 Returns a list of (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT) descriptors,
 or nil if none are pending.")
+
+ (kuro--poll-placeholder-placements
+  kuro-core-poll-placeholder-placements nil
+  "Poll for Kitty Unicode-placeholder (U+10EEEE) image regions on the grid.
+Returns a list of placeholder-region descriptors, each of the form
+\(IMAGE-ID PLACEMENT-ID SCREEN-ROW SCREEN-COL CELL-COLS CELL-ROWS
+IMG-ROW IMG-COL IMG-ROWS IMG-COLS), or nil when no placeholders are present.
+SCREEN-ROW/SCREEN-COL are the 0-based top-left of the placeholder rectangle,
+CELL-COLS x CELL-ROWS its size in terminal cells, IMG-ROW/IMG-COL the tile
+origin within the image grid, and IMG-ROWS x IMG-COLS the total image-grid
+extent the rectangle covers — so each cell renders its TILE of the image
+\(fit-to-rectangle).  Unlike `kuro--poll-image-notifications', this is a
+non-draining query re-derived from the grid each frame, so the placeholder
+image survives scrolling and reflow like the underlying text.")
 
  (kuro--consume-scroll-events
   kuro-core-consume-scroll-events nil

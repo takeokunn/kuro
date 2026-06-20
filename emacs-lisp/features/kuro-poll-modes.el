@@ -45,6 +45,7 @@
 (declare-function kuro--apply-palette-updates     "kuro-faces"      ())
 (declare-function kuro--apply-default-colors      "kuro-faces"      ())
 (declare-function kuro--render-image-notification "kuro-overlays"   (notif))
+(declare-function kuro--render-placeholder-regions "kuro-overlays"  (regions))
 (declare-function kuro--update-prompt-positions   "kuro-navigation" (marks positions max-count))
 (declare-function notifications-notify            "notifications"   (&rest params))
 (declare-function kuro--poll-notifications        "kuro-ffi-osc"    ())
@@ -83,6 +84,7 @@
       kuro--poll-prompt-mark-updates
       kuro--poll-eval-command-updates
       kuro--poll-image-events
+      kuro--poll-placeholder-events
       kuro--apply-hyperlink-ranges
       kuro--apply-text-size-ranges
       kuro--check-process-exit)
@@ -326,6 +328,15 @@ MARKS is the OSC 133 marker list to inspect."
   "Render pending Kitty Graphics image notifications."
   (dolist (notif (kuro--poll-image-notifications))
     (kuro--render-image-notification notif)))
+
+(defun kuro--poll-placeholder-events ()
+  "Render Kitty Unicode-placeholder (U+10EEEE) image regions on the grid.
+Polls `kuro--poll-placeholder-placements' (a non-draining query re-derived
+from the grid each frame) and hands the region descriptors to
+`kuro--render-placeholder-regions', which clears and re-attaches per-cell
+image tiles.  Skips the work entirely when no placeholders are present."
+  (let ((regions (kuro--poll-placeholder-placements)))
+    (kuro--render-placeholder-regions regions)))
 
 (defun kuro--check-process-exit ()
   "Kill the buffer when `kuro-kill-buffer-on-exit' is set and process exited."

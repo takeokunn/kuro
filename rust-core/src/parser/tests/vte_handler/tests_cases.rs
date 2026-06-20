@@ -291,3 +291,9 @@ mod osc;
 
 #[path = "csi_misc.rs"]
 mod csi_misc;
+
+#[path = "grapheme_cluster.rs"]
+mod grapheme_cluster;
+
+#[path = "grapheme_cluster_adversarial.rs"]
+mod grapheme_cluster_adversarial;

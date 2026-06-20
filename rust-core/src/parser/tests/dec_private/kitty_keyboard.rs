@@ -248,6 +248,7 @@ fn test_apply_mode_round_trip_all_bool_modes() {
         (1049, false), // alternate_screen default=false
         (2004, false), // bracketed_paste default=false
         (2026, false), // synchronized_output default=false
+        (2027, false), // grapheme_clustering default=false
     ];
     for &(mode, default_value) in bool_modes {
         let mut modes = DecModes::new();

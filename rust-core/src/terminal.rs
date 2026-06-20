@@ -64,6 +64,16 @@ pub struct TerminalCore {
     pub(crate) last_printed_char: Option<char>,
     /// SGR attributes stack for XTPUSHSGR (CSI # {) / XTPOPSGR (CSI # }).
     pub(crate) sgr_stack: Vec<types::cell::SgrAttributes>,
+    /// Grapheme-clustering (DEC mode 2027) state: a ZWJ (U+200D) was just
+    /// attached to the previous cell, so the NEXT printable char joins that
+    /// cluster instead of advancing the cursor. Only consulted when
+    /// `dec_modes.grapheme_clustering` is set; reset on any control/cursor/edit.
+    pub(crate) grapheme_join_pending: bool,
+    /// Grapheme-clustering (DEC mode 2027) state: a lone regional-indicator
+    /// (U+1F1E6..=U+1F1FF) is pending in the previous cell, awaiting a second
+    /// RI to form a flag. Only consulted when `dec_modes.grapheme_clustering`
+    /// is set; reset on any non-RI print / control / cursor move / edit.
+    pub(crate) regional_indicator_pending: bool,
 }
 
 impl TerminalCore {
@@ -94,6 +104,8 @@ impl TerminalCore {
             saved_gl_is_g1: None,
             last_printed_char: None,
             sgr_stack: Vec::new(),
+            grapheme_join_pending: false,
+            regional_indicator_pending: false,
         }
     }
 

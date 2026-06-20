@@ -59,6 +59,13 @@ pub struct DecModes {
     /// Synchronized output (?2026) - When set, screen updates are batched
     pub synchronized_output: bool,
 
+    /// Grapheme clustering (?2027) — when set, the print path coalesces ZWJ
+    /// emoji sequences, variation selectors, and regional-indicator flag pairs
+    /// into a single grapheme cluster occupying one logical cell run. Default
+    /// OFF so existing byte-for-byte print behavior is unchanged.
+    /// See: <https://github.com/contour-terminal/terminal-unicode-core>
+    pub(crate) grapheme_clustering: bool,
+
     /// DEC mode 2031: color scheme change notifications (Contour/Ghostty).
     /// When enabled, terminal proactively emits CSI ? 997 ; Ps n on theme change.
     /// See: <https://contour-terminal.org/vt-extensions/color-palette-update-notifications/>
@@ -144,6 +151,7 @@ impl DecModes {
             origin_mode: false,
             focus_events: false,
             synchronized_output: false,
+            grapheme_clustering: false,
             color_scheme_notifications: false,
             cursor_shape: CursorShape::BlinkingBlock,
             keyboard_flags: 0,
@@ -241,6 +249,7 @@ impl DecModes {
             47 | 1047 | 1049 => self.alternate_screen = value,
             2004 => self.bracketed_paste = value,
             2026 => self.synchronized_output = value,
+            2027 => self.grapheme_clustering = value,
             2031 => self.color_scheme_notifications = value,
             2048 => self.resize_in_band = value,
             // Mouse tracking: set stores the mode number; reset clears to 0.
@@ -295,6 +304,7 @@ impl DecModes {
             1006 => Some(self.mouse_sgr),
             1016 => Some(self.mouse_pixel),
             2026 => Some(self.synchronized_output),
+            2027 => Some(self.grapheme_clustering),
             2031 => Some(self.color_scheme_notifications),
             2048 => Some(self.resize_in_band),
             _ => None,

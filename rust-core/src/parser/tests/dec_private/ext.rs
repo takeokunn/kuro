@@ -64,7 +64,7 @@ proptest! {
         mode in proptest::prop_oneof![
             Just(1u16), Just(6), Just(7), Just(25),
             Just(1000), Just(1002), Just(1003), Just(1004),
-            Just(1006), Just(1016), Just(1049), Just(2004), Just(2026),
+            Just(1006), Just(1016), Just(1049), Just(2004), Just(2026), Just(2027),
         ]
     ) {
         let mut modes = DecModes::new();

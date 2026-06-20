@@ -25,6 +25,16 @@ fn combining_attach_position(
     cursor: crate::types::cursor::Cursor,
     cols: usize,
 ) -> Option<(usize, usize)> {
+    // When a deferred wrap is pending the most-recently-printed cell is the
+    // cell the cursor is still sitting ON (the last column) — the cursor did
+    // NOT advance past it. A combining scalar or grapheme-cluster continuation
+    // must therefore attach to `(row, col)` itself, not `(row, col - 1)`.
+    // Without this guard a combining accent / ZWJ / regional-indicator merge
+    // lands on the wrong (previous) glyph and, for flag pairs, destroys the
+    // freshly-printed regional indicator at the last column.
+    if cursor.pending_wrap {
+        return Some((cursor.row, cursor.col));
+    }
     if cursor.col > 0 {
         Some((cursor.row, cursor.col - 1))
     } else if cursor.row > 0 {
@@ -56,12 +66,27 @@ impl vte::Perform for TerminalCore {
 
         let c = self.translate_print_char(c);
         if self.buffer_ascii_print(c) {
+            // ASCII printables are ordinary advancing prints: a ZWJ-join or
+            // regional-indicator pairing can never continue through one, so a
+            // buffered ASCII char must break any pending grapheme cluster.
+            if self.dec_modes.grapheme_clustering {
+                self.clear_grapheme_cluster_state();
+            }
             return;
         }
 
         self.flush_print_buf();
 
         let width = UnicodeWidthChar::width(c);
+
+        // Grapheme clustering (DEC mode 2027): coalesce ZWJ sequences and
+        // regional-indicator flag pairs onto the previous cell. Only consulted
+        // when the mode is enabled — a single cheap bool keeps the default path
+        // byte-for-byte unchanged.
+        if self.dec_modes.grapheme_clustering && self.handle_grapheme_clustering(c, width) {
+            return;
+        }
+
         if self.handle_combining_char(c, width) {
             return;
         }
@@ -152,6 +177,145 @@ impl TerminalCore {
             return true;
         }
         false
+    }
+
+    /// Clear all DEC mode 2027 grapheme-clustering continuation state.
+    ///
+    /// Called whenever a non-clustering event interrupts a cluster: a control
+    /// char, cursor movement, line wrap, CR/LF, screen edit, or an ordinary
+    /// advancing print. This prevents a stray ZWJ or lone regional indicator
+    /// from corrupting an unrelated cell printed later.
+    #[inline]
+    pub(crate) fn clear_grapheme_cluster_state(&mut self) {
+        self.grapheme_join_pending = false;
+        self.regional_indicator_pending = false;
+    }
+
+    /// True for Unicode regional indicator symbols (U+1F1E6..=U+1F1FF) — the
+    /// codepoints that pair up to render national flag emoji.
+    #[inline]
+    const fn is_regional_indicator(c: char) -> bool {
+        matches!(c, '\u{1F1E6}'..='\u{1F1FF}')
+    }
+
+    /// DEC mode 2027 grapheme clustering for the print path.
+    ///
+    /// Returns `true` when `c` was consumed as part of a cluster (caller must
+    /// then skip the normal print). Returns `false` to fall through to the
+    /// ordinary combining/print path. Only invoked when
+    /// `dec_modes.grapheme_clustering` is set.
+    ///
+    /// Handles three cases:
+    /// 1. **ZWJ continuation** — a printable (width ≥ 1) arriving while a ZWJ
+    ///    join is pending is appended to the previous cell's cluster instead of
+    ///    advancing the cursor (family/profession emoji).
+    /// 2. **ZWJ (U+200D)** — attaches to the previous cell (width 0) and arms
+    ///    the join-pending flag so the next printable continues the cluster.
+    /// 3. **Regional indicators** — a second RI joins the lone RI already in the
+    ///    previous cell to form one width-2 flag cluster; a first RI prints
+    ///    normally and arms the RI-pending flag.
+    fn handle_grapheme_clustering(&mut self, c: char, width: Option<usize>) -> bool {
+        // Case 1: continue a ZWJ-joined cluster with the next printable char.
+        if self.grapheme_join_pending && width.unwrap_or(0) >= 1 {
+            self.grapheme_join_pending = false;
+            self.regional_indicator_pending = false;
+            if self.append_to_previous_cluster(c) {
+                return true;
+            }
+            // No previous cell (line start): fall through to a normal print.
+            return false;
+        }
+
+        // Case 2: a ZWJ (U+200D, width 0) — attach to the previous cell and arm
+        // the join so the following printable extends this cluster.
+        if c == '\u{200D}' {
+            self.regional_indicator_pending = false;
+            if self.append_to_previous_cluster(c) {
+                self.grapheme_join_pending = true;
+                return true;
+            }
+            // No previous cell: a stray ZWJ at col 0 is dropped harmlessly.
+            return true;
+        }
+
+        // Case 3: regional indicators (flags).
+        if Self::is_regional_indicator(c) {
+            if self.regional_indicator_pending {
+                // Second RI: fold into the lone RI's cell as one width-2 flag.
+                self.regional_indicator_pending = false;
+                if self.merge_regional_indicator(c) {
+                    return true;
+                }
+                // No previous cell — print this RI as a fresh first indicator.
+            }
+            // First RI: print normally, then arm the pairing flag.
+            self.regional_indicator_pending = true;
+            self.grapheme_join_pending = false;
+            let pre_cursor = *self.screen.cursor();
+            if self.dec_modes.insert_mode {
+                self.screen.insert_chars(1, self.current_attrs);
+            }
+            self.screen
+                .print(c, self.current_attrs, self.dec_modes.auto_wrap);
+            self.last_printed_char = Some(c);
+            self.stamp_printed_hyperlink(pre_cursor, width.unwrap_or(1));
+            return true;
+        }
+
+        // Any other character: not a cluster continuation. Break pending state
+        // and let the normal combining/print path handle it.
+        self.clear_grapheme_cluster_state();
+        false
+    }
+
+    /// Append `c` to the grapheme cluster of the cell preceding the cursor
+    /// without advancing the cursor. Returns `false` when there is no previous
+    /// cell (cursor at line start / origin), so the caller can fall back.
+    ///
+    /// When the preceding cell is a [`CellWidth::Wide`] continuation (the second
+    /// half of a wide grapheme), the join lands on the wide base cell one column
+    /// further back so the cluster scalars stay on a single logical cell.
+    #[inline]
+    fn append_to_previous_cluster(&mut self, c: char) -> bool {
+        let cursor = *self.screen.cursor();
+        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) else {
+            return false;
+        };
+        let base_col = self.cluster_base_col(row, col);
+        self.screen.attach_combining(row, base_col, c);
+        true
+    }
+
+    /// Resolve the base column of a (possibly wide) grapheme at `(row, col)`.
+    ///
+    /// If `(row, col)` is the trailing [`CellWidth::Wide`] continuation cell of
+    /// a wide grapheme, returns `col - 1` (the base cell holding the scalars);
+    /// otherwise returns `col` unchanged.
+    #[inline]
+    fn cluster_base_col(&self, row: usize, col: usize) -> usize {
+        if col > 0
+            && self
+                .screen
+                .get_cell(row, col)
+                .is_some_and(|cell| cell.width == crate::types::cell::CellWidth::Wide)
+        {
+            col - 1
+        } else {
+            col
+        }
+    }
+
+    /// Fold a second regional indicator into the previous (lone-RI) cell,
+    /// promoting that cell to a width-2 flag cluster and reserving the trailing
+    /// continuation cell. Returns `false` when there is no previous cell.
+    #[inline]
+    fn merge_regional_indicator(&mut self, c: char) -> bool {
+        let cursor = *self.screen.cursor();
+        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) else {
+            return false;
+        };
+        self.screen.merge_flag_pair(row, col, c);
+        true
     }
 
     #[inline]
@@ -245,6 +409,15 @@ impl TerminalCore {
     #[inline]
     fn prepare_vte_callback(&mut self, ground: bool) {
         self.flush_print_buf();
+        // DEC mode 2027: any non-print VTE callback (control char, CSI cursor
+        // move, OSC, ESC, DCS, screen edit) interrupts a grapheme cluster. Clear
+        // the continuation state so a stray ZWJ or lone RI cannot reach forward
+        // and corrupt a later, unrelated cell.
+        if self.dec_modes.grapheme_clustering
+            && (self.grapheme_join_pending || self.regional_indicator_pending)
+        {
+            self.clear_grapheme_cluster_state();
+        }
         self.note_vte_callback(ground);
     }
 }

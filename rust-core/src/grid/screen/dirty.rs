@@ -16,6 +16,41 @@ impl Screen {
         });
     }
 
+    /// Merge a second regional indicator into the cell at (row, col), forming a
+    /// single width-2 flag cluster (DEC mode 2027 grapheme clustering).
+    ///
+    /// `(row, col)` holds the first regional indicator (printed as a normal
+    /// width-1 cell, so the cursor is currently one column to its right). This:
+    /// 1. appends `c` to that cell's grapheme cluster,
+    /// 2. promotes the cell to [`CellWidth::Full`],
+    /// 3. installs a [`CellWidth::Wide`] continuation in the trailing cell, and
+    /// 4. advances the cursor one column so the flag occupies two cells total.
+    ///
+    /// Marks the affected line dirty.
+    pub fn merge_flag_pair(&mut self, row: usize, col: usize, c: char) {
+        use crate::types::cell::{Cell, CellWidth};
+
+        if let Some(cell) = self.get_cell_mut(row, col) {
+            cell.push_combining(c);
+            cell.width = CellWidth::Full;
+        }
+        let cols = self.cols() as usize;
+        if col + 1 < cols {
+            if let Some(trailing) = self.get_cell_mut(row, col + 1) {
+                *trailing = Cell {
+                    width: CellWidth::Wide,
+                    ..Cell::default()
+                };
+            }
+        }
+        self.with_active_screen_mut(|screen| {
+            screen.dirty_set.insert(row);
+            // Advance past the trailing continuation cell so the next print
+            // lands beyond the two-cell flag. Clamp to the last column.
+            screen.cursor.col = (screen.cursor.col + 1).min(cols.saturating_sub(1));
+        });
+    }
+
     /// Mark rows in the range `lo..hi` (half-open) as dirty.
     ///
     /// This method is defined on [`Screen`] (the inner active screen), not on the

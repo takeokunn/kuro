@@ -98,8 +98,9 @@
            (place-called nil))
       (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
                 ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img))
+                ((symbol-function 'kuro--maybe-start-animation) #'ignore)
                 ((symbol-function 'kuro--place-image-overlay)
-                 (lambda (_img _row _col _w) (setq place-called t))))
+                 (lambda (_img _row _col _w &optional _id) (setq place-called t))))
         (kuro--render-image-notification '(1 0 0 2 1))
         (should place-called)))))
 
@@ -111,8 +112,9 @@
            (received-width nil))
       (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
                 ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img))
+                ((symbol-function 'kuro--maybe-start-animation) #'ignore)
                 ((symbol-function 'kuro--place-image-overlay)
-                 (lambda (_img _row _col w) (setq received-width w))))
+                 (lambda (_img _row _col w &optional _id) (setq received-width w))))
         (kuro--render-image-notification '(1 0 0 0 1))
         (should (= received-width 1))))))
 
@@ -279,6 +281,93 @@
   (let ((exp (macroexpand-1
               '(kuro--register-blink-overlay ov blink-type row))))
     (should (eq (car exp) 'progn))))
+
+;;; Group 27: Kitty animation playback (a=f frames + a=a control)
+
+(ert-deftest kuro-overlays-animation-clamp-gap-uses-default-for-zero ()
+  "kuro--animation-clamp-gap falls back to the default gap when GAP-MS is 0."
+  (should (= (kuro--animation-clamp-gap 0)
+             (/ kuro--animation-default-gap-ms 1000.0))))
+
+(ert-deftest kuro-overlays-animation-clamp-gap-floors-tiny-values ()
+  "kuro--animation-clamp-gap floors sub-minimum gaps at the minimum."
+  (should (= (kuro--animation-clamp-gap 1)
+             (/ kuro--animation-min-gap-ms 1000.0))))
+
+(ert-deftest kuro-overlays-animation-clamp-gap-passes-through-large ()
+  "kuro--animation-clamp-gap returns large gaps unchanged (in seconds)."
+  (should (= (kuro--animation-clamp-gap 500) 0.5)))
+
+(ert-deftest kuro-overlays-maybe-start-animation-noop-for-still-image ()
+  "kuro--maybe-start-animation does nothing for a single-frame still image."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--animation-timers (make-hash-table :test 'eql)))
+      (cl-letf (((symbol-function 'kuro--image-animation-state)
+                 (lambda (_id) '(t 1 0)))
+                ((symbol-function 'kuro--image-frame-count) (lambda (_id) 1)))
+        (kuro--maybe-start-animation 7)
+        (should (= (hash-table-count kuro--animation-timers) 0))))))
+
+(ert-deftest kuro-overlays-maybe-start-animation-noop-when-paused ()
+  "kuro--maybe-start-animation does nothing when playback is not active."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--animation-timers (make-hash-table :test 'eql)))
+      (cl-letf (((symbol-function 'kuro--image-animation-state)
+                 (lambda (_id) '(nil 1 0)))
+                ((symbol-function 'kuro--image-frame-count) (lambda (_id) 3)))
+        (kuro--maybe-start-animation 7)
+        (should (= (hash-table-count kuro--animation-timers) 0))))))
+
+(ert-deftest kuro-overlays-animation-advance-updates-overlay-and-reschedules ()
+  "kuro--animation-advance swaps the overlay display and arms a follow-up timer."
+  (kuro-overlays-test--with-buffer
+    (insert "line0\n")
+    (let ((kuro--animation-timers (make-hash-table :test 'eql))
+          (frame-shown nil))
+      ;; Place a tagged overlay for image-id 5.
+      (let ((ov (make-overlay 1 2)))
+        (overlay-put ov 'kuro-image t)
+        (overlay-put ov 'kuro-image-id 5)
+        (push ov kuro--image-overlays))
+      (cl-letf (((symbol-function 'kuro--image-animation-state)
+                 (lambda (_id) '(t 1 0)))
+                ((symbol-function 'kuro--image-frame-count) (lambda (_id) 2))
+                ((symbol-function 'kuro--image-frame-png)
+                 (lambda (_id idx) (setq frame-shown idx) "b64data"))
+                ((symbol-function 'kuro--image-frame-gap) (lambda (_id _idx) 30))
+                ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img)))
+        (unwind-protect
+            (progn
+              (kuro--animation-advance (current-buffer) 5 1)
+              ;; Frame index 1 was rendered onto the overlay.
+              (should (= frame-shown 1))
+              (should (eq (overlay-get (car kuro--image-overlays) 'display) 'fake-img))
+              ;; A timer was scheduled for the next tick.
+              (should (= (hash-table-count kuro--animation-timers) 1)))
+          (kuro--clear-all-animations))))))
+
+(ert-deftest kuro-overlays-animation-advance-stops-when-not-playing ()
+  "kuro--animation-advance schedules nothing once playback has stopped."
+  (kuro-overlays-test--with-buffer
+    (insert "line0\n")
+    (let ((kuro--animation-timers (make-hash-table :test 'eql)))
+      (let ((ov (make-overlay 1 2)))
+        (overlay-put ov 'kuro-image-id 5)
+        (push ov kuro--image-overlays))
+      (cl-letf (((symbol-function 'kuro--image-animation-state)
+                 (lambda (_id) '(nil 1 0)))
+                ((symbol-function 'kuro--image-frame-count) (lambda (_id) 3)))
+        (kuro--animation-advance (current-buffer) 5 0)
+        (should (= (hash-table-count kuro--animation-timers) 0))))))
+
+(ert-deftest kuro-overlays-clear-all-animations-cancels-timers ()
+  "kuro--clear-all-animations cancels and forgets every running timer."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--animation-timers (make-hash-table :test 'eql)))
+      (puthash 1 (run-with-timer 100 nil #'ignore) kuro--animation-timers)
+      (puthash 2 (run-with-timer 100 nil #'ignore) kuro--animation-timers)
+      (kuro--clear-all-animations)
+      (should (= (hash-table-count kuro--animation-timers) 0)))))
 
 (provide 'kuro-overlays-test-2)
 

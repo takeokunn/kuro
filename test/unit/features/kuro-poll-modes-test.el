@@ -154,9 +154,9 @@
     (let* ((calls nil)
            (kuro-notifications-enabled t)
            (kuro-notification-function
-            (lambda (title body) (push (cons title body) calls))))
+            (lambda (title body &optional _id _report) (push (cons title body) calls))))
       (cl-letf (((symbol-function 'kuro--poll-notifications)
-                 (lambda () '(("Build" . "done") (nil . "ping")))))
+                 (lambda () '(("Build" "done" nil nil) (nil "ping" nil nil)))))
         (kuro--handle-notifications)
         (should (equal (nreverse calls)
                        '(("Build" . "done") (nil . "ping"))))))))
@@ -167,9 +167,9 @@
     (let ((displayed nil)
           (drained nil)
           (kuro-notifications-enabled nil)
-          (kuro-notification-function (lambda (_t _b) (setq displayed t))))
+          (kuro-notification-function (lambda (_t _b &optional _id _report) (setq displayed t))))
       (cl-letf (((symbol-function 'kuro--poll-notifications)
-                 (lambda () (setq drained t) '((nil . "ignored")))))
+                 (lambda () (setq drained t) '((nil "ignored" nil nil)))))
         (kuro--handle-notifications)
         (should drained)         ; always drains so the queue cannot grow
         (should-not displayed))))) ; but nothing is shown
@@ -179,7 +179,7 @@
   (kuro-poll-test--with-buffer
     (let ((displayed nil)
           (kuro-notifications-enabled t)
-          (kuro-notification-function (lambda (_t _b) (setq displayed t))))
+          (kuro-notification-function (lambda (_t _b &optional _id _report) (setq displayed t))))
       (cl-letf (((symbol-function 'kuro--poll-notifications) (lambda () nil)))
         (kuro--handle-notifications)
         (should-not displayed)))))

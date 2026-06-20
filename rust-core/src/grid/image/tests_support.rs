@@ -5,30 +5,15 @@ const DEFAULT_DISPLAY_COLS: u32 = 10;
 const DEFAULT_DISPLAY_ROWS: u32 = 5;
 
 pub(crate) fn tiny_rgb(byte: u8) -> ImageData {
-    ImageData {
-        pixels: vec![byte, byte, byte],
-        format: ImageFormat::Rgb,
-        pixel_width: 1,
-        pixel_height: 1,
-    }
+    ImageData::new(vec![byte, byte, byte], ImageFormat::Rgb, 1, 1)
 }
 
 pub(crate) fn tiny_rgba(byte: u8) -> ImageData {
-    ImageData {
-        pixels: vec![byte, byte, byte, 0xFF],
-        format: ImageFormat::Rgba,
-        pixel_width: 1,
-        pixel_height: 1,
-    }
+    ImageData::new(vec![byte, byte, byte, 0xFF], ImageFormat::Rgba, 1, 1)
 }
 
 pub(crate) fn empty_rgb() -> ImageData {
-    ImageData {
-        pixels: Vec::new(),
-        format: ImageFormat::Rgb,
-        pixel_width: 0,
-        pixel_height: 0,
-    }
+    ImageData::new(Vec::new(), ImageFormat::Rgb, 0, 0)
 }
 
 pub(crate) fn placement(image_id: u32, row: usize, col: usize) -> ImagePlacement {

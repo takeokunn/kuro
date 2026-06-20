@@ -228,3 +228,128 @@ fn osc_99_payload_with_semicolons_is_rejoined() {
     assert_eq!(core.osc_data.notifications.len(), 1);
     assert_eq!(core.osc_data.notifications[0].body, "a;b;c");
 }
+
+// ── OSC 99 action round-trip (a=report / i=<id>) ────────────────────────────────
+
+/// INTENT: `a=report` sets the notification's report flag and `i=<id>` is parsed
+/// and surfaced on the finalized notification.
+#[test]
+fn osc_99_a_report_sets_report_flag_and_id() {
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;i=abc:a=report;Click me\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    let n = &core.osc_data.notifications[0];
+    assert_eq!(n.body, "Click me");
+    assert!(n.report, "a=report must set the report flag");
+    assert_eq!(n.id.as_deref(), Some("abc"));
+}
+
+/// INTENT: a notification without `a=report` has report=false (and a no-id
+/// notification has id=None).
+#[test]
+fn osc_99_without_report_has_report_false_and_no_id() {
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;;plain\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    let n = &core.osc_data.notifications[0];
+    assert!(!n.report, "no a=report must leave report=false");
+    assert_eq!(n.id, None, "no i= must leave id=None");
+}
+
+/// INTENT: `a=focus,report` enables report (comma-separated list); a leading `-`
+/// on `report` (`a=-report`) removes it.
+#[test]
+fn osc_99_a_actions_list_and_removal() {
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;i=1:a=focus,report;x\x07");
+    assert!(core.osc_data.notifications[0].report);
+
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;i=2:a=-report;y\x07");
+    assert!(!core.osc_data.notifications[0].report);
+}
+
+/// INTENT: a `report` flag set on any chunk (even a non-final one) carries
+/// through to the finalized notification.
+#[test]
+fn osc_99_report_flag_persists_across_chunks() {
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;i=9:d=0:a=report:p=title;T\x07");
+    core.advance(b"\x1b]99;i=9:d=1:p=body;B\x07");
+    assert_eq!(core.osc_data.notifications.len(), 1);
+    assert!(core.osc_data.notifications[0].report);
+    assert_eq!(core.osc_data.notifications[0].id.as_deref(), Some("9"));
+}
+
+/// INTENT: the response API pushes the exact `OSC 99 ; i=<id> ; <button> ST`
+/// bytes (BEL-terminated) onto pending responses for a button click.
+#[test]
+fn osc_99_response_button_pushes_exact_bytes() {
+    let mut core = make_core!();
+    core.push_notification_action_response("abc", Some(2), false);
+    assert_eq!(core.pending_responses().len(), 1);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=abc;2\x07");
+}
+
+/// INTENT: plain activation (no button) pushes `OSC 99 ; i=<id> ; ST` with an
+/// empty button field.
+#[test]
+fn osc_99_response_activation_pushes_empty_button() {
+    let mut core = make_core!();
+    core.push_notification_action_response("xy", None, false);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=xy;\x07");
+}
+
+/// INTENT: a close report (`c=1` workflow) pushes the `p=close` variant
+/// `OSC 99 ; i=<id> : p=close ; ST`.
+#[test]
+fn osc_99_response_close_pushes_p_close_variant() {
+    let mut core = make_core!();
+    core.push_notification_action_response("z", None, true);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=z:p=close;\x07");
+}
+
+/// INTENT (edge): an empty id still produces well-formed framing `i=;` — the
+/// app gets back an empty-id response rather than a malformed sequence.
+#[test]
+fn osc_99_response_empty_id_is_well_formed() {
+    let mut core = make_core!();
+    core.push_notification_action_response("", None, false);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=;\x07");
+}
+
+/// INTENT (edge): a button click on a close report combines both — `i=<id>:p=
+/// close` metadata AND the button number in the payload field.
+#[test]
+fn osc_99_response_close_with_button_combines_both() {
+    let mut core = make_core!();
+    core.push_notification_action_response("q", Some(5), true);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=q:p=close;5\x07");
+}
+
+/// INTENT (injection-safety doc): an id can only ever be a single colon-free,
+/// semicolon-free field because the OSC framing strips `;` and the metadata
+/// split strips `:`. We still confirm a benign id with safe punctuation
+/// round-trips verbatim, documenting that no escaping is performed (none is
+/// needed for parser-sourced ids).
+#[test]
+fn osc_99_response_id_with_safe_punctuation_round_trips() {
+    let mut core = make_core!();
+    core.push_notification_action_response("app-42_id.x", None, false);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=app-42_id.x;\x07");
+}
+
+/// INTENT (end-to-end): an OSC 99 with `i=ID:a=report` is parsed, the report
+/// flag is surfaced, and the host can then enqueue the matching action response
+/// — confirming the full report round-trip wiring.
+#[test]
+fn osc_99_report_then_action_response_round_trip() {
+    let mut core = make_core!();
+    core.advance(b"\x1b]99;i=ID7:a=report;notif\x07");
+    let n = &core.osc_data.notifications[0];
+    assert!(n.report);
+    assert_eq!(n.id.as_deref(), Some("ID7"));
+    // Host acts on it (button 1).
+    core.push_notification_action_response("ID7", Some(1), false);
+    assert_eq!(core.pending_responses()[0], b"\x1b]99;i=ID7;1\x07");
+}

@@ -10,6 +10,9 @@ use crate::parser::limits::MAX_CHUNK_DATA_BYTES;
 mod support;
 use support::{apply_kitty_param, build_command};
 
+#[path = "kitty_media.rs"]
+mod media;
+
 /// Post-decode image format (stored in `GraphicsStore`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -44,12 +47,22 @@ pub struct KittyParams {
     pub columns: Option<u32>,
     /// Display height in cells
     pub rows: Option<u32>,
-    /// Cell-internal X offset in pixels
+    /// Cell-internal X offset in pixels (key `X`); also frame "replace" flag for a=f
     pub x_offset: u32,
-    /// Cell-internal Y offset in pixels
+    /// Cell-internal Y offset in pixels (key `Y`); also frame bg color (RGBA u32) for a=f
     pub y_offset: u32,
     /// Delete sub-command (when action=d)
     pub delete_sub: Option<char>,
+    /// Frame composition: top-left X in pixels (key `x`, a=f)
+    pub frame_x: u32,
+    /// Frame composition: top-left Y in pixels (key `y`, a=f)
+    pub frame_y: u32,
+    /// Frame display gap in milliseconds (key `z`); negative encoded as i32 via wrapping
+    pub gap: Option<i32>,
+    /// Total bytes to read from a file/temp/shm source (key `S`, t=f/t/s only)
+    pub read_size: Option<u32>,
+    /// Starting byte offset for file/temp/shm reads (key `O`, t=f/t/s only)
+    pub read_offset: Option<u32>,
 }
 
 impl KittyParams {
@@ -112,6 +125,40 @@ pub enum KittyCommand {
     },
     /// Query terminal graphics capability (a=q)
     Query { image_id: Option<u32> },
+    /// Transmit an animation frame for an existing image (a=f)
+    Frame {
+        image_id: Option<u32>,
+        pixels: Vec<u8>,
+        format: ImageFormat,
+        /// Region top-left X in pixels (key `x`)
+        x: u32,
+        /// Region top-left Y in pixels (key `y`)
+        y: u32,
+        /// Region width in pixels (key `s`); 0 = full image width
+        width: u32,
+        /// Region height in pixels (key `v`); 0 = full image height
+        height: u32,
+        /// Background canvas: compose onto a copy of frame `c` (1-based; 0 = blank)
+        base_frame: Option<u32>,
+        /// Edit target: compose onto existing frame `r` (1-based) in place
+        edit_frame: Option<u32>,
+        /// Background fill color (RGBA u32, key `Y`) used when creating a new canvas
+        bg_color: u32,
+        /// Replace mode (key `X`=1): overwrite pixels instead of alpha-blending
+        replace: bool,
+        /// Frame display gap in milliseconds (key `z`)
+        gap: Option<i32>,
+    },
+    /// Animation playback control (a=a)
+    AnimationControl {
+        image_id: Option<u32>,
+        /// Playback state: 1=stop, 2=loading, 3=run/loop (key `s`)
+        state: Option<u32>,
+        /// Loop count (key `v`); 1 = infinite per kitty spec
+        loop_count: Option<u32>,
+        /// Set current frame (key `c`, 1-based)
+        current_frame: Option<u32>,
+    },
 }
 
 /// In-progress chunk accumulation state for multi-chunk transfers (m=1).
@@ -130,7 +177,9 @@ pub struct KittyChunkState {
 /// Returns a `KittyCommand` when the sequence is complete, or `None` if:
 /// - More chunks are expected (m=1)
 /// - The payload is malformed
-/// - The transmission type is not 'd' (direct) — file/shared-mem not supported
+/// - A file/temp/shm (`t=f`/`t`/`s`) reference fails a security guard
+///   (non-regular file, symlink, blocked prefix, oversized, missing). See
+///   [`media`] for the full validation model.
 pub fn process_apc_payload(
     payload: &[u8],
     chunk_state: &mut Option<KittyChunkState>,
@@ -154,16 +203,31 @@ fn finalize_apc_payload(
     b64_data: &[u8],
     chunk_state: &mut Option<KittyChunkState>,
 ) -> Option<(KittyParams, Vec<u8>)> {
-    if params.transmission.unwrap_or('d') != 'd' {
-        *chunk_state = None;
-        return None;
-    }
-
-    let decoded = decode_apc_payload_data(b64_data)?;
+    let decoded = match params.transmission.unwrap_or('d') {
+        // Direct (base64-in-payload): decode the payload itself.
+        'd' => decode_apc_payload_data(b64_data)?,
+        // File / temp / shared-memory: payload is a base64 path/name. Resolve
+        // it (with all security guards) into the raw image bytes, then treat
+        // them exactly like direct data below. Media transfers are single-shot,
+        // so any in-progress chunk accumulation is discarded.
+        transmission @ ('f' | 't' | 's') => {
+            let bytes = media::resolve_media_payload(transmission, b64_data, &params);
+            let Some(bytes) = bytes else {
+                *chunk_state = None;
+                return None;
+            };
+            bytes
+        }
+        // Unknown transmission type: ignore.
+        _ => {
+            *chunk_state = None;
+            return None;
+        }
+    };
 
     if params.more {
         accumulate_apc_chunk(params, decoded, chunk_state)?;
-        return None;
+        None
     } else {
         Some(finish_apc_payload(params, decoded, chunk_state))
     }

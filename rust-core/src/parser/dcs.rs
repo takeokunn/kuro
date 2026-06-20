@@ -358,12 +358,12 @@ fn build_sixel_image_data(
     width: u32,
     height: u32,
 ) -> crate::grid::screen::ImageData {
-    crate::grid::screen::ImageData {
+    crate::grid::screen::ImageData::new(
         pixels,
-        format: crate::parser::kitty::ImageFormat::Rgba,
-        pixel_width: width,
-        pixel_height: height,
-    }
+        crate::parser::kitty::ImageFormat::Rgba,
+        width,
+        height,
+    )
 }
 
 fn build_sixel_image_placement(

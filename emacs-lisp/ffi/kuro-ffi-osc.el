@@ -23,6 +23,7 @@
 (declare-function kuro-core-get-cwd                  "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-clipboard-actions   "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-notifications       "ext:kuro-core" (session-id))
+(declare-function kuro-core-notify-action-response   "ext:kuro-core" (session-id id button close))
 (declare-function kuro-core-poll-prompt-marks        "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-image                "ext:kuro-core" (session-id image-id))
 (declare-function kuro-core-poll-image-notifications "ext:kuro-core" (session-id))
@@ -41,6 +42,10 @@
 (declare-function kuro-core-get-cwd-host             "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-hyperlink-ranges    "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-text-size-ranges    "ext:kuro-core" (session-id))
+(declare-function kuro-core-image-frame-count        "ext:kuro-core" (session-id image-id))
+(declare-function kuro-core-image-frame-png          "ext:kuro-core" (session-id image-id frame-index))
+(declare-function kuro-core-image-frame-gap          "ext:kuro-core" (session-id image-id frame-index))
+(declare-function kuro-core-image-animation-state    "ext:kuro-core" (session-id image-id))
 
 (kuro--define-ffi-getters
  (kuro--get-and-clear-title
@@ -159,6 +164,17 @@ any sized cells are omitted."))
   "Retrieve image IMAGE-ID as a base64-encoded PNG string from the Rust core.
 Returns the base64 string if the image exists, nil if not found.")
 
+ (kuro--image-frame-count
+  kuro-core-image-frame-count 0 image-id
+  "Return the number of Kitty animation frames for IMAGE-ID.
+Returns 0 for a still image or when the image is unknown.")
+
+ (kuro--image-animation-state
+  kuro-core-image-animation-state nil image-id
+  "Return Kitty animation playback state for IMAGE-ID.
+Returns (PLAYING CURRENT-FRAME LOOP-COUNT) where CURRENT-FRAME is 1-based
+and LOOP-COUNT of 0 means infinite, or nil if the image is unknown.")
+
  (kuro--get-scrollback
   kuro-core-get-scrollback nil max-lines
   "Retrieve up to MAX-LINES lines from the scrollback buffer.
@@ -176,6 +192,35 @@ Returns t if successful, nil otherwise.")
  (kuro--scroll-down
   kuro-core-scroll-down nil n
   "Scroll viewport down by N lines toward live terminal output."))
+
+(kuro--define-ffi-binary-getters
+ (kuro--image-frame-png
+  kuro-core-image-frame-png nil image-id frame-index
+  "Render Kitty animation frame FRAME-INDEX (0-based) of IMAGE-ID.
+Returns a base64-encoded PNG string, or nil if the frame does not exist.")
+
+ (kuro--image-frame-gap
+  kuro-core-image-frame-gap 0 image-id frame-index
+  "Return the display gap (ms) for Kitty animation frame FRAME-INDEX of IMAGE-ID.
+Returns 0 when the frame does not exist."))
+
+(defun kuro--notify-action-response (session-id id button close)
+  "Send an OSC 99 notification action response back to the terminal application.
+SESSION-ID is the Rust session that emitted the notification.  ID is the OSC 99
+`i=<id>' notification id string.  BUTTON is a 0-based button index, or any
+negative integer for plain activation (no button).  CLOSE is non-nil for the
+`p=close' close-report variant.
+
+The response (`OSC 99 ; i=<ID> ; <BUTTON> ST') is enqueued in the Rust core and
+flushed to the PTY on the next poll, exactly like a DSR/DA reply.  Returns t on
+success, nil if the session is missing or the module is unavailable."
+  (when (and kuro--initialized (stringp id))
+    (condition-case err
+        (kuro-core-notify-action-response
+         session-id id (or button -1) (if close 1 0))
+      (error
+       (when kuro-log-errors (kuro--log err))
+       nil))))
 
 (provide 'kuro-ffi-osc)
 

@@ -118,12 +118,7 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
     let cols = p.display_cols.unwrap_or_else(|| pw.div_ceil(8)).max(1);
     let rows = p.display_rows.unwrap_or_else(|| ph.div_ceil(16)).max(1);
 
-    let data = ImageData {
-        pixels,
-        format: ImageFormat::Rgba,
-        pixel_width: pw,
-        pixel_height: ph,
-    };
+    let data = ImageData::new(pixels, ImageFormat::Rgba, pw, ph);
     let actual_id = core.screen.active_graphics_mut().store_image(None, data);
     let cursor = *core.screen.cursor();
     let placement = ImagePlacement {

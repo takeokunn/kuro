@@ -8,12 +8,7 @@ pub(crate) fn make_screen() -> Screen {
 
 #[inline]
 pub(crate) fn tiny_rgb_image(byte: u8) -> ImageData {
-    ImageData {
-        pixels: vec![byte, byte, byte],
-        format: ImageFormat::Rgb,
-        pixel_width: 1,
-        pixel_height: 1,
-    }
+    ImageData::new(vec![byte, byte, byte], ImageFormat::Rgb, 1, 1)
 }
 
 macro_rules! make_placement {

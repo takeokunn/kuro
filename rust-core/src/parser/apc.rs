@@ -160,12 +160,7 @@ fn build_kitty_image_data(
     pixel_width: u32,
     pixel_height: u32,
 ) -> crate::grid::screen::ImageData {
-    crate::grid::screen::ImageData {
-        pixels,
-        format,
-        pixel_width,
-        pixel_height,
-    }
+    crate::grid::screen::ImageData::new(pixels, format, pixel_width, pixel_height)
 }
 
 fn build_kitty_image_placement(
@@ -280,6 +275,69 @@ fn handle_kitty_delete(
     }
 }
 
+fn notify_image_redisplay(core: &mut TerminalCore, image_id: u32) {
+    let notifs = core
+        .screen
+        .active_graphics()
+        .notifications_for_image(image_id);
+    core.kitty.pending_image_notifications.extend(notifs);
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "forwards the kitty a=f key set to GraphicsStore::add_frame"
+)]
+fn handle_kitty_frame(
+    core: &mut TerminalCore,
+    image_id: Option<u32>,
+    pixels: Vec<u8>,
+    format: crate::parser::kitty::ImageFormat,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    base_frame: Option<u32>,
+    edit_frame: Option<u32>,
+    bg_color: u32,
+    replace: bool,
+    gap: Option<i32>,
+) {
+    // a=f requires a target image id; ignore frames with no addressable image.
+    let Some(id) = image_id else {
+        return;
+    };
+    // z=0 and negative gaps mean "no/gapless delay" per the kitty spec → clamp to 0.
+    let gap_ms = gap.filter(|&g| g > 0).map_or(0, |g| g.unsigned_abs());
+    let applied = core.screen.active_graphics_mut().add_frame(
+        id, &pixels, format, x, y, width, height, base_frame, edit_frame, bg_color, replace, gap_ms,
+    );
+    if applied.is_some() {
+        notify_image_redisplay(core, id);
+    }
+}
+
+fn handle_kitty_animation_control(
+    core: &mut TerminalCore,
+    image_id: Option<u32>,
+    state: Option<u32>,
+    loop_count: Option<u32>,
+    current_frame: Option<u32>,
+) {
+    let Some(id) = image_id else {
+        return;
+    };
+    if core
+        .screen
+        .active_graphics_mut()
+        .set_animation(id, state, loop_count, current_frame)
+    {
+        // current_frame change repaints; emit a redisplay so Emacs picks it up.
+        if current_frame.is_some() {
+            notify_image_redisplay(core, id);
+        }
+    }
+}
+
 fn handle_kitty_query(core: &mut TerminalCore, image_id: Option<u32>) {
     let id_part = image_id.map(|id| format!(",i={id}")).unwrap_or_default();
     let response = format!("\x1b_Ga=q{id_part};OK\x1b\\");
@@ -347,6 +405,33 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
         }
         KittyCommand::Query { image_id } => {
             handle_kitty_query(core, image_id);
+        }
+        KittyCommand::Frame {
+            image_id,
+            pixels,
+            format,
+            x,
+            y,
+            width,
+            height,
+            base_frame,
+            edit_frame,
+            bg_color,
+            replace,
+            gap,
+        } => {
+            handle_kitty_frame(
+                core, image_id, pixels, format, x, y, width, height, base_frame, edit_frame,
+                bg_color, replace, gap,
+            );
+        }
+        KittyCommand::AnimationControl {
+            image_id,
+            state,
+            loop_count,
+            current_frame,
+        } => {
+            handle_kitty_animation_control(core, image_id, state, loop_count, current_frame);
         }
     }
 }

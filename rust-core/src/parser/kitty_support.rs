@@ -105,6 +105,11 @@ fn apply_kitty_u32_param(params: &mut KittyParams, key: char, val: &[u8]) -> boo
 }
 
 #[inline]
+fn set_kitty_i32_param(slot: &mut Option<i32>, val: &[u8]) {
+    *slot = std::str::from_utf8(val).ok().and_then(|s| s.parse().ok());
+}
+
+#[inline]
 fn apply_kitty_control_param(params: &mut KittyParams, key: char, val: &[u8]) -> bool {
     match key {
         'm' => {
@@ -121,6 +126,26 @@ fn apply_kitty_control_param(params: &mut KittyParams, key: char, val: &[u8]) ->
         }
         'Y' => {
             set_kitty_u32_or_zero_param(&mut params.y_offset, val);
+            true
+        }
+        'x' => {
+            set_kitty_u32_or_zero_param(&mut params.frame_x, val);
+            true
+        }
+        'y' => {
+            set_kitty_u32_or_zero_param(&mut params.frame_y, val);
+            true
+        }
+        'z' => {
+            set_kitty_i32_param(&mut params.gap, val);
+            true
+        }
+        'S' => {
+            set_kitty_u32_param(&mut params.read_size, val);
+            true
+        }
+        'O' => {
+            set_kitty_u32_param(&mut params.read_offset, val);
             true
         }
         _ => false,
@@ -238,6 +263,43 @@ fn build_kitty_query_command(params: KittyParams) -> KittyCommand {
     }
 }
 
+/// Build a `KittyCommand::Frame` (a=f) from finalized params and decoded pixels.
+///
+/// Frame regions carry the same RGB/RGBA pixel payload as transmits; the `s`/`v`
+/// keys define the region size (0 = full image). PNG frames decode to raw pixels.
+fn build_kitty_frame_command(params: KittyParams, raw_data: Vec<u8>) -> Option<KittyCommand> {
+    let format_code = params.format.unwrap_or(FORMAT_RGBA);
+    let (pixels, format) = resolve_kitty_image_payload(raw_data, format_code)?;
+    Some(KittyCommand::Frame {
+        image_id: params.image_id,
+        pixels,
+        format,
+        x: params.frame_x,
+        y: params.frame_y,
+        width: params.width.unwrap_or(0),
+        height: params.height.unwrap_or(0),
+        // c= names the background canvas frame; r= names the edit-target frame.
+        base_frame: params.columns.filter(|&n| n != 0),
+        edit_frame: params.rows.filter(|&n| n != 0),
+        bg_color: params.y_offset,
+        replace: params.x_offset == 1,
+        gap: params.gap,
+    })
+}
+
+/// Build a `KittyCommand::AnimationControl` (a=a) from finalized params.
+fn build_kitty_animation_command(params: KittyParams) -> KittyCommand {
+    KittyCommand::AnimationControl {
+        image_id: params.image_id,
+        // s= playback state reuses the width slot key.
+        state: params.width,
+        // v= loop count reuses the height slot key.
+        loop_count: params.height,
+        // c= current frame reuses the columns slot key.
+        current_frame: params.columns,
+    }
+}
+
 /// Build a `KittyCommand` from finalized params and decoded (non-base64) payload.
 pub(super) fn build_command(params: KittyParams, raw_data: Vec<u8>) -> Option<KittyCommand> {
     let action = params.action.unwrap_or('T');
@@ -250,12 +312,8 @@ pub(super) fn build_command(params: KittyParams, raw_data: Vec<u8>) -> Option<Ki
         'p' => build_kitty_place_command(params),
         'd' => Some(build_kitty_delete_command(params)),
         'q' => Some(build_kitty_query_command(params)),
-        'f' => {
-            // Animation frames: not supported in Phase 15
-            #[cfg(debug_assertions)]
-            eprintln!("[kuro] kitty animation frames not supported (a=f)");
-            None
-        }
+        'f' => build_kitty_frame_command(params, raw_data),
+        'a' => Some(build_kitty_animation_command(params)),
         _ => None,
     }
 }

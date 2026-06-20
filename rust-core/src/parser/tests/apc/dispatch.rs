@@ -250,3 +250,170 @@ fn test_dispatch_place_queues_notification_for_stored_image() {
     assert_single_pending_image_notification(&core, 100, 3, 1);
     assert!(core.kitty.apc_state == ApcScanState::Idle);
 }
+
+// ── a=f / a=a: animation frames and playback control ─────────────────────────
+
+#[test]
+fn test_dispatch_frame_adds_animation_frame() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    // Store a 1x1 RGBA image (transmit only — no placement).
+    core.advance(b"\x1b_Ga=t,f=32,i=200,s=1,v=1;AAAAAA==\x1b\\");
+    assert_eq!(core.screen.active_graphics().frame_count(200), 0);
+
+    // Transmit one animation frame (a=f): full-canvas replace.
+    core.advance(b"\x1b_Ga=f,f=32,i=200,s=1,v=1,z=80;AAAAAA==\x1b\\");
+    assert_eq!(
+        core.screen.active_graphics().frame_count(200),
+        2,
+        "base frame + new frame"
+    );
+    assert_eq!(core.screen.active_graphics().frame_gap_ms(200, 1), 80);
+}
+
+#[test]
+fn test_dispatch_frame_emits_redisplay_for_placed_image() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    // Transmit AND display so a placement exists.
+    core.screen.move_cursor(2, 3);
+    core.advance(b"\x1b_Ga=T,f=32,i=201,s=1,v=1;AAAAAA==\x1b\\");
+    assert_pending_image_notification_count(&core, 1);
+    core.kitty.pending_image_notifications.clear();
+
+    // A new frame for a placed image must queue a redisplay notification.
+    core.advance(b"\x1b_Ga=f,f=32,i=201,s=1,v=1;AAAAAA==\x1b\\");
+    assert_single_pending_image_notification(&core, 201, 1, 1);
+}
+
+#[test]
+fn test_dispatch_frame_unknown_image_is_noop() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=f,f=32,i=999,s=1,v=1;AAAAAA==\x1b\\");
+    assert_no_pending_image_notifications(&core);
+    assert_eq!(core.screen.active_graphics().frame_count(999), 0);
+}
+
+#[test]
+fn test_dispatch_animation_control_sets_playing() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=202,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=f,f=32,i=202,s=1,v=1;AAAAAA==\x1b\\");
+    // s=3 run, v=1 infinite loop.
+    core.advance(b"\x1b_Ga=a,i=202,s=3,v=1\x1b\\");
+    let (playing, current, loops) = core
+        .screen
+        .active_graphics()
+        .animation_state(202)
+        .expect("state");
+    assert!(playing, "s=3 must mark playing");
+    assert_eq!(current, 1);
+    assert_eq!(loops, 0, "v=1 → infinite");
+}
+
+/// INTENT (security/DoS regression, end-to-end): an a=f with attacker-huge
+/// region dimensions (s=,v=) flows through the full APC dispatch path and is
+/// refused — no frame is added, no panic, no giant allocation.
+#[test]
+fn test_dispatch_frame_huge_dimensions_rejected() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=210,s=1,v=1;AAAAAA==\x1b\\");
+    // s=65535,v=65535 → ~4.3e9 px region; must be refused by the DoS guard.
+    core.advance(b"\x1b_Ga=f,f=32,i=210,s=65535,v=65535;AAAAAA==\x1b\\");
+    assert_eq!(
+        core.screen.active_graphics().frame_count(210),
+        0,
+        "oversized a=f frame must not be composed"
+    );
+}
+
+/// INTENT: a=a control issued before any a=f frame exists must not panic and
+/// must leave the (frameless) image in a sane state. current_frame can't move
+/// because there are no frames to select.
+#[test]
+fn test_dispatch_animation_control_before_any_frame_is_safe() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=220,s=1,v=1;AAAAAA==\x1b\\");
+    // Run + select frame 5 — no frames exist yet.
+    core.advance(b"\x1b_Ga=a,i=220,s=3,v=1,c=5\x1b\\");
+    let (playing, current, loops) = core
+        .screen
+        .active_graphics()
+        .animation_state(220)
+        .expect("state present even with no frames");
+    assert!(playing, "s=3 still records playing intent");
+    assert_eq!(current, 1, "no frames → current stays at 1");
+    assert_eq!(loops, 0, "v=1 → infinite");
+}
+
+/// INTENT: a=a with c=0 (1-based current frame 0) must not underflow when
+/// converting to a 0-based index; it clamps safely.
+#[test]
+fn test_dispatch_animation_control_current_frame_zero_no_underflow() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=221,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=f,f=32,i=221,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=a,i=221,c=0\x1b\\");
+    let (_, current, _) = core
+        .screen
+        .active_graphics()
+        .animation_state(221)
+        .expect("state");
+    assert_eq!(current, 1, "c=0 saturates to frame index 0 → 1-based 1");
+}
+
+/// INTENT: a huge finite loop count (near u32::MAX) is recorded verbatim
+/// without overflow; it is just a large finite count, not infinite.
+#[test]
+fn test_dispatch_animation_control_loop_count_max_no_overflow() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=222,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=a,i=222,s=3,v=4294967295\x1b\\");
+    let (_, _, loops) = core
+        .screen
+        .active_graphics()
+        .animation_state(222)
+        .expect("state");
+    assert_eq!(loops, u32::MAX, "max loop count is a finite value, not infinite");
+}
+
+/// INTENT: a=f with z=0 and a negative gap both clamp the display gap to 0
+/// (gapless) without panicking on the i32→u32 conversion.
+#[test]
+fn test_dispatch_frame_zero_and_negative_gap_clamp_to_zero() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=223,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=f,f=32,i=223,s=1,v=1,z=0;AAAAAA==\x1b\\");
+    assert_eq!(core.screen.active_graphics().frame_gap_ms(223, 1), 0, "z=0 → 0");
+    core.advance(b"\x1b_Ga=f,f=32,i=223,s=1,v=1,z=-99;AAAAAA==\x1b\\");
+    assert_eq!(
+        core.screen.active_graphics().frame_gap_ms(223, 2),
+        0,
+        "negative gap → 0 (gapless)"
+    );
+}
+
+/// INTENT: a=f with a base-frame reference (c=) far beyond the frame list falls
+/// back to a fresh background canvas instead of indexing out of bounds.
+#[test]
+fn test_dispatch_frame_out_of_range_base_frame_is_safe() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.advance(b"\x1b_Ga=t,f=32,i=224,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=f,f=32,i=224,s=1,v=1,c=9999;AAAAAA==\x1b\\");
+    assert_eq!(
+        core.screen.active_graphics().frame_count(224),
+        2,
+        "out-of-range c= falls back to a blank canvas; frame still added"
+    );
+}
+
+#[test]
+fn test_dispatch_animation_control_set_current_frame_redisplays() {
+    let mut core = crate::TerminalCore::new(24, 80);
+    core.screen.move_cursor(0, 0);
+    core.advance(b"\x1b_Ga=T,f=32,i=203,s=1,v=1;AAAAAA==\x1b\\");
+    core.advance(b"\x1b_Ga=f,f=32,i=203,s=1,v=1;AAAAAA==\x1b\\");
+    core.kitty.pending_image_notifications.clear();
+
+    // c=2 selects frame 2 and must queue a redisplay.
+    core.advance(b"\x1b_Ga=a,i=203,c=2\x1b\\");
+    assert_single_pending_image_notification(&core, 203, 1, 1);
+}

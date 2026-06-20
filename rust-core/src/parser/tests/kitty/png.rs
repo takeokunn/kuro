@@ -121,19 +121,21 @@ test_kitty_params_case!(
     },
 );
 
-// `process_apc_payload` must reject `t=t` (temp-file) transmission type.
-// Only 'd' (direct/inline base64) is supported; all others are silently ignored.
+// `t=t` (temp-file) with an EMPTY payload (no base64 path) must be rejected:
+// file/temp/shm transmission requires a path reference; an absent one yields
+// None. (Successful t=t reads are covered in tests/kitty_media.rs.)
 test_unsupported_transmission!(
     test_unsupported_transmission_temp_file_returns_none,
     payload = b"a=t,t=t,i=1;",
-    label = "temp-file (t=t)",
+    label = "temp-file (t=t) with no path",
 );
 
-// `process_apc_payload` must reject `t=s` (shared-memory) transmission type.
+// `t=s` (shared-memory) with an EMPTY payload (no shm name) must be rejected.
+// (Successful t=s reads are covered in tests/kitty_media.rs.)
 test_unsupported_transmission!(
     test_unsupported_transmission_shared_mem_returns_none,
     payload = b"a=t,t=s,i=2;",
-    label = "shared-memory (t=s)",
+    label = "shared-memory (t=s) with no name",
 );
 
 // When no `a=` key is present, `build_command` defaults the action to `'T'`

@@ -130,4 +130,35 @@ impl TerminalSession {
     pub fn get_image_png_base64(&self, image_id: u32) -> String {
         self.core.screen.get_image_png_base64(image_id)
     }
+
+    /// Number of animation frames stored for `image_id` (0 = still image).
+    #[must_use]
+    pub fn image_frame_count(&self, image_id: u32) -> usize {
+        self.core.screen.active_graphics().frame_count(image_id)
+    }
+
+    /// Render animation frame `idx` (0-based) of `image_id` as a base64 PNG.
+    #[must_use]
+    pub fn image_frame_png_base64(&self, image_id: u32, idx: usize) -> String {
+        self.core
+            .screen
+            .active_graphics()
+            .frame_png_base64(image_id, idx)
+    }
+
+    /// Display gap (ms) of animation frame `idx` (0-based) for `image_id`.
+    #[must_use]
+    pub fn image_frame_gap_ms(&self, image_id: u32, idx: usize) -> u32 {
+        self.core
+            .screen
+            .active_graphics()
+            .frame_gap_ms(image_id, idx)
+    }
+
+    /// Return `(playing, current_frame_1based, loop_count)` for `image_id`.
+    /// `loop_count` of 0 means infinite. Returns `None` if the image is unknown.
+    #[must_use]
+    pub fn image_animation_state(&self, image_id: u32) -> Option<(bool, usize, u32)> {
+        self.core.screen.active_graphics().animation_state(image_id)
+    }
 }

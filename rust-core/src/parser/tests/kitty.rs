@@ -18,3 +18,6 @@ mod png_cases;
 
 #[path = "kitty/png_extra.rs"]
 mod png_extra_cases;
+
+#[path = "kitty/frame.rs"]
+mod frame;

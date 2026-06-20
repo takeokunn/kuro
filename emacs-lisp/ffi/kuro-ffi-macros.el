@@ -49,6 +49,28 @@ CORE-FN is the underlying Rust function called with session-id and ARG.
 DOC is the docstring for the generated function."
   `(defun ,name (,arg) ,doc (kuro--call ,default (,core-fn kuro--session-id ,arg))))
 
+(defmacro kuro--def-ffi-binary (name core-fn default arg1 arg2 doc)
+  "Define NAME as a two-argument FFI wrapper with fallback DEFAULT.
+CORE-FN is the underlying Rust function called with session-id, ARG1, and ARG2.
+DOC is the docstring for the generated function."
+  `(defun ,name (,arg1 ,arg2) ,doc
+          (kuro--call ,default (,core-fn kuro--session-id ,arg1 ,arg2))))
+
+(defmacro kuro--define-ffi-binary-getters (&rest entries)
+  "Expand ENTRIES into top-level `kuro--def-ffi-binary' forms.
+Each entry has the form (NAME CORE-FN DEFAULT ARG1 ARG2 DOC)."
+  (declare (indent 0))
+  `(progn
+     ,@(mapcar (lambda (entry)
+                 `(kuro--def-ffi-binary
+                   ,(nth 0 entry)
+                   ,(nth 1 entry)
+                   ,(nth 2 entry)
+                   ,(nth 3 entry)
+                   ,(nth 4 entry)
+                   ,(nth 5 entry)))
+               entries)))
+
 (defmacro kuro--define-ffi-getters (&rest entries)
   "Expand ENTRIES into top-level `kuro--def-ffi-getter' forms.
 Each entry has the form (NAME CORE-FN DEFAULT DOC)."

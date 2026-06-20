@@ -197,7 +197,7 @@ The payload and target are extracted and forwarded."
     ;; effect), so the lambda would not capture calls from the same let.
     (let* ((calls nil)
            (kuro-notifications-enabled t)
-           (kuro-notification-function (lambda (title body) (push (list title body) calls))))
+           (kuro-notification-function (lambda (title body &optional _id _report) (push (list title body) calls))))
       (cl-letf (((symbol-function 'kuro--poll-notifications)
                  (lambda () '(("Shell" . "Command finished") ("System" . "Alert")))))
         (kuro--handle-notifications)
@@ -209,7 +209,7 @@ The payload and target are extracted and forwarded."
   (kuro-poll-test--with-buffer
     (let ((fn-called nil)
           (kuro-notifications-enabled nil)
-          (kuro-notification-function (lambda (_t _b) (setq fn-called t))))
+          (kuro-notification-function (lambda (_t _b &optional _id _report) (setq fn-called t))))
       (cl-letf (((symbol-function 'kuro--poll-notifications)
                  (lambda () '(("T" . "B")))))
         (kuro--handle-notifications)
@@ -354,6 +354,96 @@ The payload and target are extracted and forwarded."
               ((symbol-function 'message) #'ignore))
       (kuro--default-notify nil "Body")
       (should (equal received-title "kuro")))))
+
+;;; Group G3: kuro--default-notify OSC 99 action round-trip (:actions / :on-action)
+
+(ert-deftest kuro-poll-modes-default-notify-passes-actions-when-report ()
+  "`kuro--default-notify' passes :actions and :on-action when REPORT and ID are set."
+  (let ((received nil)
+        (kuro--session-id 5))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args) (setq received args) t))
+              ((symbol-function 'message) #'ignore))
+      (kuro--default-notify "T" "B" "nid" t)
+      (should (plist-get received :actions))
+      (should (functionp (plist-get received :on-action))))))
+
+(ert-deftest kuro-poll-modes-default-notify-omits-actions-without-report ()
+  "`kuro--default-notify' omits :actions/:on-action when REPORT is nil."
+  (let ((received nil)
+        (kuro--session-id 5))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args) (setq received args) t))
+              ((symbol-function 'message) #'ignore))
+      (kuro--default-notify "T" "B" "nid" nil)
+      (should-not (plist-get received :actions))
+      (should-not (plist-get received :on-action)))))
+
+(ert-deftest kuro-poll-modes-default-notify-on-action-default-sends-activation ()
+  "The :on-action handler sends a plain activation (button -1) for the \"default\" key."
+  (let ((response nil)
+        (kuro--session-id 7))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args)
+                 ;; Invoke the handler as D-Bus would when the user activates.
+                 (funcall (plist-get args :on-action) "default")
+                 t))
+              ((symbol-function 'message) #'ignore)
+              ((symbol-function 'kuro--notify-action-response)
+               (lambda (sid id button close)
+                 (setq response (list sid id button close)))))
+      (kuro--default-notify "T" "B" "nid" t)
+      (should (equal response '(7 "nid" -1 nil))))))
+
+(ert-deftest kuro-poll-modes-default-notify-on-action-numeric-sends-button ()
+  "The :on-action handler sends the button index for a numeric action key."
+  (let ((response nil)
+        (kuro--session-id 7))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args)
+                 (funcall (plist-get args :on-action) "3")
+                 t))
+              ((symbol-function 'message) #'ignore)
+              ((symbol-function 'kuro--notify-action-response)
+               (lambda (sid id button close)
+                 (setq response (list sid id button close)))))
+      (kuro--default-notify "T" "B" "nid" t)
+      (should (equal response '(7 "nid" 3 nil))))))
+
+(ert-deftest kuro-poll-modes-default-notify-on-action-unknown-ignored ()
+  "The :on-action handler ignores unknown (non-default, non-numeric) action keys."
+  (let ((called nil)
+        (kuro--session-id 7))
+    (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args)
+                 (funcall (plist-get args :on-action) "closed")
+                 t))
+              ((symbol-function 'message) #'ignore)
+              ((symbol-function 'kuro--notify-action-response)
+               (lambda (&rest _) (setq called t))))
+      (kuro--default-notify "T" "B" "nid" t)
+      (should-not called))))
+
+;;; Group G4: kuro--handle-notifications surfaces id + report
+
+(ert-deftest kuro-poll-modes-handle-notifications-surfaces-id-and-report ()
+  "kuro--handle-notifications forwards ID and REPORT from the 4-element FFI shape."
+  (kuro-poll-test--with-buffer
+    (let* ((calls nil)
+           (kuro-notifications-enabled t)
+           (kuro-notification-function
+            (lambda (title body &optional id report)
+              (push (list title body id report) calls))))
+      (cl-letf (((symbol-function 'kuro--poll-notifications)
+                 (lambda () '(("T" "B" "nid" t) ("U" "C" nil nil)))))
+        (kuro--handle-notifications)
+        (should (equal (nreverse calls)
+                       '(("T" "B" "nid" t) ("U" "C" nil nil))))))))
 
 (provide 'kuro-poll-modes-test-6)
 ;;; kuro-poll-modes-test-6.el ends here

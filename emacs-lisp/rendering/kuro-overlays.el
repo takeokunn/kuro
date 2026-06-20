@@ -23,12 +23,17 @@
 
 ;;; Code:
 
+(require 'seq)
 (require 'kuro-ffi)
 (require 'kuro-faces)
 (require 'kuro-faces-attrs)
 (require 'kuro-overlays-macros)
 
 (declare-function kuro--get-image "kuro-ffi-osc" (image-id))
+(declare-function kuro--image-frame-count "kuro-ffi-osc" (image-id))
+(declare-function kuro--image-frame-png "kuro-ffi-osc" (image-id frame-index))
+(declare-function kuro--image-frame-gap "kuro-ffi-osc" (image-id frame-index))
+(declare-function kuro--image-animation-state "kuro-ffi-osc" (image-id))
 (declare-function kuro--goto-row-start "kuro-render-buffer" (row))
 
 (defvar kuro--current-render-row -1
@@ -102,6 +107,19 @@ Each overlay has a `kuro-image' property and a `display' image spec.")
   "Non-nil when the current buffer has at least one active image overlay.
 Used as a fast guard to skip `kuro--clear-row-image-overlays' on rows
 when no Kitty Graphics images are present.")
+
+(defconst kuro--animation-default-gap-ms 100
+  "Default per-frame gap in milliseconds when a Kitty frame specifies z=0.
+Used by `kuro--animation-advance' to clamp the playback timer interval.")
+
+(defconst kuro--animation-min-gap-ms 20
+  "Lower bound on the animation frame gap to avoid runaway timer churn.")
+
+(kuro--defvar-permanent-local kuro--animation-timers
+  (make-hash-table :test 'eql)
+  "Hash table mapping image-id to its active playback timer.
+Each entry holds the `run-with-timer' object driving frame advancement for a
+playing multi-frame Kitty image.  Used to cancel/replace timers on re-render.")
 
 (defvar kuro--face-prop-template (list 'face nil)
   "Reusable property list for face application to avoid per-call allocation.")
@@ -177,7 +195,9 @@ Called once per render cycle from `kuro--render-cycle'."
 ;;; Image overlays (Kitty Graphics Protocol)
 
 (defun kuro--clear-all-image-overlays ()
-  "Remove all Kitty Graphics image overlays from the current buffer."
+  "Remove all Kitty Graphics image overlays from the current buffer.
+Also cancels any in-flight animation playback timers."
+  (kuro--clear-all-animations)
   (dolist (ov kuro--image-overlays)
     (when (overlay-buffer ov)
       (delete-overlay ov)))
@@ -224,11 +244,14 @@ May signal an error if B64 is malformed or `create-image' fails."
    (encode-coding-string (base64-decode-string b64) 'binary)
    'png t))
 
-(defun kuro--place-image-overlay (img row col cell-width)
+(defun kuro--place-image-overlay (img row col cell-width &optional image-id)
   "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH cols.
 Uses `forward-char' for column positioning so wide characters (2 terminal
 columns, 1 buffer position) are handled correctly.  Pushes the new overlay
-onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
+onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer.
+When IMAGE-ID is non-nil it is stored on the overlay so animation playback
+\(`kuro--animation-advance') can locate and update the right overlay.
+Returns the created overlay, or nil when out of bounds."
   (let* ((start (save-excursion
                   (kuro--goto-row-start row)
                   (forward-char col)
@@ -237,24 +260,101 @@ onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer."
     (when (< start (point-max))
       (let ((ov (make-overlay start end)))
         (overlay-put ov 'kuro-image t)
+        (when image-id (overlay-put ov 'kuro-image-id image-id))
         (overlay-put ov 'display    img)
         (overlay-put ov 'evaporate  t)   ; auto-delete if region deleted
         (push ov kuro--image-overlays)
-        (setq kuro--has-images t)))))
+        (setq kuro--has-images t)
+        ov))))
 
 (defun kuro--render-image-notification (notif)
   "Render a single Kitty Graphics image placement NOTIF in the terminal buffer.
 NOTIF is a list of the form (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT).
-Creates an overlay with a `display' property at the correct grid position."
+Creates an overlay with a `display' property at the correct grid position.
+When the image is a playing multi-frame Kitty animation, a timer-driven
+playback loop is (re)started via `kuro--maybe-start-animation'."
   (pcase-let* ((`(,image-id ,row ,col ,raw-width . ,_) notif)
                (cell-width (max 1 raw-width))
                (b64 (kuro--get-image image-id)))
     (when (and b64 (stringp b64) (not (string-empty-p b64)))
       (condition-case err
           (when-let* ((img (kuro--decode-png-image b64)))
-            (kuro--place-image-overlay img row col cell-width))
+            (kuro--place-image-overlay img row col cell-width image-id)
+            (kuro--maybe-start-animation image-id))
         (error
          (message "kuro: image render error for id %d: %s" image-id err))))))
+
+;;; Animation playback (Kitty a=f frames + a=a control)
+
+(defun kuro--animation-clamp-gap (gap-ms)
+  "Clamp Kitty frame GAP-MS to a sane timer interval in seconds.
+A GAP-MS of 0 falls back to `kuro--animation-default-gap-ms'; all values are
+floored at `kuro--animation-min-gap-ms' to avoid runaway timers."
+  (let ((ms (if (and (integerp gap-ms) (> gap-ms 0))
+                gap-ms
+              kuro--animation-default-gap-ms)))
+    (/ (max kuro--animation-min-gap-ms ms) 1000.0)))
+
+(defun kuro--animation-cancel (image-id)
+  "Cancel and forget any running playback timer for IMAGE-ID."
+  (when-let* ((timer (gethash image-id kuro--animation-timers)))
+    (cancel-timer timer)
+    (remhash image-id kuro--animation-timers)))
+
+(defun kuro--animation-overlay-for-id (image-id)
+  "Return the live image overlay tagged with IMAGE-ID, or nil."
+  (seq-find (lambda (ov)
+              (and (overlay-buffer ov)
+                   (eql (overlay-get ov 'kuro-image-id) image-id)))
+            kuro--image-overlays))
+
+(defun kuro--animation-advance (buffer image-id frame-index)
+  "Advance IMAGE-ID's animation in BUFFER to FRAME-INDEX and reschedule.
+Renders the frame's PNG onto the tagged overlay's `display' property and arms
+the next tick using the frame gap.  Stops cleanly when the buffer is gone, the
+overlay disappeared, playback was halted (a=a,s=1), or the loop count is
+exhausted."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (kuro--animation-cancel image-id)
+      (let* ((state (kuro--image-animation-state image-id))
+             (playing (nth 0 state))
+             (count (kuro--image-frame-count image-id))
+             (ov (kuro--animation-overlay-for-id image-id)))
+        (when (and state playing ov (> count 1))
+          (let* ((idx (mod frame-index count))
+                 (b64 (kuro--image-frame-png image-id idx)))
+            (when (and b64 (stringp b64) (not (string-empty-p b64)))
+              (condition-case err
+                  (overlay-put ov 'display (kuro--decode-png-image b64))
+                (error
+                 (message "kuro: animation frame error id %d: %s" image-id err))))
+            (let ((gap (kuro--animation-clamp-gap
+                        (kuro--image-frame-gap image-id idx))))
+              (puthash image-id
+                       (run-with-timer gap nil
+                                       #'kuro--animation-advance
+                                       buffer image-id (1+ idx))
+                       kuro--animation-timers))))))))
+
+(defun kuro--maybe-start-animation (image-id)
+  "Start timer-driven playback for IMAGE-ID when it is a playing animation.
+No-op for still images, paused animations, or single-frame images.  Always
+restarts from the backend's current frame so a=a control changes take effect."
+  (let* ((state (kuro--image-animation-state image-id))
+         (playing (nth 0 state))
+         (current (or (nth 1 state) 1))
+         (count (kuro--image-frame-count image-id)))
+    (if (and state playing (> count 1))
+        ;; current is 1-based from the backend; advance shows the 0-based frame.
+        (kuro--animation-advance (current-buffer) image-id (1- current))
+      (kuro--animation-cancel image-id))))
+
+(defun kuro--clear-all-animations ()
+  "Cancel every running animation playback timer in the current buffer."
+  (when (hash-table-p kuro--animation-timers)
+    (maphash (lambda (_id timer) (cancel-timer timer)) kuro--animation-timers)
+    (clrhash kuro--animation-timers)))
 
 ;;; FFI face application with blink and hidden support
 

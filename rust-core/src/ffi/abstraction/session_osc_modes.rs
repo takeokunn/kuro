@@ -100,6 +100,17 @@ impl TerminalSession {
         fn take_notifications from osc_data take notifications : crate::types::osc::Notification
     );
 
+    /// Enqueue an OSC 99 notification action response back to the application.
+    ///
+    /// Pushes `OSC 99 ; i=<id> ; <button> ST` (or the `p=close` variant) onto the
+    /// terminal's pending responses so it flows out to the PTY like a DSR/DA
+    /// reply. `button` is `None` for plain activation, `Some(N)` for button N;
+    /// `close` selects the `p=close` close-report variant.
+    pub fn notify_action_response(&mut self, id: &str, button: Option<u32>, close: bool) {
+        self.core
+            .push_notification_action_response(id, button, close);
+    }
+
     dec_mode_getter!(/// Get the current mouse tracking mode.
         fn get_mouse_mode -> u16 = mouse_mode);
     dec_mode_getter!(/// Get whether SGR mouse coordinate encoding is active.

@@ -166,6 +166,40 @@ impl TerminalCore {
         &self.meta.pending_responses
     }
 
+    /// Enqueue an OSC 99 desktop-notification action response back to the
+    /// application, flowing out to the PTY alongside DSR/DA replies.
+    ///
+    /// Per the Kitty OSC 99 protocol, when the user acts on a notification that
+    /// requested `a=report`:
+    ///   - activation / clicking the body sends `OSC 99 ; i=<id> ; ST` — pass
+    ///     `button = None`.
+    ///   - clicking button N sends `OSC 99 ; i=<id> ; <N> ST` — pass
+    ///     `button = Some(N)`.
+    ///   - closing a `c=1` notification sends `OSC 99 ; i=<id> : p=close ; ST` —
+    ///     pass `button = None` and `close = true`.
+    ///
+    /// `id` is the notification id echoed back to the application. The response
+    /// is terminated with BEL (`ST` equivalent) to match the rest of the OSC
+    /// replies in this crate.
+    pub fn push_notification_action_response(
+        &mut self,
+        id: &str,
+        button: Option<u32>,
+        close: bool,
+    ) {
+        let metadata = if close {
+            format!("i={id}:p=close")
+        } else {
+            format!("i={id}")
+        };
+        let payload = match button {
+            Some(n) => n.to_string(),
+            None => String::new(),
+        };
+        let resp = format!("\x1b]99;{metadata};{payload}\x07");
+        self.meta.pending_responses.push(resp.into_bytes());
+    }
+
     /// Get pending image placement notifications (Kitty Graphics + Sixel).
     ///
     /// Returns notifications that have accumulated since terminal construction.

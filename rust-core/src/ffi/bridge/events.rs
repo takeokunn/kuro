@@ -5,8 +5,8 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_or_false,
-    define_session_data_query_mut, define_session_query_default, define_session_query_opt,
-    query_session, query_session_opt,
+    define_session_data_query_mut, define_session_query_bool, define_session_query_default,
+    define_session_query_opt, query_session, query_session_mut, query_session_opt,
 };
 
 define_session_query_opt!(
@@ -49,6 +49,31 @@ define_drain_session_vec_to_lisp!(
     }
 );
 
+define_session_query_bool!(
+    /// Enqueue an OSC 99 desktop-notification action response back to the PTY.
+    ///
+    /// Called by Emacs when the user acts on a notification that requested an
+    /// `a=report` action. `id` is the notification id echoed back; `button` is a
+    /// 0-based button index, or any negative value for plain activation (no
+    /// button); `close` is non-zero for the `p=close` close-report variant.
+    ///
+    /// The response (`OSC 99 ; i=<id> ; <button> ST`, or the close variant) is
+    /// pushed onto pending responses and flushed to the PTY on the next poll,
+    /// exactly like a DSR/DA reply. Returns t on success, nil if the session is
+    /// missing.
+    kuro_core_notify_action_response,
+    |id: String, button: i64, close: i64| query_session_mut,
+    |session| {
+        let btn = if button < 0 {
+            None
+        } else {
+            Some(button as u32)
+        };
+        session.notify_action_response(&id, btn, close != 0);
+        Ok(true)
+    }
+);
+
 /// Map a [`SelectionTarget`] to the stable string Emacs uses to route the
 /// clipboard write/query to the correct selection.
 #[inline]
@@ -62,11 +87,16 @@ fn selection_target_name(target: crate::types::osc::SelectionTarget) -> String {
     }
 }
 
-// Poll for pending desktop notifications (OSC 9 / OSC 777) and clear them.
+// Poll for pending desktop notifications (OSC 9 / OSC 777 / OSC 99) and clear them.
 //
-// Returns a list of `(TITLE . BODY)` cons cells, where TITLE is the
-// notification title string (OSC 777) or nil (the iTerm2 OSC 9 form), and
-// BODY is the notification body string.
+// Returns a list of `(TITLE BODY ID REPORT)` 4-element lists, where:
+//   - TITLE is the notification title string (OSC 777 / OSC 99 p=title) or nil
+//     (the iTerm2 OSC 9 form and OSC 99 without a title).
+//   - BODY is the notification body string.
+//   - ID is the OSC 99 `i=<id>` notification id string, or nil for OSC 9 / 777
+//     and OSC 99 without an `i=` field.  The id is echoed in any action response.
+//   - REPORT is t when the OSC 99 metadata requested an `a=report` activation
+//     report (so Emacs should wire :actions / :on-action), nil otherwise.
 define_drain_session_vec_to_lisp!(
     kuro_core_poll_notifications,
     "poll_notifications",
@@ -78,7 +108,12 @@ define_drain_session_vec_to_lisp!(
             None => nil,
         };
         let body = notif.body.into_lisp(env)?;
-        build_emacs_list_from_values(env, [title, body])
+        let id = match notif.id {
+            Some(i) => i.into_lisp(env)?,
+            None => false.into_lisp(env)?,
+        };
+        let report = notif.report.into_lisp(env)?;
+        build_emacs_list_from_values(env, [title, body, id, report])
     }
 );
 

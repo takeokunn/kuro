@@ -1,5 +1,5 @@
-/// Assert that `process_apc_payload` rejects an unsupported transmission type
-/// (`t=t` or `t=s`) with `None`, and that `chunk_state` is cleared.
+/// Assert that `process_apc_payload` rejects a payload with `None` and that
+/// `chunk_state` is cleared (e.g. a `t=t`/`t=s` media transfer with no path).
 macro_rules! test_unsupported_transmission {
     ($name:ident, payload = $payload:expr, label = $label:expr $(,)?) => {
         #[test]

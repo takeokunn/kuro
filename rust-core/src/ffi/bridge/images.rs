@@ -2,6 +2,7 @@
 
 use super::{
     build_emacs_list_from_values, define_session_data_query_or_false,
+    query_session_data_to_lisp_or_false,
 };
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
@@ -24,6 +25,85 @@ define_session_data_query_or_false!(
             }
         }
     );
+
+/// Return the number of Kitty animation frames for an image (0 = still image).
+#[defun]
+fn kuro_core_image_frame_count(env: &Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'_>> {
+    query_session_data_to_lisp_or_false(
+        env,
+        "image_frame_count",
+        session_id,
+        |session| Ok(session.image_frame_count(image_id)),
+        |count| (count as i64).into_lisp(env),
+    )
+}
+
+/// Render Kitty animation frame `frame_index` (0-based) as a base64 PNG string,
+/// or nil when the frame does not exist.
+#[defun]
+fn kuro_core_image_frame_png(
+    env: &Env,
+    session_id: u64,
+    image_id: u32,
+    frame_index: u32,
+) -> EmacsResult<Value<'_>> {
+    query_session_data_to_lisp_or_false(
+        env,
+        "image_frame_png",
+        session_id,
+        |session| Ok(session.image_frame_png_base64(image_id, frame_index as usize)),
+        |b64| {
+            if b64.is_empty() {
+                false.into_lisp(env)
+            } else {
+                b64.into_lisp(env)
+            }
+        },
+    )
+}
+
+/// Return the display gap (ms) for Kitty animation frame `frame_index` (0-based).
+#[defun]
+fn kuro_core_image_frame_gap(
+    env: &Env,
+    session_id: u64,
+    image_id: u32,
+    frame_index: u32,
+) -> EmacsResult<Value<'_>> {
+    query_session_data_to_lisp_or_false(
+        env,
+        "image_frame_gap",
+        session_id,
+        |session| Ok(session.image_frame_gap_ms(image_id, frame_index as usize)),
+        |gap| i64::from(gap).into_lisp(env),
+    )
+}
+
+/// Return Kitty animation playback state as `(PLAYING CURRENT-FRAME LOOP-COUNT)`,
+/// where CURRENT-FRAME is 1-based and LOOP-COUNT of 0 means infinite; nil if the
+/// image is unknown.
+#[defun]
+fn kuro_core_image_animation_state(
+    env: &Env,
+    session_id: u64,
+    image_id: u32,
+) -> EmacsResult<Value<'_>> {
+    query_session_data_to_lisp_or_false(
+        env,
+        "image_animation_state",
+        session_id,
+        |session| Ok(session.image_animation_state(image_id)),
+        |state| match state {
+            Some((playing, current, loops)) => {
+                let p = playing.into_lisp(env)?;
+                let c = (current as i64).into_lisp(env)?;
+                let l = i64::from(loops).into_lisp(env)?;
+                build_emacs_list_from_values(env, [p, c, l])
+            }
+            None => false.into_lisp(env),
+        },
+    )
+}
 
 // Poll for pending Kitty Graphics image placement notifications.
 //

@@ -154,6 +154,13 @@ pub struct Notification {
     pub title: Option<String>,
     /// Notification body text.
     pub body: String,
+    /// OSC 99 `i=<id>` notification id, echoed in any action response. `None`
+    /// for the OSC 9 / OSC 777 forms (and OSC 99 without an `i=` field).
+    pub id: Option<String>,
+    /// Whether the OSC 99 metadata requested an activation report (`a=report`).
+    /// When `true`, activating the notification must send an OSC 99 report back
+    /// to the application via [`crate::TerminalCore`]'s pending responses.
+    pub report: bool,
 }
 
 /// OSC data storage
@@ -212,6 +219,8 @@ pub(crate) struct NotificationChunk {
     pub(crate) title: String,
     /// Accumulated `p=body` payload bytes.
     pub(crate) body: String,
+    /// Whether `a=report` was requested for this notification (any chunk).
+    pub(crate) report: bool,
 }
 
 impl OscData {

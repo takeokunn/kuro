@@ -62,6 +62,10 @@ SYM must be a kuro-- prefixed symbol; the test is named by stripping that prefix
 (kuro-ffi-osc-test--uninit-nil kuro--get-scroll-offset)
 (kuro-ffi-osc-test--uninit-nil kuro--poll-eval-commands)
 (kuro-ffi-osc-test--uninit-nil kuro--get-cwd-host)
+(kuro-ffi-osc-test--uninit-nil kuro--image-frame-count 1)
+(kuro-ffi-osc-test--uninit-nil kuro--image-animation-state 1)
+(kuro-ffi-osc-test--uninit-nil kuro--image-frame-png 1 0)
+(kuro-ffi-osc-test--uninit-nil kuro--image-frame-gap 1 0)
 
 ;;; Group 2 helper macro
 
@@ -118,6 +122,10 @@ Test name: kuro-ffi-osc-BARE-calls-core-when-init (BARE = name minus kuro-- pref
 (kuro-ffi-osc-test--init-delegates kuro--get-scroll-offset     kuro-core-get-scroll-offset     7)
 (kuro-ffi-osc-test--init-delegates kuro--poll-eval-commands    kuro-core-poll-eval-commands    '("(cd \"/tmp\")"))
 (kuro-ffi-osc-test--init-delegates kuro--get-cwd-host          kuro-core-get-cwd-host          "remote-host")
+(kuro-ffi-osc-test--init-delegates kuro--image-frame-count     kuro-core-image-frame-count     3                       7)
+(kuro-ffi-osc-test--init-delegates kuro--image-animation-state kuro-core-image-animation-state '(t 1 0)                 7)
+(kuro-ffi-osc-test--init-delegates kuro--image-frame-png       kuro-core-image-frame-png       "b64png"                7 2)
+(kuro-ffi-osc-test--init-delegates kuro--image-frame-gap       kuro-core-image-frame-gap       80                      7 2)
 
 ;;; Group 3: Behavioral / value semantics when initialized
 ;;
@@ -390,6 +398,59 @@ when uninitialized — even though 0 would be a valid initialized result."
     (cl-letf (((symbol-function 'kuro-core-get-scroll-offset)
                (lambda (_id) (error "scroll error"))))
       (should (= 0 (kuro--get-scroll-offset))))))
+
+;;; Group 3: kuro--notify-action-response (OSC 99 action round-trip)
+
+(ert-deftest kuro-ffi-osc-notify-action-response-nil-when-uninit ()
+  "kuro--notify-action-response returns nil and never calls core when uninitialized."
+  (let ((kuro--initialized nil)
+        (called nil))
+    (cl-letf (((symbol-function 'kuro-core-notify-action-response)
+               (lambda (&rest _) (setq called t) t)))
+      (should-not (kuro--notify-action-response 7 "id" 2 nil))
+      (should-not called))))
+
+(ert-deftest kuro-ffi-osc-notify-action-response-forwards-button-args ()
+  "kuro--notify-action-response forwards session/id/button and close=0 for a button click."
+  (let ((kuro--initialized t)
+        (kuro-log-errors nil)
+        (received nil))
+    (cl-letf (((symbol-function 'kuro-core-notify-action-response)
+               (lambda (sid id button close)
+                 (setq received (list sid id button close)) t)))
+      (should (kuro--notify-action-response 9 "abc" 2 nil))
+      (should (equal received '(9 "abc" 2 0))))))
+
+(ert-deftest kuro-ffi-osc-notify-action-response-activation-uses-negative-button ()
+  "kuro--notify-action-response sends button -1 for plain activation (nil button)."
+  (let ((kuro--initialized t)
+        (kuro-log-errors nil)
+        (received nil))
+    (cl-letf (((symbol-function 'kuro-core-notify-action-response)
+               (lambda (sid id button close)
+                 (setq received (list sid id button close)) t)))
+      (kuro--notify-action-response 1 "x" nil nil)
+      (should (equal received '(1 "x" -1 0))))))
+
+(ert-deftest kuro-ffi-osc-notify-action-response-close-sets-flag ()
+  "kuro--notify-action-response passes close=1 for the close-report variant."
+  (let ((kuro--initialized t)
+        (kuro-log-errors nil)
+        (received nil))
+    (cl-letf (((symbol-function 'kuro-core-notify-action-response)
+               (lambda (sid id button close)
+                 (setq received (list sid id button close)) t)))
+      (kuro--notify-action-response 1 "x" nil t)
+      (should (equal received '(1 "x" -1 1))))))
+
+(ert-deftest kuro-ffi-osc-notify-action-response-non-string-id-ignored ()
+  "kuro--notify-action-response is a no-op (nil) when ID is not a string."
+  (let ((kuro--initialized t)
+        (called nil))
+    (cl-letf (((symbol-function 'kuro-core-notify-action-response)
+               (lambda (&rest _) (setq called t) t)))
+      (should-not (kuro--notify-action-response 1 nil 0 nil))
+      (should-not called))))
 
 (provide 'kuro-ffi-osc-test)
 

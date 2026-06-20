@@ -131,9 +131,15 @@ from the Rust core regardless of this setting, so they cannot accumulate."
 
 (defcustom kuro-notification-function 'kuro--default-notify
   "Function that displays a terminal desktop notification.
-Called with two arguments: TITLE (a string or nil) and BODY (a string).
+Called with four arguments: TITLE (a string or nil), BODY (a string), ID
+\(the OSC 99 `i=<id>' notification id string, or nil) and REPORT (non-nil
+when the application requested an `a=report' activation round-trip).  A
+function that only cares about TITLE and BODY may declare the last two as
+`&optional'.
 The default, `kuro--default-notify', prefers `notifications-notify' (D-Bus)
-when available and otherwise falls back to the echo area."
+when available and otherwise falls back to the echo area; when REPORT and ID
+are present it wires a D-Bus `:on-action' callback that sends an OSC 99 report
+back to the terminal application."
   :type 'function
   :group 'kuro)
 

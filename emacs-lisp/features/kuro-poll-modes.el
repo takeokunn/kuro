@@ -48,6 +48,7 @@
 (declare-function kuro--update-prompt-positions   "kuro-navigation" (marks positions max-count))
 (declare-function notifications-notify            "notifications"   (&rest params))
 (declare-function kuro--poll-notifications        "kuro-ffi-osc"    ())
+(declare-function kuro--notify-action-response    "kuro-ffi-osc"    (session-id id button close))
 (declare-function kuro--update-prompt-status      "kuro-prompt-status" (marks))
 (declare-function kuro-kill                       "kuro-lifecycle"  ())
 (declare-function kuro--poll-eval-command-updates "kuro-eval"       ())
@@ -119,16 +120,47 @@ approximately once per second.  Changes occur at user-action timescale
   (kuro--apply-default-colors)
   (kuro--handle-notifications))
 
-(defun kuro--default-notify (title body)
+(defun kuro--notify-build-action-handler (session-id id)
+  "Return an `:on-action' handler closure for OSC 99 notification ID.
+SESSION-ID is captured so the response is routed to the originating session
+even if the buffer's `kuro--session-id' has since changed.  The returned
+closure is called by `notifications-notify' with the activated action key
+\(a string).  \"default\" (whole-notification activation) sends a plain
+activation report; a numeric key sends a button-index report; any other
+key is ignored."
+  (lambda (action-key)
+    (let ((button (cond ((equal action-key "default") -1)
+                        ((and (stringp action-key)
+                              (string-match-p "\\`[0-9]+\\'" action-key))
+                         (string-to-number action-key))
+                        (t nil))))
+      (when button
+        (kuro--notify-action-response session-id id button nil)))))
+
+(defun kuro--default-notify (title body &optional id report)
   "Show a terminal desktop notification with TITLE and BODY.
 Prefers `notifications-notify' (D-Bus) when available; otherwise falls back
-to the echo area.  TITLE may be nil."
+to the echo area.  TITLE may be nil.
+
+When REPORT is non-nil and ID (an OSC 99 `i=<id>' string) is provided, the
+D-Bus notification is given an activation action whose `:on-action' callback
+sends an OSC 99 report back to the terminal application via the Rust core, so
+the application learns the notification was activated.  When D-Bus is
+unavailable this gracefully degrades to a plain echo-area message (no action
+round-trip is possible without a clickable notification)."
   (or (and (require 'notifications nil t)
            (fboundp 'notifications-notify)
            (ignore-errors
-             (notifications-notify :title (or title "kuro")
-                                   :body body
-                                   :app-name "kuro")
+             (apply #'notifications-notify
+                    (append
+                     (list :title (or title "kuro")
+                           :body body
+                           :app-name "kuro")
+                     (when (and report id)
+                       (list :actions '("default" "Activate")
+                             :on-action
+                             (kuro--notify-build-action-handler
+                              kuro--session-id id)))))
              t))
       (message "%s%s"
                (if (and title (not (string-empty-p title)))
@@ -136,15 +168,28 @@ to the echo area.  TITLE may be nil."
                  "")
                body)))
 
+(defun kuro--notification-fields (notif)
+  "Extract (TITLE BODY ID REPORT) from a polled NOTIF entry.
+Accepts the current 4-element list form `(TITLE BODY ID REPORT)' produced by
+the Rust FFI, as well as the legacy cons form `(TITLE . BODY)' (ID and REPORT
+default to nil) for backward compatibility."
+  (if (and (consp notif) (listp (cdr notif)))
+      (list (nth 0 notif) (nth 1 notif) (nth 2 notif) (nth 3 notif))
+    (list (car notif) (cdr notif) nil nil)))
+
 (defun kuro--handle-notifications ()
-  "Drain and display pending OSC 9 / OSC 777 desktop notifications.
+  "Drain and display pending OSC 9 / OSC 777 / OSC 99 desktop notifications.
 Always drains the queue (so it cannot grow unbounded); displays each
 notification via `kuro-notification-function' only when
-`kuro-notifications-enabled' is non-nil."
+`kuro-notifications-enabled' is non-nil.  When the notification carries an
+OSC 99 id and requested an `a=report' action, the id and report flag are
+forwarded so the notify function can wire an action round-trip."
   (let ((notifs (kuro--poll-notifications)))
     (when kuro-notifications-enabled
       (dolist (notif notifs)
-        (funcall kuro-notification-function (car notif) (cdr notif))))))
+        (pcase-let ((`(,title ,body ,id ,report)
+                     (kuro--notification-fields notif)))
+          (funcall kuro-notification-function title body id report))))))
 
 ;;; Tier-1: mode application and per-item pollers
 

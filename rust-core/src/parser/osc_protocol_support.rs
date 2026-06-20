@@ -83,11 +83,15 @@ fn build_notification(title_raw: Option<&[u8]>, body_raw: &[u8]) -> Option<Notif
         Some(Notification {
             title: (!title_raw.is_empty()).then(|| String::from_utf8_lossy(title_raw).into_owned()),
             body: String::from_utf8_lossy(body_raw).into_owned(),
+            id: None,
+            report: false,
         })
     } else {
         Some(Notification {
             title: None,
             body: String::from_utf8_lossy(body_raw).into_owned(),
+            id: None,
+            report: false,
         })
     }
 }
@@ -139,8 +143,11 @@ struct Osc99Metadata {
     payload_type: Osc99PayloadType,
     /// `e=` encoding flag; `true` means the payload is base64.
     encoded: bool,
-    // Note: `a=<actions>` and `u=<urgency>` are parsed for forward-compatibility
-    // but `a=` is NOT yet wired to any action dispatch (documented limitation).
+    /// `a=<actions>` requested the activation `report` action. The action list
+    /// is comma-separated (`focus`, `report`); a leading `-` removes a default.
+    /// We only track `report` since `focus` has no round-trip back to the app.
+    report: bool,
+    // Note: `u=<urgency>` is recognised but ignored.
 }
 
 impl Default for Osc99Metadata {
@@ -150,15 +157,36 @@ impl Default for Osc99Metadata {
             done: true,
             payload_type: Osc99PayloadType::Body,
             encoded: false,
+            report: false,
         }
     }
+}
+
+/// Parse the OSC 99 `a=<actions>` comma-separated list, returning whether the
+/// `report` action ends up enabled. Each entry may be prefixed with `-` to
+/// remove a (default) action; `report` is not a default, so only an explicit
+/// `report` (not `-report`) enables it.
+fn parse_osc99_actions(value: &str) -> bool {
+    let mut report = false;
+    for action in value.split(',') {
+        match action.strip_prefix('-') {
+            Some("report") => report = false,
+            Some(_) => {} // remove some other (e.g. default) action
+            None => {
+                if action == "report" {
+                    report = true;
+                }
+            }
+        }
+    }
+    report
 }
 
 /// Parse the colon-separated OSC 99 metadata field into a [`Osc99Metadata`].
 ///
 /// Unknown keys and malformed pairs are ignored gracefully; a missing key keeps
-/// its documented default. `a=<actions>` and `u=<urgency>` are recognised but
-/// `a=` is not yet wired to action dispatch.
+/// its documented default. `a=<actions>` enables the `report` round-trip;
+/// `u=<urgency>` is recognised but ignored.
 fn parse_osc99_metadata(meta_raw: &[u8]) -> Osc99Metadata {
     let mut meta = Osc99Metadata::default();
     let Ok(meta_str) = std::str::from_utf8(meta_raw) else {
@@ -180,7 +208,8 @@ fn parse_osc99_metadata(meta_raw: &[u8]) -> Osc99Metadata {
                     _ => Osc99PayloadType::Other, // close|icon|?|unknown
                 };
             }
-            // a=<actions>: NOT yet wired to action dispatch. u=<urgency>: ignored.
+            "a" => meta.report = parse_osc99_actions(value),
+            // u=<urgency>: ignored.
             _ => {}
         }
     }
@@ -225,6 +254,8 @@ fn finalize_notification_chunk(core: &mut TerminalCore, chunk: NotificationChunk
     core.osc_data.notifications.push(Notification {
         title: (!chunk.title.is_empty()).then_some(chunk.title),
         body: chunk.body,
+        id: (!chunk.id.is_empty()).then_some(chunk.id),
+        report: chunk.report,
     });
 }
 
@@ -274,6 +305,9 @@ pub(super) fn handle_osc_99(core: &mut TerminalCore, params: &[&[u8]]) {
             ..NotificationChunk::default()
         },
     };
+
+    // Any chunk requesting the report action enables it for the notification.
+    chunk.report |= meta.report;
 
     match meta.payload_type {
         Osc99PayloadType::Title => append_capped(&mut chunk.title, &text),

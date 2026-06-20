@@ -213,7 +213,7 @@ MARKS is the OSC 133 marker list to inspect."
   (when (and kuro-kill-buffer-on-exit (not (kuro--is-process-alive)))
     (kuro-kill)))
 
-(defsubst kuro--send-osc52-clipboard-response ()
+(defun kuro--send-osc52-clipboard-response ()
   "Send OSC 52 clipboard response with the current `kill-ring' head to the PTY."
   (let ((text (condition-case nil (current-kill 0 t) (error ""))))
     (kuro--send-key

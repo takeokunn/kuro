@@ -165,15 +165,13 @@
   (should (commandp #'kuro--copy-goto-prev-prompt)))
 
 (ert-deftest kuro-copy-test-goto-next-prompt-goto-char-when-found ()
-  "`kuro--copy-goto-next-prompt' calls `goto-char' with the target position."
+  "`kuro--copy-goto-next-prompt' moves point to the target position."
   (with-temp-buffer
     (insert "abc\ndef\nghi\n")
     (goto-char (point-min))
-    (let ((moved-to nil))
-      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 7))
-                ((symbol-function 'goto-char) (lambda (pos) (setq moved-to pos))))
-        (kuro--copy-goto-next-prompt)
-        (should (= moved-to 7))))))
+    (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 7)))
+      (kuro--copy-goto-next-prompt)
+      (should (= (point) 7)))))
 
 (ert-deftest kuro-copy-test-goto-next-prompt-calls-fallback-when-absent ()
   "`kuro--copy-goto-next-prompt' calls `forward-paragraph' when no target."
@@ -188,15 +186,13 @@
         (should fallback-called)))))
 
 (ert-deftest kuro-copy-test-goto-prev-prompt-goto-char-when-found ()
-  "`kuro--copy-goto-prev-prompt' calls `goto-char' with the target position."
+  "`kuro--copy-goto-prev-prompt' moves point to the target position."
   (with-temp-buffer
     (insert "abc\ndef\nghi\n")
     (goto-char (point-max))
-    (let ((moved-to nil))
-      (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 5))
-                ((symbol-function 'goto-char) (lambda (pos) (setq moved-to pos))))
-        (kuro--copy-goto-prev-prompt)
-        (should (= moved-to 5))))))
+    (cl-letf (((symbol-function 'kuro--copy-find-prompt) (lambda (_dir) 5)))
+      (kuro--copy-goto-prev-prompt)
+      (should (= (point) 5)))))
 
 (ert-deftest kuro-copy-test-goto-prev-prompt-calls-fallback-when-absent ()
   "`kuro--copy-goto-prev-prompt' calls `backward-paragraph' when no target."

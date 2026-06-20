@@ -86,13 +86,13 @@
   (let* ((buf (generate-new-buffer "*kuro-track-same*"))
          (kuro-mux--last-session 'sentinel))
     (unwind-protect
-        (cl-letf (((symbol-function 'old-selected-window) (lambda () 'fake-win))
-                  ((symbol-function 'window-live-p) (lambda (_) t))
-                  ((symbol-function 'window-buffer) (lambda (_) buf))
-                  ((symbol-function 'derived-mode-p) (lambda (&rest _) t))
-                  ((symbol-function 'current-buffer) (lambda () buf)))
-          (kuro-mux--track-window-change nil)
-          (should (eq kuro-mux--last-session 'sentinel)))
+        (with-current-buffer buf
+          (cl-letf (((symbol-function 'old-selected-window) (lambda () 'fake-win))
+                    ((symbol-function 'window-live-p) (lambda (_) t))
+                    ((symbol-function 'window-buffer) (lambda (_) buf))
+                    ((symbol-function 'derived-mode-p) (lambda (&rest _) t)))
+            (kuro-mux--track-window-change nil)
+            (should (eq kuro-mux--last-session 'sentinel))))
       (kill-buffer buf))))
 
 

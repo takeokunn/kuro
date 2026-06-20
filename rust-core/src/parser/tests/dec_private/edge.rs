@@ -305,3 +305,97 @@ fn test_sync_output_2026_reset_noop_when_not_active() {
     term.advance(b"\x1b[?2026l"); // reset — guard `2026 if synchronized_output` not satisfied
     assert!(!term.dec_modes.synchronized_output);
 }
+
+// ── DECCOLM (?3 / ?40) ───────────────────────────────────────────────────────
+
+#[test]
+fn test_deccolm_ignored_without_allow_deccolm() {
+    // Mode 3 must be silently ignored when mode 40 (allow_deccolm) is not set.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?3h"); // set mode 3 without mode 40
+    assert_eq!(
+        term.screen.cols(),
+        80,
+        "grid must remain 80 cols when allow_deccolm is not set"
+    );
+    assert!(
+        !term.dec_modes.deccolm,
+        "deccolm flag must remain false when allow_deccolm is not set"
+    );
+}
+
+#[test]
+fn test_deccolm_set_resizes_to_132_cols() {
+    // CSI ? 40 h → CSI ? 3 h: grid must expand to 132 columns.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?40h"); // enable allow_deccolm
+    term.advance(b"\x1b[?3h"); // activate DECCOLM
+    assert_eq!(
+        term.screen.cols(),
+        132,
+        "grid must resize to 132 cols on DECCOLM set"
+    );
+    assert!(term.dec_modes.deccolm, "deccolm flag must be set");
+}
+
+#[test]
+fn test_deccolm_reset_restores_80_cols() {
+    // CSI ? 3 l while allow_deccolm is set must return to 80 columns.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?40h");
+    term.advance(b"\x1b[?3h"); // enter 132-col mode
+    term.advance(b"\x1b[?3l"); // reset — return to 80-col mode
+    assert_eq!(
+        term.screen.cols(),
+        80,
+        "grid must return to 80 cols on DECCOLM reset"
+    );
+    assert!(!term.dec_modes.deccolm, "deccolm flag must be cleared");
+}
+
+#[test]
+fn test_deccolm_set_homes_cursor() {
+    // DECCOLM set must home the cursor to (0, 0) unconditionally.
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?40h");
+    term.advance(b"\x1b[5;10H"); // move cursor away
+    term.advance(b"\x1b[?3h");
+    assert_eq!(
+        term.screen.cursor().row,
+        0,
+        "cursor row must be 0 after DECCOLM set"
+    );
+    assert_eq!(
+        term.screen.cursor().col,
+        0,
+        "cursor col must be 0 after DECCOLM set"
+    );
+}
+
+#[test]
+fn test_deccolm_set_clears_screen() {
+    // DECCOLM set must erase the entire screen content (all rows).
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[?40h");
+    term.advance(b"hello"); // write some content
+    term.advance(b"\x1b[?3h"); // DECCOLM — must clear
+    // All cells in the first row must be blank (space) after the clear.
+    let line = term.screen.get_line(0).expect("row 0 must exist");
+    let non_blank = line.cells.iter().any(|c| c.char() != ' ');
+    assert!(!non_blank, "DECCOLM set must erase all screen content");
+}
+
+#[test]
+fn test_decrqm_deccolm_reports_status() {
+    // DECRQM for mode 3 must report set (1) / reset (2) correctly.
+    let mut term = crate::TerminalCore::new(24, 80);
+    // With allow_deccolm off, mode 3 is untracked but still returns reset (2).
+    term.advance(b"\x1b[?3$p");
+    assert_single_pending_response_text(&term, "\x1b[?3;2$y");
+    term.meta.pending_responses.clear();
+    // Enable mode 40 and set mode 3.
+    term.advance(b"\x1b[?40h");
+    term.advance(b"\x1b[?3h");
+    term.advance(b"\x1b[?3$p");
+    assert_single_pending_response_text(&term, "\x1b[?3;1$y");
+}

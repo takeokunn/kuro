@@ -192,6 +192,86 @@ fn test_xtgettcap_sync() {
     test_xtgettcap!(b"53796E63"       => success "53796E63");
 }
 
+// ── DECTABSR ─────────────────────────────────────────────────────────────────
+// `DCS 2 $ t ST` → `DCS 2 ; 0 $ u col1/col2/.../colN ST`
+// Columns are 1-indexed per the VT420 spec; default stops every 8 cols.
+
+/// DECTABSR default tab stops: 80-col terminal has stops at 1-indexed columns
+/// 9, 17, 25, 33, 41, 49, 57, 65, 73 (every 8 cols from col 9).
+#[test]
+fn test_dectabsr_reports_default_tab_stops() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
+    assert_eq!(responses.len(), 1, "DECTABSR must produce exactly one response");
+    let resp = responses[0];
+    assert!(
+        resp.starts_with("\x1bP2;0$u"),
+        "DECTABSR response must start with DCS 2;0$u, got: {resp:?}"
+    );
+    assert!(
+        resp.ends_with("\x1b\\"),
+        "DECTABSR response must end with ST (ESC \\), got: {resp:?}"
+    );
+    // Default 80-col stops: 9/17/25/33/41/49/57/65/73
+    assert!(
+        resp.contains("9/17/25/33/41/49/57/65/73"),
+        "DECTABSR must report default tab stops, got: {resp:?}"
+    );
+}
+
+/// DECTABSR with param 0 (not 2) must be silently ignored — no response.
+#[test]
+fn test_dectabsr_wrong_param_is_ignored() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP0$t\x1b\\"); // param 0, not 2
+    assert_no_dcs_responses(&term);
+}
+
+/// DECTABSR with no param defaults to 0 and must also be ignored.
+#[test]
+fn test_dectabsr_no_param_is_ignored() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP$t\x1b\\"); // no param — VTE delivers 0 as default
+    assert_no_dcs_responses(&term);
+}
+
+/// DECTABSR after TBC 3 must respond with default stops (Kuro restores defaults
+/// on TBC 3 rather than clearing to empty — this is a deliberate implementation
+/// choice matching many other terminals).
+#[test]
+fn test_dectabsr_after_tbc3_reports_defaults() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[3g"); // TBC 3: reset tab stops to defaults
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
+    assert_eq!(responses.len(), 1);
+    let resp = responses[0];
+    // After TBC 3, Kuro restores default stops (every 8 cols from 9).
+    assert!(
+        resp.contains("9/17/25/33/41/49/57/65/73"),
+        "DECTABSR after TBC 3 must report default stops, got: {resp:?}"
+    );
+}
+
+/// DECTABSR after setting a custom tab stop via HTS (ESC H) must report it.
+#[test]
+fn test_dectabsr_custom_stop_via_hts() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Clear all defaults, then set a stop at column 5 (0-indexed) = column 6 (1-indexed).
+    term.advance(b"\x1b[3g"); // TBC 3: clear all
+    term.advance(b"\x1b[1;5H"); // move cursor to row 1, col 5 (1-indexed = col 4 0-indexed)
+    term.advance(b"\x1bH"); // HTS: set tab stop at current column (col 4 0-indexed = col 5 1-indexed)
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
+    assert_eq!(responses.len(), 1);
+    let resp = responses[0];
+    assert!(
+        resp.contains('5'),
+        "DECTABSR must include the custom tab stop column 5, got: {resp:?}"
+    );
+}
+
 #[path = "dcs/sixel.rs"]
 mod sixel;
 

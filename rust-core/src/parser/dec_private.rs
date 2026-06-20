@@ -102,6 +102,8 @@ pub struct DecModes {
     pub screen_reverse: bool,
     /// Allow DECCOLM (?40) — permits mode 3 (132-column) to function.
     pub allow_deccolm: bool,
+    /// DECCOLM (?3) — 132-column mode is currently active.
+    pub deccolm: bool,
     /// Reverse-wraparound mode (?45) — BS at col 0 wraps to previous line's last col.
     pub reverse_wraparound: bool,
     /// DECSDM (?80) — Sixel Display Mode.
@@ -144,6 +146,7 @@ impl DecModes {
             newline_mode: false,
             screen_reverse: false,
             allow_deccolm: false,
+            deccolm: false,
             reverse_wraparound: false,
             sixel_display_mode: false,
         }
@@ -157,6 +160,10 @@ impl DecModes {
     pub fn apply_mode(&mut self, mode: u16, value: bool) {
         match mode {
             1 => self.app_cursor_keys = value,
+            // Mode 3 — DECCOLM (132-column mode). Only valid when allow_deccolm
+            // (?40) is set; silently ignored otherwise.  The side-effect (grid
+            // resize + screen clear) lives in apply_mode_set / apply_mode_reset.
+            3 if self.allow_deccolm => self.deccolm = value,
             5 => self.screen_reverse = value,
             6 => self.origin_mode = value,
             7 => self.auto_wrap = value,
@@ -213,6 +220,7 @@ impl DecModes {
     pub const fn get_mode(&self, mode: u16) -> Option<bool> {
         match mode {
             1 => Some(self.app_cursor_keys),
+            3 => Some(self.deccolm),
             5 => Some(self.screen_reverse),
             6 => Some(self.origin_mode),
             7 => Some(self.auto_wrap),

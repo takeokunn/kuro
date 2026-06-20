@@ -23,6 +23,8 @@ pub enum DcsState {
         /// Raw payload naming the queried setting (e.g. `b" q"`, `b"r"`).
         buf: Vec<u8>,
     },
+    /// DCS 2 $ t (DECTABSR): tab stop report requested — no body data.
+    Dectabsr,
 }
 
 /// Called when DCS final byte is received (hook).
@@ -41,6 +43,14 @@ pub fn dcs_hook(
         (b"$", 'q') => {
             // DECRQSS: DCS $ q <setting> ST — request status string
             core.meta.dcs_state = DcsState::Decrqss { buf: Vec::new() };
+        }
+        (b"$", 't') => {
+            // DECTABSR: DCS 2 $ t ST — request tab stop report.
+            // Only respond when the first parameter is 2 (tab stop request).
+            let p0 = params.iter().next().and_then(|g| g.first()).copied().unwrap_or(0);
+            if p0 == 2 {
+                core.meta.dcs_state = DcsState::Dectabsr;
+            }
         }
         (b"", 'q') => {
             // Sixel: DCS P1;P2;P3 q <data> ST
@@ -71,7 +81,7 @@ pub fn dcs_put(core: &mut TerminalCore, byte: u8) {
         DcsState::Sixel(decoder) => {
             decoder.put(byte);
         }
-        DcsState::Idle => {}
+        DcsState::Dectabsr | DcsState::Idle => {}
     }
 }
 
@@ -82,6 +92,7 @@ pub fn dcs_unhook(core: &mut TerminalCore) {
         DcsState::Xtgettcap { buf } => handle_xtgettcap(core, &buf),
         DcsState::Decrqss { buf } => handle_decrqss(core, &buf),
         DcsState::Sixel(decoder) => handle_sixel_complete(core, decoder),
+        DcsState::Dectabsr => handle_dectabsr(core),
         DcsState::Idle => {}
     }
 }
@@ -138,6 +149,22 @@ fn build_decrqss_sgr_response(core: &TerminalCore) -> String {
 #[inline]
 fn build_decrqss_invalid_response() -> String {
     "\x1bP0$r\x1b\\".to_string()
+}
+
+/// Handle DECTABSR — Transmit Tab Stop Report (`DCS 2 $ t ST`).
+///
+/// Responds with `DCS 2 ; 0 $ u Ps/Ps/.../Ps ST` where each Ps is a
+/// 1-indexed column position of an active tab stop.  The trailing ST
+/// uses the 7-bit form `ESC \`.
+fn handle_dectabsr(core: &mut TerminalCore) {
+    let stops = core.tab_stops.get_stops();
+    let pt: String = stops
+        .iter()
+        .map(|&col| (col + 1).to_string()) // VT tab stops are 1-indexed
+        .collect::<Vec<_>>()
+        .join("/");
+    let response = format!("\x1bP2;0$u{pt}\x1b\\");
+    core.meta.pending_responses.push(response.into_bytes());
 }
 
 fn xtgettcap_hex_response(cap_hex: &str, value: &[u8]) -> String {

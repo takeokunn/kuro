@@ -100,6 +100,23 @@ pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
     });
 }
 
+/// Apply DECCOLM set/reset side effects: resize grid, clear screen, home cursor.
+///
+/// Called for mode 3 set (132-col) and reset (80-col / restore).
+/// Does NOT emit an in-band resize report — the Emacs layer observes the
+/// new grid dimensions on the next render cycle without a spurious SIGWINCH.
+#[inline]
+fn apply_deccolm(term: &mut crate::TerminalCore, new_cols: usize) {
+    let rows = term.screen.rows() as usize;
+    term.screen.resize(rows as u16, new_cols as u16);
+    term.tab_stops.resize(new_cols);
+    term.screen.clear_lines(0, rows);
+    term.screen.mark_all_dirty();
+    // Reset scroll region to full screen and home the cursor.
+    term.screen.set_scroll_region(0, rows.saturating_sub(1));
+    term.screen.move_cursor(0, 0);
+}
+
 /// Apply a single DEC private mode set (CSI ? Ps h) with its side effects.
 ///
 /// Calls `DecModes::set_mode` first, then triggers the mode-specific side
@@ -108,6 +125,10 @@ pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
 pub fn apply_mode_set(term: &mut crate::TerminalCore, mode: u16) {
     term.dec_modes.set_mode(mode);
     match mode {
+        // DECCOLM (?3): switch to 132-column mode when ?40 allows it.
+        3 if term.dec_modes.allow_deccolm => {
+            apply_deccolm(term, 132);
+        }
         // DECOM (?6): cursor moves to top of scroll region on activation.
         6 => {
             let top = term.screen.get_scroll_region().top;
@@ -129,6 +150,10 @@ pub fn apply_mode_set(term: &mut crate::TerminalCore, mode: u16) {
 #[inline]
 pub fn apply_mode_reset(term: &mut crate::TerminalCore, mode: u16) {
     match mode {
+        // DECCOLM (?3): restore 80-column mode when ?40 allows it.
+        3 if term.dec_modes.allow_deccolm => {
+            apply_deccolm(term, 80);
+        }
         // DECOM (?6): cursor returns to absolute home position.
         6 => term.screen.move_cursor(0, 0),
         47 | 1047 | 1049 => apply_alternate_screen_reset(term, mode),

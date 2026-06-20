@@ -178,18 +178,24 @@
 ;;; Group 5 — Bracketed paste
 
 (ert-deftest kuro-e2e-bracketed-paste-mode-toggle ()
-  "Enabling then disabling bracketed paste mode does not corrupt subsequent output."
+  "Enabling then disabling bracketed paste mode does not corrupt subsequent output.
+
+Mode sequences are part of an application's OUTPUT (interpreted by the
+terminal), not keyboard input.  We therefore have the shell *print* the
+toggle via `printf' so the bytes flow through the PTY into the parser —
+which is how a real application (vim, readline) drives mode 2004 — rather
+than typing the raw escape at the readline prompt (where leftover bytes
+would pollute the next command line).  The single `printf' then `echo'
+runs as one command so the marker output is clean and deterministic."
   :expected-result kuro-e2e--expected-result
   (kuro-e2e--with-terminal
    (kuro-e2e--with-session sid
-     ;; CSI ? 2004 h = enable bracketed paste; CSI ? 2004 l = disable
-     (kuro--send-key "\033[?2004h")
-     (kuro--send-key "\033[?2004l")
-     ;; Give the mode toggle a chance to settle before the next command.
-     (sleep-for kuro-e2e--poll-interval)
-     ;; Output after toggling must still be clean.
-     (should (kuro-e2e--send-command-and-wait sid "echo KURO_AFTER_PASTE_TOGGLE\r"
-                                              "KURO_AFTER_PASTE_TOGGLE")))))
+     ;; CSI ? 2004 h = enable bracketed paste; CSI ? 2004 l = disable.
+     ;; printf emits them to the terminal; echo then proves output is clean.
+     (should (kuro-e2e--send-command-and-wait
+              sid
+              "printf '\\033[?2004h\\033[?2004l'; echo KURO_AFTER_PASTE_TOGGLE\r"
+              "KURO_AFTER_PASTE_TOGGLE")))))
 
 (ert-deftest kuro-e2e-bracketed-paste-content ()
   "A bracketed paste sequence does not corrupt subsequent shell input."

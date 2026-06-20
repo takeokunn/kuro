@@ -139,8 +139,15 @@ impl TerminalSession {
     ) {
         let (text, face_ranges, col_to_buf) =
             crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, encode_pool);
-        let hash =
-            crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
+        // `encode_line_with_pool` mem::takes text/face_ranges/col_to_buf but
+        // leaves `text_sizes` in the pool — read it back to fold OSC 66 sizing
+        // into the row hash so a text-size-only change still re-renders.
+        let hash = crate::ffi::codec::compute_row_hash_from_encoded(
+            &text,
+            &face_ranges,
+            &col_to_buf,
+            &encode_pool.text_sizes,
+        );
         (text, face_ranges, col_to_buf, hash)
     }
 

@@ -40,6 +40,7 @@
 (declare-function kuro-core-poll-eval-commands       "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-cwd-host             "ext:kuro-core" (session-id))
 (declare-function kuro-core-poll-hyperlink-ranges    "ext:kuro-core" (session-id))
+(declare-function kuro-core-poll-text-size-ranges    "ext:kuro-core" (session-id))
 
 (kuro--define-ffi-getters
  (kuro--get-and-clear-title
@@ -142,7 +143,15 @@ Returns the hostname string or nil if localhost/unset.")
  (kuro--poll-hyperlink-ranges
   kuro-core-poll-hyperlink-ranges nil
   "Poll for OSC 8 hyperlink ranges on visible terminal rows.
-Returns a list of (ROW START END URI) entries, or nil if none."))
+Returns a list of (ROW START END URI) entries, or nil if none.")
+
+ (kuro--poll-text-size-ranges
+  kuro-core-poll-text-size-ranges nil
+  "Poll for Kitty text-sizing (OSC 66) ranges on visible terminal rows.
+Returns a list of (ROW START END SCALED-PERMILLE) entries, or nil if none.
+START and END are in-row character offsets; SCALED-PERMILLE is the effective
+size multiplier times 1000 (e.g. 2000 = 2x, 500 = half size).  Rows without
+any sized cells are omitted."))
 
 (kuro--define-ffi-unary-getters
  (kuro--get-image

@@ -33,11 +33,13 @@
 //! | [`line`]       | `EncodePool`, `encode_line*` entry points             |
 //! | [`binary`]     | `encode_screen_binary`, hash functions                |
 //! | [`hyperlinks`] | `encode_hyperlink_ranges`                             |
+//! | [`text_size`]  | `encode_text_size_ranges`                             |
 
 mod binary;
 mod color;
 mod hyperlinks;
 mod line;
+mod text_size;
 
 // Color encoding
 pub use color::{
@@ -59,6 +61,9 @@ pub(crate) use binary::{
 
 // Hyperlink ranges
 pub use hyperlinks::encode_hyperlink_ranges;
+
+// Text-size ranges (Kitty OSC 66)
+pub use text_size::encode_text_size_ranges;
 
 #[cfg(test)]
 #[path = "../tests/codec.rs"]

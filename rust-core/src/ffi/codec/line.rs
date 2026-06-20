@@ -41,6 +41,15 @@ pub(crate) struct EncodePool {
     pub text: String,
     pub face_ranges: Vec<(usize, usize, u32, u32, u64, u32)>,
     pub col_to_buf: Vec<usize>,
+    /// Kitty text-sizing (OSC 66) per-cell effective multiplier in permille.
+    ///
+    /// One entry per emitted (non-placeholder) cell in `text`, mirroring the
+    /// buffer-offset layout of `face_ranges`.  `1000` is the normal size; any
+    /// other value marks a text-size change.  Folded into the row hash so that
+    /// a cell differing **only** by text size still re-renders.  Empty when no
+    /// cell on the line carries a text size (the overwhelming default), so
+    /// ordinary lines pay nothing.
+    pub text_sizes: Vec<u32>,
 }
 
 impl EncodePool {
@@ -50,6 +59,7 @@ impl EncodePool {
             text: String::new(),
             face_ranges: Vec::new(),
             col_to_buf: Vec::new(),
+            text_sizes: Vec::new(),
         }
     }
 
@@ -58,6 +68,7 @@ impl EncodePool {
         self.text.clear();
         self.face_ranges.clear();
         self.col_to_buf.clear();
+        self.text_sizes.clear();
     }
 }
 
@@ -144,6 +155,20 @@ pub(super) fn fill_encode_pool(cells: &[Cell], has_wide: bool, pool: &mut Encode
         col += 1;
 
         pool.text.push_str(cell.grapheme.as_str());
+
+        // Text-sizing (OSC 66): record this cell's effective multiplier so a
+        // text-size-only change folds into the row hash.  Sparse encoding —
+        // only sized cells push `(buf_offset, permille)` — keeps ordinary lines
+        // (no text size anywhere) at an empty Vec and zero hashing cost.
+        if let Some(ts) = cell.text_size() {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "buf_offset is a buffer char offset (≤ terminal width ≤ 65535); fits u32"
+            )]
+            let off = buf_offset as u32;
+            pool.text_sizes.push(off);
+            pool.text_sizes.push(ts.scaled_permille());
+        }
 
         // Fast path: skip four encode_color/encode_attrs calls for default-styled
         // cells (no color, no SGR flags).  Shell prompts, man-page output, and

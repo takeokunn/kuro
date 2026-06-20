@@ -38,6 +38,7 @@
 (require 'kuro-navigation)
 (require 'kuro-prompt-status)
 (require 'kuro-hyperlinks)
+(require 'kuro-text-size)
 (require 'kuro-tramp)
 (require 'kuro-poll-modes-macros)
 
@@ -51,6 +52,7 @@
 (declare-function kuro-kill                       "kuro-lifecycle"  ())
 (declare-function kuro--poll-eval-command-updates "kuro-eval"       ())
 (declare-function kuro--apply-hyperlink-ranges    "kuro-hyperlinks" ())
+(declare-function kuro--apply-text-size-ranges    "kuro-text-size"  ())
 (declare-function kuro--apply-cwd-with-tramp     "kuro-tramp"      ())
 
 ;; Forward references: these defvar-locals live in their respective modules.
@@ -77,6 +79,7 @@
       kuro--poll-eval-command-updates
       kuro--poll-image-events
       kuro--apply-hyperlink-ranges
+      kuro--apply-text-size-ranges
       kuro--check-process-exit)
     "Tier-1 poll functions called at the configured poll cadence.
 Add new shell-interaction-timescale polls here; the dispatch loop needs

@@ -288,8 +288,8 @@ fn compute_row_hash_from_encoded_is_deterministic() {
     let text = "world";
     let faces: &[(usize, usize, u32, u32, u64, u32)] = &[(0, 5, 0, 0, 1, 0)];
     let ctb: &[usize] = &[0, 1, 2, 3, 4];
-    let h1 = compute_row_hash_from_encoded(text, faces, ctb);
-    let h2 = compute_row_hash_from_encoded(text, faces, ctb);
+    let h1 = compute_row_hash_from_encoded(text, faces, ctb, &[]);
+    let h2 = compute_row_hash_from_encoded(text, faces, ctb, &[]);
     assert_eq!(h1, h2, "same encoded inputs must produce identical hashes");
 }
 
@@ -298,8 +298,8 @@ fn compute_row_hash_from_encoded_is_deterministic() {
 fn compute_row_hash_from_encoded_differs_on_text_change() {
     let faces: &[(usize, usize, u32, u32, u64, u32)] = &[];
     let ctb: &[usize] = &[];
-    let ha = compute_row_hash_from_encoded("aaa", faces, ctb);
-    let hb = compute_row_hash_from_encoded("bbb", faces, ctb);
+    let ha = compute_row_hash_from_encoded("aaa", faces, ctb, &[]);
+    let hb = compute_row_hash_from_encoded("bbb", faces, ctb, &[]);
     assert_ne!(ha, hb, "different text must produce different encoded hashes");
 }
 
@@ -318,9 +318,36 @@ fn compute_row_hash_pool_and_encoded_agree() {
     pool.col_to_buf = ctb.clone();
 
     let h_pool = compute_row_hash_from_pool(&pool);
-    let h_encoded = compute_row_hash_from_encoded(text, &faces, &ctb);
+    let h_encoded = compute_row_hash_from_encoded(text, &faces, &ctb, &pool.text_sizes);
     assert_eq!(
         h_pool, h_encoded,
         "pool-hash and encoded-hash must agree for identical data"
+    );
+}
+
+/// A `text_sizes` difference must change both hash variants — proving a
+/// text-size-only change folds into the row hash (dirty tracking).
+#[test]
+fn compute_row_hash_differs_on_text_size_change() {
+    // Pool path: identical text/faces/col_to_buf, only text_sizes differ.
+    let mut pool_a = EncodePool::new();
+    pool_a.text = String::from("x");
+    let mut pool_b = EncodePool::new();
+    pool_b.text = String::from("x");
+    pool_b.text_sizes = vec![0, 2000]; // (buf_offset=0, permille=2000)
+
+    assert_ne!(
+        compute_row_hash_from_pool(&pool_a),
+        compute_row_hash_from_pool(&pool_b),
+        "a text-size-only change must change the pool hash"
+    );
+
+    // Encoded path: same text/faces/col_to_buf, only text_sizes slice differs.
+    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[];
+    let ctb: &[usize] = &[];
+    assert_ne!(
+        compute_row_hash_from_encoded("x", faces, ctb, &[]),
+        compute_row_hash_from_encoded("x", faces, ctb, &[0, 500]),
+        "a text-size-only change must change the encoded hash"
     );
 }

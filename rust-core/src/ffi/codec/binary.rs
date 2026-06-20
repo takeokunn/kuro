@@ -140,6 +140,9 @@ pub(crate) fn compute_row_hash_from_pool(pool: &EncodePool) -> u64 {
     pool.text.as_bytes().hash(&mut h);
     pool.face_ranges.hash(&mut h);
     pool.col_to_buf.hash(&mut h);
+    // Kitty text-sizing (OSC 66): a cell differing only by text size must
+    // still change the hash so the row re-renders.
+    pool.text_sizes.hash(&mut h);
     h.finish()
 }
 
@@ -171,11 +174,15 @@ pub(crate) fn compute_row_hash_from_encoded(
     text: &str,
     face_ranges: &[(usize, usize, u32, u32, u64, u32)],
     col_to_buf: &[usize],
+    text_sizes: &[u32],
 ) -> u64 {
     let mut h = AHasher::default();
     text.as_bytes().hash(&mut h);
     face_ranges.hash(&mut h);
     col_to_buf.hash(&mut h);
+    // Kitty text-sizing (OSC 66): fold text-size changes into the hash. See
+    // [`compute_row_hash_from_pool`].
+    text_sizes.hash(&mut h);
     h.finish()
 }
 

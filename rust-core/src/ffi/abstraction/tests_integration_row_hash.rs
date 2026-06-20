@@ -238,3 +238,87 @@ fn test_row_hash_skip_palette_epoch_invalidates_cache() {
         "palette_epoch must be 1 after one OSC 4 palette change"
     );
 }
+
+/// Test — text-size-only change re-emits the row.
+///
+/// Print "Hi" at normal size, poll twice (second poll is empty, hash cached).
+/// Then re-print the SAME text "Hi" over the same cells via OSC 66 with scale=2.
+/// The grapheme content and attributes are byte-for-byte identical, so the row
+/// is dirty ONLY because of the text-size side channel — proving text_size is
+/// folded into the row hash / dirty path. The row must be returned again.
+#[test]
+fn test_row_hash_text_size_only_change_re_emits_row() {
+    let mut session = make_session();
+
+    // Print "Hi" normally on row 0.
+    session.core.advance(b"Hi");
+    let first = session.get_dirty_lines_with_faces();
+    assert!(!first.is_empty(), "First poll must return row 0");
+
+    // Second poll: no change → hash skip → empty.
+    let second = session.get_dirty_lines_with_faces();
+    assert!(
+        second.is_empty(),
+        "Second poll with no change must be empty (hash cached)"
+    );
+
+    // Home cursor and re-print identical text "Hi" at scale=2 via OSC 66.
+    session.core.advance(b"\x1b[H");
+    session.core.advance(b"\x1b]66;s=2;Hi\x1b\\");
+
+    // The text is identical; only the text size differs. The row must re-emit.
+    let third = session.get_dirty_lines_with_faces();
+    let rows: Vec<usize> = third.iter().map(|(r, _, _, _)| *r).collect();
+    assert!(
+        rows.contains(&0),
+        "A text-size-only change must mark row 0 dirty (folded into hash), got: {rows:?}"
+    );
+
+    // And the text-size range must now be reported for row 0.
+    let ts_ranges = session.get_text_size_ranges();
+    assert!(
+        ts_ranges.iter().any(|(r, _, _, p)| *r == 0 && *p == 2000),
+        "row 0 must report a scale-2 (2000 permille) text-size range, got: {ts_ranges:?}"
+    );
+}
+
+/// Test (adversarial) — REMOVING a text size (sized → unsized) must also
+/// re-emit the row and clear the reported ranges. This guards the reverse
+/// direction of the dirty-tracking proof: the row hash must drop back so a
+/// stale "still sized" hash never suppresses the un-sizing repaint.
+#[test]
+fn test_row_hash_text_size_removal_re_emits_and_clears_ranges() {
+    let mut session = make_session();
+
+    // Print "Hi" at scale=2 on row 0, then drain it.
+    session.core.advance(b"\x1b]66;s=2;Hi\x1b\\");
+    let _ = session.get_dirty_lines_with_faces();
+    let _ = session.get_dirty_lines_with_faces(); // settle hash cache
+    assert!(
+        session
+            .get_text_size_ranges()
+            .iter()
+            .any(|(r, _, _, p)| *r == 0 && *p == 2000),
+        "precondition: row 0 reports a 2000-permille range"
+    );
+
+    // Overwrite the SAME cells with identical plain text "Hi" (no sizing).
+    session.core.advance(b"\x1b[H");
+    session.core.advance(b"Hi");
+
+    // The grapheme content is identical; only the text size was removed. The
+    // row must still re-emit because text_size folds into the hash.
+    let after = session.get_dirty_lines_with_faces();
+    let rows: Vec<usize> = after.iter().map(|(r, _, _, _)| *r).collect();
+    assert!(
+        rows.contains(&0),
+        "removing a text size must mark row 0 dirty (hash drops back), got: {rows:?}"
+    );
+
+    // And no text-size ranges must remain for row 0.
+    let ts_ranges = session.get_text_size_ranges();
+    assert!(
+        !ts_ranges.iter().any(|(r, _, _, _)| *r == 0),
+        "row 0 must report NO text-size ranges after un-sizing, got: {ts_ranges:?}"
+    );
+}

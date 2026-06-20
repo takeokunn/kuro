@@ -207,6 +207,8 @@ mod binary;
 mod binary_faces;
 #[path = "codec/hyperlink.rs"]
 mod hyperlink;
+#[path = "codec/text_size.rs"]
+mod text_size;
 #[path = "codec/properties.rs"]
 mod properties;
 #[path = "codec/property_edges.rs"]

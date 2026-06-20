@@ -250,6 +250,7 @@ that reads terminal mode variables set by `kuro--apply-terminal-modes'."
                     (kuro--poll-eval-command-updates)
                     (kuro--poll-image-events)
                     (kuro--apply-hyperlink-ranges)
+                    (kuro--apply-text-size-ranges)
                     (kuro--check-process-exit)))))
 
 (ert-deftest kuro-poll-modes-dispatch-clipboard-action-routes-write-payload-and-target ()

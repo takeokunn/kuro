@@ -139,4 +139,27 @@ impl TerminalSession {
         }
         result
     }
+
+    /// Return Kitty text-sizing (OSC 66) ranges for all visible rows.
+    ///
+    /// Returns a flat Vec of `(row, start, end, scaled_permille)` tuples — one
+    /// entry per text-size range per row.  Only rows that contain at least one
+    /// sized cell are included.  `start` and `end` are buffer character offsets
+    /// (matching the convention used by `encode_text_size_ranges` and
+    /// `get_hyperlink_ranges`).  `scaled_permille` is the effective size
+    /// multiplier ×1000 (e.g. `2000` = 2×, `500` = half size).
+    #[must_use]
+    pub fn get_text_size_ranges(&self) -> Vec<(usize, usize, usize, u32)> {
+        let rows = self.core.screen.rows() as usize;
+        let mut result = Vec::new();
+        for row in 0..rows {
+            if let Some(line) = self.core.screen.get_line(row) {
+                let ranges = crate::ffi::codec::encode_text_size_ranges(&line.cells);
+                for (start, end, permille) in ranges {
+                    result.push((row, start, end, permille));
+                }
+            }
+        }
+        result
+    }
 }

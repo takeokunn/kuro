@@ -81,6 +81,18 @@ Return non-nil on a cache hit; nil when a linear scan was needed."
         (beginning-of-line))
       nil)))
 
+(defun kuro--row-position (row)
+  "Return the buffer position at the start of terminal ROW.
+Uses the `kuro--row-positions' cache via `kuro--goto-row-start'; on a cache
+miss it resolves the position with a linear scan.  When the buffer has fewer
+than ROW+1 lines, `kuro--goto-row-start' clamps point to the start of the last
+line and that position is returned.  Used by per-row overlay consumers (OSC 8
+hyperlinks, OSC 66 text-sizing) to translate Rust-supplied in-row character
+offsets into absolute buffer positions."
+  (save-excursion
+    (kuro--goto-row-start row)
+    (point)))
+
 ;;; Scroll event application
 
 (defun kuro--scroll-lines (direction n _last-rows)

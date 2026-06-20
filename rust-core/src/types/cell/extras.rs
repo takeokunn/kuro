@@ -325,3 +325,107 @@ use super::*;
         assert_eq!(attrs.foreground, Color::Default);
         assert_eq!(attrs.background, Color::Default);
     }
+
+    // ── TextSize (Kitty OSC 66) ──────────────────────────────────────────────
+
+    #[test]
+    // ALLOCATION: set_text_size(Some(non-default)) must allocate extras and store it.
+    fn test_set_text_size_some_allocates_extras() {
+        let mut cell = Cell::new('A');
+        let ts = TextSize {
+            scale: 2,
+            ..TextSize::default()
+        };
+        cell.set_text_size(Some(ts));
+        assert_eq!(
+            cell.text_size().map(|t| t.scale),
+            Some(2),
+            "set_text_size(Some(scale=2)) must store the sizing"
+        );
+    }
+
+    #[test]
+    // CHEAPNESS: a default TextSize must NOT allocate extras (treated as "no size").
+    fn test_set_text_size_default_does_not_allocate() {
+        let mut cell = Cell::new('B');
+        cell.set_text_size(Some(TextSize::default()));
+        assert_eq!(
+            cell.text_size(),
+            None,
+            "default TextSize must be treated as absence (no extras)"
+        );
+        assert!(
+            cell.extras.is_none(),
+            "default TextSize must not allocate CellExtras"
+        );
+    }
+
+    #[test]
+    // DEALLOCATION: clearing text_size when no other extras remain frees the box.
+    fn test_set_text_size_none_clears_extras() {
+        let mut cell = Cell::new('C');
+        cell.set_text_size(Some(TextSize {
+            scale: 3,
+            ..TextSize::default()
+        }));
+        cell.set_text_size(None);
+        assert_eq!(cell.text_size(), None);
+        assert!(
+            cell.extras.is_none(),
+            "extras must be freed once the only field (text_size) is cleared"
+        );
+    }
+
+    #[test]
+    // COEXISTENCE: text_size must survive clearing an unrelated extras field, and
+    // vice-versa.
+    fn test_text_size_coexists_with_hyperlink() {
+        let mut cell = Cell::new('D');
+        cell.set_hyperlink_id(Some(Arc::from("https://x")));
+        cell.set_text_size(Some(TextSize {
+            scale: 4,
+            ..TextSize::default()
+        }));
+        // Clearing the hyperlink must keep the text size.
+        cell.set_hyperlink_id(None);
+        assert_eq!(cell.text_size().map(|t| t.scale), Some(4));
+        assert_eq!(cell.hyperlink_id(), None);
+        // Clearing the text size now frees extras.
+        cell.set_text_size(None);
+        assert!(cell.extras.is_none());
+    }
+
+    #[test]
+    // MATH: scaled_permille follows scale * max(n,1)/max(d,1) ×1000 (rounded).
+    fn test_text_size_scaled_permille() {
+        assert_eq!(TextSize::default().scaled_permille(), 1000, "1× = 1000");
+        assert_eq!(
+            TextSize {
+                scale: 2,
+                ..TextSize::default()
+            }
+            .scaled_permille(),
+            2000
+        );
+        assert_eq!(
+            TextSize {
+                numerator: 1,
+                denominator: 2,
+                ..TextSize::default()
+            }
+            .scaled_permille(),
+            500,
+            "1/2 → 500"
+        );
+        assert_eq!(
+            TextSize {
+                scale: 3,
+                numerator: 1,
+                denominator: 3,
+                ..TextSize::default()
+            }
+            .scaled_permille(),
+            1000,
+            "3 × 1/3 → 1000"
+        );
+    }

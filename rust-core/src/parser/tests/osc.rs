@@ -405,5 +405,309 @@ fn test_osc4_query_palette_entry() {
     );
 }
 
+// ── OSC 66 (Kitty text-sizing) ──────────────────────────────────────────────
+
+/// Drive an OSC 66 sequence through the full parser and return the resulting
+/// core for cell inspection.
+fn osc66_term(seq: &str) -> crate::TerminalCore {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(seq.as_bytes());
+    term
+}
+
+/// Read the `TextSize` of the cell at (row, col), if any.
+fn cell_text_size(
+    term: &crate::TerminalCore,
+    row: usize,
+    col: usize,
+) -> Option<crate::types::cell::TextSize> {
+    term.screen
+        .get_cell(row, col)
+        .and_then(crate::types::cell::Cell::text_size)
+}
+
+/// INTENT: OSC 66 with `s=2` prints the payload and stamps every printed cell
+/// with scale=2 (and nothing else).
+#[test]
+fn test_osc66_scale_2_stamps_cells() {
+    let term = osc66_term("\x1b]66;s=2;Hi\x1b\\");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'H');
+    assert_eq!(term.screen.get_cell(0, 1).unwrap().char(), 'i');
+    let ts = cell_text_size(&term, 0, 0).expect("cell 0 must carry text size");
+    assert_eq!(ts.scale, 2, "s=2 must set scale=2");
+    assert_eq!(ts.scaled_permille(), 2000, "scale 2 → 2000 permille");
+    assert_eq!(
+        cell_text_size(&term, 0, 1).map(|t| t.scale),
+        Some(2),
+        "second cell must also be stamped"
+    );
+}
+
+/// INTENT: OSC 66 fractional `n=1:d=2:w=1` yields a half-size sizing (500
+/// permille) — matches the spec example `ESC]66;n=1:d=2:w=1;Ha`.
+#[test]
+fn test_osc66_fractional_half_size() {
+    let term = osc66_term("\x1b]66;n=1:d=2:w=1;Ha\x1b\\");
+    let ts = cell_text_size(&term, 0, 0).expect("cell must carry text size");
+    assert_eq!(ts.numerator, 1);
+    assert_eq!(ts.denominator, 2);
+    assert_eq!(ts.width, 1);
+    assert_eq!(ts.scaled_permille(), 500, "1/2 scale → 500 permille");
+}
+
+/// INTENT: OSC 66 alignment keys `v=` and `h=` are parsed and clamped to 0..=2.
+#[test]
+fn test_osc66_alignment_parsed_and_clamped() {
+    let term = osc66_term("\x1b]66;s=3:v=2:h=1;X\x1b\\");
+    let ts = cell_text_size(&term, 0, 0).expect("cell must carry text size");
+    assert_eq!(ts.scale, 3);
+    assert_eq!(ts.valign, 2);
+    assert_eq!(ts.halign, 1);
+
+    // Out-of-range alignment is clamped.
+    let term = osc66_term("\x1b]66;v=9:h=9;Y\x1b\\");
+    let ts = cell_text_size(&term, 0, 0).expect("cell must carry text size");
+    assert_eq!(ts.valign, 2, "valign clamped to 2");
+    assert_eq!(ts.halign, 2, "halign clamped to 2");
+}
+
+/// INTENT: a default sizing (scale 1, no fraction) must NOT allocate extras —
+/// `s=1` with no other keys prints text but stamps no text size.
+#[test]
+fn test_osc66_default_size_no_stamp() {
+    let term = osc66_term("\x1b]66;s=1;Z\x1b\\");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'Z');
+    assert_eq!(
+        cell_text_size(&term, 0, 0),
+        None,
+        "default size (scale 1) must not stamp a TextSize"
+    );
+}
+
+/// INTENT: malformed metadata is ignored gracefully; the payload still prints
+/// at normal size and the terminal stays valid.
+#[test]
+fn test_osc66_malformed_metadata_ignored() {
+    // Garbage keys/values: no recognised key parses, so sizing stays default.
+    let term = osc66_term("\x1b]66;garbage=xx:s=notanumber;Q\x1b\\");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'Q');
+    assert_eq!(
+        cell_text_size(&term, 0, 0),
+        None,
+        "unparseable metadata must leave sizing at default (no stamp)"
+    );
+    assert!(term.screen.cursor().row < 24, "terminal must remain valid");
+}
+
+/// INTENT: a denominator that is not strictly greater than the numerator is
+/// dropped (spec: d must be > n when non-zero) — sizing collapses to default.
+#[test]
+fn test_osc66_invalid_fraction_dropped() {
+    // n=3 d=2 → d <= n → fraction dropped → default sizing → no stamp.
+    let term = osc66_term("\x1b]66;n=3:d=2;W\x1b\\");
+    assert_eq!(
+        cell_text_size(&term, 0, 0),
+        None,
+        "d <= n must drop the fraction, leaving default sizing"
+    );
+}
+
+/// INTENT: a payload containing `;` (which VTE splits into params[3..]) is
+/// rejoined so the semicolons survive into the printed cells.
+#[test]
+fn test_osc66_payload_with_semicolons() {
+    let term = osc66_term("\x1b]66;s=2;a;b;c\x1b\\");
+    let expected = ['a', ';', 'b', ';', 'c'];
+    for (col, &ch) in expected.iter().enumerate() {
+        assert_eq!(
+            term.screen.get_cell(0, col).unwrap().char(),
+            ch,
+            "payload char {col} must be {ch:?}"
+        );
+        assert_eq!(
+            cell_text_size(&term, 0, col).map(|t| t.scale),
+            Some(2),
+            "every payload cell (incl. ';') must be stamped"
+        );
+    }
+}
+
+/// INTENT (regression): when a deferred wrap (`pending_wrap`) is active before
+/// the OSC 66 payload, the first payload char must land at column 0 of the NEXT
+/// row and be stamped there — NOT at the previous row's last cell.
+///
+/// The original `text_size_write_position` had a bogus `pending_wrap` branch
+/// that returned `(pre_cursor.row, pre_cursor.col)`, which (a) dropped the
+/// wrapped char's stamp and (b) corrupted the pre-existing last-column cell by
+/// tagging it with the new text size. This drove the fix to mirror the proven
+/// `hyperlink_write_position` logic exactly.
+#[test]
+fn test_osc66_stamp_after_pending_wrap_lands_on_next_row() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Fill row 0 completely (80 'x' chars) so pending_wrap is set on the cursor.
+    for _ in 0..80 {
+        term.advance(b"x");
+    }
+    let c = *term.screen.cursor();
+    assert_eq!((c.row, c.col), (0, 79), "precondition: cursor parked at (0,79)");
+    assert!(c.pending_wrap, "precondition: pending_wrap must be set");
+
+    term.advance(b"\x1b]66;s=2;AB\x1b\\");
+
+    // 'A' wraps to (1,0); 'B' to (1,1). Both must carry scale=2.
+    assert_eq!(term.screen.get_cell(1, 0).unwrap().char(), 'A');
+    assert_eq!(term.screen.get_cell(1, 1).unwrap().char(), 'B');
+    assert_eq!(
+        cell_text_size(&term, 1, 0).map(|t| t.scale),
+        Some(2),
+        "wrapped first char must be stamped at (1,0)"
+    );
+    assert_eq!(
+        cell_text_size(&term, 1, 1).map(|t| t.scale),
+        Some(2),
+        "second char must be stamped at (1,1)"
+    );
+    // The pre-existing last-column 'x' must NOT have been corrupted with sizing.
+    assert_eq!(term.screen.get_cell(0, 79).unwrap().char(), 'x');
+    assert_eq!(
+        cell_text_size(&term, 0, 79),
+        None,
+        "pre-existing cell at (0,79) must keep its default (unsized) state"
+    );
+}
+
+/// INTENT (adversarial): a wide/CJK OSC 66 char that does not fit at the last
+/// column wraps to the next row; BOTH the wide cell and its width placeholder
+/// must be stamped at the new row.
+#[test]
+fn test_osc66_wide_char_wrap_stamps_both_cells_on_next_row() {
+    let mut term = crate::TerminalCore::new(2, 4);
+    // Print 3 half-width chars: cols 0,1,2 filled; cursor at col 3, no pending_wrap.
+    term.advance(b"abc");
+    // A wide char (width 2) cannot fit at col 3 → immediate wrap to row 1, col 0.
+    term.advance("\x1b]66;s=2;\u{6f22}\x1b\\".as_bytes()); // 漢
+
+    assert_eq!(term.screen.get_cell(1, 0).unwrap().char(), '漢');
+    assert_eq!(
+        cell_text_size(&term, 1, 0).map(|t| t.scale),
+        Some(2),
+        "wide char must be stamped at (1,0) after wrap"
+    );
+    assert_eq!(
+        cell_text_size(&term, 1, 1).map(|t| t.scale),
+        Some(2),
+        "wide placeholder at (1,1) must also be stamped"
+    );
+}
+
+/// INTENT (adversarial): OSC 66 with EMPTY metadata (`OSC 66 ;; text`) uses all
+/// defaults → scale 1, no fraction → which is the normal sizing → no stamp.
+#[test]
+fn test_osc66_empty_metadata_uses_defaults_no_stamp() {
+    let term = osc66_term("\x1b]66;;hello\x1b\\");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'h');
+    assert_eq!(
+        cell_text_size(&term, 0, 0),
+        None,
+        "empty metadata → default sizing → no TextSize stamp"
+    );
+}
+
+/// INTENT (adversarial): scale out of range (`s=99`) clamps to 7; a multibyte
+/// CJK payload still prints + stamps correctly with the clamped scale.
+#[test]
+fn test_osc66_scale_out_of_range_clamps_to_7_multibyte() {
+    let term = osc66_term("\x1b]66;s=99;\u{4f60}\u{597d}\x1b\\"); // 你好
+    let ts = cell_text_size(&term, 0, 0).expect("first CJK cell must carry text size");
+    assert_eq!(ts.scale, 7, "s=99 must clamp to 7");
+    assert_eq!(ts.scaled_permille(), 7000, "scale 7 → 7000 permille");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), '你');
+    // 你 is wide → occupies cols 0,1; 好 occupies cols 2,3.
+    assert_eq!(term.screen.get_cell(0, 2).unwrap().char(), '好');
+    assert_eq!(
+        cell_text_size(&term, 0, 2).map(|t| t.scale),
+        Some(7),
+        "second CJK glyph must also be stamped"
+    );
+}
+
+/// INTENT (adversarial): denominator == 0 explicitly (`n=5:d=0`) keeps the
+/// fraction neutral — `scaled_permille` treats den 0 as 1, so a pure `s` scale
+/// survives but the numerator does NOT inflate the size beyond scale alone when
+/// the denominator is absent. Verifies no divide-by-zero / overflow.
+#[test]
+fn test_osc66_denominator_zero_no_panic() {
+    // d=0 (default) with n=5 and s=2: scaled_permille = 1000*2*max(5,1)/max(0,1)
+    // = 1000*2*5/1 = 10000. No panic; large but finite multiplier.
+    let term = osc66_term("\x1b]66;s=2:n=5;Q\x1b\\");
+    let ts = cell_text_size(&term, 0, 0).expect("cell must carry text size");
+    assert_eq!(ts.denominator, 0);
+    assert_eq!(ts.numerator, 5);
+    assert_eq!(
+        ts.scaled_permille(),
+        10_000,
+        "den 0 treated as 1; must not panic"
+    );
+}
+
+/// INTENT (adversarial): a payload longer than 4096 bytes is capped on a UTF-8
+/// boundary. Build a payload of 5000 ASCII chars; only the first cells up to the
+/// terminal width get printed, but crucially the cap must not panic and the
+/// stamped region must be self-consistent.
+#[test]
+fn test_osc66_oversized_payload_capped_no_panic() {
+    let payload = "z".repeat(5000);
+    let seq = format!("\x1b]66;s=2;{payload}\x1b\\");
+    let term = osc66_term(&seq);
+    // First cell printed and stamped.
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'z');
+    assert_eq!(cell_text_size(&term, 0, 0).map(|t| t.scale), Some(2));
+    // Terminal must remain in a valid state (cursor within bounds).
+    assert!(term.screen.cursor().row < 24, "terminal stays valid after cap");
+}
+
+/// INTENT (adversarial): multibyte UTF-8 at the 4096-byte cap boundary must be
+/// truncated on a char boundary (no panic, no partial-codepoint slice). Uses a
+/// 3-byte CJK char repeated so the raw byte length straddles 4096.
+#[test]
+fn test_osc66_multibyte_at_cap_boundary_truncates_cleanly() {
+    // 1366 × 3-byte '好' = 4098 bytes > 4096. The cap must back off to a char
+    // boundary (4096 is not a multiple of 3) without panicking.
+    let payload = "\u{597d}".repeat(1366);
+    assert!(payload.len() > 4096, "precondition: payload exceeds cap");
+    let seq = format!("\x1b]66;s=3;{payload}\x1b\\");
+    let term = osc66_term(&seq);
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), '好');
+    assert_eq!(cell_text_size(&term, 0, 0).map(|t| t.scale), Some(3));
+}
+
+/// INTENT (adversarial): an OSC 66 sized cell that is subsequently erased (cell
+/// reset via ED / overwrite) must clear its text-size extras so no sizing leaks
+/// into the now-blank cell.
+#[test]
+fn test_osc66_erase_clears_text_size() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b]66;s=2;AB\x1b\\");
+    assert_eq!(cell_text_size(&term, 0, 0).map(|t| t.scale), Some(2));
+
+    // Move cursor home and overwrite with a plain (unsized) char.
+    term.advance(b"\x1b[H");
+    term.advance(b"C");
+    assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'C');
+    assert_eq!(
+        cell_text_size(&term, 0, 0),
+        None,
+        "overwriting a sized cell with plain text must drop the text size (no leak)"
+    );
+
+    // Erase the rest of the line (ED-style): clear from cursor to end.
+    term.advance(b"\x1b[2K"); // erase entire line
+    assert_eq!(
+        cell_text_size(&term, 0, 1),
+        None,
+        "erased cell must carry no text size"
+    );
+}
+
 #[path = "osc/edge_cases.rs"]
 mod edge_cases;

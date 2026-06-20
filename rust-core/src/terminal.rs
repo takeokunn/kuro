@@ -74,6 +74,11 @@ pub struct TerminalCore {
     /// RI to form a flag. Only consulted when `dec_modes.grapheme_clustering`
     /// is set; reset on any non-RI print / control / cursor move / edit.
     pub(crate) regional_indicator_pending: bool,
+    /// Transient Kitty text-sizing (OSC 66) sizing applied to cells printed
+    /// during an OSC 66 payload. Set before feeding the payload chars through
+    /// the print path and cleared immediately after, so ordinary prints never
+    /// pay any cost. `None` (the overwhelming default) means "normal size".
+    pub(crate) active_text_size: Option<types::cell::TextSize>,
 }
 
 impl TerminalCore {
@@ -106,6 +111,7 @@ impl TerminalCore {
             sgr_stack: Vec::new(),
             grapheme_join_pending: false,
             regional_indicator_pending: false,
+            active_text_size: None,
         }
     }
 
@@ -190,6 +196,61 @@ impl TerminalCore {
         }
     }
 
+    /// Print an OSC 66 text-sizing payload, stamping each printed cell with the
+    /// given [`types::cell::TextSize`].
+    ///
+    /// The payload chars are fed through the normal `Screen::print` path so that
+    /// cursor advance, auto-wrap, and wide-character handling all behave exactly
+    /// as for ordinary text.  After each char is printed the resulting cell (and
+    /// the wide placeholder, if any) is tagged with `ts` — mirroring the
+    /// hyperlink stamping strategy.  A default (`is_default`) sizing is a no-op
+    /// beyond ordinary printing, so it never allocates `CellExtras`.
+    ///
+    /// `payload` is the already-decoded, UTF-8 text (capped to 4096 bytes by the
+    /// caller).
+    pub(crate) fn print_text_sized_payload(&mut self, payload: &str, ts: types::cell::TextSize) {
+        // Flush any pending ASCII run so buffered chars are not retroactively
+        // attributed to this text-sizing region.
+        self.flush_print_buf();
+
+        let stamp = !ts.is_default();
+        self.active_text_size = Some(ts);
+
+        for c in payload.chars() {
+            if c.is_control() {
+                // Control chars inside the payload are ignored for sizing; they
+                // would not produce a printable cell anyway.
+                continue;
+            }
+            let pre_cursor = *self.screen.cursor();
+            let width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+            self.screen
+                .print(c, self.current_attrs, self.dec_modes.auto_wrap);
+
+            if stamp {
+                let cursor_after = *self.screen.cursor();
+                let (write_row, write_col) =
+                    text_size_write_position(pre_cursor, cursor_after);
+                if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
+                    cell.set_text_size(Some(ts));
+                }
+                if width > 1 {
+                    if let Some(cell) = self.screen.get_cell_mut(write_row, write_col + 1) {
+                        cell.set_text_size(Some(ts));
+                    }
+                }
+                // `get_cell_mut` mutates the cell in place without bumping the
+                // line version (and an identical re-print would have short-
+                // circuited `update_cell_with`).  Force the row dirty + version
+                // bump so a text-size-only change is never dropped by the dirty
+                // pipeline's `line.version` skip.
+                self.screen.mark_line_dirty_and_bump(write_row);
+            }
+        }
+
+        self.active_text_size = None;
+    }
+
     /// Get the currently active charset for GL (the "left" graphic set).
     #[inline]
     pub(crate) fn active_charset(&self) -> types::charset::CharsetType {
@@ -247,6 +308,31 @@ impl TerminalCore {
         if let Some(gl) = self.saved_gl_is_g1.take() {
             self.gl_is_g1 = gl;
         }
+    }
+}
+
+/// Compute the (row, col) where the just-printed char landed, given the cursor
+/// before and after the print and the screen width.
+///
+/// Mirrors `hyperlink_write_position` in `vte_handler.rs`: if the cursor wrapped
+/// to a new row (or jumped backward on the same row via pending-wrap reset), the
+/// char was written at column 0 of the new row; otherwise it sits at the
+/// pre-print position.
+#[inline]
+fn text_size_write_position(
+    pre_cursor: types::cursor::Cursor,
+    cursor_after: types::cursor::Cursor,
+) -> (usize, usize) {
+    if cursor_after.row != pre_cursor.row || cursor_after.col < pre_cursor.col {
+        // Wrapped: the char landed at column 0 of the new row. This holds for
+        // BOTH a deferred wrap (`pending_wrap` was set by a prior char filling
+        // the last column) AND an immediate wide-char wrap — in either case the
+        // glyph is placed at (cursor_after.row, 0). The earlier `pending_wrap`
+        // special case was wrong: it stamped the *previous* row's last cell,
+        // corrupting that cell's sizing and dropping the wrapped char's stamp.
+        (cursor_after.row, 0)
+    } else {
+        (pre_cursor.row, pre_cursor.col)
     }
 }
 

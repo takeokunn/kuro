@@ -227,6 +227,32 @@ define_session_data_query_or_false!(
         }
 );
 
+define_session_data_query_or_false!(
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "row/start/end are terminal dimensions (≤ 65535); usize→i64 never wraps"
+    )]
+    /// Poll Kitty text-sizing (OSC 66) ranges for all visible terminal rows.
+    ///
+    /// Returns a flat list of `(ROW START END SCALED-PERMILLE)` entries, one per
+    /// text-size range per row.  `START` and `END` are buffer character offsets;
+    /// `SCALED-PERMILLE` is the effective size multiplier ×1000 (e.g. `2000` =
+    /// 2× size, `500` = half size).  Rows without any sized cells are omitted.
+    kuro_core_poll_text_size_ranges,
+        "poll_text_size_ranges",
+        |session| session.get_text_size_ranges(),
+        |kuro_env, ranges| {
+            build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, permille)| {
+                let row_val = (row as i64).into_lisp(env)?;
+                let start_val = (start as i64).into_lisp(env)?;
+                let end_val = (end as i64).into_lisp(env)?;
+                let permille_val = i64::from(permille).into_lisp(env)?;
+
+                build_emacs_list_from_values(env, [row_val, start_val, end_val, permille_val])
+            })
+        }
+);
+
 define_session_data_query_mut!(
     /// Get default terminal colors (OSC 10/11/12) as encoded u32 values.
     ///

@@ -237,7 +237,77 @@ impl SgrAttributes {
     }
 }
 
-/// Extended cell data for rarely-used features (hyperlinks, images).
+/// Kitty text-sizing protocol (OSC 66) per-cell sizing metadata.
+///
+/// Wire format: `OSC 66 ; key=value : key=value ... ; text ST`.
+/// Each field is clamped to the documented range when parsed:
+/// - `scale`: overall scale 1..=7 (default 1)
+/// - `width`: width in cells 0..=7 (0 => normal width)
+/// - `numerator`: fractional numerator 0..=15 (default 0)
+/// - `denominator`: fractional denominator 0..=15 (must be > numerator when non-zero)
+/// - `valign`: vertical align 0=top 1=bottom 2=center
+/// - `halign`: horizontal align 0=left 1=right 2=center
+///
+/// `TextSize::default()` is the "normal" sizing (scale 1, no fraction, no
+/// alignment) and is treated as the absence of sizing — it never allocates
+/// `CellExtras`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextSize {
+    /// Overall integer scale 1..=7.
+    pub scale: u8,
+    /// Width in cells 0..=7 (0 = normal width).
+    pub width: u8,
+    /// Fractional numerator 0..=15.
+    pub numerator: u8,
+    /// Fractional denominator 0..=15 (must be > numerator when non-zero).
+    pub denominator: u8,
+    /// Vertical alignment 0=top 1=bottom 2=center.
+    pub valign: u8,
+    /// Horizontal alignment 0=left 1=right 2=center.
+    pub halign: u8,
+}
+
+impl Default for TextSize {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            scale: 1,
+            width: 0,
+            numerator: 0,
+            denominator: 0,
+            valign: 0,
+            halign: 0,
+        }
+    }
+}
+
+impl TextSize {
+    /// Returns `true` when this is the normal/default sizing (scale 1, no
+    /// fraction, no width override, no alignment).  Default-sized cells must
+    /// never allocate [`CellExtras`].
+    #[inline]
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Effective size multiplier expressed in permille (×1000).
+    ///
+    /// `scale * max(numerator, 1) / max(denominator, 1)` scaled by 1000 and
+    /// rounded.  This is the stable integer representation exposed to Emacs:
+    /// e.g. `scale=2` → 2000, `numerator=1 denominator=2` → 500 (half size).
+    #[inline]
+    #[must_use]
+    pub fn scaled_permille(&self) -> u32 {
+        let num = u32::from(self.numerator.max(1));
+        let den = u32::from(self.denominator.max(1));
+        let scale = u32::from(self.scale.max(1));
+        // round(1000 * scale * num / den)
+        (1000 * scale * num + den / 2) / den
+    }
+}
+
+/// Extended cell data for rarely-used features (hyperlinks, images, text size).
 /// Stored behind `Option<Box<CellExtras>>` to keep the common Cell small.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellExtras {
@@ -245,6 +315,8 @@ pub struct CellExtras {
     pub hyperlink_id: Option<Arc<str>>,
     /// Image ID for Kitty Graphics Protocol (if any)
     pub image_id: Option<u32>,
+    /// Kitty text-sizing metadata (OSC 66), `None` for normal-sized cells.
+    pub text_size: Option<TextSize>,
 }
 
 /// A single cell in the terminal grid
@@ -272,6 +344,7 @@ impl Cell {
         Box::new(CellExtras {
             hyperlink_id: None,
             image_id: None,
+            text_size: None,
         })
     }
 
@@ -349,20 +422,65 @@ impl Cell {
         self.extras.as_ref().and_then(|e| e.image_id)
     }
 
+    /// Get text-size metadata (if any). Returns `None` for normal-sized cells.
+    #[inline]
+    #[must_use]
+    pub fn text_size(&self) -> Option<TextSize> {
+        self.extras.as_ref().and_then(|e| e.text_size)
+    }
+
     /// Set hyperlink ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_hyperlink_id(&mut self, id: Option<Arc<str>>) {
-        Self::update_extras(&mut self.extras, id, |e| e.image_id.is_none(), |extras, id| {
-            extras.hyperlink_id = id;
-        });
+        Self::update_extras(
+            &mut self.extras,
+            id,
+            |e| e.image_id.is_none() && e.text_size.is_none(),
+            |extras, id| {
+                extras.hyperlink_id = id;
+            },
+        );
     }
 
     /// Set image ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_image_id(&mut self, id: Option<u32>) {
-        Self::update_extras(&mut self.extras, id, |e| e.hyperlink_id.is_none(), |extras, id| {
-            extras.image_id = id;
-        });
+        Self::update_extras(
+            &mut self.extras,
+            id,
+            |e| e.hyperlink_id.is_none() && e.text_size.is_none(),
+            |extras, id| {
+                extras.image_id = id;
+            },
+        );
+    }
+
+    /// Set text-size metadata, allocating or deallocating extras as needed.
+    ///
+    /// A `None` or default ([`TextSize::is_default`]) text size never allocates
+    /// `CellExtras`; passing such a value clears the field and frees extras when
+    /// no other extended data remains.
+    #[inline]
+    pub fn set_text_size(&mut self, ts: Option<TextSize>) {
+        // Treat the normal/default sizing as "no text size" so default-sized
+        // cells stay cheap (no extras allocation).
+        let ts = ts.filter(|t| !t.is_default());
+        Self::update_extras(
+            &mut self.extras,
+            ts,
+            |e| e.hyperlink_id.is_none() && e.image_id.is_none(),
+            |extras, ts| {
+                extras.text_size = ts;
+            },
+        );
+    }
+
+    /// Builder: set text-size metadata.
+    #[inline]
+    #[must_use]
+    pub fn with_text_size(mut self, ts: TextSize) -> Self {
+        self.set_text_size(Some(ts));
+        self
     }
 
     /// Append a combining character to this cell's grapheme cluster.

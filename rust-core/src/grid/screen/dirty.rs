@@ -75,6 +75,26 @@ impl Screen {
         });
     }
 
+    /// Mark a line dirty AND bump its mutation version.
+    ///
+    /// Needed when a row changes via a side channel that does not flow through
+    /// `update_cell_with` (which only bumps the version when the cell's
+    /// `PartialEq` value differs).  The Kitty text-sizing (OSC 66) path stamps
+    /// `text_size` onto already-printed cells via `get_cell_mut`; when the
+    /// underlying grapheme/attrs are identical to the previous content the cell
+    /// write short-circuits without bumping the version, so the dirty pipeline's
+    /// `line.version` skip would incorrectly drop the row.  Calling this after
+    /// stamping forces the row to be re-encoded (and its hash — which now folds
+    /// in `text_size` — to be recomputed).
+    pub(crate) fn mark_line_dirty_and_bump(&mut self, row: usize) {
+        self.with_active_screen_mut(|screen| {
+            screen.dirty_set.insert(row);
+            if let Some(line) = screen.lines.get_mut(row) {
+                line.mark_dirty_and_bump();
+            }
+        });
+    }
+
     /// Mark all lines as dirty at once (more efficient than inserting every row)
     pub fn mark_all_dirty(&mut self) {
         self.with_active_screen_mut(|screen| {

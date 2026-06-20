@@ -38,6 +38,7 @@ pub(crate) fn handle_osc(core: &mut TerminalCore, params: &[&[u8]], _bell_termin
         b"7" => handle_osc_7(core, params),
         b"8" => handle_osc_8(core, params),
         b"9" => handle_osc_9(core, params),
+        b"66" => handle_osc_66(core, params),
         b"99" => handle_osc_99(core, params),
         b"777" => handle_osc_777(core, params),
         b"4" => handle_osc_4(core, params),
@@ -169,6 +170,100 @@ fn handle_osc_8(core: &mut TerminalCore, params: &[&[u8]]) {
         // Close hyperlink or store a validated URI.
         core.osc_data.set_hyperlink_uri(uri);
     });
+}
+
+/// Maximum OSC 66 payload size in bytes (Kitty spec: "escape-code-safe UTF-8,
+/// max 4096 bytes").  Payloads longer than this are truncated on a UTF-8
+/// boundary before printing.
+const OSC66_MAX_PAYLOAD_BYTES: usize = 4096;
+
+/// Parse the colon-separated OSC 66 metadata into a [`TextSize`].
+///
+/// Metadata is a `:`-separated list of `key=value` pairs.  Recognised keys:
+/// `s` (scale 1..=7, default 1), `w` (width 0..=7), `n` (numerator 0..=15),
+/// `d` (denominator 0..=15), `v` (valign 0..=2), `h` (halign 0..=2).
+/// Unknown keys and malformed values are ignored (the field keeps its default).
+/// The denominator is forced to `0` when it is not strictly greater than the
+/// numerator (per spec: "must be > n when non-zero"), which neutralises the
+/// fraction rather than producing a nonsensical multiplier.
+fn parse_osc66_metadata(raw: &[u8]) -> crate::types::cell::TextSize {
+    use crate::types::cell::TextSize;
+    let mut ts = TextSize::default();
+    let meta = match std::str::from_utf8(raw) {
+        Ok(s) => s,
+        Err(_) => return ts,
+    };
+
+    for pair in meta.split(':') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let Ok(v) = value.parse::<u8>() else {
+            continue;
+        };
+        match key {
+            "s" => ts.scale = v.clamp(1, 7),
+            "w" => ts.width = v.min(7),
+            "n" => ts.numerator = v.min(15),
+            "d" => ts.denominator = v.min(15),
+            "v" => ts.valign = v.min(2),
+            "h" => ts.halign = v.min(2),
+            _ => {}
+        }
+    }
+
+    // Spec: denominator must be > numerator when non-zero. Otherwise drop the
+    // fraction so the multiplier stays sane.
+    if ts.denominator != 0 && ts.denominator <= ts.numerator {
+        ts.denominator = 0;
+        ts.numerator = 0;
+    }
+
+    ts
+}
+
+/// Handle OSC 66 — Kitty text-sizing protocol.
+///
+/// Wire format: `OSC 66 ; metadata ; text ST`.  `metadata` is a colon-separated
+/// list of `key=value` pairs (see [`parse_osc66_metadata`]); `text` is the
+/// payload to render at the requested size.  The payload may itself contain
+/// `;` — VTE splits the OSC on `;`, so any `params[3..]` are rejoined with `;`.
+/// The payload is capped at [`OSC66_MAX_PAYLOAD_BYTES`] and printed through the
+/// normal print path with each cell stamped with the parsed `TextSize`.
+fn handle_osc_66(core: &mut TerminalCore, params: &[&[u8]]) {
+    let meta_raw: &[u8] = params.get(1).copied().unwrap_or(b"");
+    let ts = parse_osc66_metadata(meta_raw);
+
+    // Rejoin the payload: VTE splits on ';', so a payload containing ';' arrives
+    // as params[2], params[3], ... — join them back with ';'.
+    let payload: Vec<u8> = if params.len() <= 3 {
+        params.get(2).copied().unwrap_or(b"").to_vec()
+    } else {
+        params[2..].join(&b';')
+    };
+
+    if payload.is_empty() {
+        return;
+    }
+
+    // Cap to OSC66_MAX_PAYLOAD_BYTES on a UTF-8 char boundary.
+    let text = String::from_utf8_lossy(&payload);
+    let text: &str = if text.len() > OSC66_MAX_PAYLOAD_BYTES {
+        let mut end = OSC66_MAX_PAYLOAD_BYTES;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        &text[..end]
+    } else {
+        &text
+    };
+
+    if text.is_empty() {
+        return;
+    }
+
+    let text = text.to_owned();
+    core.print_text_sized_payload(&text, ts);
 }
 
 /// Compute the standard xterm 256-color built-in color for palette index `idx`.

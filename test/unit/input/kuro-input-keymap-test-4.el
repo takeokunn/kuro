@@ -179,5 +179,77 @@ and the inner `(when char ...)' branch is skipped — no ESC+char clear attempt.
                       (progn (kuro--keymap-apply-exceptions km) nil)
                     (error err))))))
 
+;; --- kuro--keymap-setup-super-hyper (Kitty keyboard protocol modifiers) ---
+
+(ert-deftest kuro-input-keymap-setup-super-hyper-binds-super-letters ()
+  "`kuro--keymap-setup-super-hyper' binds s-CHAR for every letter/digit."
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-super-hyper
+    (dolist (char kuro--meta-letter-chars)
+      (should (lookup-key km (kbd (format "s-%c" char)))))))
+
+(ert-deftest kuro-input-keymap-setup-super-hyper-binds-hyper-letters ()
+  "`kuro--keymap-setup-super-hyper' binds H-CHAR for every letter/digit."
+  (kuro-input-keymap-test--with-fresh-keymap km kuro--keymap-setup-super-hyper
+    (dolist (char kuro--meta-letter-chars)
+      (should (lookup-key km (kbd (format "H-%c" char)))))))
+
+(ert-deftest kuro-input-keymap-build-keymap-binds-super-x ()
+  "`kuro--build-keymap' wires s-x into the live `kuro--char-keymap'.
+Globals are dynamically rebound so the build does not pollute later tests."
+  (let ((kuro-keymap-exceptions nil)
+        (kuro--keymap (copy-tree kuro--keymap))
+        (kuro--char-keymap (copy-tree kuro--char-keymap)))
+    (kuro--build-keymap)
+    (should (lookup-key kuro--char-keymap (kbd "s-x")))
+    (should (lookup-key kuro--char-keymap (kbd "H-x")))))
+
+(ert-deftest kuro-input-keymap-super-x-dispatch-sends-csi-9u-with-kkp ()
+  "Pressing s-x through the real keymap binding emits CSI 120;9u when KKP is active.
+This exercises the full dispatch path: keymap lookup -> bound command ->
+`kuro--super-modified' -> `kuro--encode-kitty-key'."
+  (let ((kuro-keymap-exceptions nil)
+        (kuro--keymap (copy-tree kuro--keymap))
+        (kuro--char-keymap (copy-tree kuro--char-keymap))
+        (sent nil))
+    (kuro--build-keymap)
+    (let ((cmd (lookup-key kuro--char-keymap (kbd "s-x")))
+          (kuro--keyboard-flags kuro--kkp-disambiguate))
+      (should (commandp cmd))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq sent s)))
+                ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+        (call-interactively cmd))
+      (should (equal sent "\e[120;9u")))))
+
+(ert-deftest kuro-input-keymap-hyper-x-dispatch-sends-csi-17u-with-kkp ()
+  "Pressing H-x through the real keymap binding emits CSI 120;17u when KKP is active."
+  (let ((kuro-keymap-exceptions nil)
+        (kuro--keymap (copy-tree kuro--keymap))
+        (kuro--char-keymap (copy-tree kuro--char-keymap))
+        (sent nil))
+    (kuro--build-keymap)
+    (let ((cmd (lookup-key kuro--char-keymap (kbd "H-x")))
+          (kuro--keyboard-flags kuro--kkp-all-escape))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq sent s)))
+                ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+        (call-interactively cmd))
+      (should (equal sent "\e[120;17u")))))
+
+(ert-deftest kuro-input-keymap-super-x-dispatch-sends-nothing-without-kkp ()
+  "Pressing s-x with no KKP flag active sends nothing (no legacy encoding)."
+  (let ((kuro-keymap-exceptions nil)
+        (kuro--keymap (copy-tree kuro--keymap))
+        (kuro--char-keymap (copy-tree kuro--char-keymap))
+        (sent nil))
+    (kuro--build-keymap)
+    (let ((cmd (lookup-key kuro--char-keymap (kbd "s-x")))
+          (kuro--keyboard-flags 0))
+      (cl-letf (((symbol-function 'kuro--send-key)
+                 (lambda (s) (setq sent s)))
+                ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
+        (call-interactively cmd))
+      (should (null sent)))))
+
 (provide 'kuro-input-keymap-test-4)
 ;;; kuro-input-keymap-test-4.el ends here

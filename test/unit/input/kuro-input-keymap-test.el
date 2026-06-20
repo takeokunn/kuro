@@ -306,6 +306,30 @@ C-v is absent (handled by scroll-aware `kuro--scroll-aware-ctrl-v')."
       (should (lookup-key map [up]))
       (should (lookup-key map [down])))))
 
+;;; Group: shifted function keys + numeric keypad bindings
+
+(ert-deftest kuro-input-keymap-build-binds-shifted-fkeys ()
+  "S-F1..S-F12 are bound to their PTY senders in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [S-f1]) 'kuro--S-F1))
+    (should (eq (lookup-key map [S-f5]) 'kuro--S-F5))
+    (should (eq (lookup-key map [S-f12]) 'kuro--S-F12))))
+
+(ert-deftest kuro-input-keymap-build-binds-keypad-keys ()
+  "Numeric keypad keys are bound to their KP senders in the built keymap."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [kp-7]) 'kuro--KP-7))
+    (should (eq (lookup-key map [kp-0]) 'kuro--KP-0))
+    (should (eq (lookup-key map [kp-enter]) 'kuro--KP-ENTER))
+    (should (eq (lookup-key map [kp-add]) 'kuro--KP-ADD))))
+
+(ert-deftest kuro-input-keymap-build-preserves-shifted-scroll-bindings ()
+  "Shifted navigation keys stay bound to LOCAL scroll commands (not PTY sends)."
+  (let ((map (kuro-keymap-test--built-map)))
+    (should (eq (lookup-key map [S-prior]) 'kuro-scroll-up))
+    (should (eq (lookup-key map [S-next]) 'kuro-scroll-down))
+    (should (eq (lookup-key map [S-end]) 'kuro-scroll-bottom))))
+
 (provide 'kuro-input-keymap-test)
 
 ;;; kuro-input-keymap-test.el ends here

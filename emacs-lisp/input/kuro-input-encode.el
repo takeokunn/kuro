@@ -12,6 +12,9 @@
 ;;; Code:
 
 (require 'kuro-ffi)
+;; `kuro--encode-kitty-key' and the KKP modifier constants now live in
+;; kuro-input-keys-data.el so kuro-input-keys.el can route through them.
+(require 'kuro-input-keys-data)
 
 ;; Forward references: defined in kuro-input-render.el.
 (declare-function kuro--schedule-immediate-render "kuro-input-render" ())
@@ -76,22 +79,12 @@ Bound to \\[kuro-send-next-key] in `kuro-mode-map'."
                (key-description (vector event))))))
 
 ;;; Kitty Keyboard Protocol
-
-(defconst kuro--kitty-modifier-offset 1
-  "Offset added to the modifier bitmask in the Kitty keyboard protocol.
-The Kitty protocol encodes modifiers as (bitmask + 1) on the wire:
-no modifier = parameter omitted (implicit 1), shift-only = 2,
-alt-only = 3, ctrl-only = 5, shift+ctrl = 6, etc.
-Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#modifiers")
-
-(defun kuro--encode-kitty-key (key modifiers)
-  "Encode KEY with MODIFIERS in Kitty keyboard protocol format.
-KEY is a Unicode codepoint integer.
-MODIFIERS is a bitmask: shift=1, alt=2, ctrl=4, super=8, hyper=16, meta=32.
-Returns the encoded escape sequence string."
-  (if (= modifiers 0)
-      (format "\e[%du" key)
-    (format "\e[%d;%du" key (+ modifiers kuro--kitty-modifier-offset))))
+;;
+;; `kuro--encode-kitty-key', `kuro--kitty-modifier-offset', and the
+;; KKP modifier-bit constants moved to kuro-input-keys-data.el so that
+;; kuro-input-keys.el (loaded earlier) can route modifier encoding through
+;; them.  They remain available here via the (require 'kuro-input-keys-data)
+;; above for any caller that loads kuro-input-encode.
 
 (provide 'kuro-input-encode)
 ;;; kuro-input-encode.el ends here

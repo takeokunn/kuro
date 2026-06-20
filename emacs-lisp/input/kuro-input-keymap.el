@@ -56,6 +56,8 @@
 (declare-function kuro-scroll-bottom "kuro-input-send-scroll" ())
 (declare-function kuro--send-ctrl "kuro-input-send" (byte))
 (declare-function kuro--scroll-aware-ctrl-v "kuro-input-send-scroll" ())
+(declare-function kuro--super-modified "kuro-input-keys" (char))
+(declare-function kuro--hyper-modified "kuro-input-keys" (char))
 
 ;;; Keymap Variable
 
@@ -96,6 +98,26 @@ Uses `kuro--ctrl-key-table' to map Emacs key strings to ASCII control codes."
   ;; event, rather than a bare \e that could be mistaken as the start of an escape sequence.
   (define-key map [escape] #'kuro--send-escape))
 
+(defun kuro--keymap-setup-super-hyper (map)
+  "Install Super (s-) and Hyper (H-) modifier bindings into MAP.
+Each printable letter/digit is bound so that, when a Kitty keyboard
+protocol flag is active, s-CHAR sends CSI char;9u and H-CHAR sends
+CSI char;17u via `kuro--super-modified' / `kuro--hyper-modified'.
+
+These modifiers have no legacy (non-KKP) terminal encoding, so without a
+KKP flag the handlers send nothing — matching how real terminals behave.
+
+`kuro--kkp-report-events' (flag 0x02, key press/repeat/release reporting)
+is intentionally NOT wired here: vanilla Emacs delivers only key-press
+events and exposes no key-release events, so it cannot be supported."
+  (dolist (char kuro--meta-letter-chars)
+    (kuro--bind-keys map
+                     `(lambda () (interactive) (kuro--super-modified ,char))
+                     (kbd (format "s-%c" char)))
+    (kuro--bind-keys map
+                     `(lambda () (interactive) (kuro--hyper-modified ,char))
+                     (kbd (format "H-%c" char)))))
+
 (defun kuro--keymap-setup-mouse (map)
   "Install mouse event bindings into MAP using `kuro--mouse-bindings'."
   (kuro--define-key-bindings map kuro--mouse-bindings
@@ -129,6 +151,7 @@ for `kuro--keymap' (semi-char) after exception removal."
     (kuro--keymap-setup-special map)
     (kuro--keymap-setup-ctrl map)
     (kuro--keymap-setup-meta map)
+    (kuro--keymap-setup-super-hyper map)
     (kuro--keymap-setup-navigation map)
     (kuro--keymap-setup-mouse map)
     (kuro--keymap-setup-yank map)

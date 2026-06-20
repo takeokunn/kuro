@@ -252,12 +252,36 @@ that reads terminal mode variables set by `kuro--apply-terminal-modes'."
                     (kuro--apply-hyperlink-ranges)
                     (kuro--check-process-exit)))))
 
-(ert-deftest kuro-poll-modes-dispatch-clipboard-action-macroexpands-to-pcase ()
-  "`kuro--dispatch-clipboard-action' expands to a fixed pcase dispatch."
-  (should (equal (macroexpand-1 '(kuro--dispatch-clipboard-action action))
-                 '(pcase (car action)
-                    ('write (kuro--clipboard-write (cdr action)))
-                    ('query (kuro--clipboard-query))))))
+(ert-deftest kuro-poll-modes-dispatch-clipboard-action-routes-write-payload-and-target ()
+  "`kuro--dispatch-clipboard-action' forwards a 3-element write's payload and target."
+  (let ((written nil)
+        (target nil))
+    (cl-letf (((symbol-function 'kuro--clipboard-write)
+               (lambda (text &optional tgt) (setq written text target tgt)))
+              ((symbol-function 'kuro--clipboard-query) #'ignore))
+      (kuro--dispatch-clipboard-action '(write "payload" "primary"))
+      (should (equal written "payload"))
+      (should (equal target "primary")))))
+
+(ert-deftest kuro-poll-modes-dispatch-clipboard-action-dispatches-query ()
+  "`kuro--dispatch-clipboard-action' dispatches a query action to the query handler."
+  (let ((queried nil))
+    (cl-letf (((symbol-function 'kuro--clipboard-write) #'ignore)
+              ((symbol-function 'kuro--clipboard-query)
+               (lambda () (setq queried t))))
+      (kuro--dispatch-clipboard-action '(query nil "clipboard"))
+      (should queried))))
+
+(ert-deftest kuro-poll-modes-dispatch-clipboard-action-legacy-cons-defaults-target-nil ()
+  "`kuro--dispatch-clipboard-action' accepts a legacy cons and yields nil target."
+  (let ((written nil)
+        (target 'unset))
+    (cl-letf (((symbol-function 'kuro--clipboard-write)
+               (lambda (text &optional tgt) (setq written text target tgt)))
+              ((symbol-function 'kuro--clipboard-query) #'ignore))
+      (kuro--dispatch-clipboard-action '(write . "legacy"))
+      (should (equal written "legacy"))
+      (should (null target)))))
 
 (provide 'kuro-poll-modes-test-2)
 

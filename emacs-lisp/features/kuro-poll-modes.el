@@ -220,19 +220,48 @@ MARKS is the OSC 133 marker list to inspect."
      (format "\e]52;c;%s\a"
              (base64-encode-string (or text "") t)))))
 
-(defun kuro--clipboard-write (text)
-  "Place TEXT on the kill ring per `kuro-clipboard-policy'.
+(defsubst kuro--clipboard-action-payload (action)
+  "Return the payload string of clipboard ACTION.
+ACTION is the new 3-element list (TAG PAYLOAD TARGET) or a legacy
+2-element form — the list (TAG PAYLOAD) or the cons (TAG . PAYLOAD).
+The cons form is detected by a non-list cdr."
+  (let ((rest (cdr action)))
+    (if (listp rest) (car rest) rest)))
+
+(defsubst kuro--clipboard-action-target (action)
+  "Return the selection-target string of clipboard ACTION, or nil.
+Only the new 3-element list (TAG PAYLOAD TARGET) carries a target; legacy
+2-element actions yield nil, defaulting writes to the clipboard."
+  (let ((rest (cdr action)))
+    (and (consp rest) (nth 1 rest))))
+
+(defun kuro--clipboard-set-selection (text target)
+  "Place TEXT on the Emacs selection chosen by TARGET.
+TARGET is a string from the OSC 52 selection field:
+  \"primary\" / \"select\" → the X PRIMARY selection;
+  \"clipboard\", \"cut-buffer-N\", nil, or any unknown value →
+  the kill ring and the CLIPBOARD selection (the default path)."
+  (pcase target
+    ((or "primary" "select")
+     (gui-set-selection 'PRIMARY text))
+    (_
+     (kill-new text))))
+
+(defun kuro--clipboard-write (text &optional target)
+  "Place TEXT on the Emacs selection chosen by TARGET per `kuro-clipboard-policy'.
+TARGET routes the write (see `kuro--clipboard-set-selection'); when nil the
+write goes to the clipboard for backward compatibility.
 Under `write-only' or `allow': accepts silently.  Under `prompt': asks first.
 Under `deny' or any other value: does nothing."
   (pcase kuro-clipboard-policy
     ((or 'write-only 'allow)
-     (kill-new text)
+     (kuro--clipboard-set-selection text target)
      (message "Kuro: clipboard updated from terminal"))
     ('prompt
      (when (yes-or-no-p
             (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
                     (length text)))
-       (kill-new text)))))
+       (kuro--clipboard-set-selection text target)))))
 
 (defun kuro--clipboard-query ()
   "Respond to a clipboard read request per `kuro-clipboard-policy'.

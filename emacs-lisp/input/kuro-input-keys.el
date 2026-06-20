@@ -40,6 +40,11 @@
 (defvar kuro--keyboard-flags 0
   "Forward reference; defvar-permanent-local in kuro-input-paste.el.")
 
+;; kuro--app-keypad-mode is a defvar-permanent-local in kuro-input-send.el.
+;; Forward-declare to silence byte-compiler (used by keypad senders below).
+(defvar kuro--app-keypad-mode nil
+  "Forward reference; defvar-permanent-local in kuro-input-send.el.")
+
 
 ;;; KKP key-sender helper
 
@@ -83,27 +88,93 @@ LEGACY-NORMAL / LEGACY-APPLICATION pair via `kuro--send-key-sequence'."
 (kuro--def-key-sequence kuro--F11 "Send F11 key." "\e[23~" "\e[23~" kuro--kkp-cp-f11)
 (kuro--def-key-sequence kuro--F12 "Send F12 key." "\e[24~" "\e[24~" kuro--kkp-cp-f12)
 
+;;; Shifted Function Keys S-F1..S-F12
+;;
+;; Generated from `kuro--shifted-fkey-bindings'.  Legacy form: F1-F4 use
+;; CSI 1;2P..S, F5-F12 use CSI <n>;2~.  With KKP all-escape active, the
+;; canonical CSI <codepoint>;2u form is sent (shift wire = 2).
+(defmacro kuro--define-shifted-fkeys ()
+  "Generate `kuro--S-F1' .. `kuro--S-F12' from `kuro--shifted-fkey-bindings'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (let ((name (nth 1 entry))
+                (legacy (nth 2 entry))
+                (kkp-cp (nth 3 entry)))
+            `(kuro--def-shifted-fkey ,name ,legacy ,kkp-cp
+               ,(format "Send Shift+%s key." (upcase (symbol-name (nth 0 entry)))))))
+        kuro--shifted-fkey-bindings)))
+(kuro--define-shifted-fkeys)
+
+;;; Numeric Keypad Keys KP-0..KP-9, kp-decimal/enter/add/subtract/multiply/divide
+;;
+;; Generated from `kuro--keypad-bindings'.  Each sends the plain character in
+;; normal keypad mode (DECKPNM) or the SS3-prefixed application form in
+;; application keypad mode (DECKPAM), dispatched on `kuro--app-keypad-mode'.
+(defmacro kuro--define-keypad-keys ()
+  "Generate `kuro--KP-*' senders from `kuro--keypad-bindings'."
+  `(progn
+     ,@(mapcar
+        (lambda (entry)
+          (let ((name (nth 1 entry))
+                (normal (nth 2 entry))
+                (application (nth 3 entry)))
+            `(kuro--def-keypad-key ,name ,normal ,application
+               ,(format "Send keypad %s key." (symbol-name (nth 0 entry))))))
+        kuro--keypad-bindings)))
+(kuro--define-keypad-keys)
+
 ;;; Modifier Combinations
+;;
+;; All KKP modifier encoding is unified through `kuro--encode-kitty-key'
+;; (kuro-input-keys-data.el), which applies the (bitmask + 1) wire offset.
+;; This keeps Ctrl/Alt/Super/Hyper encoding identical and eliminates the
+;; previously-inlined `format "\e[%d;Nu"' duplicates.
 
 (defun kuro--ctrl-modified (char _modifier)
   "Send Ctrl+CHAR.  _MODIFIER is ignored (reserved for future use).
-With KKP REPORT_ALL_KEYS flag (0x08), encodes as CSI char;5u so the app
-can distinguish Ctrl+I from Tab, Ctrl+M from Enter, etc."
+With KKP REPORT_ALL_KEYS flag (0x08), encodes as CSI char;5u (ctrl bit,
+wire 4+1=5) via `kuro--encode-kitty-key' so the app can distinguish
+Ctrl+I from Tab, Ctrl+M from Enter, etc.  Otherwise sends the raw C0 byte."
   (interactive "nChar: \nModifier: ")
-  (kuro--with-kkp-all-escape (format "\e[%d;5u" char)
+  (kuro--with-kkp-all-escape (kuro--encode-kitty-key char kuro--kkp-mod-ctrl)
     (kuro--send-special (logand char 31))))
 
 (defun kuro--alt-modified (char)
   "Send Alt+CHAR.
-With KKP DISAMBIGUATE flag (0x01), encodes as CSI char;3u so the app
-receives unambiguous Alt+key events without escape-prefix ambiguity.
+With KKP DISAMBIGUATE flag (0x01), encodes as CSI char;3u (alt bit,
+wire 2+1=3) via `kuro--encode-kitty-key' so the app receives unambiguous
+Alt+key events without escape-prefix ambiguity.
 Without KKP, sends the legacy ESC prefix followed by CHAR."
   (interactive "nChar: ")
   (if (kuro--kkp-flag-p kuro--kkp-disambiguate)
-      ;; KKP Alt modifier: alt=2 → wire modifier = (2+1)=3
-      (kuro--send-key (format "\e[%d;3u" char))
+      (kuro--send-key (kuro--encode-kitty-key char kuro--kkp-mod-alt))
     (kuro--send-key (string ?\e char)))
   (kuro--schedule-immediate-render))
+
+(defun kuro--super-modified (char)
+  "Send Super+CHAR (the s- modifier) in Kitty keyboard protocol form.
+With any KKP flag active (DISAMBIGUATE 0x01 or ALL_ESCAPE 0x08), encodes
+as CSI char;9u (super bit 8, wire 8+1=9) via `kuro--encode-kitty-key'.
+Vanilla terminals have no legacy encoding for Super, so without KKP the
+keypress is dropped (no bytes sent)."
+  (interactive "nChar: ")
+  (when (or (kuro--kkp-flag-p kuro--kkp-disambiguate)
+            (kuro--kkp-flag-p kuro--kkp-all-escape))
+    (kuro--send-key (kuro--encode-kitty-key char kuro--kkp-mod-super))
+    (kuro--schedule-immediate-render)))
+
+(defun kuro--hyper-modified (char)
+  "Send Hyper+CHAR (the H- modifier) in Kitty keyboard protocol form.
+With any KKP flag active (DISAMBIGUATE 0x01 or ALL_ESCAPE 0x08), encodes
+as CSI char;17u (hyper bit 16, wire 16+1=17) via `kuro--encode-kitty-key'.
+Vanilla terminals have no legacy encoding for Hyper, so without KKP the
+keypress is dropped (no bytes sent)."
+  (interactive "nChar: ")
+  (when (or (kuro--kkp-flag-p kuro--kkp-disambiguate)
+            (kuro--kkp-flag-p kuro--kkp-all-escape))
+    (kuro--send-key (kuro--encode-kitty-key char kuro--kkp-mod-hyper))
+    (kuro--schedule-immediate-render)))
 
 (provide 'kuro-input-keys)
 

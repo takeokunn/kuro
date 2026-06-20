@@ -225,7 +225,37 @@
      "With flags=0, Alt+a sends legacy ESC+a."
      0
      (kuro--alt-modified ?a)
-     "\ea"))
+     "\ea")
+    (kuro-input-keys--g21-kkp-super-disambiguate-sends-csi-9u
+     "With flag 0x01, Super+x sends CSI 120;9u (super bit 8, wire 9)."
+     #x01
+     (kuro--super-modified ?x)
+     "\e[120;9u")
+    (kuro-input-keys--g21-kkp-super-all-escape-sends-csi-9u
+     "With flag 0x08, Super+a sends CSI 97;9u."
+     #x08
+     (kuro--super-modified ?a)
+     "\e[97;9u")
+    (kuro-input-keys--g21-kkp-hyper-disambiguate-sends-csi-17u
+     "With flag 0x01, Hyper+x sends CSI 120;17u (hyper bit 16, wire 17)."
+     #x01
+     (kuro--hyper-modified ?x)
+     "\e[120;17u")
+    (kuro-input-keys--g21-kkp-hyper-all-escape-sends-csi-17u
+     "With flag 0x08, Hyper+a sends CSI 97;17u."
+     #x08
+     (kuro--hyper-modified ?a)
+     "\e[97;17u")
+    (kuro-input-keys--g21-kkp-super-zero-flags-sends-nothing
+     "With flags=0, Super+a sends nothing (no legacy encoding)."
+     0
+     (kuro--super-modified ?a)
+     nil)
+    (kuro-input-keys--g21-kkp-hyper-zero-flags-sends-nothing
+     "With flags=0, Hyper+a sends nothing (no legacy encoding)."
+     0
+     (kuro--hyper-modified ?a)
+     nil))
   "KKP send behavior cases as NAME, DOCSTRING, FLAGS, BODY, EXPECTED.")
 
 (defconst kuro-input-keys-test--encode-kitty-key-cases
@@ -234,7 +264,28 @@
      97 0 "\e[97u")
     (kuro-input-keys--g21-kkp-encode-kitty-key-with-ctrl
      "kuro--encode-kitty-key with ctrl modifier encodes as ESC [ key ; 5 u."
-     65 4 "\e[65;5u"))
+     65 4 "\e[65;5u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-shift-only
+     "kuro--encode-kitty-key with shift (1) encodes wire 2: ESC [ key ; 2 u."
+     97 1 "\e[97;2u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-alt-only
+     "kuro--encode-kitty-key with alt (2) encodes wire 3: ESC [ key ; 3 u."
+     97 2 "\e[97;3u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-super-only
+     "kuro--encode-kitty-key with super (8) encodes wire 9: ESC [ key ; 9 u."
+     97 8 "\e[97;9u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-hyper-only
+     "kuro--encode-kitty-key with hyper (16) encodes wire 17: ESC [ key ; 17 u."
+     97 16 "\e[97;17u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-meta-only
+     "kuro--encode-kitty-key with meta (32) encodes wire 33: ESC [ key ; 33 u."
+     97 32 "\e[97;33u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-ctrl-super
+     "kuro--encode-kitty-key with ctrl+super (4+8=12) encodes wire 13."
+     97 12 "\e[97;13u")
+    (kuro-input-keys--g21-kkp-encode-kitty-key-shift-hyper
+     "kuro--encode-kitty-key with shift+hyper (1+16=17) encodes wire 18."
+     97 17 "\e[97;18u"))
   "Encode-kitty-key cases as NAME, DOCSTRING, KEY, MODIFIER, EXPECTED.")
 
 (defconst kuro-input-keys-test--kkp-flag-p-cases

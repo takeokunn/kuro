@@ -108,6 +108,86 @@
                           (and (consp form) (eq (car form) 'kuro--send-kkp-functional)))
                         body))))
 
+;;; Group: Shifted function keys S-F1..S-F12
+
+(ert-deftest kuro-input-keys--shifted-f1-legacy-csi-1-2-P ()
+  "S-F1 sends xterm legacy CSI 1;2P when KKP all-escape is inactive."
+  (kuro-input-keys-test--with-kkp 0
+    (kuro--S-F1)
+    (should (equal (car kuro-input-keys-test--sent) "\e[1;2P"))))
+
+(ert-deftest kuro-input-keys--shifted-f1-kkp-csi-cp-2u ()
+  "S-F1 sends KKP CSI 57364;2u when all-escape (0x08) is active."
+  (kuro-input-keys-test--with-kkp #x08
+    (kuro--S-F1)
+    (should (equal (car kuro-input-keys-test--sent)
+                   (format "\e[%d;2u" kuro--kkp-cp-f1)))))
+
+(ert-deftest kuro-input-keys--shifted-f5-legacy-csi-15-2-tilde ()
+  "S-F5 sends xterm legacy CSI 15;2~ when KKP all-escape is inactive."
+  (kuro-input-keys-test--with-kkp 0
+    (kuro--S-F5)
+    (should (equal (car kuro-input-keys-test--sent) "\e[15;2~"))))
+
+(ert-deftest kuro-input-keys--shifted-f5-kkp-csi-cp-2u ()
+  "S-F5 sends KKP CSI 57368;2u when all-escape (0x08) is active."
+  (kuro-input-keys-test--with-kkp #x08
+    (kuro--S-F5)
+    (should (equal (car kuro-input-keys-test--sent)
+                   (format "\e[%d;2u" kuro--kkp-cp-f5)))))
+
+(ert-deftest kuro-input-keys--shifted-f4-legacy-csi-1-2-S ()
+  "S-F4 sends xterm legacy CSI 1;2S (last of the SS3-style F1-F4 group)."
+  (kuro-input-keys-test--with-kkp 0
+    (kuro--S-F4)
+    (should (equal (car kuro-input-keys-test--sent) "\e[1;2S"))))
+
+(ert-deftest kuro-input-keys--shifted-f12-legacy-csi-24-2-tilde ()
+  "S-F12 sends xterm legacy CSI 24;2~."
+  (kuro-input-keys-test--with-kkp 0
+    (kuro--S-F12)
+    (should (equal (car kuro-input-keys-test--sent) "\e[24;2~"))))
+
+;;; Group: Numeric keypad keys (normal vs application keypad mode)
+
+(ert-deftest kuro-input-keys--keypad-7-normal-sends-plain-char ()
+  "KP-7 sends the plain character \"7\" when application keypad mode is off."
+  (kuro-input-keys-test--with-capture
+    (let ((kuro--app-keypad-mode nil))
+      (kuro--KP-7))
+    (should (equal (car kuro-input-keys-test--sent) "7"))))
+
+(ert-deftest kuro-input-keys--keypad-7-application-sends-ss3 ()
+  "KP-7 sends the SS3 application form ESC O w when app keypad mode is on."
+  (kuro-input-keys-test--with-capture
+    (let ((kuro--app-keypad-mode t))
+      (kuro--KP-7))
+    (should (equal (car kuro-input-keys-test--sent) "\eOw"))))
+
+(ert-deftest kuro-input-keys--keypad-0-normal-and-application ()
+  "KP-0 sends \"0\" normally and ESC O p in application keypad mode."
+  (kuro-input-keys-test--with-capture
+    (let ((kuro--app-keypad-mode nil)) (kuro--KP-0))
+    (should (equal (car kuro-input-keys-test--sent) "0")))
+  (kuro-input-keys-test--with-capture
+    (let ((kuro--app-keypad-mode t)) (kuro--KP-0))
+    (should (equal (car kuro-input-keys-test--sent) "\eOp"))))
+
+(ert-deftest kuro-input-keys--keypad-operators-normal-and-application ()
+  "Keypad operators send their plain char normally and SS3 form in app mode."
+  (dolist (case '((kuro--KP-DECIMAL  "." "\eOn")
+                  (kuro--KP-ENTER    "\r" "\eOM")
+                  (kuro--KP-ADD      "+" "\eOl")
+                  (kuro--KP-SUBTRACT "-" "\eOm")
+                  (kuro--KP-MULTIPLY "*" "\eOj")
+                  (kuro--KP-DIVIDE   "/" "\eOo")))
+    (kuro-input-keys-test--with-capture
+      (let ((kuro--app-keypad-mode nil)) (funcall (nth 0 case)))
+      (should (equal (car kuro-input-keys-test--sent) (nth 1 case))))
+    (kuro-input-keys-test--with-capture
+      (let ((kuro--app-keypad-mode t)) (funcall (nth 0 case)))
+      (should (equal (car kuro-input-keys-test--sent) (nth 2 case))))))
+
 (provide 'kuro-input-keys-test-3)
 
 ;;; kuro-input-keys-test-3.el ends here

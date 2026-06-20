@@ -49,6 +49,34 @@
 (declare-function kuro--F11 "kuro-input-keys" ())
 (declare-function kuro--F12 "kuro-input-keys" ())
 (declare-function kuro--kkp-flag-p "kuro-input-keys" (flag))
+(declare-function kuro--S-F1 "kuro-input-keys" ())
+(declare-function kuro--S-F2 "kuro-input-keys" ())
+(declare-function kuro--S-F3 "kuro-input-keys" ())
+(declare-function kuro--S-F4 "kuro-input-keys" ())
+(declare-function kuro--S-F5 "kuro-input-keys" ())
+(declare-function kuro--S-F6 "kuro-input-keys" ())
+(declare-function kuro--S-F7 "kuro-input-keys" ())
+(declare-function kuro--S-F8 "kuro-input-keys" ())
+(declare-function kuro--S-F9 "kuro-input-keys" ())
+(declare-function kuro--S-F10 "kuro-input-keys" ())
+(declare-function kuro--S-F11 "kuro-input-keys" ())
+(declare-function kuro--S-F12 "kuro-input-keys" ())
+(declare-function kuro--KP-0 "kuro-input-keys" ())
+(declare-function kuro--KP-1 "kuro-input-keys" ())
+(declare-function kuro--KP-2 "kuro-input-keys" ())
+(declare-function kuro--KP-3 "kuro-input-keys" ())
+(declare-function kuro--KP-4 "kuro-input-keys" ())
+(declare-function kuro--KP-5 "kuro-input-keys" ())
+(declare-function kuro--KP-6 "kuro-input-keys" ())
+(declare-function kuro--KP-7 "kuro-input-keys" ())
+(declare-function kuro--KP-8 "kuro-input-keys" ())
+(declare-function kuro--KP-9 "kuro-input-keys" ())
+(declare-function kuro--KP-DECIMAL "kuro-input-keys" ())
+(declare-function kuro--KP-ENTER "kuro-input-keys" ())
+(declare-function kuro--KP-ADD "kuro-input-keys" ())
+(declare-function kuro--KP-SUBTRACT "kuro-input-keys" ())
+(declare-function kuro--KP-MULTIPLY "kuro-input-keys" ())
+(declare-function kuro--KP-DIVIDE "kuro-input-keys" ())
 
 (kuro--def-shifted-key kuro--send-shifted-tab
   "\e[9;2u" "\e[Z"
@@ -69,6 +97,18 @@
   (kuro--define-key-bindings map kuro--fkey-handlers
     (lambda (binding) (vector (car binding)))
     #'cdr)
+
+  ;; Shifted function keys S-F1–S-F12 (PTY senders; do not conflict with the
+  ;; intentionally-local shifted navigation keys S-prior/S-next/S-end/S-tab).
+  (kuro--define-key-bindings map kuro--shifted-fkey-bindings
+    (lambda (binding) (vector (intern (format "S-%s" (nth 0 binding)))))
+    (lambda (binding) (nth 1 binding)))
+
+  ;; Numeric keypad keys (KP-0..KP-9 and operators): dispatch normal vs
+  ;; SS3 application form on `kuro--app-keypad-mode'.
+  (kuro--define-key-bindings map kuro--keypad-bindings
+    (lambda (binding) (vector (nth 0 binding)))
+    (lambda (binding) (nth 1 binding)))
 
   ;; Modifier + arrow keys: xterm CSI 1;Nm sequences (or KKP with flag 0x08)
   (kuro--define-modifier-arrow-bindings map

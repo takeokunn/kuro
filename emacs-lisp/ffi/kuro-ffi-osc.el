@@ -55,9 +55,15 @@ Returns a directory string if available, nil otherwise.")
  (kuro--poll-clipboard-actions
   kuro-core-poll-clipboard-actions nil
   "Poll for pending OSC 52 clipboard actions from the terminal.
-Returns a list of (TYPE . DATA) pairs where TYPE is `write' or `query'.
-For `write' actions, DATA is the text string to place on the clipboard.
-For `query' actions, DATA is nil (terminal is requesting clipboard contents).
+Returns a list of (TAG PAYLOAD TARGET) 3-element lists where TAG is
+`write' or `query'.
+For `write' actions, PAYLOAD is the text string to place on the selection.
+For `query' actions, PAYLOAD is nil (terminal is requesting contents).
+TARGET is the selection-target string from the OSC 52 field — one of
+\"clipboard\", \"primary\", \"select\", or \"cut-buffer-N\" — used to route
+the write to the correct Emacs selection (see `kuro--clipboard-write').
+A legacy 2-element action (TAG PAYLOAD) or cons (TAG . PAYLOAD) is also
+accepted and defaults TARGET to \"clipboard\".
 Returns nil if no actions are pending.")
 
  (kuro--poll-notifications

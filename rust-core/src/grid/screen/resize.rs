@@ -30,8 +30,8 @@ fn resize_line_buffer(lines: &mut VecDeque<Line>, new_rows: usize, new_cols: usi
 
 #[inline]
 fn clamp_cursor(cursor_row: &mut usize, cursor_col: &mut usize, new_rows: u16, new_cols: u16) {
-    *cursor_row = (*cursor_row).min(new_rows.saturating_sub(1) as usize);
-    *cursor_col = (*cursor_col).min(new_cols.saturating_sub(1) as usize);
+    *cursor_row = (*cursor_row).min(usize::from(new_rows.saturating_sub(1)));
+    *cursor_col = (*cursor_col).min(usize::from(new_cols.saturating_sub(1)));
 }
 
 /// Resize the PRIMARY screen + scrollback content, reflowing (rewrapping) soft
@@ -61,13 +61,17 @@ fn resize_buffered_screen_content(
             .saved_primary_cursor
             .map_or((screen.cursor.row, screen.cursor.col), |c| (c.row, c.col));
 
-        let recovered =
-            screen.reflow_primary(new_rows as usize, new_cols as usize, track_row, track_col);
+        let recovered = screen.reflow_primary(
+            usize::from(new_rows),
+            usize::from(new_cols),
+            track_row,
+            track_col,
+        );
 
         let (row, col) = recovered.unwrap_or_else(|| {
             (
-                track_row.min(new_rows.saturating_sub(1) as usize),
-                track_col.min(new_cols.saturating_sub(1) as usize),
+                track_row.min(usize::from(new_rows.saturating_sub(1))),
+                track_col.min(usize::from(new_cols.saturating_sub(1))),
             )
         });
 
@@ -83,10 +87,14 @@ fn resize_buffered_screen_content(
     }
 
     // Width unchanged (height-only change): keep the existing cheap path.
-    resize_line_buffer(&mut screen.lines, new_rows as usize, new_cols as usize);
+    resize_line_buffer(
+        &mut screen.lines,
+        usize::from(new_rows),
+        usize::from(new_cols),
+    );
 
     for line in &mut screen.scrollback_buffer {
-        line.resize(new_cols as usize);
+        line.resize(usize::from(new_cols));
     }
 
     clamp_cursor(
@@ -109,7 +117,7 @@ fn resize_active_screen_state(
     screen.cols = new_cols;
 
     resize_buffered_screen_content(screen, is_primary, old_cols, new_rows, new_cols);
-    screen.scroll_region = ScrollRegion::full_screen(new_rows as usize);
+    screen.scroll_region = ScrollRegion::full_screen(usize::from(new_rows));
     screen.cursor.pending_wrap = false;
 }
 
@@ -126,7 +134,11 @@ fn resize_primary_while_alternate_active(
 
 #[inline]
 fn resize_cached_alternate_screen(screen: &mut Screen, new_rows: u16, new_cols: u16) {
-    resize_line_buffer(&mut screen.lines, new_rows as usize, new_cols as usize);
+    resize_line_buffer(
+        &mut screen.lines,
+        usize::from(new_rows),
+        usize::from(new_cols),
+    );
     screen.rows = new_rows;
     screen.cols = new_cols;
     clamp_cursor(
@@ -135,7 +147,7 @@ fn resize_cached_alternate_screen(screen: &mut Screen, new_rows: u16, new_cols: 
         new_rows,
         new_cols,
     );
-    screen.scroll_region = ScrollRegion::full_screen(new_rows as usize);
+    screen.scroll_region = ScrollRegion::full_screen(usize::from(new_rows));
 }
 
 impl Screen {

@@ -37,7 +37,7 @@ impl TerminalSession {
     /// the rows reported by the dirty tracker.
     #[must_use]
     pub fn get_dirty_lines(&mut self) -> Vec<(usize, String)> {
-        let rows = self.core.screen.rows() as usize;
+        let rows = usize::from(self.core.screen.rows());
         if self.core.screen.is_full_dirty() {
             self.core.screen.clear_dirty();
             collect_encoded_dirty_rows(&self.core.screen, 0..rows)
@@ -74,7 +74,7 @@ impl TerminalSession {
     /// Resize the terminal core and PTY, if any.
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         self.core.resize(rows, cols);
-        self.row_hashes.resize(rows as usize, None);
+        self.row_hashes.resize(usize::from(rows), None);
         for slot in &mut self.row_hashes {
             *slot = None;
         }

@@ -49,9 +49,10 @@ pub use color::{
 
 // Line encoding
 pub use line::encode_line;
-pub use line::EncodedLineData;
 pub(crate) use line::{
-    encode_line_into_buf, encode_line_with_pool, EncodePool, EncodedFaceRange, EncodedLine,
+    encode_line_into_buf, encode_line_with_pool, BinaryFrameResult, BinaryFrameU32,
+    BinaryFrameU32Field, BinaryFrameU32Overflow, EncodePool, EncodedFaceRange, EncodedLine,
+    EncodedLineData,
 };
 
 // Binary frame encoding + hash
@@ -59,7 +60,7 @@ pub(crate) use line::{
 pub(crate) use binary::compute_row_hash;
 pub(crate) use binary::{
     compute_row_hash_from_encoded, encode_line_into_buf_and_hash, encode_screen_binary,
-    BINARY_FORMAT_VERSION,
+    HashedEncodedText, BINARY_FORMAT_VERSION,
 };
 
 // Hyperlink ranges

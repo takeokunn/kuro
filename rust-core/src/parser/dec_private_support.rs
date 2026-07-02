@@ -17,7 +17,7 @@ fn apply_alternate_screen_set(term: &mut crate::TerminalCore, mode: u16) {
         // Alternate screen (?1047): switch to alt screen and clear it on entry.
         1047 => {
             term.screen.switch_to_alternate();
-            let rows = term.screen.rows() as usize;
+            let rows = usize::from(term.screen.rows());
             term.screen.clear_lines(0, rows);
             term.screen.mark_all_dirty();
         }
@@ -106,14 +106,17 @@ pub fn handle_decrqm(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Does NOT emit an in-band resize report — the Emacs layer observes the
 /// new grid dimensions on the next render cycle without a spurious SIGWINCH.
 #[inline]
-fn apply_deccolm(term: &mut crate::TerminalCore, new_cols: usize) {
-    let rows = term.screen.rows() as usize;
-    term.screen.resize(rows as u16, new_cols as u16);
-    term.tab_stops.resize(new_cols);
-    term.screen.clear_lines(0, rows);
+fn apply_deccolm(term: &mut crate::TerminalCore, new_cols: u16) {
+    let rows = term.screen.rows();
+    let rows_usize = usize::from(rows);
+    let new_cols_usize = usize::from(new_cols);
+    term.screen.resize(rows, new_cols);
+    term.tab_stops.resize(new_cols_usize);
+    term.screen.clear_lines(0, rows_usize);
     term.screen.mark_all_dirty();
     // Reset scroll region to full screen and home the cursor.
-    term.screen.set_scroll_region(0, rows.saturating_sub(1));
+    term.screen
+        .set_scroll_region(0, rows_usize.saturating_sub(1));
     term.screen.move_cursor(0, 0);
 }
 

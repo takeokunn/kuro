@@ -7,7 +7,7 @@ use crate::ffi::codec::binary::compute_row_hash_from_pool;
 
 #[test]
 fn encode_screen_binary_empty_input_produces_8_byte_header() {
-    let result = encode_screen_binary(&[]);
+    let result = encode_screen_binary_ok(&[]);
     assert_eq!(
         result.len(),
         8,
@@ -21,7 +21,7 @@ fn encode_screen_binary_empty_input_produces_8_byte_header() {
 #[test]
 fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
     let lines: Vec<EncodedLine> = Vec::new();
-    let result = encode_screen_binary(&lines);
+    let result = encode_screen_binary_ok(&lines);
     assert_eq!(
         result.len(),
         8,
@@ -39,7 +39,7 @@ fn encode_screen_binary_single_row_no_text_no_faces_no_col_to_buf() {
         face_ranges: vec![],
         col_to_buf: vec![],
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + col_to_buf_len (4) = 24 bytes total
@@ -62,7 +62,7 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
         face_ranges: vec![],
         col_to_buf: vec![],
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + text_bytes (5) + col_to_buf_len (4) = 29 bytes total
@@ -72,7 +72,7 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
     assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
     assert_eq!(
         read_u32_le(&result, 16),
-        text_len as u32,
+        test_usize_to_u32(text_len, "text length test value fits u32"),
         "text_byte_len must match"
     );
     assert_eq!(&result[20..25], b"Hello", "raw text bytes must be correct");
@@ -100,7 +100,7 @@ fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
         face_ranges,
         col_to_buf: vec![],
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + text (5) + face_range (28) + col_to_buf_len (4) = 57 bytes
@@ -130,7 +130,7 @@ fn encode_screen_binary_single_row_nonempty_col_to_buf() {
         face_ranges: vec![],
         col_to_buf,
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
     // + text (2) + col_to_buf_len (4) + col_to_buf_entries (3*4=12) = 38 bytes
@@ -170,8 +170,65 @@ fn encode_screen_binary_multiple_rows_num_rows_header() {
             col_to_buf: vec![],
         })
         .collect();
-    let result = encode_screen_binary(&lines);
+    let result = encode_screen_binary_ok(&lines);
     assert_binary_header!(&result, rows 5);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[inline]
+fn above_binary_frame_u32_max() -> usize {
+    usize::try_from(u64::from(u32::MAX) + 1).expect("64-bit usize fits u32::MAX + 1")
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn encode_screen_binary_rejects_row_index_above_u32() {
+    let value = above_binary_frame_u32_max();
+    let lines = vec![encoded_line(value, "", vec![], vec![])];
+    let error = encode_screen_binary(&lines).expect_err("row index above u32 must be rejected");
+    assert_eq!(error.field, BinaryFrameU32Field::RowIndex);
+    assert_eq!(error.value, value);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn encode_screen_binary_rejects_face_start_above_u32() {
+    let value = above_binary_frame_u32_max();
+    let lines = vec![encoded_line(
+        0,
+        "",
+        vec![face_range(value, 0, 0, 0, 0, 0)],
+        vec![],
+    )];
+    let error = encode_screen_binary(&lines).expect_err("face start above u32 must be rejected");
+    assert_eq!(error.field, BinaryFrameU32Field::FaceStartBuf);
+    assert_eq!(error.value, value);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn encode_screen_binary_rejects_face_end_above_u32() {
+    let value = above_binary_frame_u32_max();
+    let lines = vec![encoded_line(
+        0,
+        "",
+        vec![face_range(0, value, 0, 0, 0, 0)],
+        vec![],
+    )];
+    let error = encode_screen_binary(&lines).expect_err("face end above u32 must be rejected");
+    assert_eq!(error.field, BinaryFrameU32Field::FaceEndBuf);
+    assert_eq!(error.value, value);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn encode_screen_binary_rejects_col_to_buf_offset_above_u32() {
+    let value = above_binary_frame_u32_max();
+    let lines = vec![encoded_line(0, "", vec![], vec![value])];
+    let error =
+        encode_screen_binary(&lines).expect_err("col_to_buf offset above u32 must be rejected");
+    assert_eq!(error.field, BinaryFrameU32Field::ColToBufOffset);
+    assert_eq!(error.value, value);
 }
 
 // -------------------------------------------------------------------------

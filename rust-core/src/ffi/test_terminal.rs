@@ -20,6 +20,11 @@ use std::sync::Mutex;
 /// [`kuro_core_test_create`] and destroyed via [`kuro_core_test_destroy`].
 static TEST_TERMINAL: Mutex<Option<TerminalCore>> = Mutex::new(None);
 
+#[inline]
+fn usize_to_lisp_i64(value: usize, field: &'static str) -> i64 {
+    i64::try_from(value).expect(field)
+}
+
 /// Catch Rust panics and convert them to Emacs errors, for test terminal functions.
 fn catch_panic_test<'e, R, F>(env: &'e Env, f: F) -> EmacsResult<Value<'e>>
 where
@@ -112,10 +117,6 @@ fn kuro_core_test_feed(env: &Env, data: String) -> EmacsResult<Value<'_>> {
 
 /// Get cursor position as `(ROW . COL)` (0-indexed).
 #[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
-)]
 fn kuro_core_test_get_cursor(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (row, col) = {
@@ -129,8 +130,8 @@ fn kuro_core_test_get_cursor(env: &Env) -> EmacsResult<Value<'_>> {
     }));
     match result {
         Ok(Ok((row, col))) => {
-            let r = (row as i64).into_lisp(env)?;
-            let c = (col as i64).into_lisp(env)?;
+            let r = usize_to_lisp_i64(row, "test cursor row must fit i64").into_lisp(env)?;
+            let c = usize_to_lisp_i64(col, "test cursor column must fit i64").into_lisp(env)?;
             env.cons(r, c)
         }
         Ok(Err(e)) => {
@@ -210,10 +211,6 @@ fn kuro_core_test_get_line(env: &Env, row: usize) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(0 . 23)` if no test terminal is active.
 #[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "top/bottom are terminal dimensions (≤ 65535); usize→i64 never wraps"
-)]
 fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (top, bottom) = {
@@ -227,8 +224,9 @@ fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
     }));
     match result {
         Ok(Ok((top, bottom))) => {
-            let t = (top as i64).into_lisp(env)?;
-            let b = (bottom as i64).into_lisp(env)?;
+            let t = usize_to_lisp_i64(top, "test scroll region top must fit i64").into_lisp(env)?;
+            let b = usize_to_lisp_i64(bottom, "test scroll region bottom must fit i64")
+                .into_lisp(env)?;
             env.cons(t, b)
         }
         Ok(Err(e)) => {
@@ -246,24 +244,20 @@ fn kuro_core_test_get_scroll_region(env: &Env) -> EmacsResult<Value<'_>> {
 ///
 /// Returns `(24 . 80)` if no test terminal is active.
 #[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "rows/cols are terminal dimensions (≤ 65535); usize→i64 never wraps"
-)]
 fn kuro_core_test_get_size(env: &Env) -> EmacsResult<Value<'_>> {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (rows, cols) = {
             let global = lock_test!(global);
             (*global).as_ref().map_or((24, 80), |t| {
-                (t.screen.rows() as usize, t.screen.cols() as usize)
+                (usize::from(t.screen.rows()), usize::from(t.screen.cols()))
             })
         };
         Ok::<(usize, usize), KuroError>((rows, cols))
     }));
     match result {
         Ok(Ok((rows, cols))) => {
-            let r = (rows as i64).into_lisp(env)?;
-            let c = (cols as i64).into_lisp(env)?;
+            let r = usize_to_lisp_i64(rows, "test terminal rows must fit i64").into_lisp(env)?;
+            let c = usize_to_lisp_i64(cols, "test terminal columns must fit i64").into_lisp(env)?;
             env.cons(r, c)
         }
         Ok(Err(e)) => {

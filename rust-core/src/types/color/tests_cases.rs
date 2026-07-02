@@ -194,23 +194,23 @@ fn test_grayscale_boundary_values() {
 }
 
 #[test]
-fn test_named_color_order() {
-    assert_eq!(NamedColor::Black as u8, 0);
-    assert_eq!(NamedColor::Red as u8, 1);
-    assert_eq!(NamedColor::Green as u8, 2);
-    assert_eq!(NamedColor::Yellow as u8, 3);
-    assert_eq!(NamedColor::Blue as u8, 4);
-    assert_eq!(NamedColor::Magenta as u8, 5);
-    assert_eq!(NamedColor::Cyan as u8, 6);
-    assert_eq!(NamedColor::White as u8, 7);
-    assert_eq!(NamedColor::BrightBlack as u8, 8);
-    assert_eq!(NamedColor::BrightRed as u8, 9);
-    assert_eq!(NamedColor::BrightGreen as u8, 10);
-    assert_eq!(NamedColor::BrightYellow as u8, 11);
-    assert_eq!(NamedColor::BrightBlue as u8, 12);
-    assert_eq!(NamedColor::BrightMagenta as u8, 13);
-    assert_eq!(NamedColor::BrightCyan as u8, 14);
-    assert_eq!(NamedColor::BrightWhite as u8, 15);
+fn test_named_color_index() {
+    assert_eq!(NamedColor::Black.index(), 0);
+    assert_eq!(NamedColor::Red.index(), 1);
+    assert_eq!(NamedColor::Green.index(), 2);
+    assert_eq!(NamedColor::Yellow.index(), 3);
+    assert_eq!(NamedColor::Blue.index(), 4);
+    assert_eq!(NamedColor::Magenta.index(), 5);
+    assert_eq!(NamedColor::Cyan.index(), 6);
+    assert_eq!(NamedColor::White.index(), 7);
+    assert_eq!(NamedColor::BrightBlack.index(), 8);
+    assert_eq!(NamedColor::BrightRed.index(), 9);
+    assert_eq!(NamedColor::BrightGreen.index(), 10);
+    assert_eq!(NamedColor::BrightYellow.index(), 11);
+    assert_eq!(NamedColor::BrightBlue.index(), 12);
+    assert_eq!(NamedColor::BrightMagenta.index(), 13);
+    assert_eq!(NamedColor::BrightCyan.index(), 14);
+    assert_eq!(NamedColor::BrightWhite.index(), 15);
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn test_cube_green_ramp() {
 
 #[test]
 fn test_named_black_is_idx_0() {
-    assert_eq!(NamedColor::Black as u8, 0);
+    assert_eq!(NamedColor::Black.index(), 0);
     assert_eq!(NamedColor::Black.to_rgb(), (0, 0, 0));
     assert_eq!(Color::Indexed(0).to_rgb(), (0, 0, 0));
 }
@@ -295,9 +295,9 @@ proptest! {
 
     #[test]
     fn prop_named_to_indexed_consistent(idx in 0u8..=15u8) {
-        let named = ALL_NAMED_COLORS[idx as usize];
-        let raw = named as u8;
-        prop_assert_eq!(raw, idx, "NamedColor at slot {} must cast to {}", idx, idx);
+        let named = ALL_NAMED_COLORS[usize::from(idx)];
+        let raw = named.index();
+        prop_assert_eq!(raw, idx, "NamedColor at slot {} must index to {}", idx, idx);
         prop_assert!(raw <= 15, "NamedColor index must be <= 15, got {}", raw);
     }
 

@@ -21,6 +21,48 @@ const RGB_GREEN_IDX: usize = 3;
 const RGB_BLUE_IDX: usize = 4;
 
 #[derive(Copy, Clone)]
+struct SgrColorByte(u8);
+
+impl SgrColorByte {
+    #[inline]
+    fn from_param(value: u16) -> Option<Self> {
+        u8::try_from(value).ok().map(Self)
+    }
+}
+
+impl From<SgrColorByte> for u8 {
+    #[inline]
+    fn from(value: SgrColorByte) -> Self {
+        value.0
+    }
+}
+
+#[derive(Copy, Clone)]
+struct SgrRgb {
+    red: SgrColorByte,
+    green: SgrColorByte,
+    blue: SgrColorByte,
+}
+
+impl SgrRgb {
+    #[inline]
+    fn from_params(red: u16, green: u16, blue: u16) -> Option<Self> {
+        Some(Self {
+            red: SgrColorByte::from_param(red)?,
+            green: SgrColorByte::from_param(green)?,
+            blue: SgrColorByte::from_param(blue)?,
+        })
+    }
+}
+
+impl From<SgrRgb> for Color {
+    #[inline]
+    fn from(value: SgrRgb) -> Self {
+        Self::Rgb(value.red.into(), value.green.into(), value.blue.into())
+    }
+}
+
+#[derive(Copy, Clone)]
 pub(super) enum SgrColorTarget {
     Foreground,
     Background,
@@ -35,38 +77,28 @@ const NAMED_SGR_COLOR_GROUPS: &[(u16, u16, SgrColorTarget, bool)] = &[
 ];
 
 #[inline]
-fn next_component(groups: &[&[u16]], i: &mut usize) -> u8 {
+fn next_required_param(groups: &[&[u16]], i: &mut usize) -> Option<u16> {
     if *i < groups.len() && !groups[*i].is_empty() {
-        let v = groups[*i][0] as u8;
+        let value = groups[*i][0];
         *i += 1;
-        v
+        Some(value)
     } else {
-        0
+        None
     }
 }
 
 #[inline]
 fn parse_colon_indexed_color(current_group: &[u16]) -> Option<Color> {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "palette index 0-255 from u16 sub-param; values > 255 truncate (xterm-compatible)"
-    )]
-    let n = current_group.get(COLOR_INDEX_IDX).copied()? as u8;
-    Some(Color::Indexed(n))
+    let index = current_group.get(COLOR_INDEX_IDX).copied()?;
+    Some(Color::Indexed(SgrColorByte::from_param(index)?.into()))
 }
 
 #[inline]
 fn parse_colon_rgb_color(current_group: &[u16]) -> Option<Color> {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "RGB components 0-255 from u16 sub-params; values > 255 truncate (xterm-compatible)"
-    )]
-    let (r, g, b) = (
-        current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8,
-        current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8,
-        current_group.get(RGB_BLUE_IDX).copied().unwrap_or(0) as u8,
-    );
-    Some(Color::Rgb(r, g, b))
+    let red = current_group.get(RGB_RED_IDX).copied()?;
+    let green = current_group.get(RGB_GREEN_IDX).copied()?;
+    let blue = current_group.get(RGB_BLUE_IDX).copied()?;
+    SgrRgb::from_params(red, green, blue).map(Color::from)
 }
 
 #[inline]
@@ -81,24 +113,20 @@ fn parse_colon_form_color(current_group: &[u16]) -> Option<Color> {
 #[inline]
 fn parse_semicolon_indexed_color(groups: &[&[u16]], i: &mut usize) -> Option<Color> {
     if *i < groups.len() && !groups[*i].is_empty() {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "palette index 0-255; values > 255 truncate (xterm-compatible)"
-        )]
-        let n = groups[*i][0] as u8;
+        let index = groups[*i][0];
         *i += 1;
-        Some(Color::Indexed(n))
+        Some(Color::Indexed(SgrColorByte::from_param(index)?.into()))
     } else {
         None
     }
 }
 
 #[inline]
-fn parse_semicolon_rgb_color(groups: &[&[u16]], i: &mut usize) -> Color {
-    let r = next_component(groups, i);
-    let g = next_component(groups, i);
-    let b = next_component(groups, i);
-    Color::Rgb(r, g, b)
+fn parse_semicolon_rgb_color(groups: &[&[u16]], i: &mut usize) -> Option<Color> {
+    let red = next_required_param(groups, i)?;
+    let green = next_required_param(groups, i)?;
+    let blue = next_required_param(groups, i)?;
+    SgrRgb::from_params(red, green, blue).map(Color::from)
 }
 
 #[inline]
@@ -112,7 +140,7 @@ fn parse_semicolon_form_color(groups: &[&[u16]], i: &mut usize) -> Option<Color>
 
     match mode {
         5 => parse_semicolon_indexed_color(groups, i),
-        2 => Some(parse_semicolon_rgb_color(groups, i)),
+        2 => parse_semicolon_rgb_color(groups, i),
         _ => None,
     }
 }

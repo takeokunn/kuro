@@ -339,7 +339,8 @@ impl TerminalCore {
         }
 
         let cursor = *self.screen.cursor();
-        if let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) {
+        if let Some((row, col)) = combining_attach_position(cursor, usize::from(self.screen.cols()))
+        {
             self.screen.attach_combining(row, col, c);
             // If the cell we just extended is a Kitty Unicode placeholder, the
             // newly-attached diacritic carries row/column (or high-id-byte)
@@ -436,7 +437,7 @@ impl TerminalCore {
             && cursor.col == 0
             && cursor.row > 0
         {
-            let last_col = (self.screen.cols() as usize).saturating_sub(1);
+            let last_col = usize::from(self.screen.cols()).saturating_sub(1);
             self.screen.move_cursor(cursor.row - 1, last_col);
         } else {
             self.screen.backspace();

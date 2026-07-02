@@ -240,6 +240,14 @@ SOURCE is used to locate the response body in BUFFER."
     (unless (zerop rc)
       (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))))
 
+(defun kuro-module--validate-release-archive (tar-bin tmp-file)
+  "Signal unless TMP-FILE contains exactly the expected shared library."
+  (let ((members (kuro-module--archive-members tar-bin tmp-file))
+        (expected (kuro-module--shared-library-name)))
+    (unless (equal members (list expected))
+      (error "Kuro: release archive must contain exactly %s, got %S"
+             expected members))))
+
 (defun kuro-module--install-release-archive (tar-bin tmp-file target-dir)
   "Install the shared library from TMP-FILE with TAR-BIN into TARGET-DIR."
   (let* ((extract-dir (make-temp-file "kuro-module-extract-" t))
@@ -268,7 +276,6 @@ SOURCE is used to locate the response body in BUFFER."
         (delete-directory extract-dir t))
       (when (file-exists-p tmp-file)
         (delete-file tmp-file)))))
-
 
 ;;;###autoload
 (defun kuro-module-download (&optional version)

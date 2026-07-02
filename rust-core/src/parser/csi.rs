@@ -239,7 +239,8 @@ fn csi_param_zero_based(params: &vte::Params, index: usize) -> usize {
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1) as usize
+        .saturating_sub(1)
+        .into()
 }
 
 fn csi_origin_row(term: &crate::TerminalCore, row: usize) -> usize {

@@ -216,7 +216,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 
     #[test]
-    fn prop_mark_line_dirty_sets_flag_and_dirty_row(row in 0usize..ROWS as usize) {
+    fn prop_mark_line_dirty_sets_flag_and_dirty_row(row in 0usize..usize::from(ROWS)) {
         let mut screen = clean_screen();
         screen.mark_line_dirty(row);
 
@@ -236,8 +236,8 @@ proptest! {
 
     #[test]
     fn prop_attach_combining_in_bounds_marks_row(
-        row in 0usize..ROWS as usize,
-        col in 0usize..COLS as usize,
+        row in 0usize..usize::from(ROWS),
+        col in 0usize..usize::from(COLS),
     ) {
         let mut screen = clean_screen();
         screen.attach_combining(row, col, '\u{0301}');
@@ -254,7 +254,7 @@ proptest! {
         screen.mark_all_dirty();
         let dirty = screen.take_dirty_lines();
 
-        for expected_row in 0..rows as usize {
+        for expected_row in 0..usize::from(rows) {
             prop_assert!(dirty.contains(&expected_row));
         }
     }

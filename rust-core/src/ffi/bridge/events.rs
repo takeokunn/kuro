@@ -7,6 +7,7 @@ use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_mut,
     define_session_data_query_or_false, define_session_query_bool, define_session_query_default,
     define_session_query_opt, query_session, query_session_mut, query_session_opt,
+    u64_to_lisp_i64, usize_to_lisp_i64,
 };
 
 define_session_query_opt!(
@@ -144,8 +145,10 @@ define_drain_session_vec_to_lisp!(
             crate::types::osc::PromptMark::CommandEnd => "command-end",
         };
         let mark_val = mark_str.into_lisp(env)?;
-        let row_val = (event.row as i64).into_lisp(env)?;
-        let col_val = (event.col as i64).into_lisp(env)?;
+        let row_val =
+            usize_to_lisp_i64(event.row, "prompt mark row must fit i64").into_lisp(env)?;
+        let col_val =
+            usize_to_lisp_i64(event.col, "prompt mark column must fit i64").into_lisp(env)?;
         let exit_val = match event.exit_code {
             Some(code) => i64::from(code).into_lisp(env)?,
             None => false.into_lisp(env)?,
@@ -155,7 +158,7 @@ define_drain_session_vec_to_lisp!(
             None => false.into_lisp(env)?,
         };
         let duration_val = match event.duration_ms {
-            Some(ms) => (ms as i64).into_lisp(env)?,
+            Some(ms) => u64_to_lisp_i64(ms, "prompt mark duration must fit i64").into_lisp(env)?,
             None => false.into_lisp(env)?,
         };
         let err_val = match event.err_path {
@@ -241,10 +244,6 @@ define_session_data_query_or_false!(
 );
 
 define_session_data_query_or_false!(
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "row/start/end are terminal dimensions (≤ 65535); usize→i64 never wraps"
-    )]
     /// Poll hyperlink ranges for all visible terminal rows.
     ///
     /// Returns a flat list of `(ROW START END URI)` entries, one per hyperlink
@@ -255,9 +254,10 @@ define_session_data_query_or_false!(
     |session| session.get_hyperlink_ranges(),
     |kuro_env, ranges| {
         build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, uri)| {
-            let row_val = (row as i64).into_lisp(env)?;
-            let start_val = (start as i64).into_lisp(env)?;
-            let end_val = (end as i64).into_lisp(env)?;
+            let row_val = usize_to_lisp_i64(row, "hyperlink row must fit i64").into_lisp(env)?;
+            let start_val =
+                usize_to_lisp_i64(start, "hyperlink start must fit i64").into_lisp(env)?;
+            let end_val = usize_to_lisp_i64(end, "hyperlink end must fit i64").into_lisp(env)?;
             let uri_val = uri.into_lisp(env)?;
 
             build_emacs_list_from_values(env, [row_val, start_val, end_val, uri_val])

@@ -24,9 +24,17 @@ fn test_binary_direct_no_dirty_returns_empty() {
     let mut session = make_binary_session();
     consume_initial_dirty(&mut session);
     // A second call with no changes must return empty.
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
-    assert!(texts.is_empty(), "texts must be empty when no dirty rows");
-    assert!(buf.is_empty(), "buf must be empty when no dirty rows");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("empty dirty frame must fit binary u32 fields");
+    assert!(
+        frame.texts.is_empty(),
+        "texts must be empty when no dirty rows"
+    );
+    assert!(
+        frame.bytes.is_empty(),
+        "buf must be empty when no dirty rows"
+    );
 }
 
 /// After entering the alternate screen (which marks all rows full-dirty), the binary
@@ -36,15 +44,28 @@ fn test_binary_direct_full_dirty_returns_all_rows() {
     let mut session = make_binary_session();
     consume_initial_dirty(&mut session);
     enter_alt_screen(&mut session);
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
-    assert_eq!(texts.len(), 24, "full_dirty must produce 24 text entries");
-    assert!(buf.len() > 8, "full_dirty binary buf must contain row data");
-    let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("full dirty frame must fit binary u32 fields");
+    assert_eq!(
+        frame.texts.len(),
+        24,
+        "full_dirty must produce 24 text entries"
+    );
+    assert!(
+        frame.bytes.len() > 8,
+        "full_dirty binary buf must contain row data"
+    );
+    let version = u32::from_le_bytes(frame.bytes[0..4].try_into().unwrap());
     assert_eq!(
         version, BINARY_FORMAT_VERSION,
         "binary format version must match"
     );
-    assert_eq!(binary_num_rows(&buf), 24, "header num_rows must be 24");
+    assert_eq!(
+        binary_num_rows(&frame.bytes),
+        24,
+        "header num_rows must be 24"
+    );
 }
 
 /// Writing to one row and calling `get_dirty_lines_binary_direct` must return
@@ -55,17 +76,19 @@ fn test_binary_direct_partial_dirty_returns_only_changed_row() {
     consume_initial_dirty(&mut session);
     // Write to row 0 only.
     session.core.advance(b"HI");
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("partial dirty frame must fit binary u32 fields");
     // At minimum row 0 must appear; hash dedup may reduce subsequent calls.
     assert!(
-        !texts.is_empty(),
+        !frame.texts.is_empty(),
         "partial dirty must return at least one row"
     );
     assert!(
-        buf.len() > 8,
+        frame.bytes.len() > 8,
         "partial dirty must produce a non-trivial payload"
     );
-    let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let version = u32::from_le_bytes(frame.bytes[0..4].try_into().unwrap());
     assert_eq!(version, BINARY_FORMAT_VERSION, "format version must match");
 }
 
@@ -77,13 +100,15 @@ fn test_binary_direct_synchronized_output_suppresses() {
     enable_sync_output(&mut session);
     // Write something so there ARE dirty rows.
     session.core.advance(b"SYNC");
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("suppressed dirty frame must fit binary u32 fields");
     assert!(
-        texts.is_empty(),
+        frame.texts.is_empty(),
         "synchronized output mode must suppress dirty lines"
     );
     assert!(
-        buf.is_empty(),
+        frame.bytes.is_empty(),
         "synchronized output mode must suppress binary payload"
     );
 }
@@ -106,17 +131,21 @@ fn test_binary_direct_scroll_offset_suppresses_live_rows() {
     assert_eq!(session.scroll_offset(), 3);
     // Consume the scroll_dirty event so scroll_dirty becomes false.
     // This call takes the scrollback viewport path (scroll_dirty = true).
-    let _ = session.get_dirty_lines_binary_direct();
+    let _ = session
+        .get_dirty_lines_binary_direct()
+        .expect("scrollback dirty frame must fit binary u32 fields");
     // Now: scroll_dirty = false, scroll_offset = 3 — suppression path applies.
     // Write to the live screen so there are dirty rows that would normally render.
     session.core.advance(b"LIVE");
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("suppressed live dirty frame must fit binary u32 fields");
     assert!(
-        texts.is_empty(),
+        frame.texts.is_empty(),
         "live dirty rows must be suppressed when scroll_offset > 0 and not scroll_dirty"
     );
     assert!(
-        buf.is_empty(),
+        frame.bytes.is_empty(),
         "binary buf must be empty when scroll_offset > 0 and not scroll_dirty"
     );
 }
@@ -144,20 +173,22 @@ fn test_binary_direct_scrollback_viewport_path() {
         "scroll_offset must be positive after scroll_up"
     );
     // This call must take the scrollback viewport path: returns all 24 rows.
-    let (texts, buf) = session.get_dirty_lines_binary_direct();
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("scrollback viewport dirty frame must fit binary u32 fields");
     assert_eq!(
-        texts.len(),
+        frame.texts.len(),
         24,
         "scrollback viewport path must return 24 text entries"
     );
     assert!(
-        buf.len() > 8,
+        frame.bytes.len() > 8,
         "scrollback viewport path must produce a binary payload"
     );
-    let version = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let version = u32::from_le_bytes(frame.bytes[0..4].try_into().unwrap());
     assert_eq!(version, BINARY_FORMAT_VERSION, "format version must match");
     assert_eq!(
-        binary_num_rows(&buf),
+        binary_num_rows(&frame.bytes),
         24,
         "header num_rows must be 24 for scrollback path"
     );
@@ -165,5 +196,31 @@ fn test_binary_direct_scrollback_viewport_path() {
     assert!(
         !session.core.screen.is_scroll_dirty(),
         "scroll_dirty must be cleared after scrollback viewport path"
+    );
+}
+
+#[test]
+fn test_binary_direct_reemits_same_width_text_change() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+
+    session.core.advance(b"abc");
+    let _ = session
+        .get_dirty_lines_binary_direct()
+        .expect("initial changed row must fit binary u32 fields");
+
+    session.core.advance(b"\rxyz");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("same-width changed row must fit binary u32 fields");
+
+    assert!(
+        frame.texts.iter().any(|text| text.starts_with("xyz")),
+        "same-width overwrite must be emitted, got {:?}",
+        frame.texts
+    );
+    assert!(
+        frame.bytes.len() > 8,
+        "same-width overwrite must produce binary row data"
     );
 }

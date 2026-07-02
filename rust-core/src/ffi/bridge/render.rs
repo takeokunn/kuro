@@ -6,6 +6,7 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_query_default,
     query_session, query_session_data_or_default_mut_with_panic, query_session_mut,
+    usize_to_lisp_i64,
 };
 use crate::error::KuroError;
 
@@ -52,7 +53,8 @@ define_poll_updates_handler!(
     poll_dirty_lines,
     |env, dirty_lines| {
         build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
-            let line_no_val = (line_no as i64).into_lisp(env)?;
+            let line_no_val =
+                usize_to_lisp_i64(line_no, "dirty line row index must fit i64").into_lisp(env)?;
             let text_val = text.into_lisp(env)?;
             build_emacs_list_from_values(env, [line_no_val, text_val])
         })
@@ -112,7 +114,10 @@ define_poll_updates_handler!(
         if lines.is_empty() {
             return false.into_lisp(env);
         }
-        let bytes = crate::ffi::codec::encode_screen_binary(&lines);
+        let bytes = match crate::ffi::codec::encode_screen_binary(&lines) {
+            Ok(bytes) => bytes,
+            Err(error) => return emit_error(env, &KuroError::from(error)),
+        };
         build_emacs_vector_from_iter(
             env,
             bytes.len(),

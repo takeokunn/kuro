@@ -10,6 +10,24 @@ macro_rules! dispatch_if_handled {
     };
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModifyOtherKeysLevel(u8);
+
+impl ModifyOtherKeysLevel {
+    fn from_param(value: u16) -> Option<Self> {
+        match value {
+            0..=2 => u8::try_from(value).ok().map(Self),
+            _ => None,
+        }
+    }
+}
+
+impl From<ModifyOtherKeysLevel> for u8 {
+    fn from(level: ModifyOtherKeysLevel) -> Self {
+        level.0
+    }
+}
+
 #[inline]
 fn handle_csi_dsr_color_scheme_query(tc: &mut TerminalCore, params: &vte::Params) {
     // CSI ? Ps n — DEC DSR queries
@@ -35,7 +53,9 @@ fn handle_csi_modify_other_keys(tc: &mut TerminalCore, params: &vte::Params) {
     let key_type = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
     let value = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
     if key_type == 4 {
-        tc.dec_modes.modify_other_keys = value.min(2) as u8;
+        if let Some(level) = ModifyOtherKeysLevel::from_param(value) {
+            tc.dec_modes.modify_other_keys = u8::from(level);
+        }
     }
 }
 

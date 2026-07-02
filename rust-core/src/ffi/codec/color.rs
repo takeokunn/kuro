@@ -20,7 +20,7 @@ pub const COLOR_DEFAULT_SENTINEL: u32 = 0xFF00_0000;
 
 /// Bit-31 marker for `Color::Named` in the u32 FFI encoding.
 ///
-/// `encode_color(Color::Named(c))` produces `COLOR_NAMED_MARKER | (c as u8)`.
+/// `encode_color(Color::Named(c))` produces `COLOR_NAMED_MARKER | c.index()`.
 pub const COLOR_NAMED_MARKER: u32 = 0x8000_0000;
 
 /// Bit-30 marker for `Color::Indexed` in the u32 FFI encoding.
@@ -88,17 +88,15 @@ pub const ATTRS_SUBSCRIPT_BIT: u64 = 0x4000;
 pub fn encode_color(color: &Color) -> u32 {
     match color {
         Color::Default => COLOR_DEFAULT_SENTINEL,
-        // NamedColor is #[repr(u8)] with discriminants 0..=15,
-        // so a direct cast replaces the 16-arm match with a single instruction.
-        Color::Named(named) => COLOR_NAMED_MARKER | u32::from(*named as u8),
+        Color::Named(named) => COLOR_NAMED_MARKER | u32::from(named.index()),
         Color::Indexed(idx) => COLOR_INDEXED_MARKER | u32::from(*idx),
         Color::Rgb(r, g, b) => encode_rgb(*r, *g, *b),
     }
 }
 
 #[inline(always)]
-const fn encode_rgb(red: u8, green: u8, blue: u8) -> u32 {
-    ((red as u32) << RGB_R_SHIFT) | ((green as u32) << RGB_G_SHIFT) | (blue as u32)
+fn encode_rgb(red: u8, green: u8, blue: u8) -> u32 {
+    (u32::from(red) << RGB_R_SHIFT) | (u32::from(green) << RGB_G_SHIFT) | u32::from(blue)
 }
 
 /// Encode `SgrAttributes` as a `u64` bitmask for FFI transfer.
@@ -119,9 +117,7 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
     if attrs.underline() {
         bits |= ATTRS_UNDERLINE_BIT;
     }
-    // UnderlineStyle is repr(u8) with discriminants 0-5 matching the wire
-    // encoding exactly — a direct cast replaces the 5-arm match table.
-    bits |= u64::from(attrs.underline_style as u8) << ATTRS_STYLE_SHIFT;
+    bits |= u64::from(attrs.underline_style.wire_code()) << ATTRS_STYLE_SHIFT;
     if attrs.overline {
         bits |= ATTRS_OVERLINE_BIT;
     }

@@ -26,6 +26,12 @@ fn test_placeholder_functions() {
     let int_val = RawFFI::make_integer(env, 42);
     assert!(!int_val.is_null());
 
+    let negative_int_val = RawFFI::make_integer(env, -1);
+    assert!(!negative_int_val.is_null());
+
+    let max_int_val = RawFFI::make_integer(env, i64::MAX);
+    assert!(!max_int_val.is_null());
+
     let str_val = RawFFI::make_string(env, "hello");
     assert!(!str_val.is_null());
 

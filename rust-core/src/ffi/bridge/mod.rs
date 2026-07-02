@@ -51,6 +51,16 @@ mod render;
 
 pub use emacs_impl::EmacsModuleFFI;
 
+#[inline]
+pub(crate) fn usize_to_lisp_i64(value: usize, field: &'static str) -> i64 {
+    i64::try_from(value).expect(field)
+}
+
+#[inline]
+pub(crate) fn u64_to_lisp_i64(value: u64, field: &'static str) -> i64 {
+    i64::try_from(value).expect(field)
+}
+
 macro_rules! define_session_query_opt {
     ($(#[$doc:meta])* $fn_name:ident, $query:ident, |$session:ident| $body:block) => {
         $(#[$doc])*

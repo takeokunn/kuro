@@ -131,7 +131,7 @@ proptest! {
         );
 
         if n == 0 {
-            prop_assert_eq!(encoded.text, "");
+            prop_assert_eq!(encoded.text.as_str(), "");
             prop_assert!(encoded.face_ranges.is_empty());
         } else {
             let char_count = encoded.text.chars().count();
@@ -394,7 +394,7 @@ fn test_pbt_encode_line_face_ranges_contiguous() {
 #[test]
 // INVARIANT: Empty input -> exactly 8 bytes: format_version=2 LE then num_rows=0 LE.
 fn test_pbt_encode_screen_binary_empty() {
-    let out = encode_screen_binary(&[]);
+    let out = encode_screen_binary_ok(&[]);
     assert_eq!(
         out,
         [
@@ -414,7 +414,7 @@ fn test_pbt_encode_screen_binary_one_row_no_faces() {
         face_ranges: vec![],
         col_to_buf: vec![0],
     }];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb [0]);
     assert_eq!(

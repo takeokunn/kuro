@@ -143,9 +143,9 @@ pub enum CellWidth {
 
 /// Underline style for SGR 4:x sub-parameters
 ///
-/// `#[repr(u8)]` with sequential discriminants allows `encode_attrs` in
-/// `ffi/codec.rs` to cast directly to `u64` instead of using a 5-arm match
-/// table.  The discriminant values (0-5) match the wire encoding exactly.
+/// Explicit discriminants document the SGR wire values.  Use
+/// [`UnderlineStyle::wire_code`] at FFI boundaries instead of casting the
+/// discriminant.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnderlineStyle {
@@ -162,6 +162,22 @@ pub enum UnderlineStyle {
     Dotted = 4,
     /// Dashed line (SGR 4:5)
     Dashed = 5,
+}
+
+impl UnderlineStyle {
+    /// Return the SGR underline style code used in FFI attribute encoding.
+    #[inline]
+    #[must_use]
+    pub const fn wire_code(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Straight => 1,
+            Self::Double => 2,
+            Self::Curly => 3,
+            Self::Dotted => 4,
+            Self::Dashed => 5,
+        }
+    }
 }
 
 /// SGR (Select Graphic Rendition) attributes for a cell

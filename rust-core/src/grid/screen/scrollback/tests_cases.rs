@@ -183,6 +183,19 @@ fn viewport_scroll_up_noop_at_max_no_dirty() {
 }
 
 #[test]
+fn viewport_scroll_up_saturates_before_clamping() {
+    let mut screen = make_screen();
+    screen.scrollback_line_count = usize::MAX;
+    screen.scroll_offset = usize::MAX - 1;
+    screen.clear_scroll_dirty();
+
+    screen.viewport_scroll_up(usize::MAX);
+
+    assert_eq!(screen.scroll_offset(), usize::MAX);
+    assert!(screen.is_scroll_dirty());
+}
+
+#[test]
 fn viewport_scroll_down_to_zero_marks_full_view_dirty() {
     let mut screen = screen_with_scrollback(20);
     screen.viewport_scroll_up(10);
@@ -292,6 +305,15 @@ fn get_scrollback_viewport_line_at_full_offset_bottom_row() {
 
     assert!(screen.get_scrollback_viewport_line(4).is_some());
     assert!(screen.get_scrollback_viewport_line(3).is_none());
+}
+
+#[test]
+fn get_scrollback_viewport_line_handles_huge_counts_without_signed_wrap() {
+    let mut screen = make_screen();
+    screen.scrollback_line_count = usize::MAX;
+    screen.scroll_offset = usize::MAX;
+
+    assert!(screen.get_scrollback_viewport_line(0).is_none());
 }
 
 #[test]

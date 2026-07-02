@@ -242,7 +242,7 @@ impl TerminalCore {
         // Clear the XTPUSHSGR stack so a later XTPOPSGR cannot restore stale attrs
         self.sgr_stack.clear();
         // Reset scroll region to full screen
-        let rows = self.screen.rows() as usize;
+        let rows = usize::from(self.screen.rows());
         self.screen.set_scroll_region(0, rows);
         // Move cursor to home
         self.screen.move_cursor(0, 0);
@@ -280,7 +280,7 @@ impl TerminalCore {
         // Reset DEC private modes to correct terminal defaults
         self.dec_modes = DecModes::new();
         // Reset tab stops to every 8th column
-        self.tab_stops = TabStops::new(self.screen.cols() as usize);
+        self.tab_stops = TabStops::new(usize::from(self.screen.cols()));
         // Clear title state
         self.meta.title = String::new();
         self.meta.title_dirty = false;

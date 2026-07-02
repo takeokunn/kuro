@@ -1,5 +1,7 @@
 //! Process cleanup helpers for POSIX PTYs.
 
+use std::time::Duration;
+
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag};
 use nix::unistd::Pid;
@@ -9,7 +11,12 @@ use nix::unistd::Pid;
 pub(super) const DROP_WAITPID_TIMEOUT_MS: u64 = 1_000;
 
 /// Sleep interval between non-blocking waitpid polls during Pty::drop.
-const DROP_WAITPID_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+const DROP_WAITPID_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[inline]
+fn duration_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
 
 pub(super) fn signal_child_tree(child_pid: Pid, signal: Signal) {
     // The child calls setsid(), so its pid is also the initial process-group id.
@@ -33,9 +40,10 @@ pub(super) fn signal_child_tree(child_pid: Pid, signal: Signal) {
     }
 }
 
-pub(super) fn reap_child_until(child_pid: Pid, timeout: std::time::Duration) -> bool {
-    let poll_ms = DROP_WAITPID_POLL_INTERVAL.as_millis() as u64;
-    let max_retries = (timeout.as_millis() as u64 / poll_ms).max(1);
+pub(super) fn reap_child_until(child_pid: Pid, timeout: Duration) -> bool {
+    let poll_ms = duration_millis_u64(DROP_WAITPID_POLL_INTERVAL).max(1);
+    let timeout_ms = duration_millis_u64(timeout);
+    let max_retries = (timeout_ms / poll_ms).max(1);
 
     for _ in 0..max_retries {
         match waitpid(child_pid, Some(WaitPidFlag::WNOHANG)) {

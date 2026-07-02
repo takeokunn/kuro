@@ -202,9 +202,9 @@ fn test_row_hash_skip_palette_epoch_invalidates_cache() {
         session.row_hashes.first().copied().flatten().is_some(),
         "row_hashes must be populated after the first poll"
     );
-    let (_, _, stored_epoch) = session.row_hashes[0].expect("row 0 must be cached");
+    let stored_cache = session.row_hashes[0].expect("row 0 must be cached");
     assert_eq!(
-        stored_epoch, 0,
+        stored_cache.palette_epoch, 0,
         "Stored epoch must be 0 before any palette change"
     );
 

@@ -189,14 +189,14 @@ fn test_encode_line_faces_bold_cell_encodes_flag_in_attrs() {
         1,
         "bold cell must produce exactly 1 face range"
     );
-    let flags = encoded.face_ranges[0].flags;
+    let range = &encoded.face_ranges[0];
     assert_ne!(
-        flags, 0,
+        range.flags, 0,
         "face-range flags must be non-zero for a bold cell"
     );
     // Bit 0 of the encoded attrs corresponds to BOLD (SgrFlags::BOLD = bit 0, maps to encode bit 0).
     assert_eq!(
-        flags & 1,
+        range.flags & 1,
         1,
         "bit 0 of face-range flags must be set for BOLD"
     );

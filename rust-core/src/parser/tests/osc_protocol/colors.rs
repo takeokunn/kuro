@@ -203,9 +203,13 @@ test_osc_1337_noop!(
 
 #[test]
 fn test_parse_color_spec_rgb_overlong_channel_returns_none() {
-    // "ffffff" is 6 hex digits — u16::from_str_radix("ffffff", 16) = 0xffffff
-    // which overflows u16 (max 0xffff), so from_str_radix returns Err and ? propagates None.
     assert_eq!(parse_color_spec("rgb:ffffff/00/00"), None);
+}
+
+#[test]
+fn test_parse_color_spec_rgb_5digit_channel_returns_none() {
+    // OSC rgb: channels are accepted only as 1..=4 hex digits.
+    assert_eq!(parse_color_spec("rgb:0ffff/00/00"), None);
 }
 
 // ── round-trip ────────────────────────────────────────────────────────────────

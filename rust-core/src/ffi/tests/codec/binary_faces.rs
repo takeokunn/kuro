@@ -25,7 +25,7 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
         face_ranges,
         col_to_buf: vec![],
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
     assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags, ul ul_color);
@@ -48,7 +48,7 @@ fn encode_screen_binary_two_rows_row_indices_in_order() {
             col_to_buf: vec![],
         },
     ];
-    let result = encode_screen_binary(&lines);
+    let result = encode_screen_binary_ok(&lines);
     // format_version at offset 0, num_rows at offset 4
     assert_binary_header!(&result, rows 2);
     // First row header at offset 8: row_index = 7
@@ -252,7 +252,7 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
         face_ranges: vec![],
         col_to_buf,
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
     assert_eq!(result.len(), 35);
@@ -310,7 +310,7 @@ fn encode_screen_binary_two_face_ranges_same_row() {
         face_ranges,
         col_to_buf: vec![],
     }];
-    let result = encode_screen_binary(lines);
+    let result = encode_screen_binary_ok(lines);
 
     // num_face_ranges header (at byte 12 = header[8]+row_idx[4]) must be 2.
     assert_eq!(read_u32_le(&result, 12), 2, "num_face_ranges must be 2");

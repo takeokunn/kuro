@@ -5,7 +5,7 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use super::super::super::{
     build_emacs_list_from_values, define_session_data_query, define_session_data_query_or_false,
-    define_session_query_default, query_session,
+    define_session_query_default, query_session, usize_to_lisp_i64,
 };
 
 type CursorState = (usize, usize, bool, i64);
@@ -16,8 +16,8 @@ define_session_data_query_or_false!(
     "get_cursor",
     |session| session.get_cursor(),
     |kuro_env, (row, col)| {
-        let row_val = (row as i64).into_lisp(kuro_env)?;
-        let col_val = (col as i64).into_lisp(kuro_env)?;
+        let row_val = usize_to_lisp_i64(row, "cursor row must fit i64").into_lisp(kuro_env)?;
+        let col_val = usize_to_lisp_i64(col, "cursor column must fit i64").into_lisp(kuro_env)?;
         kuro_env.cons(row_val, col_val)
     }
 );
@@ -53,8 +53,8 @@ fn cursor_state_to_lisp(
     build_emacs_list_from_values(
         env,
         [
-            (row as i64).into_lisp(env)?,
-            (col as i64).into_lisp(env)?,
+            usize_to_lisp_i64(row, "cursor row must fit i64").into_lisp(env)?,
+            usize_to_lisp_i64(col, "cursor column must fit i64").into_lisp(env)?,
             visible.into_lisp(env)?,
             shape.into_lisp(env)?,
         ],

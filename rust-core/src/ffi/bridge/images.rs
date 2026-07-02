@@ -2,7 +2,7 @@
 
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_or_false,
-    query_session_data_to_lisp_or_false,
+    query_session_data_to_lisp_or_false, usize_to_lisp_i64,
 };
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
@@ -125,8 +125,10 @@ define_drain_session_vec_to_lisp!(
     |session| { Ok(session.take_pending_image_notifications()) },
     |env, notif| {
         let id_val = i64::from(notif.image_id).into_lisp(env)?;
-        let row_val = (notif.row as i64).into_lisp(env)?;
-        let col_val = (notif.col as i64).into_lisp(env)?;
+        let row_val =
+            usize_to_lisp_i64(notif.row, "image notification row must fit i64").into_lisp(env)?;
+        let col_val = usize_to_lisp_i64(notif.col, "image notification column must fit i64")
+            .into_lisp(env)?;
         let cw_val = i64::from(notif.cell_width).into_lisp(env)?;
         let ch_val = i64::from(notif.cell_height).into_lisp(env)?;
         let px_val = i64::from(notif.pixel_x_offset).into_lisp(env)?;

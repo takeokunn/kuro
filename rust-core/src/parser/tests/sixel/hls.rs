@@ -57,9 +57,8 @@ fn hls_to_rgb_blue() {
 
 #[test]
 fn hls_to_rgb_values_clamped_above_100() {
-    // L > 100 and S > 100 must not produce out-of-range values (no panic)
+    // The internal math helper remains defensive even though parser boundaries reject this input.
     let [r, g, b] = hls_to_rgb(0.0, 200.0, 200.0);
-    // Just ensure no panic; values should be in 0-255
     let _ = (r, g, b);
 }
 
@@ -87,8 +86,7 @@ fn digit_accumulation_saturating_on_overflow() {
     let huge = "9".repeat(20);
     let seq = format!("#{}$", huge);
     let d = decode(seq.as_bytes());
-    // current_color is u16; the parsed u32 saturates then casts — just no panic
-    let _ = d.current_color;
+    assert_eq!(d.current_color, 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -197,7 +197,10 @@ fn handle_iterm2_file(core: &mut TerminalCore, stripped: &str) {
         core.kitty.pending_image_notifications.push(notif);
     }
     // Advance cursor past the image
-    let max_row = (core.screen.rows() as usize).saturating_sub(1);
-    let new_row = cursor.row.saturating_add(rows as usize).min(max_row);
+    let Ok(rows) = usize::try_from(rows) else {
+        return;
+    };
+    let max_row = usize::from(core.screen.rows()).saturating_sub(1);
+    let new_row = cursor.row.saturating_add(rows).min(max_row);
     core.screen.move_cursor(new_row, 0);
 }

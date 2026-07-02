@@ -177,6 +177,8 @@ the low u32 avoids the `(ash high-word 32)' bignum allocation that
   (let ((byte-count (* num-face-ranges (if v2-p 28 24))))
     (kuro--binary-require-byte-range vec pos byte-count "face ranges"))
   (if (zerop num-face-ranges)
+      ;; Zero-range fast exit: an empty vector (not nil) so callers that check
+      ;; `(vectorp face-list)' see a consistent return type.  No allocation needed.
       (progn (setq kuro--decode-pos pos) [])
     (let ((result (make-vector (* 6 num-face-ranges) 0))
           (base 0)
@@ -199,6 +201,7 @@ Returns the VECTOR directly (empty vector when length is zero; no CJK
 wide characters on this row).  Sets `kuro--decode-pos' to the byte offset
 immediately after the decoded section — eliminates the (VECTOR . NEW-POS)
 cons cell allocation at ~3,600 calls/sec in the hot decode path."
+  (kuro--binary-require-available vec pos 4 "col-to-buf length")
   (let* ((ctb-len (kuro--read-u32-le vec pos))
          (pos (+ pos 4)))
     (kuro--binary-require-available vec pos (* ctb-len 4) "col-to-buf entries")

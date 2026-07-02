@@ -12,16 +12,16 @@ struct Rect {
 }
 
 impl Rect {
-    fn from_params(params: &vte::Params, rows: usize, cols: usize) -> Self {
+    fn from_params(params: &vte::Params, rows: u16, cols: u16) -> Self {
         let mut iter = params.iter().filter_map(|p| p.first().copied());
         Self::from_iter(&mut iter, rows, cols)
     }
 
-    fn from_iter(iter: &mut impl Iterator<Item = u16>, rows: usize, cols: usize) -> Self {
-        let top = iter.next().unwrap_or(1).max(1) as usize - 1;
-        let left = iter.next().unwrap_or(1).max(1) as usize - 1;
-        let bottom = (iter.next().unwrap_or(rows as u16) as usize).min(rows);
-        let right = (iter.next().unwrap_or(cols as u16) as usize).min(cols);
+    fn from_iter(iter: &mut impl Iterator<Item = u16>, rows: u16, cols: u16) -> Self {
+        let top = usize::from(iter.next().unwrap_or(1).max(1).saturating_sub(1));
+        let left = usize::from(iter.next().unwrap_or(1).max(1).saturating_sub(1));
+        let bottom = usize::from(iter.next().unwrap_or(rows).min(rows));
+        let right = usize::from(iter.next().unwrap_or(cols).min(cols));
         Self {
             top,
             left,
@@ -35,34 +35,42 @@ impl Rect {
     }
 }
 
-fn deccara_rect_from_groups(groups: &[&[u16]], rows: usize, cols: usize) -> Rect {
+fn deccara_rect_from_groups(groups: &[&[u16]], rows: u16, cols: u16) -> Rect {
     Rect {
-        top: (groups
-            .first()
-            .and_then(|g| g.first())
-            .copied()
-            .unwrap_or(1)
-            .max(1) as usize)
-            - 1,
-        left: (groups
-            .get(1)
-            .and_then(|g| g.first())
-            .copied()
-            .unwrap_or(1)
-            .max(1) as usize)
-            - 1,
-        bottom: (groups
-            .get(2)
-            .and_then(|g| g.first())
-            .copied()
-            .unwrap_or(rows as u16) as usize)
-            .min(rows),
-        right: (groups
-            .get(3)
-            .and_then(|g| g.first())
-            .copied()
-            .unwrap_or(cols as u16) as usize)
-            .min(cols),
+        top: usize::from(
+            groups
+                .first()
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(1)
+                .max(1)
+                .saturating_sub(1),
+        ),
+        left: usize::from(
+            groups
+                .get(1)
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(1)
+                .max(1)
+                .saturating_sub(1),
+        ),
+        bottom: usize::from(
+            groups
+                .get(2)
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(rows)
+                .min(rows),
+        ),
+        right: usize::from(
+            groups
+                .get(3)
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(cols)
+                .min(cols),
+        ),
     }
 }
 
@@ -80,8 +88,8 @@ where
         return;
     }
 
-    let rows = term.screen.rows() as usize;
-    let cols = term.screen.cols() as usize;
+    let rows = usize::from(term.screen.rows());
+    let cols = usize::from(term.screen.cols());
     let bottom = rect.bottom.min(rows);
     let right = rect.right.min(cols);
     if rect.top >= bottom || rect.left >= right {
@@ -102,8 +110,8 @@ where
 }
 
 fn copy_rect_cells(term: &TerminalCore, rect: Rect) -> Vec<Vec<Cell>> {
-    let rows = term.screen.rows() as usize;
-    let cols = term.screen.cols() as usize;
+    let rows = usize::from(term.screen.rows());
+    let cols = usize::from(term.screen.cols());
     let bottom = rect.bottom.min(rows);
     let right = rect.right.min(cols);
 
@@ -124,8 +132,8 @@ fn copy_rect_cells(term: &TerminalCore, rect: Rect) -> Vec<Vec<Cell>> {
 }
 
 fn write_rect_cells(term: &mut TerminalCore, top: usize, left: usize, cells: &[Vec<Cell>]) {
-    let rows = term.screen.rows() as usize;
-    let cols = term.screen.cols() as usize;
+    let rows = usize::from(term.screen.rows());
+    let cols = usize::from(term.screen.cols());
 
     for (ri, row_buf) in cells.iter().enumerate() {
         let dst_row = top + ri;
@@ -147,11 +155,7 @@ fn write_rect_cells(term: &mut TerminalCore, top: usize, left: usize, cells: &[V
 }
 
 pub(super) fn handle_decera(term: &mut TerminalCore, params: &vte::Params) {
-    let rect = Rect::from_params(
-        params,
-        term.screen.rows() as usize,
-        term.screen.cols() as usize,
-    );
+    let rect = Rect::from_params(params, term.screen.rows(), term.screen.cols());
     let bg = term.current_attrs.background;
     let blank = blank_cell_with_bg(bg);
     apply_rect_cells(term, rect, |cell| *cell = blank.clone(), false);
@@ -164,8 +168,8 @@ pub(super) fn handle_decfra(term: &mut TerminalCore, params: &vte::Params) {
 
     let rect = Rect::from_iter(
         &mut iter.filter_map(|p| p.first().copied()),
-        term.screen.rows() as usize,
-        term.screen.cols() as usize,
+        term.screen.rows(),
+        term.screen.cols(),
     );
 
     let attrs = term.current_attrs;
@@ -174,13 +178,13 @@ pub(super) fn handle_decfra(term: &mut TerminalCore, params: &vte::Params) {
 }
 
 pub(super) fn handle_deccra(term: &mut TerminalCore, params: &vte::Params) {
-    let rows = term.screen.rows() as usize;
-    let cols = term.screen.cols() as usize;
+    let rows = term.screen.rows();
+    let cols = term.screen.cols();
     let mut iter = params.iter().filter_map(|p| p.first().copied());
     let src = Rect::from_iter(&mut iter, rows, cols);
     let _src_page = iter.next();
-    let dst_top = iter.next().unwrap_or(1).max(1) as usize - 1;
-    let dst_left = iter.next().unwrap_or(1).max(1) as usize - 1;
+    let dst_top = usize::from(iter.next().unwrap_or(1).max(1).saturating_sub(1));
+    let dst_left = usize::from(iter.next().unwrap_or(1).max(1).saturating_sub(1));
 
     let cells = copy_rect_cells(term, src);
     if cells.is_empty() {
@@ -191,8 +195,8 @@ pub(super) fn handle_deccra(term: &mut TerminalCore, params: &vte::Params) {
 }
 
 pub(super) fn handle_deccara(term: &mut TerminalCore, params: &vte::Params) {
-    let rows = term.screen.rows() as usize;
-    let cols = term.screen.cols() as usize;
+    let rows = term.screen.rows();
+    let cols = term.screen.cols();
 
     let (group_buf, n) = collect_param_groups(params);
     let groups = &group_buf[..n];

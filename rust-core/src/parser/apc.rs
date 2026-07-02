@@ -248,12 +248,7 @@ fn handle_kitty_transmit(
     let _ = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "forwards the kitty a=T key set (image data + placement geometry + z + pixel offsets)"
-)]
-fn handle_kitty_transmit_and_display(
-    core: &mut TerminalCore,
+struct KittyTransmitDisplay {
     image_id: Option<u32>,
     pixels: Vec<u8>,
     format: crate::parser::kitty::ImageFormat,
@@ -265,17 +260,26 @@ fn handle_kitty_transmit_and_display(
     z_index: i32,
     pixel_x_offset: u32,
     pixel_y_offset: u32,
-) {
-    let actual_id = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
+}
+
+fn handle_kitty_transmit_and_display(core: &mut TerminalCore, command: KittyTransmitDisplay) {
+    let actual_id = store_kitty_image(
+        core,
+        command.image_id,
+        command.pixels,
+        command.format,
+        command.pixel_width,
+        command.pixel_height,
+    );
     add_kitty_image_placement(
         core,
         actual_id,
-        placement_id,
-        columns,
-        rows,
-        z_index,
-        pixel_x_offset,
-        pixel_y_offset,
+        command.placement_id,
+        command.columns,
+        command.rows,
+        command.z_index,
+        command.pixel_x_offset,
+        command.pixel_y_offset,
     );
 }
 
@@ -475,17 +479,19 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
         } => {
             handle_kitty_transmit_and_display(
                 core,
-                image_id,
-                pixels,
-                format,
-                pixel_width,
-                pixel_height,
-                columns,
-                rows,
-                placement_id,
-                z_index,
-                pixel_x_offset,
-                pixel_y_offset,
+                KittyTransmitDisplay {
+                    image_id,
+                    pixels,
+                    format,
+                    pixel_width,
+                    pixel_height,
+                    columns,
+                    rows,
+                    placement_id,
+                    z_index,
+                    pixel_x_offset,
+                    pixel_y_offset,
+                },
             );
         }
         KittyCommand::Place {

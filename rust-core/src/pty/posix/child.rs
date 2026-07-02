@@ -666,4 +666,48 @@ mod tests {
             "rcfile must not be group/world accessible"
         );
     }
+
+    #[test]
+    fn test_shell_quote_escapes_single_quotes_without_enabling_expansion() {
+        assert_eq!(
+            shell_quote("a'$(touch hacked)`id`"),
+            "'a'\\''$(touch hacked)`id`'"
+        );
+    }
+
+    #[test]
+    fn test_build_bash_rcfile_content_shell_quotes_paths() {
+        let content = build_bash_rcfile_content(
+            Some(Path::new("/tmp/home'$(touch hacked)")),
+            Path::new("/tmp/integration`touch hacked`/kuro-shell.bash"),
+        );
+        assert_eq!(
+            content,
+            "[ -f '/tmp/home'\\''$(touch hacked)/.bashrc' ] && source '/tmp/home'\\''$(touch hacked)/.bashrc'\nsource '/tmp/integration`touch hacked`/kuro-shell.bash'\n"
+        );
+    }
+
+    #[test]
+    fn test_build_zsh_rcfile_content_shell_quotes_paths() {
+        let content = build_zsh_rcfile_content(
+            Some(Path::new("/tmp/zdot'$(touch hacked)")),
+            Path::new("/tmp/integration`touch hacked`/kuro-shell.zsh"),
+        );
+        assert_eq!(
+            content,
+            "[ -f '/tmp/zdot'\\''$(touch hacked)/.zshrc' ] && ZDOTDIR='/tmp/zdot'\\''$(touch hacked)' source '/tmp/zdot'\\''$(touch hacked)/.zshrc'\nsource '/tmp/integration`touch hacked`/kuro-shell.zsh'\n"
+        );
+    }
+
+    #[test]
+    fn test_shell_rcfile_content_skips_empty_original_startup_dir() {
+        assert_eq!(
+            build_bash_rcfile_content(None, Path::new("/tmp/kuro-shell.bash")),
+            "source '/tmp/kuro-shell.bash'\n"
+        );
+        assert_eq!(
+            build_zsh_rcfile_content(None, Path::new("/tmp/kuro-shell.zsh")),
+            "source '/tmp/kuro-shell.zsh'\n"
+        );
+    }
 }

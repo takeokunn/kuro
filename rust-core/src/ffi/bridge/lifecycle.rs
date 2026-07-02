@@ -3,6 +3,7 @@
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, catch_panic,
     define_session_query_bool, define_session_query_default, query_session, query_session_mut,
+    u64_to_lisp_i64,
 };
 use crate::ffi::abstraction::{
     attach_session, detach_session, init_session, list_sessions, shutdown_session, PasteText,
@@ -49,7 +50,7 @@ fn build_session_list_entry<'e>(
     is_detached: bool,
     is_alive: bool,
 ) -> EmacsResult<Value<'e>> {
-    let id_val = (id as i64).into_lisp(env)?;
+    let id_val = u64_to_lisp_i64(id, "session id must fit i64").into_lisp(env)?;
     let cmd_val = command.into_lisp(env)?;
     let detached_val = is_detached.into_lisp(env)?;
     let alive_val = is_alive.into_lisp(env)?;
@@ -79,7 +80,7 @@ fn kuro_core_init<'e>(
     let args = collect_shell_args(env, shell_args)?;
     catch_panic(env, move || {
         let session_id = init_session(&command, &args, rows, cols)?;
-        Ok(session_id as i64)
+        Ok(u64_to_lisp_i64(session_id, "new session id must fit i64"))
     })
 }
 

@@ -9,7 +9,7 @@ fn test_pbt_encode_screen_binary_row_index_and_text_len() {
         face_ranges: vec![],
         col_to_buf: vec![],
     }];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     let next = assert_binary_row!(&out, 8, row 42, text "Hello", faces 0, ctb []);
     assert_eq!(
@@ -35,7 +35,7 @@ fn test_pbt_encode_screen_binary_one_face_range() {
         }],
         col_to_buf: vec![],
     }];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     let next = assert_binary_row!(&out, 8, row 0, text "AB", faces 1, ctb []);
     let fr_base = 8 + 12 + 2;
@@ -56,7 +56,7 @@ fn test_pbt_encode_screen_binary_col_to_buf_entries() {
         face_ranges: vec![],
         col_to_buf: vec![0, 0, 1],
     }];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     let next = assert_binary_row!(&out, 8, row 0, text "X", faces 0, ctb [0, 0, 1]);
     assert_eq!(next, out.len(), "row payload length mismatch");
@@ -84,7 +84,7 @@ fn test_pbt_encode_screen_binary_two_rows() {
             col_to_buf: vec![],
         },
     ];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     assert_binary_header!(&out, rows 2);
     let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb []);
@@ -108,7 +108,7 @@ fn test_pbt_encode_screen_binary_unicode_text() {
         face_ranges: vec![],
         col_to_buf: vec![],
     }];
-    let out = encode_screen_binary(lines);
+    let out = encode_screen_binary_ok(lines);
 
     let next = assert_binary_row!(&out, 8, row 0, text arrow, faces 0, ctb []);
     assert_eq!(next, out.len(), "row payload length mismatch");

@@ -90,7 +90,7 @@ impl TerminalCore {
             current_attrs: types::cell::SgrAttributes::default(),
             parser: Some(vte::Parser::new()),
             dec_modes: DecModes::new(),
-            tab_stops: TabStops::new(cols as usize),
+            tab_stops: TabStops::new(usize::from(cols)),
             saved_cursor: None,
             saved_attrs: None,
             saved_primary_attrs: None,
@@ -165,7 +165,7 @@ impl TerminalCore {
             None => return,
         };
         let cursor = *self.screen.cursor();
-        let cols = self.screen.cols() as usize;
+        let cols = usize::from(self.screen.cols());
         let mut remaining = n;
         let mut row = cursor.row;
         let mut col = cursor.col;
@@ -275,7 +275,7 @@ impl TerminalCore {
     /// learns the new size without relying on SIGWINCH.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.screen.resize(rows, cols);
-        self.tab_stops.resize(cols as usize);
+        self.tab_stops.resize(usize::from(cols));
         if self.dec_modes.resize_in_band {
             self.push_in_band_resize_report();
         }

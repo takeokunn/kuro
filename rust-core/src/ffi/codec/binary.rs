@@ -1,16 +1,29 @@
 //! Binary frame encoding and row hash computation.
 //!
 //! [`encode_screen_binary`] serialises a list of dirty lines into the flat
-//! binary frame format consumed by the Emacs decoder.  The hash functions
-//! ([`compute_row_hash_from_pool`], [`compute_row_hash_from_encoded`]) detect
-//! unchanged rows so the render path can skip redundant FFI calls.
+//! binary frame format consumed by the Emacs decoder. `compute_row_hash_from_encoded`
+//! detects unchanged rows so the render path can skip redundant FFI calls.
 
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
 use super::line::{
-    encode_line_into_buf, write_face_range, EncodePool, EncodedFaceRange, EncodedLine,
+    encode_line_into_buf, write_face_range, BinaryFrameResult, BinaryFrameU32, BinaryFrameU32Field,
+    EncodePool, EncodedFaceRange, EncodedLine,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HashedEncodedText {
+    pub(crate) text: String,
+    pub(crate) content_hash: u64,
+}
+
+impl HashedEncodedText {
+    #[inline]
+    const fn new(text: String, content_hash: u64) -> Self {
+        Self { text, content_hash }
+    }
+}
 
 /// Current binary frame format version.
 ///
@@ -56,7 +69,7 @@ pub(crate) const BINARY_FORMAT_VERSION: u32 = 2;
     )
 )]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
-pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
+pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> BinaryFrameResult<Vec<u8>> {
     // Pre-compute total capacity to avoid repeated reallocation.
     let capacity = {
         let mut cap = 8usize; // format_version + num_rows header
@@ -73,56 +86,37 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
 
     // Header: format_version + num_rows
     buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
-    )]
-    buf.extend_from_slice(&(lines.len() as u32).to_le_bytes());
+    BinaryFrameU32::from_usize(lines.len(), BinaryFrameU32Field::RowCount)?.write_le(&mut buf);
 
     for line in lines {
         // row_index
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "row index is a terminal row (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(line.row_index as u32).to_le_bytes());
+        BinaryFrameU32::from_usize(line.row_index, BinaryFrameU32Field::RowIndex)?
+            .write_le(&mut buf);
 
         // num_face_ranges
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(line.face_ranges.len() as u32).to_le_bytes());
+        BinaryFrameU32::from_usize(line.face_ranges.len(), BinaryFrameU32Field::FaceRangeCount)?
+            .write_le(&mut buf);
 
         // text_byte_len + text bytes
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "UTF-8 text byte length for one terminal line fits u32"
-        )]
-        buf.extend_from_slice(&(line.text.len() as u32).to_le_bytes());
+        BinaryFrameU32::from_usize(line.text.len(), BinaryFrameU32Field::TextByteLen)?
+            .write_le(&mut buf);
         buf.extend_from_slice(line.text.as_bytes());
 
         // Per face range: coalesce into single 28-byte stack write via write_face_range.
         for range in &line.face_ranges {
-            write_face_range(&mut buf, range);
+            write_face_range(&mut buf, range)?;
         }
 
         // col_to_buf section: length header + u32 entries
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
-        )]
-        buf.extend_from_slice(&(line.col_to_buf.len() as u32).to_le_bytes());
+        BinaryFrameU32::from_usize(line.col_to_buf.len(), BinaryFrameU32Field::ColToBufLen)?
+            .write_le(&mut buf);
         for &offset in &line.col_to_buf {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
-            )]
-            buf.extend_from_slice(&(offset as u32).to_le_bytes());
+            BinaryFrameU32::from_usize(offset, BinaryFrameU32Field::ColToBufOffset)?
+                .write_le(&mut buf);
         }
     }
 
-    buf
+    Ok(buf)
 }
 
 /// Hash an already-populated [`EncodePool`] to detect row changes.
@@ -136,6 +130,7 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
 /// [`encode_line_into_buf`] where the data **remains in the pool** after the
 /// call.  For [`encode_line_with_pool`] — which uses `mem::take` — use
 /// [`compute_row_hash_from_encoded`] instead.
+#[cfg(test)]
 #[inline]
 pub(crate) fn compute_row_hash_from_pool(pool: &EncodePool) -> u64 {
     let mut h = AHasher::default();
@@ -160,10 +155,15 @@ pub(crate) fn encode_line_into_buf_and_hash(
     pool: &mut EncodePool,
     row_index: usize,
     buf: &mut Vec<u8>,
-) -> (String, u64) {
-    let text = encode_line_into_buf(cells, has_wide, pool, row_index, buf);
-    let hash = compute_row_hash_from_pool(pool);
-    (text, hash)
+) -> BinaryFrameResult<HashedEncodedText> {
+    let text = encode_line_into_buf(cells, has_wide, pool, row_index, buf)?;
+    let content_hash = compute_row_hash_from_encoded(
+        &text,
+        &pool.face_ranges,
+        &pool.col_to_buf,
+        &pool.text_sizes,
+    );
+    Ok(HashedEncodedText::new(text, content_hash))
 }
 
 /// Hash already-returned encoded line data.
@@ -195,8 +195,8 @@ pub(crate) fn compute_row_hash_from_encoded(
 /// encoded SGR flags, and the `col_to_buf` mapping slice.
 ///
 /// This function re-encodes every cell and is retained only for test assertions.
-/// Production call sites use the faster [`compute_row_hash_from_pool`] which
-/// hashes already-encoded pool data.
+/// Production call sites use `compute_row_hash_from_encoded` over already-encoded
+/// typed line data.
 #[cfg(test)]
 #[inline]
 pub(crate) fn compute_row_hash(row: &crate::grid::line::Line, col_to_buf: &[usize]) -> u64 {
@@ -209,7 +209,12 @@ pub(crate) fn compute_row_hash(row: &crate::grid::line::Line, col_to_buf: &[usiz
         encode_color(&cell.attrs.background).hash(&mut h);
         encode_attrs(&cell.attrs).hash(&mut h);
         encode_color(&cell.attrs.underline_color).hash(&mut h);
-        (cell.width as u8).hash(&mut h);
+        let width_code = match cell.width {
+            crate::types::cell::CellWidth::Half => 0_u8,
+            crate::types::cell::CellWidth::Full => 1,
+            crate::types::cell::CellWidth::Wide => 2,
+        };
+        width_code.hash(&mut h);
     }
     col_to_buf.hash(&mut h);
     h.finish()

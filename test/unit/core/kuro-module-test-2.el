@@ -119,6 +119,24 @@
 
 ;;; Group 20b: kuro-module installation helper coverage
 
+(defun kuro-module-test--tar-call-process-stub
+    (members extract-exit &optional extract-callback)
+  "Return a `call-process' stub for tar listing MEMBERS and extraction.
+EXTRACT-EXIT is returned for extraction calls.  EXTRACT-CALLBACK receives the
+tar arguments for extraction calls."
+  (lambda (_program _infile destination _display &rest args)
+    (cond
+     ((equal (car args) "-tzf")
+      (when (eq destination t)
+        (dolist (member members)
+          (insert member "\n")))
+      0)
+     ((equal (car args) "-xzf")
+      (when extract-callback
+        (funcall extract-callback args))
+      extract-exit)
+     (t 127))))
+
 (ert-deftest kuro-module-test--shared-library-name-uses-shared-extension ()
   "`kuro-module--shared-library-name' prefixes the platform extension with libkuro_core."
   (cl-letf (((symbol-function 'kuro-module--shared-extension)
@@ -131,6 +149,95 @@
              (lambda () "libkuro_core.so")))
     (should (equal (kuro-module--installed-module-path "/tmp/kuro")
                    "/tmp/kuro/libkuro_core.so"))))
+
+(ert-deftest kuro-module-test--validate-release-archive-accepts-single-library ()
+  "`kuro-module--validate-release-archive' accepts exactly the shared library."
+  (cl-letf (((symbol-function 'kuro-module--shared-library-name)
+             (lambda () "libkuro_core.so"))
+            ((symbol-function 'call-process)
+             (kuro-module-test--tar-call-process-stub
+              '("libkuro_core.so") 0)))
+    (should-not
+     (kuro-module--validate-release-archive "/usr/bin/tar" "/tmp/kuro.tar.gz"))))
+
+(ert-deftest kuro-module-test--validate-release-archive-rejects-extra-member ()
+  "`kuro-module--validate-release-archive' rejects archives with extra files."
+  (cl-letf (((symbol-function 'kuro-module--shared-library-name)
+             (lambda () "libkuro_core.so"))
+            ((symbol-function 'call-process)
+             (kuro-module-test--tar-call-process-stub
+              '("libkuro_core.so" "README.md") 0)))
+    (should (string-match-p
+             "must contain exactly"
+             (error-message-string
+              (should-error
+               (kuro-module--validate-release-archive
+                "/usr/bin/tar" "/tmp/kuro.tar.gz")
+               :type 'error))))))
+
+(ert-deftest kuro-module-test--validate-release-archive-rejects-relative-escape ()
+  "`kuro-module--validate-release-archive' rejects path-escaping members."
+  (cl-letf (((symbol-function 'kuro-module--shared-library-name)
+             (lambda () "libkuro_core.so"))
+            ((symbol-function 'call-process)
+             (kuro-module-test--tar-call-process-stub
+              '("../libkuro_core.so") 0)))
+    (should (string-match-p
+             "must contain exactly"
+             (error-message-string
+              (should-error
+               (kuro-module--validate-release-archive
+                "/usr/bin/tar" "/tmp/kuro.tar.gz")
+               :type 'error))))))
+
+(ert-deftest kuro-module-test--validate-release-archive-errors-on-listing-failure ()
+  "`kuro-module--validate-release-archive' errors when tar cannot list members."
+  (cl-letf (((symbol-function 'call-process)
+             (lambda (&rest _) 1)))
+    (should (string-match-p
+             "tar listing failed"
+             (error-message-string
+              (should-error
+               (kuro-module--validate-release-archive
+                "/usr/bin/tar" "/tmp/kuro.tar.gz")
+               :type 'error))))))
+
+(ert-deftest kuro-module-test--install-release-archive-extracts-only-shared-library ()
+  "`kuro-module--install-release-archive' extracts only the validated library member."
+  (kuro-module-test--with-temp-dir-file (tmpdir tmp-tar "kuro-install-archive-" "kuro.tar.gz")
+    (let ((extract-args nil)
+          (installed (expand-file-name "libkuro_core.so" tmpdir)))
+      (cl-letf (((symbol-function 'kuro-module--shared-library-name)
+                 (lambda () "libkuro_core.so"))
+                ((symbol-function 'call-process)
+                 (kuro-module-test--tar-call-process-stub
+                  '("libkuro_core.so")
+                  0
+                  (lambda (args)
+                    (setq extract-args args)
+                    (with-temp-file installed
+                      (insert "binary")))))
+                ((symbol-function 'message) #'ignore))
+        (should (equal (kuro-module--install-release-archive
+                        "/usr/bin/tar" tmp-tar tmpdir)
+                       installed))
+        (should (equal extract-args
+                       (list "-xzf" tmp-tar "-C" tmpdir
+                             "libkuro_core.so")))
+        (should-not (file-exists-p tmp-tar))))))
+
+(ert-deftest kuro-module-test--install-release-archive-deletes-invalid-archive ()
+  "`kuro-module--install-release-archive' deletes rejected temporary archives."
+  (kuro-module-test--with-temp-dir-file (tmpdir tmp-tar "kuro-install-invalid-" "kuro.tar.gz")
+    (cl-letf (((symbol-function 'kuro-module--shared-library-name)
+               (lambda () "libkuro_core.so"))
+              ((symbol-function 'call-process)
+               (kuro-module-test--tar-call-process-stub
+                '("libkuro_core.so" "README.md") 0)))
+      (should-error
+       (kuro-module--install-release-archive "/usr/bin/tar" tmp-tar tmpdir)
+       :type 'error)
+      (should-not (file-exists-p tmp-tar)))))
 
 (ert-deftest kuro-module-test--release-spec-builds-urls ()
   "`kuro-module--release-spec' returns the expected release metadata plist."
@@ -247,8 +354,9 @@
   "`kuro-module-download' errors when `tar' is not found in PATH."
   (cl-letf (((symbol-function 'executable-find) (lambda (_cmd) nil)))
     (should (string-match-p "executable not found"
-                            (cadr (should-error (kuro-module-download "0.0.0")
-                                                :type 'error))))))
+                            (error-message-string
+                             (should-error (kuro-module-download "0.0.0")
+                                           :type 'error))))))
 
 (ert-deftest kuro-module-test--download-sha256-fetch-fails ()
   "`kuro-module-download' errors when the .sha256 URL fetch returns nil."
@@ -261,8 +369,9 @@
               ((symbol-function 'url-retrieve-synchronously) (lambda (&rest _) nil))
               ((symbol-function 'message) #'ignore))
       (should (string-match-p "failed to fetch SHA256"
-                              (cadr (should-error (kuro-module-download "0.0.0")
-                                                  :type 'error)))))))
+                              (error-message-string
+                               (should-error (kuro-module-download "0.0.0")
+                                             :type 'error)))))))
 
 (ert-deftest kuro-module-test--download-sha256-mismatch ()
   "`kuro-module-download' errors when SHA256 computed from file differs from expected."
@@ -296,8 +405,9 @@
                        (lambda (_file _hash) nil))
                       ((symbol-function 'message) #'ignore))
               (should (string-match-p "SHA256 mismatch"
-                                      (cadr (should-error (kuro-module-download "0.0.0")
-                                                          :type 'error))))))
+                                      (error-message-string
+                                       (should-error (kuro-module-download "0.0.0")
+                                                     :type 'error))))))
         (ignore-errors (kill-buffer sha-buf))))))
 
 (ert-deftest kuro-module-test--download-tar-extraction-fails ()
@@ -342,8 +452,9 @@
                       ((symbol-function 'delete-file) #'ignore)
                       ((symbol-function 'message) #'ignore))
               (should (string-match-p "tar extraction failed"
-                                      (cadr (should-error (kuro-module-download "0.0.0")
-                                                          :type 'error))))))
+                                      (error-message-string
+                                       (should-error (kuro-module-download "0.0.0")
+                                                     :type 'error))))))
         (ignore-errors (kill-buffer sha-buf))))))
 
 (ert-deftest kuro-module-test--download-extracted-binary-missing ()
@@ -374,10 +485,12 @@ naturally returns nil for the installed-binary check without global stubbing."
                        (lambda (url &rest _)
                          (if (string-suffix-p ".sha256" url)
                              sha-buf
-                           (let ((buf (generate-new-buffer " *kuro-dl-binmiss-body*")))
-                             (with-current-buffer buf
-                               (insert "HTTP/1.1 200 OK\r\n\r\nfake"))
+                             (let ((buf (generate-new-buffer " *kuro-dl-binmiss-body*")))
+                               (with-current-buffer buf
+                                 (insert "HTTP/1.1 200 OK\r\n\r\nfake"))
                              buf))))
+                      ((symbol-function 'kuro-module--write-http-body-to-file)
+                       #'ignore)
                       ;; Verify passes, tar returns 0 — but no binary is extracted
                       ((symbol-function 'kuro-module--verify-sha256)
                        (lambda (_file _hash) t))
@@ -388,8 +501,9 @@ naturally returns nil for the installed-binary check without global stubbing."
                       ((symbol-function 'message) #'ignore))
               ;; tmpdir has no libkuro_core.so/.dylib → file-exists-p naturally nil
               (should (string-match-p "extracted archive does not contain"
-                                      (cadr (should-error (kuro-module-download "0.0.0")
-                                                          :type 'error))))))
+                                      (error-message-string
+                                       (should-error (kuro-module-download "0.0.0")
+                                                     :type 'error))))))
         (ignore-errors (kill-buffer sha-buf))))))
 
 (ert-deftest kuro-module-test--install-release-archive-copies-library ()
@@ -577,8 +691,9 @@ naturally returns nil for the installed-binary check without global stubbing."
                          (when (string-suffix-p ".sha256" url) sha-buf)))
                       ((symbol-function 'message) #'ignore))
               (should (string-match-p "malformed HTTP response"
-                                      (cadr (should-error (kuro-module-download "0.0.0")
-                                                          :type 'error))))))
+                                      (error-message-string
+                                       (should-error (kuro-module-download "0.0.0")
+                                                     :type 'error))))))
         (ignore-errors (kill-buffer sha-buf))))))
 
 ;;; Group 22: kuro-module-build error paths
@@ -653,7 +768,8 @@ naturally returns nil for the installed-binary check without global stubbing."
   "`kuro-module-build' errors when `kuro-module--locate-cargo-toml' returns nil."
   (cl-letf (((symbol-function 'kuro-module--locate-cargo-toml) (lambda () nil)))
     (should (string-match-p "rust-core not found alongside"
-                            (cadr (should-error (kuro-module-build) :type 'error))))))
+                            (error-message-string
+                             (should-error (kuro-module-build) :type 'error))))))
 
 (ert-deftest kuro-module-test--build-cargo-not-found ()
   "`kuro-module-build' errors when `cargo' is not found in PATH."
@@ -663,7 +779,8 @@ naturally returns nil for the installed-binary check without global stubbing."
              (lambda (p) (equal p "/fake/rust-core/Cargo.toml")))
             ((symbol-function 'executable-find) (lambda (_cmd) nil)))
     (should (string-match-p "executable not found"
-                            (cadr (should-error (kuro-module-build) :type 'error))))))
+                            (error-message-string
+                             (should-error (kuro-module-build) :type 'error))))))
 
 (ert-deftest kuro-module-test--build-cargo-build-fails ()
   "`kuro-module-build' errors and pops to buffer when cargo exits with nonzero."
@@ -678,7 +795,8 @@ naturally returns nil for the installed-binary check without global stubbing."
                (lambda (_buf) (setq pop-called t)))
               ((symbol-function 'message) #'ignore))
       (should (string-match-p "cargo build failed"
-                              (cadr (should-error (kuro-module-build) :type 'error))))
+                              (error-message-string
+                               (should-error (kuro-module-build) :type 'error))))
       (should pop-called))))
 
 (ert-deftest kuro-module-test--build-lib-missing-after-build ()
@@ -696,7 +814,8 @@ naturally returns nil for the installed-binary check without global stubbing."
              (lambda () "/fake/target-dir"))
             ((symbol-function 'message) #'ignore))
     (should (string-match-p "cargo reported success but"
-                            (cadr (should-error (kuro-module-build) :type 'error))))))
+                            (error-message-string
+                             (should-error (kuro-module-build) :type 'error))))))
 
 ;;; Group 23: kuro-module--verify-sha256 — dedicated coverage
 
@@ -751,8 +870,9 @@ when `kuro-module-load' runs but `kuro-core-init' remains unbound."
     (unwind-protect
         (cl-letf (((symbol-function 'kuro-module-load) #'ignore))
           (should (string-match-p "native module could not be loaded"
-                                  (cadr (should-error (kuro--ensure-module-loaded)
-                                                      :type 'error)))))
+                                  (error-message-string
+                                   (should-error (kuro--ensure-module-loaded)
+                                                 :type 'error)))))
       (when was-bound
         (fset 'kuro-core-init (lambda () nil))))))
 

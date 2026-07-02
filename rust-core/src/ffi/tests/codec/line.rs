@@ -76,7 +76,7 @@ fn test_encode_line_coverage_invariant() {
         Cell::with_attrs('C', a3),
     ];
     let encoded = encode_line(&cells);
-    let ranges = encoded.face_ranges;
+    let ranges = &encoded.face_ranges;
 
     // First range must start at 0
     assert_eq!(ranges[0].start_buf, 0);
@@ -87,7 +87,7 @@ fn test_encode_line_coverage_invariant() {
         assert_eq!(w[0].end_buf, w[1].start_buf, "ranges must be contiguous");
     }
     // Each range must be non-empty
-    for range in &ranges {
+    for range in ranges {
         assert!(
             range.start_buf < range.end_buf,
             "empty range found: start={}, end={}",
@@ -107,7 +107,7 @@ fn test_encode_line_three_distinct_attrs_face_ranges() {
         Cell::with_attrs('C', attrs_flags!(SgrFlags::DIM)),
     ];
     let encoded = encode_line(&cells);
-    let ranges = encoded.face_ranges;
+    let ranges = &encoded.face_ranges;
     assert_eq!(
         ranges.len(),
         3,
@@ -271,7 +271,7 @@ fn test_encode_line_first_cell_face_range_always_emitted() {
     // A single cell with default attributes: the face range must cover [0, 1).
     let cell = Cell::new('Z');
     let encoded = encode_line(&[cell]);
-    let ranges = encoded.face_ranges;
+    let ranges = &encoded.face_ranges;
     assert_eq!(
         ranges.len(),
         1,
@@ -322,7 +322,7 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
 // encode_line_with_pool tests
 // -------------------------------------------------------------------------
 
-/// Empty slice → all-empty tuple; pool is not mutated in a visible way.
+/// Empty slice produces all-empty encoded data; pool is not mutated in a visible way.
 #[test]
 fn test_encode_line_with_pool_empty() {
     let mut pool = EncodePool::new();
@@ -375,7 +375,8 @@ fn test_encode_line_with_pool_reuse_clears_state() {
 fn test_encode_line_into_buf_empty_cells_writes_16_byte_row() {
     let mut pool = EncodePool::new();
     let mut buf: Vec<u8> = Vec::new();
-    let text = encode_line_into_buf(&[], false, &mut pool, 7, &mut buf);
+    let text = encode_line_into_buf(&[], false, &mut pool, 7, &mut buf)
+        .expect("empty line binary row should fit u32 fields");
     assert_eq!(text, "", "empty cells must return empty string");
     // 16-byte layout: [row_index=7: u32][num_face_ranges=0: u32][text_byte_len=0: u32][col_to_buf_len=0: u32]
     assert_eq!(buf.len(), 16, "empty cells must produce exactly 16 bytes");
@@ -395,7 +396,8 @@ fn test_encode_line_into_buf_single_cell_serialises_correctly() {
     let mut pool = EncodePool::new();
     let mut buf: Vec<u8> = Vec::new();
     let cell = Cell::new('H');
-    let text = encode_line_into_buf(&[cell], false, &mut pool, 2, &mut buf);
+    let text = encode_line_into_buf(&[cell], false, &mut pool, 2, &mut buf)
+        .expect("single-cell binary row should fit u32 fields");
     assert_eq!(text, "H", "text must be returned separately");
     // Layout: [row_index=2: u32][num_face_ranges=1: u32][text_byte_len=0: u32]
     //         [28-byte face range][col_to_buf_len=0: u32]

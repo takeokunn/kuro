@@ -181,11 +181,17 @@ fn color_definition_rgb_blue() {
 }
 
 #[test]
-fn color_definition_clamps_rgb_to_100() {
-    // Values above 100 must be clamped to 100 before scaling to 255
-    let d = decode(b"#4;2;200;200;200$");
-    // 100.min(200) * 255 / 100 == 255
-    assert_eq!(d.color_map.get(&4), Some(&[255u8, 255, 255]));
+fn color_definition_rejects_rgb_above_100() {
+    let mut d = decode(b"");
+    let original = d.color_map.get(&4).copied();
+    feed(&mut d, b"#4;2;200;200;200$");
+
+    assert_eq!(d.current_color, 4);
+    assert_eq!(
+        d.color_map.get(&4).copied(),
+        original,
+        "invalid RGB definition must keep the previous register value"
+    );
 }
 
 #[test]
@@ -211,18 +217,20 @@ fn color_no_params_does_not_panic() {
 }
 
 #[test]
-fn color_index_high_value_clamped_to_max_register() {
-    // Indices above 1023 are clamped to 1023 (MAX_COLOR_REGISTERS - 1).
-    // Must not panic; the color must land at register 1023, not 65535.
+fn color_index_above_max_register_is_ignored() {
     let d = decode(b"#65535;2;50;50;50$");
+    assert_eq!(d.current_color, 0);
     assert!(
-        d.color_map.contains_key(&1023),
-        "out-of-range register must be clamped to 1023"
+        !d.color_map.contains_key(&1023),
+        "out-of-range register must not be redirected to register 1023"
     );
-    assert!(
-        !d.color_map.contains_key(&65535),
-        "register 65535 must not exist after clamping"
-    );
+}
+
+#[test]
+fn color_index_above_u16_is_ignored() {
+    let d = decode(b"#70000;2;50;50;50$");
+    assert_eq!(d.current_color, 0);
+    assert!(!d.color_map.contains_key(&1023));
 }
 
 #[test]
@@ -247,6 +255,28 @@ fn color_hls_definition() {
     assert!(rgb[0] > 200, "hls red: r should be high, got {}", rgb[0]);
     assert!(rgb[1] < 50, "hls red: g should be low, got {}", rgb[1]);
     assert!(rgb[2] < 50, "hls red: b should be low, got {}", rgb[2]);
+}
+
+#[test]
+fn color_hls_rejects_hue_above_360() {
+    let mut d = decode(b"");
+    let original = d.color_map.get(&5).copied();
+    feed(&mut d, b"#5;1;361;50;100$");
+
+    assert_eq!(d.current_color, 5);
+    assert_eq!(d.color_map.get(&5).copied(), original);
+}
+
+#[test]
+fn color_hls_rejects_lightness_or_saturation_above_100() {
+    let mut d = decode(b"");
+    let original = d.color_map.get(&5).copied();
+
+    feed(&mut d, b"#5;1;0;101;100$");
+    assert_eq!(d.color_map.get(&5).copied(), original);
+
+    feed(&mut d, b"#5;1;0;50;101$");
+    assert_eq!(d.color_map.get(&5).copied(), original);
 }
 
 #[test]

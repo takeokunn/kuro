@@ -79,7 +79,7 @@ fn append_sgr_color(out: &mut String, color: Color, base: u8, bright_base: u8, e
     match color {
         Color::Default => {}
         Color::Named(n) => {
-            let idx = n as u8;
+            let idx = n.index();
             let code = if idx < 8 {
                 base + idx
             } else {

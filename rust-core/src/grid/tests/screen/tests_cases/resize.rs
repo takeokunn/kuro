@@ -22,13 +22,19 @@ fn test_resize_same_dimensions_is_noop() {
 }
 
 #[test]
-fn test_resize_zero_dimensions_do_not_panic() {
+fn test_resize_zero_rows_does_not_panic() {
     let mut screen = Screen::new(10, 20);
 
-    screen.resize(0, 0);
+    screen.resize(0, 20);
+    assert_eq!(screen.rows(), 0);
+}
 
-    assert_eq!(screen.cursor().row, 0);
-    assert_eq!(screen.cursor().col, 0);
+#[test]
+fn test_resize_zero_cols_does_not_panic() {
+    let mut screen = Screen::new(10, 20);
+
+    screen.resize(10, 0);
+    assert_eq!(screen.cols(), 0);
 }
 
 #[test]

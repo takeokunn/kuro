@@ -42,7 +42,7 @@ pub fn handle_scroll(term: &mut crate::TerminalCore, params: &vte::Params, c: ch
 /// Note: The top margin is inclusive, bottom margin is exclusive (following the
 /// existing `ScrollRegion` convention in Screen).
 fn csi_decstbm(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let rows = term.screen.rows() as usize;
+    let rows = term.screen.rows();
 
     if let Some((top, bottom)) = decstbm_bounds(params, rows) {
         term.screen.set_scroll_region(top, bottom);
@@ -58,25 +58,27 @@ fn scroll_param_amount(params: &vte::Params) -> usize {
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .max(1) as usize
+        .max(1)
+        .into()
 }
 
-fn decstbm_bounds(params: &vte::Params, rows: usize) -> Option<(usize, usize)> {
-    let rows = u16::try_from(rows).unwrap_or(u16::MAX);
+fn decstbm_bounds(params: &vte::Params, rows: u16) -> Option<(usize, usize)> {
     let top = params
         .iter()
         .next()
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1) as usize;
+        .saturating_sub(1)
+        .into();
     let bottom = params
         .iter()
         .nth(1)
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(rows)
-        .min(rows) as usize;
+        .min(rows)
+        .into();
 
     (top < bottom).then_some((top, bottom))
 }
@@ -108,17 +110,11 @@ fn csi_sd(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Shifts each row in the scroll region left by `Ps` columns. Columns shifted
 /// off the left edge are discarded; `Ps` blank columns appear at the right.
 pub fn handle_sl(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1) as usize;
+    let n = scroll_param_amount(params);
 
     let bg = term.current_attrs.background;
     let region = term.screen.get_scroll_region();
-    let cols = term.screen.cols() as usize;
+    let cols = usize::from(term.screen.cols());
     let shift = n.min(cols);
     let mut blank = crate::types::Cell::default();
     blank.attrs.background = bg;
@@ -142,17 +138,11 @@ pub fn handle_sl(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// Shifts each row in the scroll region right by `Ps` columns. Columns shifted
 /// off the right edge are discarded; `Ps` blank columns appear at the left.
 pub fn handle_sr(term: &mut crate::TerminalCore, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1) as usize;
+    let n = scroll_param_amount(params);
 
     let bg = term.current_attrs.background;
     let region = term.screen.get_scroll_region();
-    let cols = term.screen.cols() as usize;
+    let cols = usize::from(term.screen.cols());
     let shift = n.min(cols);
     let mut blank = crate::types::Cell::default();
     blank.attrs.background = bg;

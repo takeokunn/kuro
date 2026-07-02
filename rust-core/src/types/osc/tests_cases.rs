@@ -262,7 +262,7 @@ fn osc_data_set_default_color_updates_slot_and_dirty_flag() {
 fn osc_data_reset_default_color_clears_slot() {
     let mut d = OscData {
         default_bg: Some(Color::Rgb(4, 5, 6)),
-        ..OscData::default()
+        ..Default::default()
     };
     d.reset_default_color(DefaultColorSlot::Background);
     assert!(d.default_bg.is_none());

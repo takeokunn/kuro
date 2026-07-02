@@ -2,7 +2,6 @@
 
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
-use super::{build_emacs_list_from_rev, build_emacs_list_from_values};
 use crate::error::KuroError;
 use crate::ffi::bridge::query_session_data_or_error_mut;
 
@@ -83,42 +82,45 @@ where
 }
 
 #[inline]
-fn build_emacs_face_range<'e>(
+fn build_emacs_face_ranges_vector<'e>(
     env: &'e Env,
-    (start_buf, end_buf, fg, bg, flags, ul_color): (usize, usize, u32, u32, u64, u32),
+    ranges: Vec<crate::ffi::codec::EncodedFaceRange>,
 ) -> EmacsResult<Value<'e>> {
-    let start_val = (start_buf as i64).into_lisp(env)?;
-    let end_val = (end_buf as i64).into_lisp(env)?;
-    let fg_val = i64::from(fg).into_lisp(env)?;
-    let bg_val = i64::from(bg).into_lisp(env)?;
-    let flags_val = (flags as i64).into_lisp(env)?;
-    let ul_color_val = i64::from(ul_color).into_lisp(env)?;
-
-    build_emacs_list_from_values(
-        env,
-        [start_val, end_val, fg_val, bg_val, flags_val, ul_color_val],
-    )
+    let vec = env.make_vector(ranges.len() * 6, 0i64.into_lisp(env)?)?;
+    for (idx, range) in ranges.into_iter().enumerate() {
+        let base = idx * 6;
+        vec.set(base, (range.start_buf as i64).into_lisp(env)?)?;
+        vec.set(base + 1, (range.end_buf as i64).into_lisp(env)?)?;
+        vec.set(base + 2, i64::from(range.fg).into_lisp(env)?)?;
+        vec.set(base + 3, i64::from(range.bg).into_lisp(env)?)?;
+        vec.set(base + 4, (range.flags as i64).into_lisp(env)?)?;
+        vec.set(base + 5, i64::from(range.underline_color).into_lisp(env)?)?;
+    }
+    vec.into_lisp(env)
 }
 
 #[inline]
 pub(super) fn build_emacs_poll_updates_with_faces_line<'e>(
     env: &'e Env,
-    (line_no, text, face_ranges, col_to_buf): crate::ffi::codec::EncodedLine,
+    line: crate::ffi::codec::EncodedLine,
 ) -> EmacsResult<Value<'e>> {
-    let line_no_val = (line_no as i64).into_lisp(env)?;
-    let text_val = text.into_lisp(env)?;
-
-    let face_list = build_emacs_list_from_rev(env, face_ranges, build_emacs_face_range)?;
+    let line_no_val = (line.row_index as i64).into_lisp(env)?;
+    let text_val = line.text.into_lisp(env)?;
+    let face_ranges_vec = build_emacs_face_ranges_vector(env, line.face_ranges)?;
 
     let col_to_buf_vec = build_emacs_vector_from_iter(
         env,
-        col_to_buf.len(),
+        line.col_to_buf.len(),
         false.into_lisp(env)?,
-        col_to_buf,
+        line.col_to_buf,
         |env, offset| (offset as i64).into_lisp(env),
     )?;
 
-    let line_pair = build_emacs_list_from_values(env, [line_no_val, text_val])?;
-    let line_data = build_emacs_list_from_values(env, [line_pair, face_list])?;
-    build_emacs_list_from_values(env, [line_data, col_to_buf_vec])
+    build_emacs_vector_from_iter(
+        env,
+        4,
+        false.into_lisp(env)?,
+        [line_no_val, text_val, face_ranges_vec, col_to_buf_vec],
+        |_env, value| Ok(value),
+    )
 }

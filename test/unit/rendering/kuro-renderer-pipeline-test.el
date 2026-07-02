@@ -258,17 +258,24 @@
 
 ;;; Group 15: kuro--apply-dirty-lines
 
+(defun kuro-renderer-pipeline-test--should-reject-dirty-updates (updates rows)
+  "Assert `kuro--apply-dirty-lines' rejects UPDATES with ROWS last rows."
+  (kuro-renderer-pipeline-test--with-buffer
+    (let ((kuro--last-rows rows))
+      (should-error (kuro--apply-dirty-lines updates)))))
+
 (ert-deftest kuro-renderer-pipeline-apply-dirty-lines-calls-update-for-each-row ()
   "kuro--apply-dirty-lines calls kuro--update-line-full for each update entry."
   (kuro-renderer-pipeline-test--with-buffer
     (insert "row0\nrow1\n")
-    (let ((updated-rows nil))
+    (let ((updated-rows nil)
+          (kuro--last-rows 2))
       (cl-letf (((symbol-function 'kuro--update-line-full)
                  (lambda (row _text _faces _c2b)
                    (push row updated-rows))))
         (kuro--apply-dirty-lines
-         (vector (vector 0 "new0" nil nil)
-                 (vector 1 "new1" nil nil)))
+         (vector (vector 0 "new0" [] [])
+                 (vector 1 "new1" [] [])))
         (should (= (length updated-rows) 2))
         (should (member 0 updated-rows))
         (should (member 1 updated-rows))))))
@@ -281,7 +288,8 @@ on row 0, the loop aborts and remaining rows are not attempted — this is
 acceptable because `kuro--update-line-full' never signals in production."
   (kuro-renderer-pipeline-test--with-buffer
     (insert "row0\nrow1\n")
-    (let ((rows-attempted nil))
+    (let ((rows-attempted nil)
+          (kuro--last-rows 2))
       (cl-letf (((symbol-function 'kuro--update-line-full)
                  (lambda (row _text _faces _c2b)
                    (push row rows-attempted)
@@ -289,14 +297,14 @@ acceptable because `kuro--update-line-full' never signals in production."
                      (error "simulated row error")))))
         ;; Error is caught inside kuro--apply-dirty-lines; nothing propagates.
         (kuro--apply-dirty-lines
-         (vector (vector 0 "bad" nil nil)
-                 (vector 1 "ok" nil nil)))
+         (vector (vector 0 "bad" [] [])
+                 (vector 1 "ok" [] [])))
         ;; Only row 0 was attempted; frame-level abort skipped row 1.
         (should (= (length rows-attempted) 1))
         (should (equal rows-attempted '(0)))))))
 
 (ert-deftest kuro-renderer-pipeline-apply-dirty-lines-empty-updates-is-noop ()
-  "kuro--apply-dirty-lines with an empty list is a no-op."
+  "kuro--apply-dirty-lines with a nil update list is a no-op."
   (kuro-renderer-pipeline-test--with-buffer
     (let ((called nil))
       (cl-letf (((symbol-function 'kuro--update-line-full)
@@ -304,6 +312,59 @@ acceptable because `kuro--update-line-full' never signals in production."
         (kuro--apply-dirty-lines nil)
         (should-not called)))))
 
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-non-vector-updates ()
+  "kuro--apply-dirty-lines rejects list-shaped updates."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   '((0 "text" [] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-out-of-range-row ()
+  "kuro--apply-dirty-lines rejects rows beyond `kuro--last-rows'."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 1 "text" [] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-negative-row ()
+  "kuro--apply-dirty-lines rejects negative row indexes."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector -1 "text" [] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-non-string-text ()
+  "kuro--apply-dirty-lines rejects non-string text payloads."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 42 [] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-nil-face-ranges ()
+  "kuro--apply-dirty-lines rejects nil face-range payloads."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 "text" nil []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-malformed-face-ranges ()
+  "kuro--apply-dirty-lines rejects face-range vectors with non-stride-6 length."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 "text" [0 1 2 3 4] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-non-u32-face-range-value ()
+  "kuro--apply-dirty-lines rejects non-u32 face-range values."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 "text" [0 1 2 3 -1 0] []))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-nil-col-to-buf ()
+  "kuro--apply-dirty-lines rejects nil col-to-buf payloads."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 "text" [] nil))
+   1))
+
+(ert-deftest kuro-renderer-pipeline-apply-dirty-lines-rejects-non-u32-col-to-buf-value ()
+  "kuro--apply-dirty-lines rejects non-u32 col-to-buf values."
+  (kuro-renderer-pipeline-test--should-reject-dirty-updates
+   (vector (vector 0 "text" [] [#x100000000]))
+   1))
+
 (provide 'kuro-renderer-pipeline-test)
 ;;; kuro-renderer-pipeline-test.el ends here
-

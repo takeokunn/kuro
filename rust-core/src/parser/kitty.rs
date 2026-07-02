@@ -59,9 +59,9 @@ pub struct KittyParams {
     pub frame_y: u32,
     /// Frame display gap in milliseconds (key `z`); negative encoded as i32 via wrapping
     pub gap: Option<i32>,
-    /// Total bytes to read from a file/temp/shm source (key `S`, t=f/t/s only)
+    /// Parsed legacy read size (key `S`). Host-object reads are rejected.
     pub read_size: Option<u32>,
-    /// Starting byte offset for file/temp/shm reads (key `O`, t=f/t/s only)
+    /// Parsed legacy read offset (key `O`). Host-object reads are rejected.
     pub read_offset: Option<u32>,
     /// Image *number* (key `I`) — for `a=d,d=n/N` newest-by-number deletion.
     pub image_number: Option<u32>,
@@ -72,10 +72,6 @@ impl KittyParams {
     ///
     /// Format: `a=t,f=100,i=1,m=0`
     #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "quiet is 0 or 2 per Kitty graphics protocol spec; u32→u8 is always safe for valid inputs"
-    )]
     pub fn parse(header: &[u8]) -> Self {
         let mut params = Self::default();
         for kv in header.split(|&b| b == b',') {
@@ -201,9 +197,7 @@ pub struct KittyChunkState {
 /// Returns a `KittyCommand` when the sequence is complete, or `None` if:
 /// - More chunks are expected (m=1)
 /// - The payload is malformed
-/// - A file/temp/shm (`t=f`/`t`/`s`) reference fails a security guard
-///   (non-regular file, symlink, blocked prefix, oversized, missing). See
-///   [`media`] for the full validation model.
+/// - A file/temp/shm (`t=f`/`t=t`/`t=s`) host-object reference is refused.
 pub fn process_apc_payload(
     payload: &[u8],
     chunk_state: &mut Option<KittyChunkState>,
@@ -230,10 +224,9 @@ fn finalize_apc_payload(
     let decoded = match params.transmission.unwrap_or('d') {
         // Direct (base64-in-payload): decode the payload itself.
         'd' => decode_apc_payload_data(b64_data)?,
-        // File / temp / shared-memory: payload is a base64 path/name. Resolve
-        // it (with all security guards) into the raw image bytes, then treat
-        // them exactly like direct data below. Media transfers are single-shot,
-        // so any in-progress chunk accumulation is discarded.
+        // Host-object references (file/temp/shm) are refused in kitty_media.
+        // They are single-shot transfers, so any in-progress chunk accumulation
+        // is discarded.
         transmission @ ('f' | 't' | 's') => {
             let bytes = media::resolve_media_payload(transmission, b64_data, &params);
             let Some(bytes) = bytes else {

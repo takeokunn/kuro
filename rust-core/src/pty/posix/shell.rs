@@ -1,4 +1,4 @@
-//! Shell resolution and whitelist validation for POSIX PTYs.
+//! Shell allowlist validation for POSIX PTYs.
 
 use crate::{
     ffi::error::{invalid_parameter_error, pty_spawn_error},
@@ -8,7 +8,7 @@ use crate::{
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
-/// Allowed shells whitelist for security.
+/// Allowed shell basenames for security.
 const ALLOWED_SHELLS: &[&str] = &["bash", "zsh", "sh", "fish"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,38 +17,21 @@ pub(super) struct ShellCommand {
 }
 
 impl ShellCommand {
-    /// Search `$PATH` for an executable named `command`.
-    ///
-    /// Returns the first absolute path found, or `None` if not found.
-    pub(super) fn find_in_path(command: &str) -> Option<PathBuf> {
-        if command.is_empty() {
-            return None;
-        }
-        let path_var = std::env::var("PATH").unwrap_or_default();
-        for dir in path_var.split(':') {
-            if dir.is_empty() {
-                continue;
-            }
-            let candidate = PathBuf::from(dir).join(command);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-        None
-    }
-
-    /// Validate shell command against whitelist.
+    /// Validate shell command against the allowlist.
     ///
     /// Ensures only allowed shells can be spawned to prevent command injection.
-    /// Resolves the command to an absolute path and checks the basename.
+    /// The command must already be an absolute path; `$PATH` is intentionally
+    /// ignored so validation and exec use the same filesystem object.
     pub(super) fn resolve(command: &str) -> Result<Self> {
-        let path = if Path::new(command).is_absolute() {
-            Self::validate_absolute_path(command)?
-        } else {
-            Self::find_in_path(command).ok_or_else(|| {
-                invalid_parameter_error("command", &format!("Shell not found in PATH: {command}"))
-            })?
-        };
+        let requested_path = Path::new(command);
+        if !requested_path.is_absolute() {
+            return Err(invalid_parameter_error(
+                "command",
+                "Shell command must be an absolute path",
+            ));
+        }
+
+        let path = Self::validate_absolute_path(requested_path)?;
 
         let basename = path
             .file_name()
@@ -80,14 +63,20 @@ impl ShellCommand {
         self.path
     }
 
-    fn validate_absolute_path(command: &str) -> Result<PathBuf> {
-        // Absolute path: validate directly without PATH lookup.
-        // This handles NixOS Nix store paths where the Rust process inherits
-        // Emacs's restricted PATH and PATH lookup cannot locate the binary.
-        let path = PathBuf::from(command);
+    fn validate_absolute_path(path: &Path) -> Result<PathBuf> {
+        // Absolute path: validate directly without PATH lookup. This handles
+        // NixOS store paths and keeps validation aligned with the exec target.
+        let path = path.to_path_buf();
         let meta = std::fs::metadata(&path).map_err(|_| {
             invalid_parameter_error("command", "Shell path does not exist or is inaccessible")
         })?;
+
+        if !meta.is_file() {
+            return Err(invalid_parameter_error(
+                "command",
+                "Shell path is not a regular file",
+            ));
+        }
 
         // Symlinks are followed by metadata(); the kernel still performs final
         // permission enforcement at execv(2) time.

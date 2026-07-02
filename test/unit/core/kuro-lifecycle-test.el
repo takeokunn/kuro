@@ -17,7 +17,7 @@
 ;; also stubbing every Rust call that the code under test might reach.
 ;;
 ;; Groups:
-;;   Group 1: kuro-send-string  (delegates to kuro--send-key)
+;;   Group 1: kuro-send-string  (delegates text to kuro--send-paste-or-raw)
 ;;   Group 2: kuro-send-interrupt / kuro-send-sigstop / kuro-send-sigquit
 ;;   Group 3: kuro-kill         (guards on derived-mode-p; calls kuro--shutdown)
 ;;   Group 4: kuro-create guard (must not attempt a real PTY)
@@ -34,40 +34,53 @@
 
 ;;; ── Group 1: kuro-send-string ───────────────────────────────────────────────
 ;;
-;; kuro-send-string delegates the entire string directly to kuro--send-key in
-;; a single call.  The initialization guard lives inside kuro--send-key, so
-;; when kuro--initialized is nil the stub is never called.
+;; kuro-send-string delegates the entire string to the paste-safe text path in
+;; a single call.  The initialization guard lives inside the Rust send FFIs, so
+;; when kuro--initialized is nil no Rust send function is called.
 
 (ert-deftest kuro-lifecycle--send-string-noop-when-not-initialized ()
   "kuro-send-string does nothing when kuro--initialized is nil.
-Stubs kuro-core-send-key (the Rust FFI) rather than kuro--send-key so
-that the `kuro--call' guard inside kuro--send-key is exercised."
+Stubs Rust send FFIs rather than high-level wrappers so that the
+`kuro--call' guard is exercised."
   (kuro-lifecycle-test--assert-noop-when-uninitialized (kuro-send-string "hello")))
 
-(ert-deftest kuro-lifecycle--send-string-passes-string-to-send-key ()
-  "kuro-send-string passes the whole string to kuro--send-key in one call."
-  (let ((received (kuro-lifecycle-test--capture-send-key
+(ert-deftest kuro-lifecycle--send-string-passes-string-to-paste-or-raw ()
+  "kuro-send-string passes the whole string to kuro--send-paste-or-raw."
+  (let ((received (kuro-lifecycle-test--capture-send-paste-or-raw
                    (kuro-send-string "hello"))))
     (should (equal received '("hello")))))
 
 (ert-deftest kuro-lifecycle--send-string-empty-string ()
-  "kuro-send-string with an empty string calls kuro--send-key with \"\"."
-  (let ((received (kuro-lifecycle-test--capture-send-key
+  "kuro-send-string with an empty string sends \"\" through paste-safe path."
+  (let ((received (kuro-lifecycle-test--capture-send-paste-or-raw
                    (kuro-send-string ""))))
     (should (equal received '("")))))
 
 (ert-deftest kuro-lifecycle--send-string-multi-char ()
   "kuro-send-string sends the full multi-char string in a single call."
-  (let ((received (kuro-lifecycle-test--capture-send-key
+  (let ((received (kuro-lifecycle-test--capture-send-paste-or-raw
                    (kuro-send-string "abc"))))
     (should (= (length received) 1))
     (should (equal (car received) "abc"))))
 
 (ert-deftest kuro-lifecycle--send-string-newline ()
   "kuro-send-string correctly forwards a string containing a newline."
-  (let ((received (kuro-lifecycle-test--capture-send-key
+  (let ((received (kuro-lifecycle-test--capture-send-paste-or-raw
                    (kuro-send-string "line\n"))))
     (should (equal received '("line\n")))))
+
+(ert-deftest kuro-lifecycle--send-string-rejects-non-string ()
+  "kuro-send-string rejects non-string payloads before dispatch."
+  (should-error (kuro-send-string 42) :type 'wrong-type-argument))
+
+(ert-deftest kuro-lifecycle--send-string-schedules-immediate-render ()
+  "kuro-send-string schedules an immediate render after dispatch."
+  (let ((scheduled nil))
+    (cl-letf (((symbol-function 'kuro--send-paste-or-raw) #'ignore)
+              ((symbol-function 'kuro--schedule-immediate-render)
+               (lambda () (setq scheduled t))))
+      (kuro-send-string "hello"))
+    (should scheduled)))
 
 ;;; ── Group 2: kuro-send-interrupt / kuro-send-sigstop / kuro-send-sigquit ───
 ;;

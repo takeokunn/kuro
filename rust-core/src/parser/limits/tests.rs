@@ -13,7 +13,7 @@
 //!   `MAX_PROMPT_DURATION_MS` = 31_536_000_000 (one year in ms)
 
 use super::{
-    MAX_APC_PAYLOAD_BYTES, MAX_CHUNK_DATA_BYTES, MAX_TITLE_BYTES, MAX_PROMPT_DURATION_MS,
+    MAX_APC_PAYLOAD_BYTES, MAX_CHUNK_DATA_BYTES, MAX_PROMPT_DURATION_MS, MAX_TITLE_BYTES,
     NOTIFICATION_MAX_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_BYTES,
 };
 use proptest::prelude::*;
@@ -82,8 +82,7 @@ fn test_osc8_max_uri_bytes_is_8192() {
 // VALUE: MAX_PROMPT_DURATION_MS must be exactly one year in milliseconds.
 fn test_max_prompt_duration_ms_is_one_year() {
     assert_eq!(
-        MAX_PROMPT_DURATION_MS,
-        31_536_000_000,
+        MAX_PROMPT_DURATION_MS, 31_536_000_000,
         "MAX_PROMPT_DURATION_MS must equal one year in milliseconds"
     );
 }

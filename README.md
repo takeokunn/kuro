@@ -67,22 +67,14 @@ cp target/release/libkuro_core.so ~/.local/share/kuro/
 cp target/release/libkuro_core.dylib ~/.local/share/kuro/
 ```
 
-After installing the Emacs package via `package.el` (see MELPA section below), you can also run `M-x kuro-module-build` to compile the native module from source via cargo, or `M-x kuro-module-download` to fetch a prebuilt binary.
+After installing Kuro, you can also use the native module helpers below to build locally or fetch a prebuilt binary.
 
-### MELPA
+### Native Module Helpers
 
-MELPA packaging is prepared (recipe, `.elpaignore`, package-lint CI). Submission is pending the rollout of the GitHub Releases prebuilt-binary infrastructure, which ships native modules for the four supported platforms:
-
-- `linux-x86_64`
-- `linux-aarch64`
-- `darwin-x86_64`
-- `darwin-aarch64`
+Use these commands after installing Kuro:
 
 ```elisp
-;; Once published:
-M-x package-install RET kuro RET
-
-;; Then fetch the prebuilt native module for your platform:
+;; Fetch the prebuilt native module for your platform:
 M-x kuro-module-download
 
 ;; Or compile from source via cargo (requires a Rust toolchain):
@@ -112,7 +104,7 @@ M-x kuro-module-build
 
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS across Emacs 29.4 and 30.1 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS; the Elisp checks run on Emacs 30 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 
@@ -157,7 +149,7 @@ nix run .#run       # Build + install + launch Emacs
 ### Test
 
 ```bash
-nix flake check                                        # All checks (Rust + ERT + byte-compile + audit)
+nix flake check                                        # All checks (Rust + ERT + byte-compile + package-lint + checkdoc + treefmt)
 nix develop --command bash test/scripts/runners/run-e2e.sh       # E2E tests (PTY — outside sandbox)
 nix develop --command bash test/scripts/runners/vttest-compliance.sh  # VTE compliance
 ```
@@ -192,12 +184,10 @@ The `fuzz` devShell provides nightly Rust + cargo-fuzz. Available targets: `adva
 | `kuro-clippy` | Clippy with `-D warnings` |
 | `kuro-fmt` | `cargo fmt --check` |
 | `kuro-test` | Rust unit + integration tests |
-| `kuro-audit` | Security audit (rustsec advisory-db) |
-| `kuro-elisp-emacs-29` | ERT test suite on Emacs 29.4 |
-| `kuro-elisp-emacs-30` | ERT test suite on Emacs 30.1 |
-| `kuro-byte-compile-emacs-29` | Byte-compile on Emacs 29.4 |
-| `kuro-byte-compile-emacs-30` | Byte-compile on Emacs 30.1 |
-| `kuro-package-lint` | `package-lint` on `kuro.el` |
+| `kuro-elisp` | ERT test suite on Emacs 30 |
+| `kuro-byte-compile` | Byte-compile on Emacs 30 |
+| `kuro-package-lint` | `package-lint` on user-facing entry points |
+| `kuro-checkdoc` | `checkdoc` across `emacs-lisp/` |
 | `treefmt` | Rust + Nix files are formatted (treefmt) |
 
 ### Nix file layout

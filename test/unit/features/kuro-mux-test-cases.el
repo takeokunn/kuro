@@ -10,30 +10,28 @@
 (defconst kuro-mux-test--session-spec-table
   '((kuro-mux-test-session-spec-includes-name
      "*mux-sp1*" kuro-mux--name :name "test-session")
-    (kuro-mux-test-session-spec-includes-command
-     "*mux-sp2*" kuro-mux--command :command "fish")
     (kuro-mux-test-session-spec-includes-directory
-     "*mux-sp3*" kuro-mux--directory :directory "/tmp"))
+     "*mux-sp2*" kuro-mux--directory :directory (file-name-as-directory "/tmp")))
   "Cases for `kuro-mux--session-spec'.")
 
 (defconst kuro-mux-test--parse-layout-plists-table
   '((kuro-mux-test-parse-layout-plists-single
-     ((:name "dev" :command "bash" :directory "/tmp"))
+     ((:name "dev" :directory "/tmp"))
      1
-     (:name "dev" :command "bash" :directory "/tmp"))
+     (:name "dev" :directory (file-name-as-directory "/tmp")))
     (kuro-mux-test-parse-layout-plists-multiple
-     ((:name "a" :command "sh" :directory "/a")
-      (:name "b" :command "zsh" :directory "/b"))
-     2
-     (:name "a"))
+      ((:name "a" :directory "/tmp")
+       (:name "b" :directory "/tmp"))
+      2
+      (:name "a" :directory (file-name-as-directory "/tmp")))
     (kuro-mux-test-parse-layout-plists-empty
      nil
      0
      nil)
-    (kuro-mux-test-parse-layout-plists-drops-invalid
-     ((:name "ok" :command "bash") "not-a-list" (:name "broken"))
-     1
-     (:name "ok")))
+    (kuro-mux-test-parse-layout-plists-rejects-invalid
+     ((:name "ok" :directory "/tmp") "not-a-list" (:name "bad" :command "bash"))
+     0
+     nil))
   "Cases for `kuro-mux--parse-layout-plists'.")
 
 (defconst kuro-mux-test--prefix-bindings-invariant-table

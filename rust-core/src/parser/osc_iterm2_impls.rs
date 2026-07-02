@@ -62,30 +62,10 @@ pub(crate) fn decode_iterm2_image(b64_data: &str) -> Option<(Vec<u8>, u32, u32)>
         return None;
     }
     let raw = crate::util::base64::decode(b64_data.trim().as_bytes()).ok()?;
-
-    use crate::parser::kitty::ImageFormat;
-    let decoder = png::Decoder::new(std::io::Cursor::new(&raw));
-    decoder.read_info().ok().and_then(|mut reader| {
-        let mut buf = vec![0u8; reader.output_buffer_size()];
-        reader.next_frame(&mut buf).ok().map(|info| {
-            buf.truncate(info.buffer_size());
-            let fmt = match info.color_type {
-                png::ColorType::Rgba => ImageFormat::Rgba,
-                _ => ImageFormat::Rgb,
-            };
-            let w = info.width;
-            let h = info.height;
-            // Convert RGB → RGBA
-            let pixels = if fmt == ImageFormat::Rgb {
-                buf.chunks(3)
-                    .flat_map(|p| [p[0], p[1], p[2], 255])
-                    .collect()
-            } else {
-                buf
-            };
-            (pixels, w, h)
-        })
-    })
+    crate::parser::png_decode::decode_inline_png(&raw)
+        .ok()?
+        .into_rgba_pixels()
+        .ok()
 }
 
 /// Handle OSC 1337 — iTerm2 proprietary extensions.

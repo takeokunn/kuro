@@ -63,13 +63,12 @@ fn get_cell_mut_exposes_in_place_mutation() {
 
     line.get_cell_mut(2).unwrap().attrs.flags |= SgrFlags::BOLD;
 
-    assert!(
-        line.get_cell(2)
-            .unwrap()
-            .attrs
-            .flags
-            .contains(SgrFlags::BOLD)
-    );
+    assert!(line
+        .get_cell(2)
+        .unwrap()
+        .attrs
+        .flags
+        .contains(SgrFlags::BOLD));
 }
 
 #[test]
@@ -140,11 +139,7 @@ fn clear_cases_reset_cells_wide_and_wrap_state() {
 
 #[test]
 fn clear_with_bg_cases_apply_bce_and_reset_flags() {
-    for bg in [
-        Color::Default,
-        Color::Indexed(7),
-        Color::Rgb(10, 20, 30),
-    ] {
+    for bg in [Color::Default, Color::Indexed(7), Color::Rgb(10, 20, 30)] {
         let mut line = line_with_text("abcdef");
         line.has_wide = true;
         line.wrapped = true;
@@ -194,7 +189,10 @@ fn resize_cases_adjust_cells_and_reset_wrap() {
     assert_eq!(line.to_string(), "Hello");
     assert!(line.is_dirty);
     assert!(!line.wrapped);
-    assert!(!line.has_wide, "removed suffix contained the only wide cell");
+    assert!(
+        !line.has_wide,
+        "removed suffix contained the only wide cell"
+    );
 
     line.mark_clean();
     line.wrapped = true;
@@ -206,7 +204,10 @@ fn resize_cases_adjust_cells_and_reset_wrap() {
 
     line.mark_clean();
     line.resize(8);
-    assert!(line.is_dirty, "same-size resize still invalidates render state");
+    assert!(
+        line.is_dirty,
+        "same-size resize still invalidates render state"
+    );
 
     line.resize(0);
     assert_eq!(line.cells.len(), 0);

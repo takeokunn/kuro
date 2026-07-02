@@ -105,7 +105,7 @@ Test name: kuro-ffi-osc-BARE-calls-core-when-init (BARE = name minus kuro-- pref
 
 (kuro-ffi-osc-test--init-delegates kuro--get-and-clear-title   kuro-core-get-and-clear-title   "test-title")
 (kuro-ffi-osc-test--init-delegates kuro--get-cwd               kuro-core-get-cwd               "/home/user")
-(kuro-ffi-osc-test--init-delegates kuro--poll-clipboard-actions kuro-core-poll-clipboard-actions '((write . "hello")))
+(kuro-ffi-osc-test--init-delegates kuro--poll-clipboard-actions kuro-core-poll-clipboard-actions '((write "hello" "clipboard")))
 (kuro-ffi-osc-test--init-delegates kuro--poll-prompt-marks     kuro-core-poll-prompt-marks     '((0 . prompt-start)))
 (kuro-ffi-osc-test--init-delegates kuro--get-image             kuro-core-get-image             "base64data"            42)
 (kuro-ffi-osc-test--init-delegates kuro--poll-image-notifications kuro-core-poll-image-notifications '((1 0 0 10 5)))
@@ -120,7 +120,7 @@ Test name: kuro-ffi-osc-BARE-calls-core-when-init (BARE = name minus kuro-- pref
 (kuro-ffi-osc-test--init-delegates kuro--scroll-up             kuro-core-scroll-up             t                       3)
 (kuro-ffi-osc-test--init-delegates kuro--scroll-down           kuro-core-scroll-down           t                       5)
 (kuro-ffi-osc-test--init-delegates kuro--get-scroll-offset     kuro-core-get-scroll-offset     7)
-(kuro-ffi-osc-test--init-delegates kuro--poll-eval-commands    kuro-core-poll-eval-commands    '("(cd \"/tmp\")"))
+(kuro-ffi-osc-test--init-delegates kuro--poll-eval-commands    kuro-core-poll-eval-commands    '("cd /tmp"))
 (kuro-ffi-osc-test--init-delegates kuro--get-cwd-host          kuro-core-get-cwd-host          "remote-host")
 (kuro-ffi-osc-test--init-delegates kuro--image-frame-count     kuro-core-image-frame-count     3                       7)
 (kuro-ffi-osc-test--init-delegates kuro--image-animation-state kuro-core-image-animation-state '(t 1 0)                 7)

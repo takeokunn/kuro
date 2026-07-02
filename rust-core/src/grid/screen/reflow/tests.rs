@@ -20,20 +20,21 @@ fn logical_text(s: &Screen) -> Vec<String> {
     let mut cur = String::new();
     let mut active = false;
 
-    let push_row = |cur: &mut String, line: &super::super::Line, active: &mut bool, out: &mut Vec<String>| {
-        for cell in &line.cells {
-            cur.push_str(cell.grapheme());
-        }
-        if line.wrapped {
-            *active = true;
-        } else {
-            // trim trailing spaces from the logical line
-            let trimmed = cur.trim_end_matches(' ').to_string();
-            out.push(trimmed);
-            cur.clear();
-            *active = false;
-        }
-    };
+    let push_row =
+        |cur: &mut String, line: &super::super::Line, active: &mut bool, out: &mut Vec<String>| {
+            for cell in &line.cells {
+                cur.push_str(cell.grapheme());
+            }
+            if line.wrapped {
+                *active = true;
+            } else {
+                // trim trailing spaces from the logical line
+                let trimmed = cur.trim_end_matches(' ').to_string();
+                out.push(trimmed);
+                cur.clear();
+                *active = false;
+            }
+        };
 
     for line in &s.scrollback_buffer {
         push_row(&mut cur, line, &mut active, &mut out);
@@ -62,14 +63,21 @@ fn narrow_splits_logical_line_into_more_rows() {
     let mut s = Screen::new(5, 80);
     type_str(&mut s, &"a".repeat(100));
     // Pre-condition: row 0 is soft-wrapped into row 1.
-    assert!(s.lines[0].wrapped, "row 0 should be soft-wrapped at width 80");
+    assert!(
+        s.lines[0].wrapped,
+        "row 0 should be soft-wrapped at width 80"
+    );
 
     s.resize(5, 40);
 
     // 100 chars at width 40 → 3 physical rows (40 + 40 + 20).
     // Count rows that carry content (scrollback + live).
     let content = all_content(&s);
-    assert_eq!(content, "a".repeat(100), "content identical when concatenated");
+    assert_eq!(
+        content,
+        "a".repeat(100),
+        "content identical when concatenated"
+    );
 
     // The first content rows must be soft-wrapped.
     // Find rows belonging to the logical line and assert >= 3.
@@ -92,7 +100,11 @@ fn widen_coalesces_into_fewer_rows() {
     type_str(&mut s, &"b".repeat(100));
     s.resize(5, 100);
 
-    assert_eq!(all_content(&s), "b".repeat(100), "content preserved on widen");
+    assert_eq!(
+        all_content(&s),
+        "b".repeat(100),
+        "content preserved on widen"
+    );
 
     // Exactly one physical row should carry the content now.
     let content_rows: usize = s
@@ -101,14 +113,20 @@ fn widen_coalesces_into_fewer_rows() {
         .chain(s.scrollback_buffer.iter())
         .filter(|l| l.cells.iter().any(|c| c.grapheme() != " "))
         .count();
-    assert_eq!(content_rows, 1, "100 chars at width 100 fit on a single row");
+    assert_eq!(
+        content_rows, 1,
+        "100 chars at width 100 fit on a single row"
+    );
     // That row is not soft-wrapped (it is the logical end).
     let row = s
         .lines
         .iter()
         .find(|l| l.cells.iter().any(|c| c.grapheme() != " "))
         .unwrap();
-    assert!(!row.wrapped, "the single full row is the logical end, not wrapped");
+    assert!(
+        !row.wrapped,
+        "the single full row is the logical end, not wrapped"
+    );
 }
 
 #[test]
@@ -130,7 +148,10 @@ fn wide_char_not_split_at_wrap_boundary() {
     // as the printer does.  The reflowed text therefore reads "abcd 世" (note
     // the padding space): the wide char is pushed intact, never split.
     let joined = all_content(&s).replace(' ', "");
-    assert_eq!(joined, "abcd世", "wide char preserved intact across wrap (padding aside)");
+    assert_eq!(
+        joined, "abcd世",
+        "wide char preserved intact across wrap (padding aside)"
+    );
 
     // The wide char must be intact: find the Full lead cell, its next cell is Wide.
     let mut found = false;
@@ -162,7 +183,11 @@ fn wide_char_wrap_padding_dropped_on_widen() {
 
     s.resize(4, 10);
     // Now everything fits on one row with no embedded pad space.
-    assert_eq!(all_content(&s), "abcd世", "wide-char wrap padding dropped on widen");
+    assert_eq!(
+        all_content(&s),
+        "abcd世",
+        "wide-char wrap padding dropped on widen"
+    );
 }
 
 #[test]
@@ -241,15 +266,26 @@ fn alternate_screen_not_reflowed() {
     // per-row resize (correct for the alternate screen) just truncates each row
     // independently → row 0 keeps its first 40 q's, row 1 keeps exactly its
     // original 20 q's (NOT 40).  Counting row 1's q's proves no reflow ran.
-    let row0_qs = alt.lines[0].cells.iter().filter(|c| c.grapheme() == "q").count();
-    let row1_qs = alt.lines[1].cells.iter().filter(|c| c.grapheme() == "q").count();
+    let row0_qs = alt.lines[0]
+        .cells
+        .iter()
+        .filter(|c| c.grapheme() == "q")
+        .count();
+    let row1_qs = alt.lines[1]
+        .cells
+        .iter()
+        .filter(|c| c.grapheme() == "q")
+        .count();
     assert_eq!(row0_qs, 40, "alt row 0 truncated, not rewrapped");
     assert_eq!(
         row1_qs, 20,
         "alt row 1 keeps its original 20 q's — reflow would have refilled it to 40"
     );
     // And alt row 0 is no longer flagged wrapped (per-row resize clears it).
-    assert!(!alt.lines[0].wrapped, "per-row resize clears the soft-wrap flag");
+    assert!(
+        !alt.lines[0].wrapped,
+        "per-row resize clears the soft-wrap flag"
+    );
 }
 
 #[test]
@@ -267,7 +303,10 @@ fn scrollback_is_reflowed() {
     type_str(&mut s, &"C".repeat(100));
 
     let before = all_content(&s);
-    assert!(s.scrollback_buffer.len() > 0, "should have scrollback content");
+    assert!(
+        !s.scrollback_buffer.is_empty(),
+        "should have scrollback content"
+    );
 
     s.resize(3, 40);
 
@@ -285,7 +324,11 @@ fn width_unchanged_height_change_no_reflow_change() {
     type_str(&mut s, "hello world");
     let before = all_content(&s);
     s.resize(30, 80); // same width, taller
-    assert_eq!(all_content(&s), before, "height-only change preserves content");
+    assert_eq!(
+        all_content(&s),
+        before,
+        "height-only change preserves content"
+    );
     assert_eq!(s.cols(), 80);
     assert_eq!(s.rows(), 30);
 }

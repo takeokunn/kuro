@@ -43,8 +43,18 @@ fn off_zwj_between_ascii_matches_legacy_combining() {
     off.advance(b"B");
 
     // ZWJ attaches to 'A' cell; 'B' is a separate advancing cell.
-    let cell_a: Vec<char> = off.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    assert_eq!(cell_a, vec!['A', ZWJ], "ZWJ joins 'A' via legacy combining path");
+    let cell_a: Vec<char> = off
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        cell_a,
+        vec!['A', ZWJ],
+        "ZWJ joins 'A' via legacy combining path"
+    );
     assert_eq!(off.screen.get_cell(0, 1).unwrap().char(), 'B');
     assert_cursor!(off, row 0, col 2);
 }
@@ -72,20 +82,38 @@ fn three_ris_form_one_flag_plus_lone_ri() {
     let mut term = term_2027_on();
     term.advance(&bytes(&[RI_J, RI_P, RI_U]));
 
-    let flag: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
+    let flag: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(flag, vec![RI_J, RI_P], "cols 0-1 = first flag (JP)");
     assert_eq!(term.screen.get_cell(0, 0).unwrap().width, CellWidth::Full);
     assert_eq!(term.screen.get_cell(0, 1).unwrap().width, CellWidth::Wide);
 
     // Third RI is a fresh lone width-1 cell at col 2.
-    let lone: Vec<char> = term.screen.get_cell(0, 2).unwrap().grapheme().chars().collect();
+    let lone: Vec<char> = term
+        .screen
+        .get_cell(0, 2)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(lone, vec![RI_U], "col 2 = lone third RI, width 1");
     assert_eq!(term.screen.get_cell(0, 2).unwrap().width, CellWidth::Half);
     assert_cursor!(term, row 0, col 3);
 
     // The lone RI is armed: a 4th RI completes a second flag at cols 2-3.
     term.advance(&bytes(&[RI_S]));
-    let flag2: Vec<char> = term.screen.get_cell(0, 2).unwrap().grapheme().chars().collect();
+    let flag2: Vec<char> = term
+        .screen
+        .get_cell(0, 2)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(flag2, vec![RI_U, RI_S], "cols 2-3 = second flag (US)");
     assert_cursor!(term, row 0, col 4);
 }
@@ -104,8 +132,18 @@ fn zwj_first_byte_at_origin_then_emoji_prints_normally() {
     // MAN must print as a fresh width-2 cell at col 0 — NOT swallowed by a
     // bogus pending-join from the dropped ZWJ.
     assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), MAN);
-    let cluster: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    assert_eq!(cluster, vec![MAN], "MAN is a fresh cell, not joined to a dropped ZWJ");
+    let cluster: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        cluster,
+        vec![MAN],
+        "MAN is a fresh cell, not joined to a dropped ZWJ"
+    );
     assert_cursor!(term, row 0, col 2);
 }
 
@@ -125,7 +163,11 @@ fn zwj_at_row1_col0_documented_behavior() {
     // last column, and arms the join. Then 'Z' is ASCII: it continues the join?
     // No — ASCII goes through buffer_ascii_print which CLEARS cluster state.
     // So 'Z' must print fresh at row1 col0.
-    assert_eq!(term.screen.get_cell(1, 0).unwrap().char(), 'Z', "'Z' prints fresh at row1 col0");
+    assert_eq!(
+        term.screen.get_cell(1, 0).unwrap().char(),
+        'Z',
+        "'Z' prints fresh at row1 col0"
+    );
     assert_cursor!(term, row 1, col 1);
 }
 
@@ -141,9 +183,19 @@ fn zwj_then_backspace_then_emoji_no_join() {
     term.advance(&bytes(&[WOMAN]));
 
     // After BS from col 2 -> col 1, WOMAN prints at col 1 fresh (not joined).
-    let man_cluster: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
+    let man_cluster: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(man_cluster, vec![MAN, ZWJ], "row0 col0 keeps only MAN+ZWJ");
-    assert_eq!(term.screen.get_cell(0, 1).unwrap().char(), WOMAN, "WOMAN is fresh, not joined");
+    assert_eq!(
+        term.screen.get_cell(0, 1).unwrap().char(),
+        WOMAN,
+        "WOMAN is fresh, not joined"
+    );
 }
 
 /// INTENT: ZWJ then a CSI sequence (cursor save/restore — a no-op move) then a
@@ -156,9 +208,23 @@ fn zwj_then_csi_then_emoji_no_join() {
     term.advance(b"\x1b[0m"); // SGR reset — a CSI dispatch
     term.advance(&bytes(&[WOMAN]));
 
-    let man_cluster: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    assert_eq!(man_cluster, vec![MAN, ZWJ], "CSI must break the pending join");
-    assert_eq!(term.screen.get_cell(0, 2).unwrap().char(), WOMAN, "WOMAN advances as its own cell");
+    let man_cluster: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        man_cluster,
+        vec![MAN, ZWJ],
+        "CSI must break the pending join"
+    );
+    assert_eq!(
+        term.screen.get_cell(0, 2).unwrap().char(),
+        WOMAN,
+        "WOMAN advances as its own cell"
+    );
     assert_cursor!(term, row 0, col 4);
 }
 
@@ -179,8 +245,18 @@ fn ri_pair_straddling_last_column_merges_into_same_cell() {
     term.advance(&bytes(&[RI_P])); // second RI: merge at the edge
 
     // Both RIs fold into the last-column cell — the lone RI is NOT destroyed.
-    let edge: Vec<char> = term.screen.get_cell(0, 3).unwrap().grapheme().chars().collect();
-    assert_eq!(edge, vec![RI_J, RI_P], "both RIs merge into the last-column cell");
+    let edge: Vec<char> = term
+        .screen
+        .get_cell(0, 3)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        edge,
+        vec![RI_J, RI_P],
+        "both RIs merge into the last-column cell"
+    );
     assert_eq!(
         term.screen.get_cell(0, 3).unwrap().width,
         CellWidth::Full,
@@ -193,7 +269,10 @@ fn ri_pair_straddling_last_column_merges_into_same_cell() {
         "neighbour cell 'c' must NOT be corrupted by the edge merge"
     );
     // Cursor stays in-bounds (no trailing continuation cell fits past col 3).
-    assert!(term.screen.cursor().col < 4, "cursor stays in-bounds after edge merge");
+    assert!(
+        term.screen.cursor().col < 4,
+        "cursor stays in-bounds after edge merge"
+    );
 }
 
 /// INTENT (REGRESSION): the SAME pending_wrap bug existed on the legacy combining
@@ -205,10 +284,26 @@ fn combining_at_last_column_attaches_to_correct_cell() {
     term.advance(b"abcd"); // 'd' fills col 3, pending_wrap set, cursor stays col 3
     term.advance("\u{0301}".as_bytes()); // combining acute accent (width 0)
 
-    let c2: Vec<char> = term.screen.get_cell(0, 2).unwrap().grapheme().chars().collect();
-    let c3: Vec<char> = term.screen.get_cell(0, 3).unwrap().grapheme().chars().collect();
+    let c2: Vec<char> = term
+        .screen
+        .get_cell(0, 2)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    let c3: Vec<char> = term
+        .screen
+        .get_cell(0, 3)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(c2, vec!['c'], "'c' must NOT receive the accent");
-    assert_eq!(c3, vec!['d', '\u{301}'], "accent attaches to 'd' at the last column");
+    assert_eq!(
+        c3,
+        vec!['d', '\u{301}'],
+        "accent attaches to 'd' at the last column"
+    );
 }
 
 /// INTENT: A ZWJ-join that would continue past auto-wrap. MAN fills cols at the
@@ -221,8 +316,18 @@ fn zwj_continuation_does_not_wrap() {
     term.advance(&bytes(&[MAN])); // width-2 at cols 0-1, cursor col2
     term.advance(&bytes(&[ZWJ, WOMAN])); // continue cluster on the MAN cell
 
-    let cluster: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    assert_eq!(cluster, vec![MAN, ZWJ, WOMAN], "join stays on the one cell, no wrap");
+    let cluster: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        cluster,
+        vec![MAN, ZWJ, WOMAN],
+        "join stays on the one cell, no wrap"
+    );
     assert_cursor!(term, row 0, col 2); // cursor unchanged by the join continuation
 }
 
@@ -241,7 +346,11 @@ fn erase_line_over_flag_clears_both_cells() {
     let c1 = term.screen.get_cell(0, 1).unwrap();
     assert_eq!(c0.char(), ' ', "base cell erased to blank");
     assert_eq!(c0.width, CellWidth::Half, "no stale Full width remains");
-    assert_eq!(c1.width, CellWidth::Half, "no orphaned Wide continuation remains");
+    assert_eq!(
+        c1.width,
+        CellWidth::Half,
+        "no orphaned Wide continuation remains"
+    );
 }
 
 /// INTENT: delete-char (DCH) over a flag cluster. After deleting the 2-cell
@@ -273,8 +382,18 @@ fn backspace_over_zwj_cluster_then_overwrite() {
 
     // 'Q' overwrites col 0; it must be a clean fresh cell, not carrying old
     // cluster scalars.
-    let c0: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    assert_eq!(c0, vec!['Q'], "overwrite produces a clean single-scalar cell");
+    let c0: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    assert_eq!(
+        c0,
+        vec!['Q'],
+        "overwrite produces a clean single-scalar cell"
+    );
 }
 
 // ── (7) DECRQM reports correct state after set/reset cycles ──────────────────
@@ -379,7 +498,13 @@ fn many_ri_pairs_form_many_flags_no_panic() {
     term.advance(&bytes(&chain));
 
     // First flag still intact at origin.
-    let first: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
+    let first: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(first, vec![RI_J, RI_P], "first flag intact after 100 flags");
     assert_eq!(term.screen.get_cell(0, 0).unwrap().width, CellWidth::Full);
 }

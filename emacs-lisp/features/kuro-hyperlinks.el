@@ -16,6 +16,7 @@
 (require 'kuro-ffi-osc)
 (require 'kuro-keymap)
 (require 'kuro-hyperlinks-macros)
+(require 'kuro-url-safety)
 
 (declare-function kuro--row-position "kuro-render-buffer" (row))
 
@@ -33,26 +34,36 @@
     ((kbd "RET") . kuro-open-hyperlink-at-point))
   "Keymap for hyperlink overlays.")
 
-(defconst kuro--hyperlink-allowed-schemes '("https" "http" "ftp" "ftps" "mailto")
-  "URI schemes permitted for OSC 8 hyperlink navigation.
-Blocks potentially dangerous schemes like file:, data:, javascript:,
-and OS-registered protocol handlers.")
+(defun kuro--hyperlink-range-entry-p (entry)
+  "Return non-nil when ENTRY is a strictly typed hyperlink range."
+  (pcase entry
+    (`(,row ,start ,end ,uri)
+     (and (integerp row)
+          (<= 0 row)
+          (integerp start)
+          (<= 0 start)
+          (integerp end)
+          (< start end)
+          (kuro--terminal-web-url-valid-p uri)))
+    (_ nil)))
 
-(defun kuro--uri-scheme-allowed-p (uri)
-  "Return non-nil if URI has a permitted scheme."
-  (when-let* ((scheme (and (string-match "\\`\\([a-zA-Z][a-zA-Z0-9+.-]*\\):" uri)
-                          (downcase (match-string 1 uri)))))
-    (member scheme kuro--hyperlink-allowed-schemes)))
+(defun kuro--hyperlink-buffer-range-p (beg end)
+  "Return non-nil when BEG and END are valid overlay bounds."
+  (and (integerp beg)
+       (integerp end)
+       (<= (point-min) beg)
+       (< beg end)
+       (<= end (point-max))))
 
 (defun kuro-open-hyperlink-at-point ()
   "Open the OSC 8 hyperlink at point using `browse-url'."
   (interactive)
   (when-let* ((ov (car (overlays-at (point)))))
     (when-let* ((uri (overlay-get ov 'kuro-hyperlink-uri)))
-      (if (kuro--uri-scheme-allowed-p uri)
+      (if (kuro--terminal-web-url-valid-p uri)
           (browse-url uri)
-        (message "kuro: blocked hyperlink with disallowed scheme: %s"
-                 (truncate-string-to-width uri 80))))))
+        (message "kuro: blocked hyperlink target: %s"
+                 (kuro--terminal-web-url-target-summary uri))))))
 
 (defun kuro--clear-hyperlink-overlays ()
   "Remove all hyperlink overlays from the current buffer."
@@ -68,11 +79,13 @@ offsets within the row text.  Overlays are created with the
     (when (or ranges kuro--hyperlink-overlays)
       (kuro--clear-hyperlink-overlays)
       (dolist (entry ranges)
-        (pcase-let ((`(,row ,start ,end ,uri) entry))
-          (when-let* ((row-pos (kuro--row-position row)))
-            (let* ((beg (+ row-pos start))
-                   (e   (+ row-pos end)))
-              (kuro--make-hyperlink-overlay beg e uri))))))))
+        (when (kuro--hyperlink-range-entry-p entry)
+          (pcase-let ((`(,row ,start ,end ,uri) entry))
+            (when-let* ((row-pos (kuro--row-position row)))
+              (let* ((beg (+ row-pos start))
+                     (e   (+ row-pos end)))
+                (when (kuro--hyperlink-buffer-range-p beg e)
+                  (kuro--make-hyperlink-overlay beg e uri))))))))))
 
 (provide 'kuro-hyperlinks)
 

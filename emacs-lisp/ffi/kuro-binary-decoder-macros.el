@@ -4,6 +4,9 @@
 
 ;; Author: takeokunn
 
+;;; Commentary:
+;; Macro helpers for binary frame decoding.
+
 ;;; Code:
 
 (defmacro kuro--decode-face-range-step (result vec pos base ul-p)

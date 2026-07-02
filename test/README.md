@@ -9,7 +9,7 @@ own tests under [`rust-core/`](../rust-core) (see the table at the bottom).
 test/
 ├── unit/                 # Pure-Elisp ERT unit tests — no Rust module required
 │   ├── core/             #   kuro.el, kuro-config, kuro-lifecycle, kuro-module, …
-│   ├── ffi/              #   FFI bridge, binary decoder, OSC plumbing, eval whitelist
+│   ├── ffi/              #   FFI bridge, binary decoder, OSC plumbing, eval allowlist
 │   ├── rendering/        #   renderer pipeline, overlays, render-buffer, typewriter
 │   ├── input/            #   keymap, mouse, input dispatch
 │   ├── faces/            #   face construction, palette, attributes
@@ -33,9 +33,9 @@ spawn an actual shell over a PTY and require the native module to be built.
 nix flake check
 ```
 
-Runs the Rust unit + integration tests, the full ERT suite on Emacs 29.4 and
-30.1, byte-compilation, `clippy -D warnings`, `cargo fmt --check`, `package-lint`,
-and a `cargo-audit` security scan — the same checks CI runs.
+Runs the Rust unit + integration tests, the ERT suite on Emacs 30, byte-compilation,
+`clippy -D warnings`, `cargo fmt --check`, `package-lint`, `checkdoc`, and `treefmt`
+formatting validation — the same checks CI runs.
 
 ### The ERT unit suite directly
 

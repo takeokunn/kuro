@@ -27,7 +27,10 @@ fn set_get_and_count_track_state() {
 #[test]
 fn iter_ones_returns_set_indices_in_order() {
     let bit_set = bit_set(200, &[1, 63, 64, 127]);
-    assert_eq!(bit_set.iter_ones().collect::<Vec<_>>(), vec![1, 63, 64, 127]);
+    assert_eq!(
+        bit_set.iter_ones().collect::<Vec<_>>(),
+        vec![1, 63, 64, 127]
+    );
 }
 
 #[test]

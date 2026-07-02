@@ -378,7 +378,11 @@ fn test_dispatch_animation_control_loop_count_max_no_overflow() {
         .active_graphics()
         .animation_state(222)
         .expect("state");
-    assert_eq!(loops, u32::MAX, "max loop count is a finite value, not infinite");
+    assert_eq!(
+        loops,
+        u32::MAX,
+        "max loop count is a finite value, not infinite"
+    );
 }
 
 /// INTENT: a=f with z=0 and a negative gap both clamp the display gap to 0
@@ -388,7 +392,11 @@ fn test_dispatch_frame_zero_and_negative_gap_clamp_to_zero() {
     let mut core = crate::TerminalCore::new(24, 80);
     core.advance(b"\x1b_Ga=t,f=32,i=223,s=1,v=1;AAAAAA==\x1b\\");
     core.advance(b"\x1b_Ga=f,f=32,i=223,s=1,v=1,z=0;AAAAAA==\x1b\\");
-    assert_eq!(core.screen.active_graphics().frame_gap_ms(223, 1), 0, "z=0 → 0");
+    assert_eq!(
+        core.screen.active_graphics().frame_gap_ms(223, 1),
+        0,
+        "z=0 → 0"
+    );
     core.advance(b"\x1b_Ga=f,f=32,i=223,s=1,v=1,z=-99;AAAAAA==\x1b\\");
     assert_eq!(
         core.screen.active_graphics().frame_gap_ms(223, 2),

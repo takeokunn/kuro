@@ -161,17 +161,22 @@ fn test_handle_osc_52_query_carries_clipboard_target() {
 }
 
 #[test]
-fn test_handle_osc_52_cut_buffer_target() {
-    use crate::types::osc::SelectionTarget;
+fn test_handle_osc_52_cut_buffer_target_is_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    // OSC 52 ; 3 ; base64("hello") -> cut buffer 3.
+    // OSC 52 ; 3 ; base64("hello") -> rejected legacy cut buffer selector.
     let params: &[&[u8]] = &[b"52", b"3", b"aGVsbG8="];
     super::handle_osc_52(&mut core, params);
-    assert_osc_52_action!(
-        core,
-        ClipboardAction::Write { target: SelectionTarget::CutBuffer(3), data } if data == "hello"
-    );
+    assert!(core.osc_data().clipboard_actions.is_empty());
+}
+
+#[test]
+fn test_handle_osc_52_unknown_selector_is_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"52", b"bogus", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert!(core.osc_data().clipboard_actions.is_empty());
 }
 
 #[test]
@@ -274,23 +279,43 @@ test_osc_default_colors_query_set!(
     0
 );
 
-// ── handle_osc_51 (Elisp eval) ───────────────────────────────────────────────
+// ── handle_osc_51 (strict command payloads) ──────────────────────────────────
 
 #[test]
-fn osc51_eval_command_stored() {
+fn osc51_cd_command_stored() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"51", b"e", b"(message \"hello\")"];
+    let params: &[&[u8]] = &[b"51", b"e", b"cd /tmp"];
     super::handle_osc_51(&mut core, params);
     assert_eq!(core.osc_data().eval_commands.len(), 1);
-    assert_eq!(core.osc_data().eval_commands[0], "(message \"hello\")");
+    assert_eq!(core.osc_data().eval_commands[0], "cd /tmp");
+}
+
+#[test]
+fn osc51_setenv_command_stored() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"setenv FOO bar"];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "setenv FOO bar");
+}
+
+#[test]
+fn osc51_surrounding_spaces_trimmed() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"  setenv FOO bar  "];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "setenv FOO bar");
 }
 
 #[test]
 fn osc51_non_e_subcommand_ignored() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"51", b"x", b"(evil-stuff)"];
+    let params: &[&[u8]] = &[b"51", b"x", b"setenv FOO bar"];
     super::handle_osc_51(&mut core, params);
     assert!(core.osc_data().eval_commands.is_empty());
 }
@@ -299,7 +324,8 @@ fn osc51_non_e_subcommand_ignored() {
 fn osc51_oversized_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let big = vec![b'a'; 4097];
+    let mut big = b"setenv FOO ".to_vec();
+    big.extend(vec![b'a'; 4097]);
     let params: &[&[u8]] = &[b"51", b"e", &big];
     super::handle_osc_51(&mut core, params);
     assert!(core.osc_data().eval_commands.is_empty());
@@ -316,13 +342,48 @@ fn osc51_invalid_utf8_rejected() {
 }
 
 #[test]
-fn osc51_empty_command_stored() {
+fn osc51_empty_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"51", b"e", b""];
     super::handle_osc_51(&mut core, params);
-    assert_eq!(core.osc_data().eval_commands.len(), 1);
-    assert_eq!(core.osc_data().eval_commands[0], "");
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_sexp_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"(setenv \"FOO\" \"bar\")"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_unknown_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"delete-file /etc/passwd"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_prefix_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"cd-evil /tmp"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+#[test]
+fn osc51_control_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"setenv FOO bar\n"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
 }
 
 /// OSC 51 with no subcommand param at all (`params = ["51"]`) must be a no-op.
@@ -336,7 +397,7 @@ fn osc51_no_subcommand_param_is_noop() {
     super::handle_osc_51(&mut core, params);
     assert!(
         core.osc_data().eval_commands.is_empty(),
-        "no subcommand → no eval command"
+        "no subcommand -> no command payload"
     );
 }
 
@@ -351,7 +412,7 @@ fn osc51_e_subcommand_no_command_is_noop() {
     super::handle_osc_51(&mut core, params);
     assert!(
         core.osc_data().eval_commands.is_empty(),
-        "e without command → no eval command"
+        "e without command -> no command payload"
     );
 }
 

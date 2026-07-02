@@ -11,20 +11,16 @@ use super::super::super::{
 type CursorState = (usize, usize, bool, i64);
 
 define_session_data_query_or_false!(
-        #[expect(
-            clippy::cast_possible_wrap,
-            reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
-        )]
-        /// Get cursor position as a (ROW . COL) cons pair
-        kuro_core_get_cursor,
-        "get_cursor",
-        |session| session.get_cursor(),
-        |kuro_env, (row, col)| {
-            let row_val = (row as i64).into_lisp(kuro_env)?;
-            let col_val = (col as i64).into_lisp(kuro_env)?;
-            kuro_env.cons(row_val, col_val)
-        }
-    );
+    /// Get cursor position as a (ROW . COL) cons pair
+    kuro_core_get_cursor,
+    "get_cursor",
+    |session| session.get_cursor(),
+    |kuro_env, (row, col)| {
+        let row_val = (row as i64).into_lisp(kuro_env)?;
+        let col_val = (col as i64).into_lisp(kuro_env)?;
+        kuro_env.cons(row_val, col_val)
+    }
+);
 
 define_session_query_default!(
     /// Get cursor visibility (DECTCEM state: t if visible, nil if hidden)
@@ -66,10 +62,6 @@ fn cursor_state_to_lisp(
 }
 
 define_session_data_query!(
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
-    )]
     /// Get all cursor state in a single Mutex acquisition: position, visibility, shape.
     ///
     /// Returns a flat list `(row col visible shape)` where:

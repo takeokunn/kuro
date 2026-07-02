@@ -46,7 +46,9 @@
                       (set-buffer-multibyte nil)
                       (insert-file-contents-literally tmpfile)
                       (secure-hash 'sha256 (current-buffer)))))
-      (should (kuro-module--verify-sha256 tmpfile expected)))))
+      (should (kuro-module--verify-sha256
+               tmpfile
+               (kuro-module--parse-sha256 expected "test digest"))))))
 
 (ert-deftest kuro-module-test--verify-sha256-mismatch-rejects ()
   "`kuro-module--verify-sha256' returns nil when the digest does not match."
@@ -55,17 +57,18 @@
     (should-not
      (kuro-module--verify-sha256
       tmpfile
-      "0000000000000000000000000000000000000000000000000000000000000000"))))
+      (kuro-module--parse-sha256
+       "0000000000000000000000000000000000000000000000000000000000000000"
+       "test digest")))))
 
-(ert-deftest kuro-module-test--verify-sha256-nil-hash-warns-and-passes ()
-  "`kuro-module--verify-sha256' returns t when EXPECTED-HASH is nil and emits a warning."
-  (let ((warned nil))
-    (kuro-module-test--with-temp-file (tmpfile "kuro-hash-")
-      (cl-letf (((symbol-function 'display-warning)
-                 (lambda (&rest _args) (setq warned t))))
-        (with-temp-file tmpfile (insert "hello kuro"))
-        (should (kuro-module--verify-sha256 tmpfile nil))
-        (should warned)))))
+(ert-deftest kuro-module-test--verify-sha256-nil-hash-errors ()
+  "`kuro-module--verify-sha256' rejects missing expected digests."
+  (kuro-module-test--with-temp-file (tmpfile "kuro-hash-")
+    (with-temp-file tmpfile (insert "hello kuro"))
+    (should (string-match-p
+             "expected SHA256 must be a validated digest object"
+             (cadr (should-error (kuro-module--verify-sha256 tmpfile nil)
+                                 :type 'error))))))
 
 ;;; Group 19: kuro-module--shared-extension
 
@@ -95,6 +98,24 @@
       (should-not (file-directory-p target))
       (kuro-module--target-path)
       (should (file-directory-p target)))))
+
+(ert-deftest kuro-module-test--target-path-uses-private-mode ()
+  "`kuro-module--target-path' creates a private install directory."
+  (kuro-module-test--with-temp-dir-env (tmpdir "kuro-xdg-" "XDG_DATA_HOME")
+    (let ((dir (kuro-module--target-path)))
+      (should (= (logand (file-modes dir) #o777) #o700)))))
+
+(ert-deftest kuro-module-test--target-path-rejects-symlink-directory ()
+  "`kuro-module--target-path' rejects a symlinked install directory."
+  (skip-unless (fboundp 'make-symbolic-link))
+  (kuro-module-test--with-temp-dir-env (tmpdir "kuro-xdg-" "XDG_DATA_HOME")
+    (let ((real (expand-file-name "real" tmpdir))
+          (link (expand-file-name "kuro" tmpdir)))
+      (make-directory real t)
+      (make-symbolic-link real link)
+      (should (string-match-p "must not be a symlink"
+                              (cadr (should-error (kuro-module--target-path)
+                                                  :type 'error)))))))
 
 ;;; Group 20b: kuro-module installation helper coverage
 
@@ -182,8 +203,10 @@
             (insert "\n"))
           (cl-letf (((symbol-function 'url-retrieve-synchronously)
                      (lambda (&rest _) buffer)))
-            (should (equal (kuro-module--fetch-sha256 "https://example.test/file.sha256")
-                           hash))))
+            (let ((digest (kuro-module--fetch-sha256
+                           "https://example.test/file.sha256")))
+              (should (kuro-module--sha256-p digest))
+              (should (equal (kuro-module--sha256-digest digest) hash)))))
       (ignore-errors (kill-buffer buffer)))))
 
 (ert-deftest kuro-module-test--fetch-sha256-rejects-invalid-body ()
@@ -201,8 +224,7 @@
                              (kuro-module--fetch-sha256
                               "https://example.test/file.sha256")
                              :type 'error))))
-              (should (string-match-p "invalid SHA256 in sidecar response"
-                                      message)))))
+              (should (string-match-p "invalid SHA256" message)))))
       (ignore-errors (kill-buffer buffer)))))
 
 (ert-deftest kuro-module-test--write-http-body-to-file-copies-body-bytes ()
@@ -294,7 +316,12 @@
                       ((symbol-function 'kuro-module--target-path)
                        (lambda () tmpdir))
                       ((symbol-function 'make-temp-file)
-                       (lambda (&rest _) tmp-tar))
+                       (lambda (_prefix &optional dir-flag _suffix)
+                         (if dir-flag
+                             (let ((extract-dir (expand-file-name "extract" tmpdir)))
+                               (make-directory extract-dir t)
+                               extract-dir)
+                           tmp-tar)))
                       ((symbol-function 'url-retrieve-synchronously)
                        (lambda (url &rest _)
                          (if (string-suffix-p ".sha256" url)
@@ -306,8 +333,12 @@
                       ((symbol-function 'write-region) #'ignore)
                       ((symbol-function 'kuro-module--verify-sha256)
                        (lambda (_file _hash) t))
-                      ((symbol-function 'call-process)
-                       (lambda (&rest _) 1))
+                      ((symbol-function 'kuro-module--archive-members)
+                       (lambda (_tar _archive)
+                         (list (kuro-module--shared-library-name))))
+                      ((symbol-function 'kuro-module--extract-archive-member)
+                       (lambda (&rest _)
+                         (error "Kuro: tar extraction failed (exit 1, see *kuro-module-download*)")))
                       ((symbol-function 'delete-file) #'ignore)
                       ((symbol-function 'message) #'ignore))
               (should (string-match-p "tar extraction failed"
@@ -333,7 +364,12 @@ naturally returns nil for the installed-binary check without global stubbing."
                       ((symbol-function 'kuro-module--target-path)
                        (lambda () tmpdir))
                       ((symbol-function 'make-temp-file)
-                       (lambda (&rest _) tmp-tar))
+                       (lambda (_prefix &optional dir-flag _suffix)
+                         (if dir-flag
+                             (let ((extract-dir (expand-file-name "extract" tmpdir)))
+                               (make-directory extract-dir t)
+                               extract-dir)
+                           tmp-tar)))
                       ((symbol-function 'url-retrieve-synchronously)
                        (lambda (url &rest _)
                          (if (string-suffix-p ".sha256" url)
@@ -345,14 +381,179 @@ naturally returns nil for the installed-binary check without global stubbing."
                       ;; Verify passes, tar returns 0 — but no binary is extracted
                       ((symbol-function 'kuro-module--verify-sha256)
                        (lambda (_file _hash) t))
-                      ((symbol-function 'call-process)
-                       (lambda (&rest _) 0))
+                      ((symbol-function 'kuro-module--archive-members)
+                       (lambda (_tar _archive)
+                         (list (kuro-module--shared-library-name))))
+                      ((symbol-function 'kuro-module--extract-archive-member) #'ignore)
                       ((symbol-function 'message) #'ignore))
               ;; tmpdir has no libkuro_core.so/.dylib → file-exists-p naturally nil
               (should (string-match-p "extracted archive does not contain"
                                       (cadr (should-error (kuro-module-download "0.0.0")
                                                           :type 'error))))))
         (ignore-errors (kill-buffer sha-buf))))))
+
+(ert-deftest kuro-module-test--install-release-archive-copies-library ()
+  "`kuro-module--install-release-archive' installs the single expected library member."
+  (let ((tar-bin (executable-find "tar")))
+    (skip-unless tar-bin)
+    (let* ((root (make-temp-file "kuro-module-archive-ok-" t))
+           (src (expand-file-name "src" root))
+           (target (expand-file-name "target" root))
+           (archive (expand-file-name "module.tar.gz" root))
+           (library (kuro-module--shared-library-name))
+           (source-library (expand-file-name library src))
+           (installed (expand-file-name library target)))
+      (unwind-protect
+          (progn
+            (make-directory src t)
+            (write-region "binary" nil source-library nil 'silent)
+            (should (zerop (call-process tar-bin nil nil nil
+                                         "-czf" archive "-C" src library)))
+            (kuro-module--install-release-archive tar-bin archive target)
+            (should (file-exists-p installed))
+            (with-temp-buffer
+              (insert-file-contents-literally installed)
+              (should (equal (buffer-string) "binary")))
+            (should (= (logand (file-modes target) #o777) #o700))
+            (should (= (logand (file-modes installed) #o777) #o600))
+            (should (= (file-nlinks installed) 1))
+            (should-not (file-exists-p archive)))
+        (when (file-exists-p root)
+          (delete-directory root t))))))
+
+(ert-deftest kuro-module-test--install-release-archive-rejects-extra-member ()
+  "`kuro-module--install-release-archive' rejects archives with extra members."
+  (let ((tar-bin (executable-find "tar")))
+    (skip-unless tar-bin)
+    (let* ((root (make-temp-file "kuro-module-archive-extra-" t))
+           (src (expand-file-name "src" root))
+           (target (expand-file-name "target" root))
+           (archive (expand-file-name "module.tar.gz" root))
+           (library (kuro-module--shared-library-name))
+           (source-library (expand-file-name library src))
+           (extra (expand-file-name "extra.txt" src))
+           (installed (expand-file-name library target)))
+      (unwind-protect
+          (progn
+            (make-directory src t)
+            (write-region "binary" nil source-library nil 'silent)
+            (write-region "extra" nil extra nil 'silent)
+            (should (zerop (call-process tar-bin nil nil nil
+                                         "-czf" archive "-C" src library "extra.txt")))
+            (should (string-match-p "archive must contain exactly"
+                                    (cadr (should-error
+                                           (kuro-module--install-release-archive
+                                            tar-bin archive target)
+                                           :type 'error))))
+            (should-not (file-exists-p installed)))
+        (when (file-exists-p root)
+          (delete-directory root t))))))
+
+(ert-deftest kuro-module-test--install-release-archive-rejects-symlink-library ()
+  "`kuro-module--install-release-archive' rejects symlinked library payloads."
+  (let* ((root (make-temp-file "kuro-module-symlink-" t))
+         (target (expand-file-name "target" root))
+         (archive (expand-file-name "module.tar.gz" root))
+         (extract-dir (expand-file-name "extract" root))
+         (library (kuro-module--shared-library-name))
+         (real (expand-file-name "real-lib" root)))
+    (unwind-protect
+        (progn
+          (make-directory target t)
+          (make-directory extract-dir t)
+          (with-temp-file archive)
+          (write-region "binary" nil real nil 'silent)
+          (cl-letf (((symbol-function 'make-temp-file)
+                     (lambda (_prefix &optional dir-flag _suffix)
+                       (if dir-flag extract-dir archive)))
+                    ((symbol-function 'kuro-module--archive-members)
+                     (lambda (_tar _archive) (list library)))
+                    ((symbol-function 'kuro-module--extract-archive-member)
+                     (lambda (_tar _archive destination member)
+                       (make-symbolic-link real (expand-file-name member destination))))
+                    ((symbol-function 'message) #'ignore))
+            (should (string-match-p "contains symlink"
+                                    (cadr (should-error
+                                           (kuro-module--install-release-archive
+                                            "/usr/bin/tar" archive target)
+                                           :type 'error))))))
+      (when (file-exists-p root)
+        (delete-directory root t)))))
+
+(ert-deftest kuro-module-test--install-release-archive-rejects-destination-symlink ()
+  "`kuro-module--install-release-archive' rejects a symlinked destination file."
+  (skip-unless (fboundp 'make-symbolic-link))
+  (let ((tar-bin (executable-find "tar")))
+    (skip-unless tar-bin)
+    (let* ((root (make-temp-file "kuro-module-dest-symlink-" t))
+           (src (expand-file-name "src" root))
+           (target (expand-file-name "target" root))
+           (archive (expand-file-name "module.tar.gz" root))
+           (library (kuro-module--shared-library-name))
+           (source-library (expand-file-name library src))
+           (installed (expand-file-name library target))
+           (victim (expand-file-name "victim" root)))
+      (unwind-protect
+          (progn
+            (make-directory src t)
+            (make-directory target t)
+            (write-region "binary" nil source-library nil 'silent)
+            (write-region "victim" nil victim nil 'silent)
+            (make-symbolic-link victim installed)
+            (should (zerop (call-process tar-bin nil nil nil
+                                         "-czf" archive "-C" src library)))
+            (should (string-match-p "destination must not be a symlink"
+                                    (cadr (should-error
+                                           (kuro-module--install-release-archive
+                                            tar-bin archive target)
+                                           :type 'error))))
+            (with-temp-buffer
+              (insert-file-contents-literally victim)
+              (should (equal (buffer-string) "victim"))))
+        (when (file-exists-p root)
+          (delete-directory root t))))))
+
+(ert-deftest kuro-module-test--install-release-archive-rejects-hardlink-library ()
+  "`kuro-module--install-release-archive' rejects hardlinked library payloads."
+  (skip-unless (fboundp 'add-name-to-file))
+  (let* ((root (make-temp-file "kuro-module-hardlink-" t))
+         (target (expand-file-name "target" root))
+         (archive (expand-file-name "module.tar.gz" root))
+         (extract-dir (expand-file-name "extract" root))
+         (library (kuro-module--shared-library-name))
+         (real (expand-file-name "real-lib" root))
+         (probe (expand-file-name "probe-link" root))
+         (hardlinks-supported nil))
+    (unwind-protect
+        (progn
+          (make-directory target t)
+          (make-directory extract-dir t)
+          (with-temp-file archive)
+          (write-region "binary" nil real nil 'silent)
+          (condition-case nil
+              (progn
+                (add-name-to-file real probe)
+                (setq hardlinks-supported t)
+                (delete-file probe))
+            (file-error nil))
+          (skip-unless hardlinks-supported)
+          (cl-letf (((symbol-function 'make-temp-file)
+                     (lambda (_prefix &optional dir-flag _suffix)
+                       (if dir-flag extract-dir archive)))
+                    ((symbol-function 'kuro-module--archive-members)
+                     (lambda (_tar _archive) (list library)))
+                    ((symbol-function 'kuro-module--extract-archive-member)
+                     (lambda (_tar _archive destination member)
+                       (add-name-to-file real
+                                         (expand-file-name member destination))))
+                    ((symbol-function 'message) #'ignore))
+            (should (string-match-p "exactly one filesystem link"
+                                    (cadr (should-error
+                                           (kuro-module--install-release-archive
+                                            "/usr/bin/tar" archive target)
+                                           :type 'error))))))
+      (when (file-exists-p root)
+        (delete-directory root t)))))
 
 (ert-deftest kuro-module-test--download-sha256-malformed-response ()
   "`kuro-module-download' errors when SHA256 HTTP response has no blank-line separator."
@@ -381,6 +582,72 @@ naturally returns nil for the installed-binary check without global stubbing."
         (ignore-errors (kill-buffer sha-buf))))))
 
 ;;; Group 22: kuro-module-build error paths
+
+(ert-deftest kuro-module-test--install-built-library-copies-with-private-mode ()
+  "`kuro-module--install-built-library' installs cargo output with strict modes."
+  (let* ((root (make-temp-file "kuro-module-built-ok-" t))
+         (target (expand-file-name "target" root))
+         (library (kuro-module--shared-library-name))
+         (built (expand-file-name library root))
+         (dest (expand-file-name library target)))
+    (unwind-protect
+        (progn
+          (write-region "binary" nil built nil 'silent)
+          (should (equal (kuro-module--install-built-library built dest) dest))
+          (should (= (logand (file-modes target) #o777) #o700))
+          (should (= (logand (file-modes dest) #o777) #o600))
+          (with-temp-buffer
+            (insert-file-contents-literally dest)
+            (should (equal (buffer-string) "binary"))))
+      (when (file-exists-p root)
+        (delete-directory root t)))))
+
+(ert-deftest kuro-module-test--install-built-library-rejects-symlink-source ()
+  "`kuro-module--install-built-library' rejects a symlinked cargo output file."
+  (skip-unless (fboundp 'make-symbolic-link))
+  (let* ((root (make-temp-file "kuro-module-built-source-link-" t))
+         (target (expand-file-name "target" root))
+         (library (kuro-module--shared-library-name))
+         (real (expand-file-name "real-lib" root))
+         (built (expand-file-name library root))
+         (dest (expand-file-name library target)))
+    (unwind-protect
+        (progn
+          (write-region "binary" nil real nil 'silent)
+          (make-symbolic-link real built)
+          (should (string-match-p "native module source must not be a symlink"
+                                  (cadr (should-error
+                                         (kuro-module--install-built-library
+                                          built dest)
+                                         :type 'error)))))
+      (when (file-exists-p root)
+        (delete-directory root t)))))
+
+(ert-deftest kuro-module-test--install-built-library-rejects-destination-symlink ()
+  "`kuro-module--install-built-library' rejects a symlinked install file."
+  (skip-unless (fboundp 'make-symbolic-link))
+  (let* ((root (make-temp-file "kuro-module-built-dest-link-" t))
+         (target (expand-file-name "target" root))
+         (library (kuro-module--shared-library-name))
+         (built (expand-file-name library root))
+         (dest (expand-file-name library target))
+         (victim (expand-file-name "victim" root)))
+    (unwind-protect
+        (progn
+          (make-directory target t)
+          (write-region "binary" nil built nil 'silent)
+          (write-region "victim" nil victim nil 'silent)
+          (make-symbolic-link victim dest)
+          (should (string-match-p "destination must not be a symlink"
+                                  (cadr (should-error
+                                         (kuro-module--install-built-library
+                                          built dest)
+                                         :type 'error))))
+          (with-temp-buffer
+            (insert-file-contents-literally victim)
+            (should (equal (buffer-string) "victim"))))
+      (when (file-exists-p root)
+        (delete-directory root t)))))
 
 (ert-deftest kuro-module-test--build-cargo-toml-not-found ()
   "`kuro-module-build' errors when `kuro-module--locate-cargo-toml' returns nil."
@@ -433,15 +700,23 @@ naturally returns nil for the installed-binary check without global stubbing."
 
 ;;; Group 23: kuro-module--verify-sha256 — dedicated coverage
 
-(ert-deftest kuro-module-test--verify-sha256-nil-hash-warns-and-returns-t ()
-  "`kuro-module--verify-sha256' returns t and calls `display-warning' when hash is nil."
-  (let ((warned nil))
-    (kuro-module-test--with-temp-file (tmpfile "kuro-verify-nil-")
-      (cl-letf (((symbol-function 'display-warning)
-                 (lambda (&rest _) (setq warned t))))
-        (with-temp-file tmpfile (insert "content"))
-        (should (kuro-module--verify-sha256 tmpfile nil))
-        (should warned)))))
+(ert-deftest kuro-module-test--verify-sha256-raw-string-errors ()
+  "`kuro-module--verify-sha256' rejects unparsed expected digest strings."
+  (kuro-module-test--with-temp-file (tmpfile "kuro-verify-raw-")
+    (with-temp-file tmpfile (insert "content"))
+    (should (string-match-p
+             "expected SHA256 must be a validated digest object"
+             (cadr (should-error
+                    (kuro-module--verify-sha256 tmpfile (make-string 64 ?0))
+                    :type 'error))))))
+
+(ert-deftest kuro-module-test--parse-sha256-rejects-malformed-digest ()
+  "`kuro-module--parse-sha256' rejects malformed expected digest strings."
+  (should (string-match-p
+           "invalid SHA256"
+           (cadr (should-error
+                  (kuro-module--parse-sha256 "not-a-sha256" "test digest")
+                  :type 'error)))))
 
 (ert-deftest kuro-module-test--verify-sha256-matching-hash-returns-t ()
   "`kuro-module--verify-sha256' returns t when the file hash matches exactly."
@@ -451,7 +726,9 @@ naturally returns nil for the installed-binary check without global stubbing."
                   (set-buffer-multibyte nil)
                   (insert-file-contents-literally tmpfile)
                   (secure-hash 'sha256 (current-buffer)))))
-      (should (kuro-module--verify-sha256 tmpfile hash)))))
+      (should (kuro-module--verify-sha256
+               tmpfile
+               (kuro-module--parse-sha256 hash "test digest"))))))
 
 (ert-deftest kuro-module-test--verify-sha256-mismatched-hash-returns-nil ()
   "`kuro-module--verify-sha256' returns nil when the expected hash does not match."
@@ -460,7 +737,9 @@ naturally returns nil for the installed-binary check without global stubbing."
     (should-not
      (kuro-module--verify-sha256
       tmpfile
-      "0000000000000000000000000000000000000000000000000000000000000000"))))
+      (kuro-module--parse-sha256
+       "0000000000000000000000000000000000000000000000000000000000000000"
+       "test digest")))))
 
 ;;; Group 24: kuro--ensure-module-loaded error path
 

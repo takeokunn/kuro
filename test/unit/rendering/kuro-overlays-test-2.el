@@ -104,19 +104,43 @@
         (kuro--render-image-notification '(1 0 0 2 1))
         (should place-called)))))
 
-(ert-deftest kuro-overlays-render-image-notification-raw-width-zero-uses-one ()
-  "kuro--render-image-notification clamps raw-width 0 to 1 via (max 1 raw-width)."
+(ert-deftest kuro-overlays-render-image-notification-rejects-zero-width ()
+  "kuro--render-image-notification rejects zero-width image notifications."
   (kuro-overlays-test--with-buffer
     (insert "line0\n")
-    (let* ((fake-b64 (base64-encode-string "PNG"))
-           (received-width nil))
-      (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
-                ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img))
-                ((symbol-function 'kuro--maybe-start-animation) #'ignore)
+    (let ((get-called nil)
+          (place-called nil))
+      (cl-letf (((symbol-function 'kuro--get-image)
+                 (lambda (_id)
+                   (setq get-called t)
+                   (base64-encode-string "PNG")))
                 ((symbol-function 'kuro--place-image-overlay)
-                 (lambda (_img _row _col w &optional _id) (setq received-width w))))
+                 (lambda (&rest _args) (setq place-called t))))
         (kuro--render-image-notification '(1 0 0 0 1))
-        (should (= received-width 1))))))
+        (should-not get-called)
+        (should-not place-called))))
+
+(ert-deftest kuro-overlays-render-image-notification-rejects-malformed-tuples ()
+  "Malformed image notification tuples are rejected before image lookup."
+  (kuro-overlays-test--with-buffer
+    (insert "line0\n")
+    (let ((get-called nil)
+          (place-called nil))
+      (cl-letf (((symbol-function 'kuro--get-image)
+                 (lambda (_id)
+                   (setq get-called t)
+                   (base64-encode-string "PNG")))
+                ((symbol-function 'kuro--place-image-overlay)
+                 (lambda (&rest _args) (setq place-called t))))
+        (dolist (notif '(nil (1 0 0 1) (1 0 0 1 1 9) (0 0 0 1 1)
+                             (1 -1 0 1 1) (1 0 -1 1 1) (1 0 0 -1 1)
+                             (1 0 0 1 0) ("1" 0 0 1 1)))
+          (should-not
+           (condition-case err
+               (progn (kuro--render-image-notification notif) nil)
+             (error err)))))
+        (should-not get-called)
+        (should-not place-called)))))
 
 ;;; Group 13: kuro--tick-blink-overlays — blink both slow and fast at their boundary
 

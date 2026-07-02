@@ -56,7 +56,10 @@ fn test_enq_emits_answerback() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x05"); // ENQ
     let responses = term.pending_responses();
-    assert!(!responses.is_empty(), "ENQ must produce at least one response");
+    assert!(
+        !responses.is_empty(),
+        "ENQ must produce at least one response"
+    );
     let combined: Vec<u8> = responses.iter().flatten().copied().collect();
     assert_eq!(combined, b"kuro", "ENQ response must be \"kuro\"");
 }
@@ -129,10 +132,10 @@ fn test_decic_inserts_blank_column_across_all_rows() {
     let mut term = TerminalCore::new(4, 10);
     term.advance(b"\x1b[1;1HABCDEFGHIJ"); // row 0: A-J
     term.advance(b"\x1b[2;1HKLMNOPQRST"); // row 1: K-T
-    // Move cursor to col 2 (0-indexed), then DECIC with count 2
+                                          // Move cursor to col 2 (0-indexed), then DECIC with count 2
     term.advance(b"\x1b[1;3H"); // cursor to row 0, col 2 (1-indexed)
     term.advance(b"\x1b[2'}"); // DECIC: insert 2 columns (intermediate = apostrophe 0x27)
-    // Row 0: A B _ _ C D E F G H (cols 0-9), where _ is blank
+                               // Row 0: A B _ _ C D E F G H (cols 0-9), where _ is blank
     assert_eq!(cell_char(&term, 0, 0), 'A');
     assert_eq!(cell_char(&term, 0, 1), 'B');
     assert_eq!(cell_char(&term, 0, 2), ' ');
@@ -155,10 +158,10 @@ fn test_decic_does_not_panic_out_of_bounds() {
 fn test_decdc_deletes_column_across_all_rows() {
     let mut term = TerminalCore::new(4, 10);
     term.advance(b"\x1b[1;1HABCDEFGHIJ"); // row 0: A-J
-    // Move cursor to col 1 (0-indexed), then DECDC with count 1
+                                          // Move cursor to col 1 (0-indexed), then DECDC with count 1
     term.advance(b"\x1b[1;2H"); // cursor to row 0, col 1 (1-indexed = 0-indexed col 1)
     term.advance(b"\x1b[1'~"); // DECDC: delete 1 column (apostrophe intermediate)
-    // Row 0: A C D E F G H I J _ (B deleted, rest shifted left)
+                               // Row 0: A C D E F G H I J _ (B deleted, rest shifted left)
     assert_eq!(cell_char(&term, 0, 0), 'A');
     assert_eq!(cell_char(&term, 0, 1), 'C');
     assert_eq!(cell_char(&term, 0, 2), 'D');
@@ -182,11 +185,7 @@ fn test_deccra_copies_rectangle_to_destination() {
     // Try: ESC [ 1 ; 1 ; 1 ; 2 ; 0 ; 3 ; 5 $ v
     term.advance(b"\x1b[1;1HXYXYXYXY"); // refresh source
     term.advance(b"\x1b[1;1;1;2;0;3;5$v"); // DECCRA
-    assert_eq!(
-        cell_char(&term, 2, 4),
-        'X',
-        "DECCRA: dst cell must be X"
-    );
+    assert_eq!(cell_char(&term, 2, 4), 'X', "DECCRA: dst cell must be X");
 }
 
 #[test]
@@ -204,9 +203,15 @@ fn test_deccra_does_not_panic_out_of_bounds() {
 fn test_decnkm_sets_app_keypad() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[?66h"); // DECNKM set = app keypad mode
-    assert!(term.dec_modes().app_keypad, "DECNKM set must enable app_keypad");
+    assert!(
+        term.dec_modes().app_keypad,
+        "DECNKM set must enable app_keypad"
+    );
     term.advance(b"\x1b[?66l"); // DECNKM reset = numeric keypad
-    assert!(!term.dec_modes().app_keypad, "DECNKM reset must disable app_keypad");
+    assert!(
+        !term.dec_modes().app_keypad,
+        "DECNKM reset must disable app_keypad"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,10 +221,10 @@ fn test_decnkm_sets_app_keypad() {
 #[test]
 fn test_irm_inserts_ascii_chars() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[1;1HABCDE");        // write ABCDE
-    term.advance(b"\x1b[1;3H");             // cursor to col 2 (0-indexed)
-    term.advance(b"\x1b[4h");              // IRM on
-    term.advance(b"X");                    // insert X at col 2 → A B X C D (E pushed off)
+    term.advance(b"\x1b[1;1HABCDE"); // write ABCDE
+    term.advance(b"\x1b[1;3H"); // cursor to col 2 (0-indexed)
+    term.advance(b"\x1b[4h"); // IRM on
+    term.advance(b"X"); // insert X at col 2 → A B X C D (E pushed off)
     assert_eq!(cell_char(&term, 0, 0), 'A');
     assert_eq!(cell_char(&term, 0, 1), 'B');
     assert_eq!(cell_char(&term, 0, 2), 'X');
@@ -232,7 +237,7 @@ fn test_irm_reset_restores_replace_mode() {
     term.advance(b"\x1b[1;1HABCDE");
     term.advance(b"\x1b[4h\x1b[4l"); // IRM on then off
     term.advance(b"\x1b[1;3H");
-    term.advance(b"X");               // Replace mode: X overwrites C
+    term.advance(b"X"); // Replace mode: X overwrites C
     assert_eq!(cell_char(&term, 0, 2), 'X');
     assert_eq!(cell_char(&term, 0, 3), 'D');
 }
@@ -244,10 +249,10 @@ fn test_irm_reset_restores_replace_mode() {
 #[test]
 fn test_lnm_makes_lf_also_cr() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[20h");  // LNM on
+    term.advance(b"\x1b[20h"); // LNM on
     term.advance(b"\x1b[1;5H"); // cursor to col 4 (0-indexed)
-    term.advance(b"\n");        // LF with LNM: should also do CR
-    // Cursor should now be at col 0 (CR happened) and row 1
+    term.advance(b"\n"); // LF with LNM: should also do CR
+                         // Cursor should now be at col 0 (CR happened) and row 1
     assert_eq!(term.cursor_col(), 0, "LNM: LF must also do CR");
     assert_eq!(term.cursor_row(), 1);
 }
@@ -260,7 +265,7 @@ fn test_lnm_makes_lf_also_cr() {
 fn test_cht_moves_to_next_tab_stop() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;1H"); // cursor to col 0
-    term.advance(b"\x1b[1I");   // CHT 1: advance to next tab stop (col 8)
+    term.advance(b"\x1b[1I"); // CHT 1: advance to next tab stop (col 8)
     assert_eq!(term.cursor_col(), 8, "CHT must advance to col 8");
 }
 
@@ -268,7 +273,7 @@ fn test_cht_moves_to_next_tab_stop() {
 fn test_cht_n2_jumps_two_tab_stops() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;1H"); // cursor to col 0
-    term.advance(b"\x1b[2I");   // CHT 2: advance two tab stops (col 16)
+    term.advance(b"\x1b[2I"); // CHT 2: advance two tab stops (col 16)
     assert_eq!(term.cursor_col(), 16, "CHT 2 must advance to col 16");
 }
 
@@ -276,7 +281,7 @@ fn test_cht_n2_jumps_two_tab_stops() {
 fn test_cbt_moves_to_prev_tab_stop() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;20H"); // cursor to col 19 (0-indexed)
-    term.advance(b"\x1b[1Z");    // CBT 1: back to col 16
+    term.advance(b"\x1b[1Z"); // CBT 1: back to col 16
     assert_eq!(term.cursor_col(), 16, "CBT must move back to col 16");
 }
 
@@ -284,7 +289,7 @@ fn test_cbt_moves_to_prev_tab_stop() {
 fn test_cbt_at_col0_is_noop() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;1H"); // cursor at col 0
-    term.advance(b"\x1b[1Z");   // CBT at col 0: must stay at 0
+    term.advance(b"\x1b[1Z"); // CBT at col 0: must stay at 0
     assert_eq!(term.cursor_col(), 0, "CBT at col 0 must stay at 0");
 }
 
@@ -296,7 +301,7 @@ fn test_cbt_at_col0_is_noop() {
 fn test_hpr_moves_cursor_right() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;5H"); // col 4
-    term.advance(b"\x1b[3a");   // HPR 3: col 7
+    term.advance(b"\x1b[3a"); // HPR 3: col 7
     assert_eq!(term.cursor_col(), 7);
 }
 
@@ -304,7 +309,7 @@ fn test_hpr_moves_cursor_right() {
 fn test_vpr_moves_cursor_down() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[3;1H"); // row 2
-    term.advance(b"\x1b[2e");   // VPR 2: row 4
+    term.advance(b"\x1b[2e"); // VPR 2: row 4
     assert_eq!(term.cursor_row(), 4);
 }
 
@@ -312,7 +317,7 @@ fn test_vpr_moves_cursor_down() {
 fn test_hpa_positions_cursor_absolutely() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[1;10H"); // col 9
-    term.advance(b"\x1b[5`");    // HPA 5 (1-indexed): col 4
+    term.advance(b"\x1b[5`"); // HPA 5 (1-indexed): col 4
     assert_eq!(term.cursor_col(), 4);
 }
 
@@ -334,7 +339,10 @@ fn test_xtgettcap_smulx_returns_extended_underline() {
     let responses = term.pending_responses();
     assert!(!responses.is_empty(), "Smulx query must produce a response");
     let resp = String::from_utf8_lossy(responses[0].as_slice()).to_string();
-    assert!(resp.contains("1+r"), "Smulx response must be DCS 1+r (known)");
+    assert!(
+        resp.contains("1+r"),
+        "Smulx response must be DCS 1+r (known)"
+    );
 }
 
 #[path = "integration_sequences_part2b.rs"]

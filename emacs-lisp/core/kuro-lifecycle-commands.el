@@ -84,9 +84,12 @@ prompt is skipped when `kuro-module-installation-method' is set."
 
 ;;;###autoload
 (defun kuro-send-string (string)
-  "Send STRING to the terminal."
+  "Send STRING to the terminal through the paste-safe text path."
   (interactive "sSend string: ")
-  (kuro--send-key string))
+  (unless (stringp string)
+    (signal 'wrong-type-argument (list 'stringp string)))
+  (kuro--send-paste-or-raw string)
+  (kuro--schedule-immediate-render))
 
 (defun kuro--most-recent-buffer ()
   "Return the most recently active live Kuro terminal buffer, or nil.

@@ -13,7 +13,7 @@
 ;;   Group 3: kuro--apply-hyperlink-ranges — overlay creation from polled data
 ;;   Group 4: kuro-hyperlink face
 ;;   Group 5: kuro--hyperlink-keymap bindings
-;;   Group 6: kuro--uri-scheme-allowed-p — URI scheme allowlist
+;;   Group 6: terminal web URL allowlist invariants
 
 ;;; Code:
 
@@ -92,6 +92,40 @@
                    (lambda (url) (setq called url))))
           (kuro-open-hyperlink-at-point)
           (should (null called)))))))
+
+(ert-deftest test-kuro-hyperlinks-open-at-point-blocks-invalid-target ()
+  "kuro-open-hyperlink-at-point blocks unsafe URI-shaped targets."
+  (kuro-hyperlinks-test--with-buffer
+    (insert "click here\n")
+    (let ((ov (make-overlay 1 6)))
+      (overlay-put ov 'kuro-hyperlink-uri "https://user@example.com")
+      (goto-char 1)
+      (let ((called nil)
+            (msg nil))
+        (cl-letf (((symbol-function 'browse-url)
+                   (lambda (url) (setq called url)))
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+          (kuro-open-hyperlink-at-point)
+          (should (null called))
+          (should (string-match-p "blocked hyperlink target" msg)))))))
+
+(ert-deftest test-kuro-hyperlinks-open-at-point-blocks-non-string-target ()
+  "kuro-open-hyperlink-at-point reports crafted non-string targets safely."
+  (kuro-hyperlinks-test--with-buffer
+    (insert "click here\n")
+    (let ((ov (make-overlay 1 6)))
+      (overlay-put ov 'kuro-hyperlink-uri 42)
+      (goto-char 1)
+      (let ((called nil)
+            (msg nil))
+        (cl-letf (((symbol-function 'browse-url)
+                   (lambda (url) (setq called url)))
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+          (kuro-open-hyperlink-at-point)
+          (should (null called))
+          (should (string-match-p "42" msg)))))))
 
 ;;; Group 2: kuro--clear-hyperlink-overlays — cleanup
 
@@ -193,6 +227,56 @@
       (kuro--apply-hyperlink-ranges)
       (should (null kuro--hyperlink-overlays)))))
 
+(ert-deftest test-kuro-hyperlinks-apply-skips-disallowed-schemes ()
+  "kuro--apply-hyperlink-ranges does not create overlays for blocked schemes."
+  (kuro-hyperlinks-test--with-buffer
+    (insert "contact\n")
+    (cl-letf (((symbol-function 'kuro--poll-hyperlink-ranges)
+               (lambda () '((0 0 7 "mailto:test@example.com"))))
+              ((symbol-function 'kuro--row-position)
+               (lambda (_row) 1)))
+      (kuro--apply-hyperlink-ranges)
+      (should (null kuro--hyperlink-overlays)))))
+
+(ert-deftest test-kuro-hyperlinks-apply-skips-malformed-ranges ()
+  "kuro--apply-hyperlink-ranges only creates overlays for typed valid ranges."
+  (kuro-hyperlinks-test--with-buffer
+    (insert "link ok\n")
+    (cl-letf (((symbol-function 'kuro--poll-hyperlink-ranges)
+               (lambda ()
+                 '((0 0 4 "ftp://example.com/file")
+                   (-1 0 4 "https://negative-row.example")
+                   (0 -1 4 "https://negative-start.example")
+                   (0 4 4 "https://empty.example")
+                   (0 4 2 "https://inverted.example")
+                   (0 0 4 42)
+                   (0 0 4 "https:///hostless")
+                   (0 0 4 "https://user@example.com")
+                    (0 0 4 "https://example.com/bad\npath")
+                    (0 0 4 "https://example.com:bad/path")
+                    (0 0 4 "https://example.com:999999/path")
+                    (0 0 4 "https://999.999.999.999/path")
+                    (0 0 4 "https://[dead:beef]/path")
+                    (0 0 4 "https://ok.example"))))
+              ((symbol-function 'kuro--row-position)
+               (lambda (_row) 1)))
+      (kuro--apply-hyperlink-ranges)
+      (should (= (length kuro--hyperlink-overlays) 1))
+      (should (string= (overlay-get (car kuro--hyperlink-overlays)
+                                     'kuro-hyperlink-uri)
+                       "https://ok.example")))))
+
+(ert-deftest test-kuro-hyperlinks-apply-skips-out-of-buffer-ranges ()
+  "kuro--apply-hyperlink-ranges rejects overlay bounds outside the buffer."
+  (kuro-hyperlinks-test--with-buffer
+    (insert "short\n")
+    (cl-letf (((symbol-function 'kuro--poll-hyperlink-ranges)
+               (lambda () '((0 0 999 "https://example.com"))))
+              ((symbol-function 'kuro--row-position)
+               (lambda (_row) 1)))
+      (kuro--apply-hyperlink-ranges)
+      (should (null kuro--hyperlink-overlays)))))
+
 ;;; Group 4: kuro-hyperlink face
 
 (ert-deftest test-kuro-hyperlinks-face-exists ()
@@ -213,27 +297,7 @@
   "kuro--hyperlink-keymap has RET binding."
   (should (lookup-key kuro--hyperlink-keymap (kbd "RET"))))
 
-;;; Group 6: kuro--uri-scheme-allowed-p — URI scheme allowlist
-
-(ert-deftest test-kuro-hyperlinks-uri-scheme-https-allowed ()
-  "kuro--uri-scheme-allowed-p allows https."
-  (should (kuro--uri-scheme-allowed-p "https://example.com")))
-
-(ert-deftest test-kuro-hyperlinks-uri-scheme-http-allowed ()
-  "kuro--uri-scheme-allowed-p allows http."
-  (should (kuro--uri-scheme-allowed-p "http://example.com")))
-
-(ert-deftest test-kuro-hyperlinks-uri-scheme-file-blocked ()
-  "kuro--uri-scheme-allowed-p blocks file: URIs."
-  (should-not (kuro--uri-scheme-allowed-p "file:///etc/passwd")))
-
-(ert-deftest test-kuro-hyperlinks-uri-scheme-data-blocked ()
-  "kuro--uri-scheme-allowed-p blocks data: URIs."
-  (should-not (kuro--uri-scheme-allowed-p "data:text/html,<h1>hi</h1>")))
-
-(ert-deftest test-kuro-hyperlinks-uri-scheme-javascript-blocked ()
-  "kuro--uri-scheme-allowed-p blocks javascript: URIs."
-  (should-not (kuro--uri-scheme-allowed-p "javascript:alert(1)")))
+;;; Group 6: terminal web URL allowlist invariants
 
 (ert-deftest test-kuro-hyperlinks-open-blocked-scheme-shows-message ()
   "kuro-open-hyperlink-at-point shows message for blocked scheme."
@@ -250,21 +314,29 @@
                    (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
           (kuro-open-hyperlink-at-point)
           (should (null called))
-          (should (string-match-p "blocked" msg)))))))
+          (should (string-match-p "blocked hyperlink target" msg)))))))
 
-;;; ── kuro--hyperlink-allowed-schemes invariants ───────────────────────────────
+;;; ── terminal web URL allowlist invariants ────────────────────────────────────
 
 (ert-deftest kuro-hyperlinks-allowed-schemes-includes-https ()
-  "`kuro--hyperlink-allowed-schemes' must include \"https\" as the primary scheme."
-  (should (member "https" kuro--hyperlink-allowed-schemes)))
+  "`kuro--terminal-web-url-allowed-schemes' must include \"https\"."
+  (should (member "https" kuro--terminal-web-url-allowed-schemes)))
 
 (ert-deftest kuro-hyperlinks-allowed-schemes-includes-http ()
-  "`kuro--hyperlink-allowed-schemes' includes \"http\" for legacy URLs."
-  (should (member "http" kuro--hyperlink-allowed-schemes)))
+  "`kuro--terminal-web-url-allowed-schemes' includes \"http\"."
+  (should (member "http" kuro--terminal-web-url-allowed-schemes)))
 
 (ert-deftest kuro-hyperlinks-allowed-schemes-excludes-file ()
-  "`kuro--hyperlink-allowed-schemes' must NOT include \"file\" (security: local path traversal)."
-  (should-not (member "file" kuro--hyperlink-allowed-schemes)))
+  "`kuro--terminal-web-url-allowed-schemes' must NOT include \"file\"."
+  (should-not (member "file" kuro--terminal-web-url-allowed-schemes)))
+
+(ert-deftest kuro-hyperlinks-allowed-schemes-excludes-ftp ()
+  "`kuro--terminal-web-url-allowed-schemes' must NOT include \"ftp\"."
+  (should-not (member "ftp" kuro--terminal-web-url-allowed-schemes)))
+
+(ert-deftest kuro-hyperlinks-allowed-schemes-excludes-mailto ()
+  "`kuro--terminal-web-url-allowed-schemes' must NOT include \"mailto\"."
+  (should-not (member "mailto" kuro--terminal-web-url-allowed-schemes)))
 
 (provide 'kuro-hyperlinks-test)
 

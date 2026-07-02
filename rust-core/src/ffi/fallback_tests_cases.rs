@@ -1,7 +1,7 @@
-use crate::ffi::fallback::emacs_funcall_exit;
-use crate::ffi::emacs_env;
-use crate::RawFFI;
 use super::tests_support::null_env;
+use crate::ffi::emacs_env;
+use crate::ffi::fallback::emacs_funcall_exit;
+use crate::RawFFI;
 
 #[test]
 fn test_raw_ffi_trait_impl() {

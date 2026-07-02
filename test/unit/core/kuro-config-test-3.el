@@ -38,7 +38,8 @@
 (ert-deftest test-kuro-set-font-skips-non-kuro-buffers ()
   "kuro--set-font does not call kuro--apply-font-to-buffer on non-kuro buffers."
   (let ((apply-called nil))
-    (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
+    (cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () nil))
+              ((symbol-function 'kuro--apply-font-to-buffer)
                (lambda (_buf) (setq apply-called t))))
       (with-temp-buffer
         ;; This buffer is NOT in kuro-mode.

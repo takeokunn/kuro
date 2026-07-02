@@ -2,430 +2,430 @@ use std::sync::Arc;
 
 use super::*;
 
-    // -------------------------------------------------------------------------
-    // Merged from tests/unit/types/cell.rs
-    // -------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// Merged from tests/unit/types/cell.rs
+// -------------------------------------------------------------------------
 
-    // --- Arbitrary generators ---
+// --- Arbitrary generators ---
 
-    mod pbt {
-        use super::*;
-        use proptest::prelude::*;
+mod pbt {
+    use super::*;
+    use proptest::prelude::*;
 
-        prop_compose! {
-            /// Generate an SgrAttributes with randomised boolean fields.
-            fn arb_sgr_attrs()(
-                bold        in proptest::bool::ANY,
-                dim         in proptest::bool::ANY,
-                italic      in proptest::bool::ANY,
-                blink_slow  in proptest::bool::ANY,
-                blink_fast  in proptest::bool::ANY,
-                inverse     in proptest::bool::ANY,
-                hidden      in proptest::bool::ANY,
-                strikethrough in proptest::bool::ANY,
-            ) -> SgrAttributes {
-                let mut flags = SgrFlags::default();
-                flags.set(SgrFlags::BOLD, bold);
-                flags.set(SgrFlags::DIM, dim);
-                flags.set(SgrFlags::ITALIC, italic);
-                flags.set(SgrFlags::BLINK_SLOW, blink_slow);
-                flags.set(SgrFlags::BLINK_FAST, blink_fast);
-                flags.set(SgrFlags::INVERSE, inverse);
-                flags.set(SgrFlags::HIDDEN, hidden);
-                flags.set(SgrFlags::STRIKETHROUGH, strikethrough);
-                SgrAttributes { flags, ..Default::default() }
-            }
-        }
-
-        /// Strategy that picks one of the six `UnderlineStyle` variants.
-        fn arb_underline_style() -> impl Strategy<Value = UnderlineStyle> {
-            prop_oneof![
-                Just(UnderlineStyle::None),
-                Just(UnderlineStyle::Straight),
-                Just(UnderlineStyle::Double),
-                Just(UnderlineStyle::Curly),
-                Just(UnderlineStyle::Dotted),
-                Just(UnderlineStyle::Dashed),
-            ]
-        }
-
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(500))]
-
-            #[test]
-            // IDEMPOTENCE: Resetting SgrAttributes twice produces the same result as
-            // resetting once.
-            fn prop_sgr_reset_idempotent(mut attrs in arb_sgr_attrs()) {
-                attrs.reset();
-                let after_first = attrs;
-                attrs.reset();
-                let after_second = attrs;
-                prop_assert_eq!(after_first, SgrAttributes::default());
-                prop_assert_eq!(after_second, SgrAttributes::default());
-                prop_assert_eq!(after_first, after_second);
-            }
-
-            #[test]
-            // BOUNDARY: push_combining enforces a 32-byte grapheme cap.
-            fn prop_push_combining_32_byte_cap(
-                count in 0usize..=50usize,
-                combining in proptest::collection::vec(
-                    prop::char::range('\u{0300}', '\u{036F}'),
-                    0..=50,
-                )
-            ) {
-                let mut cell = Cell::new('a');
-                for c in combining.iter().take(count) {
-                    cell.push_combining(*c);
-                }
-                prop_assert!(
-                    cell.grapheme.len() <= 32,
-                    "grapheme exceeded 32 bytes: len={}",
-                    cell.grapheme.len()
-                );
-            }
-
-            #[test]
-            // INVARIANT: attrs.underline() must return true iff underline_style != None.
-            fn prop_underline_helper_consistent(style in arb_underline_style()) {
-                let attrs = SgrAttributes {
-                    underline_style: style,
-                    ..Default::default()
-                };
-                let expected = style != UnderlineStyle::None;
-                prop_assert_eq!(
-                    attrs.underline(),
-                    expected,
-                    "underline() must be true iff style != None (style={:?})",
-                    style
-                );
-            }
-
-            #[test]
-            // INVARIANT: Cell::new(c) always sets width == CellWidth::Half.
-            fn prop_cell_new_width_is_half(c in prop::char::range('\u{0020}', '\u{007E}')) {
-                let cell = Cell::new(c);
-                prop_assert_eq!(
-                    cell.width,
-                    CellWidth::Half,
-                    "Cell::new must always produce CellWidth::Half, got {:?}",
-                    c
-                );
-            }
-
-            #[test]
-            // CHAINING: After calling with_hyperlink(a) and then with_hyperlink(b),
-            // the cell must retain only the last hyperlink id (b).
-            fn prop_hyperlink_replaces_previous(
-                a in "[a-z]{1,20}",
-                b in "[a-z]{1,20}",
-            ) {
-                let cell = Cell::new('X')
-                    .with_hyperlink(Arc::from(a.as_str()))
-                    .with_hyperlink(Arc::from(b.as_str()));
-                prop_assert_eq!(
-                    cell.hyperlink_id(),
-                    Some(b.as_str()),
-                    "second with_hyperlink must overwrite first: a={:?} b={:?}",
-                    a,
-                    b
-                );
-            }
+    prop_compose! {
+        /// Generate an SgrAttributes with randomised boolean fields.
+        fn arb_sgr_attrs()(
+            bold        in proptest::bool::ANY,
+            dim         in proptest::bool::ANY,
+            italic      in proptest::bool::ANY,
+            blink_slow  in proptest::bool::ANY,
+            blink_fast  in proptest::bool::ANY,
+            inverse     in proptest::bool::ANY,
+            hidden      in proptest::bool::ANY,
+            strikethrough in proptest::bool::ANY,
+        ) -> SgrAttributes {
+            let mut flags = SgrFlags::default();
+            flags.set(SgrFlags::BOLD, bold);
+            flags.set(SgrFlags::DIM, dim);
+            flags.set(SgrFlags::ITALIC, italic);
+            flags.set(SgrFlags::BLINK_SLOW, blink_slow);
+            flags.set(SgrFlags::BLINK_FAST, blink_fast);
+            flags.set(SgrFlags::INVERSE, inverse);
+            flags.set(SgrFlags::HIDDEN, hidden);
+            flags.set(SgrFlags::STRIKETHROUGH, strikethrough);
+            SgrAttributes { flags, ..Default::default() }
         }
     }
 
-    // --- CellExtras allocation / deallocation ---
-
-    #[test]
-    // INVARIANT: set_hyperlink_id(None) on a default cell (no extras) must be a
-    // no-op: no extras allocated, hyperlink_id remains None.
-    fn test_set_hyperlink_id_none_when_no_extras() {
-        let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "set_hyperlink_id(None) on bare cell must leave hyperlink_id as None"
-        );
-        assert_eq!(cell.image_id(), None);
+    /// Strategy that picks one of the six `UnderlineStyle` variants.
+    fn arb_underline_style() -> impl Strategy<Value = UnderlineStyle> {
+        prop_oneof![
+            Just(UnderlineStyle::None),
+            Just(UnderlineStyle::Straight),
+            Just(UnderlineStyle::Double),
+            Just(UnderlineStyle::Curly),
+            Just(UnderlineStyle::Dotted),
+            Just(UnderlineStyle::Dashed),
+        ]
     }
 
-    #[test]
-    // ALLOCATION: set_hyperlink_id(Some(...)) must allocate extras and store the id.
-    fn test_set_hyperlink_id_some_allocates_extras() {
-        let mut cell = Cell::new('B');
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        assert_eq!(
-            cell.hyperlink_id(),
-            Some("https://example.com"),
-            "set_hyperlink_id(Some(...)) must store the hyperlink id"
-        );
-    }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
 
-    #[test]
-    // DEALLOCATION: after setting a hyperlink, clearing it while image_id is None
-    // must deallocate extras entirely.
-    fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
-        let mut cell = Cell::new('C');
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must remain None (extras deallocated)"
-        );
-    }
+        #[test]
+        // IDEMPOTENCE: Resetting SgrAttributes twice produces the same result as
+        // resetting once.
+        fn prop_sgr_reset_idempotent(mut attrs in arb_sgr_attrs()) {
+            attrs.reset();
+            let after_first = attrs;
+            attrs.reset();
+            let after_second = attrs;
+            prop_assert_eq!(after_first, SgrAttributes::default());
+            prop_assert_eq!(after_second, SgrAttributes::default());
+            prop_assert_eq!(after_first, after_second);
+        }
 
-    #[test]
-    // RETENTION: clearing hyperlink_id while image_id is Some must keep extras alive.
-    fn test_set_hyperlink_id_none_keeps_extras_when_image_some() {
-        let mut cell = Cell::new('D');
-        cell.set_image_id(Some(7));
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.image_id(),
-            Some(7),
-            "image_id must remain Some(7) — extras must not be deallocated"
-        );
-    }
+        #[test]
+        // BOUNDARY: push_combining enforces a 32-byte grapheme cap.
+        fn prop_push_combining_32_byte_cap(
+            count in 0usize..=50usize,
+            combining in proptest::collection::vec(
+                prop::char::range('\u{0300}', '\u{036F}'),
+                0..=50,
+            )
+        ) {
+            let mut cell = Cell::new('a');
+            for c in combining.iter().take(count) {
+                cell.push_combining(*c);
+            }
+            prop_assert!(
+                cell.grapheme.len() <= 32,
+                "grapheme exceeded 32 bytes: len={}",
+                cell.grapheme.len()
+            );
+        }
 
-    #[test]
-    // DEALLOCATION (symmetric): clearing image_id while hyperlink_id is None must
-    // deallocate extras entirely.
-    fn test_set_image_id_none_clears_extras_when_hyperlink_none() {
-        let mut cell = Cell::new('E');
-        cell.set_image_id(Some(42));
-        cell.set_image_id(None);
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must remain None (extras deallocated)"
-        );
-    }
-
-    #[test]
-    // ALLOCATION: set_image_id(Some(...)) must allocate extras and store the id.
-    fn test_set_image_id_some_allocates_extras() {
-        let mut cell = Cell::new('F');
-        cell.set_image_id(Some(99));
-        assert_eq!(
-            cell.image_id(),
-            Some(99),
-            "set_image_id(Some(99)) must store the image id"
-        );
-    }
-
-    #[test]
-    // COMBINED CLEAR: set both hyperlink_id and image_id, then clear both.
-    fn test_cell_with_hyperlink_and_image_both_cleared() {
-        let mut cell = Cell::new('G');
-        cell.set_hyperlink_id(Some(Arc::from("https://a.com")));
-        cell.set_image_id(Some(5));
-        cell.set_image_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            Some("https://a.com"),
-            "hyperlink_id must survive clearing image_id"
-        );
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after final clear"
-        );
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must be None after both cleared"
-        );
-    }
-
-    #[test]
-    // ENCODING: Cell::new with a multi-byte UTF-8 character must store and
-    // retrieve it correctly via char().
-    fn test_cell_new_multibyte_utf8() {
-        let cell = Cell::new('\u{2192}'); // U+2192, 3 bytes in UTF-8
-        assert_eq!(
-            cell.char(),
-            '\u{2192}',
-            "Cell::new must store and return the correct char"
-        );
-        assert_eq!(
-            cell.width,
-            CellWidth::Half,
-            "Cell::new must produce CellWidth::Half"
-        );
-    }
-
-    #[test]
-    // IDEMPOTENCE: reset() on an already-default SgrAttributes must be a no-op.
-    fn test_sgr_attributes_reset_idempotent() {
-        let mut attrs = SgrAttributes::default();
-        attrs.reset();
-        assert_eq!(
-            attrs,
-            SgrAttributes::default(),
-            "reset() on default attrs must be idempotent"
-        );
-    }
-
-    #[test]
-    // MAPPING: Each UnderlineStyle variant must produce the correct underline()
-    // boolean.
-    fn underline_style_all_variants_correct_bool() {
-        let cases: &[(UnderlineStyle, bool)] = &[
-            (UnderlineStyle::None, false),
-            (UnderlineStyle::Straight, true),
-            (UnderlineStyle::Double, true),
-            (UnderlineStyle::Curly, true),
-            (UnderlineStyle::Dotted, true),
-            (UnderlineStyle::Dashed, true),
-        ];
-        for (style, expected) in cases {
+        #[test]
+        // INVARIANT: attrs.underline() must return true iff underline_style != None.
+        fn prop_underline_helper_consistent(style in arb_underline_style()) {
             let attrs = SgrAttributes {
-                underline_style: *style,
+                underline_style: style,
                 ..Default::default()
             };
-            assert_eq!(
+            let expected = style != UnderlineStyle::None;
+            prop_assert_eq!(
                 attrs.underline(),
-                *expected,
-                "underline() wrong for {style:?}: expected {expected}"
+                expected,
+                "underline() must be true iff style != None (style={:?})",
+                style
+            );
+        }
+
+        #[test]
+        // INVARIANT: Cell::new(c) always sets width == CellWidth::Half.
+        fn prop_cell_new_width_is_half(c in prop::char::range('\u{0020}', '\u{007E}')) {
+            let cell = Cell::new(c);
+            prop_assert_eq!(
+                cell.width,
+                CellWidth::Half,
+                "Cell::new must always produce CellWidth::Half, got {:?}",
+                c
+            );
+        }
+
+        #[test]
+        // CHAINING: After calling with_hyperlink(a) and then with_hyperlink(b),
+        // the cell must retain only the last hyperlink id (b).
+        fn prop_hyperlink_replaces_previous(
+            a in "[a-z]{1,20}",
+            b in "[a-z]{1,20}",
+        ) {
+            let cell = Cell::new('X')
+                .with_hyperlink(Arc::from(a.as_str()))
+                .with_hyperlink(Arc::from(b.as_str()));
+            prop_assert_eq!(
+                cell.hyperlink_id(),
+                Some(b.as_str()),
+                "second with_hyperlink must overwrite first: a={:?} b={:?}",
+                a,
+                b
             );
         }
     }
+}
 
-    #[test]
-    // INVARIANT: SgrAttributes::default() must have all booleans false and
-    // both color fields equal to Color::Default.
-    fn sgr_default_all_false() {
-        let attrs = SgrAttributes::default();
+// --- CellExtras allocation / deallocation ---
+
+#[test]
+// INVARIANT: set_hyperlink_id(None) on a default cell (no extras) must be a
+// no-op: no extras allocated, hyperlink_id remains None.
+fn test_set_hyperlink_id_none_when_no_extras() {
+    let mut cell = Cell::new('A');
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "set_hyperlink_id(None) on bare cell must leave hyperlink_id as None"
+    );
+    assert_eq!(cell.image_id(), None);
+}
+
+#[test]
+// ALLOCATION: set_hyperlink_id(Some(...)) must allocate extras and store the id.
+fn test_set_hyperlink_id_some_allocates_extras() {
+    let mut cell = Cell::new('B');
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
+    assert_eq!(
+        cell.hyperlink_id(),
+        Some("https://example.com"),
+        "set_hyperlink_id(Some(...)) must store the hyperlink id"
+    );
+}
+
+#[test]
+// DEALLOCATION: after setting a hyperlink, clearing it while image_id is None
+// must deallocate extras entirely.
+fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
+    let mut cell = Cell::new('C');
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must remain None (extras deallocated)"
+    );
+}
+
+#[test]
+// RETENTION: clearing hyperlink_id while image_id is Some must keep extras alive.
+fn test_set_hyperlink_id_none_keeps_extras_when_image_some() {
+    let mut cell = Cell::new('D');
+    cell.set_image_id(Some(7));
+    cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.image_id(),
+        Some(7),
+        "image_id must remain Some(7) — extras must not be deallocated"
+    );
+}
+
+#[test]
+// DEALLOCATION (symmetric): clearing image_id while hyperlink_id is None must
+// deallocate extras entirely.
+fn test_set_image_id_none_clears_extras_when_hyperlink_none() {
+    let mut cell = Cell::new('E');
+    cell.set_image_id(Some(42));
+    cell.set_image_id(None);
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must be None after clearing"
+    );
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must remain None (extras deallocated)"
+    );
+}
+
+#[test]
+// ALLOCATION: set_image_id(Some(...)) must allocate extras and store the id.
+fn test_set_image_id_some_allocates_extras() {
+    let mut cell = Cell::new('F');
+    cell.set_image_id(Some(99));
+    assert_eq!(
+        cell.image_id(),
+        Some(99),
+        "set_image_id(Some(99)) must store the image id"
+    );
+}
+
+#[test]
+// COMBINED CLEAR: set both hyperlink_id and image_id, then clear both.
+fn test_cell_with_hyperlink_and_image_both_cleared() {
+    let mut cell = Cell::new('G');
+    cell.set_hyperlink_id(Some(Arc::from("https://a.com")));
+    cell.set_image_id(Some(5));
+    cell.set_image_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        Some("https://a.com"),
+        "hyperlink_id must survive clearing image_id"
+    );
+    cell.set_hyperlink_id(None);
+    assert_eq!(
+        cell.hyperlink_id(),
+        None,
+        "hyperlink_id must be None after final clear"
+    );
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "image_id must be None after both cleared"
+    );
+}
+
+#[test]
+// ENCODING: Cell::new with a multi-byte UTF-8 character must store and
+// retrieve it correctly via char().
+fn test_cell_new_multibyte_utf8() {
+    let cell = Cell::new('\u{2192}'); // U+2192, 3 bytes in UTF-8
+    assert_eq!(
+        cell.char(),
+        '\u{2192}',
+        "Cell::new must store and return the correct char"
+    );
+    assert_eq!(
+        cell.width,
+        CellWidth::Half,
+        "Cell::new must produce CellWidth::Half"
+    );
+}
+
+#[test]
+// IDEMPOTENCE: reset() on an already-default SgrAttributes must be a no-op.
+fn test_sgr_attributes_reset_idempotent() {
+    let mut attrs = SgrAttributes::default();
+    attrs.reset();
+    assert_eq!(
+        attrs,
+        SgrAttributes::default(),
+        "reset() on default attrs must be idempotent"
+    );
+}
+
+#[test]
+// MAPPING: Each UnderlineStyle variant must produce the correct underline()
+// boolean.
+fn underline_style_all_variants_correct_bool() {
+    let cases: &[(UnderlineStyle, bool)] = &[
+        (UnderlineStyle::None, false),
+        (UnderlineStyle::Straight, true),
+        (UnderlineStyle::Double, true),
+        (UnderlineStyle::Curly, true),
+        (UnderlineStyle::Dotted, true),
+        (UnderlineStyle::Dashed, true),
+    ];
+    for (style, expected) in cases {
+        let attrs = SgrAttributes {
+            underline_style: *style,
+            ..Default::default()
+        };
         assert_eq!(
-            attrs.flags,
-            SgrFlags::default(),
-            "all boolean flags must be clear in default attrs"
+            attrs.underline(),
+            *expected,
+            "underline() wrong for {style:?}: expected {expected}"
         );
-        assert!(!attrs.underline());
-        assert_eq!(attrs.underline_style, UnderlineStyle::None);
-        assert_eq!(attrs.foreground, Color::Default);
-        assert_eq!(attrs.background, Color::Default);
     }
+}
 
-    // ── TextSize (Kitty OSC 66) ──────────────────────────────────────────────
+#[test]
+// INVARIANT: SgrAttributes::default() must have all booleans false and
+// both color fields equal to Color::Default.
+fn sgr_default_all_false() {
+    let attrs = SgrAttributes::default();
+    assert_eq!(
+        attrs.flags,
+        SgrFlags::default(),
+        "all boolean flags must be clear in default attrs"
+    );
+    assert!(!attrs.underline());
+    assert_eq!(attrs.underline_style, UnderlineStyle::None);
+    assert_eq!(attrs.foreground, Color::Default);
+    assert_eq!(attrs.background, Color::Default);
+}
 
-    #[test]
-    // ALLOCATION: set_text_size(Some(non-default)) must allocate extras and store it.
-    fn test_set_text_size_some_allocates_extras() {
-        let mut cell = Cell::new('A');
-        let ts = TextSize {
+// ── TextSize (Kitty OSC 66) ──────────────────────────────────────────────
+
+#[test]
+// ALLOCATION: set_text_size(Some(non-default)) must allocate extras and store it.
+fn test_set_text_size_some_allocates_extras() {
+    let mut cell = Cell::new('A');
+    let ts = TextSize {
+        scale: 2,
+        ..TextSize::default()
+    };
+    cell.set_text_size(Some(ts));
+    assert_eq!(
+        cell.text_size().map(|t| t.scale),
+        Some(2),
+        "set_text_size(Some(scale=2)) must store the sizing"
+    );
+}
+
+#[test]
+// CHEAPNESS: a default TextSize must NOT allocate extras (treated as "no size").
+fn test_set_text_size_default_does_not_allocate() {
+    let mut cell = Cell::new('B');
+    cell.set_text_size(Some(TextSize::default()));
+    assert_eq!(
+        cell.text_size(),
+        None,
+        "default TextSize must be treated as absence (no extras)"
+    );
+    assert!(
+        cell.extras.is_none(),
+        "default TextSize must not allocate CellExtras"
+    );
+}
+
+#[test]
+// DEALLOCATION: clearing text_size when no other extras remain frees the box.
+fn test_set_text_size_none_clears_extras() {
+    let mut cell = Cell::new('C');
+    cell.set_text_size(Some(TextSize {
+        scale: 3,
+        ..TextSize::default()
+    }));
+    cell.set_text_size(None);
+    assert_eq!(cell.text_size(), None);
+    assert!(
+        cell.extras.is_none(),
+        "extras must be freed once the only field (text_size) is cleared"
+    );
+}
+
+#[test]
+// COEXISTENCE: text_size must survive clearing an unrelated extras field, and
+// vice-versa.
+fn test_text_size_coexists_with_hyperlink() {
+    let mut cell = Cell::new('D');
+    cell.set_hyperlink_id(Some(Arc::from("https://x")));
+    cell.set_text_size(Some(TextSize {
+        scale: 4,
+        ..TextSize::default()
+    }));
+    // Clearing the hyperlink must keep the text size.
+    cell.set_hyperlink_id(None);
+    assert_eq!(cell.text_size().map(|t| t.scale), Some(4));
+    assert_eq!(cell.hyperlink_id(), None);
+    // Clearing the text size now frees extras.
+    cell.set_text_size(None);
+    assert!(cell.extras.is_none());
+}
+
+#[test]
+// MATH: scaled_permille follows scale * max(n,1)/max(d,1) ×1000 (rounded).
+fn test_text_size_scaled_permille() {
+    assert_eq!(TextSize::default().scaled_permille(), 1000, "1× = 1000");
+    assert_eq!(
+        TextSize {
             scale: 2,
             ..TextSize::default()
-        };
-        cell.set_text_size(Some(ts));
-        assert_eq!(
-            cell.text_size().map(|t| t.scale),
-            Some(2),
-            "set_text_size(Some(scale=2)) must store the sizing"
-        );
-    }
-
-    #[test]
-    // CHEAPNESS: a default TextSize must NOT allocate extras (treated as "no size").
-    fn test_set_text_size_default_does_not_allocate() {
-        let mut cell = Cell::new('B');
-        cell.set_text_size(Some(TextSize::default()));
-        assert_eq!(
-            cell.text_size(),
-            None,
-            "default TextSize must be treated as absence (no extras)"
-        );
-        assert!(
-            cell.extras.is_none(),
-            "default TextSize must not allocate CellExtras"
-        );
-    }
-
-    #[test]
-    // DEALLOCATION: clearing text_size when no other extras remain frees the box.
-    fn test_set_text_size_none_clears_extras() {
-        let mut cell = Cell::new('C');
-        cell.set_text_size(Some(TextSize {
+        }
+        .scaled_permille(),
+        2000
+    );
+    assert_eq!(
+        TextSize {
+            numerator: 1,
+            denominator: 2,
+            ..TextSize::default()
+        }
+        .scaled_permille(),
+        500,
+        "1/2 → 500"
+    );
+    assert_eq!(
+        TextSize {
             scale: 3,
+            numerator: 1,
+            denominator: 3,
             ..TextSize::default()
-        }));
-        cell.set_text_size(None);
-        assert_eq!(cell.text_size(), None);
-        assert!(
-            cell.extras.is_none(),
-            "extras must be freed once the only field (text_size) is cleared"
-        );
-    }
-
-    #[test]
-    // COEXISTENCE: text_size must survive clearing an unrelated extras field, and
-    // vice-versa.
-    fn test_text_size_coexists_with_hyperlink() {
-        let mut cell = Cell::new('D');
-        cell.set_hyperlink_id(Some(Arc::from("https://x")));
-        cell.set_text_size(Some(TextSize {
-            scale: 4,
-            ..TextSize::default()
-        }));
-        // Clearing the hyperlink must keep the text size.
-        cell.set_hyperlink_id(None);
-        assert_eq!(cell.text_size().map(|t| t.scale), Some(4));
-        assert_eq!(cell.hyperlink_id(), None);
-        // Clearing the text size now frees extras.
-        cell.set_text_size(None);
-        assert!(cell.extras.is_none());
-    }
-
-    #[test]
-    // MATH: scaled_permille follows scale * max(n,1)/max(d,1) ×1000 (rounded).
-    fn test_text_size_scaled_permille() {
-        assert_eq!(TextSize::default().scaled_permille(), 1000, "1× = 1000");
-        assert_eq!(
-            TextSize {
-                scale: 2,
-                ..TextSize::default()
-            }
-            .scaled_permille(),
-            2000
-        );
-        assert_eq!(
-            TextSize {
-                numerator: 1,
-                denominator: 2,
-                ..TextSize::default()
-            }
-            .scaled_permille(),
-            500,
-            "1/2 → 500"
-        );
-        assert_eq!(
-            TextSize {
-                scale: 3,
-                numerator: 1,
-                denominator: 3,
-                ..TextSize::default()
-            }
-            .scaled_permille(),
-            1000,
-            "3 × 1/3 → 1000"
-        );
-    }
+        }
+        .scaled_permille(),
+        1000,
+        "3 × 1/3 → 1000"
+    );
+}

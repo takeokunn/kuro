@@ -204,6 +204,7 @@ mod osc_modes;
 
 #[path = "session_init.rs"]
 mod init;
+pub use init::PasteText;
 
 #[path = "session_io.rs"]
 mod io;

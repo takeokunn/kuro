@@ -30,4 +30,3 @@ fn test_attach_combining_caps_grapheme_bytes() {
 
     assert!(screen.get_cell(0, 0).unwrap().grapheme().len() <= 32);
 }
-

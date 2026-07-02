@@ -1,21 +1,77 @@
 use super::*;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::Path;
+
+const TEST_SHELL_NAMES: &[&str] = &["sh", "bash", "zsh", "fish"];
+
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .metadata()
+            .map(|meta| meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+}
+
+fn optional_shell_path(name: &str) -> Option<String> {
+    let common_candidates = [
+        format!("/bin/{name}"),
+        format!("/usr/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("/opt/homebrew/bin/{name}"),
+    ];
+
+    common_candidates
+        .into_iter()
+        .find(|candidate| is_executable_file(Path::new(candidate.as_str())))
+        .or_else(|| {
+            std::env::var("SHELL").ok().filter(|shell| {
+                let path = Path::new(shell);
+                path.is_absolute()
+                    && is_executable_file(path)
+                    && path.file_name().and_then(|n| n.to_str()) == Some(name)
+            })
+        })
+        .or_else(|| {
+            std::env::var_os("PATH").and_then(|paths| {
+                std::env::split_paths(&paths).find_map(|dir| {
+                    let path = dir.join(name);
+                    if is_executable_file(&path) {
+                        Some(path.to_string_lossy().into_owned())
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
+}
+
+fn required_test_shell_path() -> String {
+    TEST_SHELL_NAMES
+        .iter()
+        .find_map(|name| optional_shell_path(name))
+        .expect("absolute path to sh, bash, zsh, or fish is required for POSIX PTY tests")
+}
 
 #[test]
 fn test_validate_allowed_shells() {
-    assert!(Pty::validate_shell("sh").is_ok());
-    if super::Pty::find_in_path("bash").is_some() {
-        assert!(Pty::validate_shell("bash").is_ok());
-    }
-    if super::Pty::find_in_path("zsh").is_some() {
-        assert!(Pty::validate_shell("zsh").is_ok());
-    }
-    if super::Pty::find_in_path("fish").is_some() {
-        assert!(Pty::validate_shell("fish").is_ok());
+    for shell_name in TEST_SHELL_NAMES {
+        if let Some(path) = optional_shell_path(shell_name) {
+            let result = Pty::validate_shell(&path);
+            assert!(
+                result.is_ok(),
+                "absolute {shell_name} path should be accepted: {path}. Error: {:?}",
+                result.err()
+            );
+        }
     }
 }
 
 #[test]
 fn test_validate_rejected_shell() {
+    assert!(Pty::validate_shell("sh").is_err());
+    assert!(Pty::validate_shell("bash").is_err());
+    assert!(Pty::validate_shell("zsh").is_err());
+    assert!(Pty::validate_shell("fish").is_err());
     assert!(Pty::validate_shell(" malicious_command").is_err());
     assert!(Pty::validate_shell("rm").is_err());
     assert!(Pty::validate_shell("cat").is_err());
@@ -23,7 +79,8 @@ fn test_validate_rejected_shell() {
 
 #[test]
 fn test_pty_spawn() {
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(pty.is_ok());
 
     let mut pty = pty.unwrap();
@@ -34,7 +91,8 @@ fn test_pty_spawn() {
 fn test_drop_kills_long_running_child_without_hanging() {
     let start = std::time::Instant::now();
     {
-        let mut pty = Pty::spawn("sh", &[], 24, 80).unwrap();
+        let shell = required_test_shell_path();
+        let mut pty = Pty::spawn(&shell, &[], 24, 80).unwrap();
         pty.write(b"sleep 60\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -47,7 +105,7 @@ fn test_drop_kills_long_running_child_without_hanging() {
 
 #[test]
 fn test_validate_shell_empty_string_rejected() {
-    // An empty string should fail because `which` cannot resolve it
+    // An empty string is not an absolute path and must never be resolved via PATH.
     let result = Pty::validate_shell("");
     assert!(result.is_err(), "empty string should be rejected");
 }
@@ -55,8 +113,8 @@ fn test_validate_shell_empty_string_rejected() {
 #[test]
 fn test_validate_shell_absolute_path_bash() {
     let bash_path = std::path::Path::new("/bin/bash");
-    if bash_path.exists() {
-        // An absolute path to bash resolves to the "bash" basename which is in the whitelist
+    if is_executable_file(bash_path) {
+        // An absolute path to bash resolves to the "bash" basename which is in the allowlist
         let result = Pty::validate_shell("/bin/bash");
         assert!(
             result.is_ok(),
@@ -67,20 +125,18 @@ fn test_validate_shell_absolute_path_bash() {
 
 #[test]
 fn test_validate_shell_rejects_relative_path_slash_slash() {
-    // Relative paths like "../bash" cannot be resolved by `which` as an absolute path,
-    // so they should be rejected
+    // Relative paths are rejected before any filesystem or PATH resolution.
     let result = Pty::validate_shell("../bash");
     assert!(result.is_err(), "relative path ../bash should be rejected");
 }
 
 #[test]
 fn test_validate_shell_rejects_python() {
-    // "python3" is not in the ALLOWED_SHELLS whitelist
-    // If it isn't even installed, which() will fail — either way we expect Err
+    // Relative executable names are rejected even before basename allowlist checks.
     let result = Pty::validate_shell("python3");
     assert!(
         result.is_err(),
-        "python3 should be rejected (not in whitelist)"
+        "python3 should be rejected (not in allowlist)"
     );
 }
 
@@ -90,10 +146,10 @@ fn test_validate_shell_rejects_python() {
 fn test_validate_shell_absolute_nix_store() {
     // Use $SHELL to test with the actual shell path on this system.
     // On NixOS this is a Nix store path like /nix/store/…/bin/fish.
-    // Skip gracefully if $SHELL is unset or points to a non-whitelisted shell.
+    // Skip gracefully if $SHELL is unset or points to a shell outside the allowlist.
     if let Ok(shell) = std::env::var("SHELL") {
         let p = std::path::Path::new(&shell);
-        if p.is_absolute() && p.exists() {
+        if p.is_absolute() && is_executable_file(p) {
             let basename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if ["bash", "zsh", "sh", "fish"].contains(&basename) {
                 let result = Pty::validate_shell(&shell);
@@ -124,16 +180,18 @@ fn test_validate_shell_absolute_nonexistent() {
 
 #[test]
 fn test_validate_shell_absolute_not_executable() {
-    // An absolute path with a whitelisted basename but no execute bit must be rejected.
-    // Use a PID-suffixed name to avoid collisions with parallel test runs.
-    use std::os::unix::fs::PermissionsExt as _;
-    let path = std::env::temp_dir().join(format!("fish_{}", std::process::id()));
+    // An absolute path with an allowed basename but no execute bit must be rejected.
+    let dir = std::env::temp_dir().join(format!("kuro_pty_shell_not_exec_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("fish");
     std::fs::write(&path, b"#!/bin/sh").unwrap();
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o644); // rw-r--r-- : no execute bit
     std::fs::set_permissions(&path, perms).unwrap();
     let result = Pty::validate_shell(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
     assert!(
         result.is_err(),
         "absolute path without execute bit must be rejected"
@@ -141,19 +199,41 @@ fn test_validate_shell_absolute_not_executable() {
 }
 
 #[test]
-fn test_validate_shell_absolute_not_in_whitelist() {
+fn test_validate_shell_absolute_not_in_allowlist() {
     // An executable absolute path whose basename is not in ALLOWED_SHELLS must be rejected.
-    use std::os::unix::fs::PermissionsExt as _;
-    let path = std::env::temp_dir().join(format!("curio_{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("kuro_pty_shell_not_allowed_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("curio");
     std::fs::write(&path, b"#!/bin/sh").unwrap();
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&path, perms).unwrap();
     let result = Pty::validate_shell(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
     assert!(
         result.is_err(),
-        "absolute path with non-whitelisted basename must be rejected"
+        "absolute path with basename outside the allowlist must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_shell_absolute_not_regular_file() {
+    // A directory with an allowed basename is not a valid exec target.
+    let dir =
+        std::env::temp_dir().join(format!("kuro_pty_shell_not_regular_{}", std::process::id()));
+    let path = dir.join("sh");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let result = Pty::validate_shell(path.to_str().unwrap());
+    let _ = std::fs::remove_dir(&path);
+    let _ = std::fs::remove_dir(&dir);
+    assert!(
+        result.is_err(),
+        "absolute directory path must be rejected even when basename is allowlisted"
     );
 }
 
@@ -163,7 +243,7 @@ fn test_validate_shell_absolute_bin_sh() {
     // Its basename "sh" is in ALLOWED_SHELLS. On NixOS it is a symlink into the
     // Nix store, so this test exercises the absolute-path branch on NixOS.
     let bin_sh = std::path::Path::new("/bin/sh");
-    if bin_sh.exists() {
+    if is_executable_file(bin_sh) {
         let result = Pty::validate_shell("/bin/sh");
         assert!(
             result.is_ok(),
@@ -193,7 +273,8 @@ fn test_validate_shell_absolute_bin_sh() {
 fn test_spawn_with_nonzero_dimensions_succeeds() {
     // Spawning with explicit non-zero rows/cols must succeed.
     // This exercises the openpty(Some(&winsize), ...) path.
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(
         pty.is_ok(),
         "Pty::spawn with rows=24 cols=80 must succeed: {:?}",
@@ -205,7 +286,8 @@ fn test_spawn_with_nonzero_dimensions_succeeds() {
 fn test_spawn_rows_cols_passed_through() {
     // After spawn, the parent can immediately set_winsize to the same value
     // without error — confirming the master fd is valid and TIOCSWINSZ works.
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(pty.is_ok());
     let mut pty = pty.unwrap();
     // This mirrors what kuro does on resize; it must not error.
@@ -218,10 +300,9 @@ fn test_spawn_rows_cols_passed_through() {
 #[test]
 fn test_validate_shell_returns_absolute_path() {
     // validate_shell must return an absolute PathBuf so that execv uses
-    // the exact binary we validated, not whatever PATH finds first.
-    // Regression: previously execvp("bash", ...) was used, which could
-    // resolve to a different bash (e.g. Homebrew) than validate_shell chose.
-    let result = Pty::validate_shell("sh");
+    // the exact binary we validated, not a later PATH resolution.
+    let shell = required_test_shell_path();
+    let result = Pty::validate_shell(&shell);
     assert!(result.is_ok());
     let path = result.unwrap();
     assert!(
@@ -233,13 +314,13 @@ fn test_validate_shell_returns_absolute_path() {
 #[test]
 fn test_validate_shell_bash_returns_absolute_path() {
     // Same as above, specifically for bash.
-    if super::Pty::find_in_path("bash").is_some() {
-        let result = Pty::validate_shell("bash");
+    if let Some(bash) = optional_shell_path("bash") {
+        let result = Pty::validate_shell(&bash);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(
             path.is_absolute(),
-            "validate_shell('bash') must return an absolute path, got: {path:?}"
+            "validate_shell({bash:?}) must return an absolute path, got: {path:?}"
         );
     }
 }
@@ -251,7 +332,8 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     // correctly propagated the size.  If this returns 0×0, readline in the child
     // will enter dumb mode.
     use std::os::unix::io::AsRawFd as _;
-    let pty = Pty::spawn("sh", &[], 42, 120);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 42, 120);
     assert!(pty.is_ok());
     let pty = pty.unwrap();
 

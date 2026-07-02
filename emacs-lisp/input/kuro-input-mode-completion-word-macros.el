@@ -4,6 +4,9 @@
 
 ;; Author: takeokunn
 
+;;; Commentary:
+;; Macro helpers for completion-word mode.
+
 ;;; Code:
 
 (require 'kuro-input-mode-macros)

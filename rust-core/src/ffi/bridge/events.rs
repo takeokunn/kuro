@@ -4,8 +4,8 @@ use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use super::{
-    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_or_false,
-    define_session_data_query_mut, define_session_query_bool, define_session_query_default,
+    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_mut,
+    define_session_data_query_or_false, define_session_query_bool, define_session_query_default,
     define_session_query_opt, query_session, query_session_mut, query_session_opt,
 };
 
@@ -23,7 +23,7 @@ define_session_query_opt!(
 //
 // Returns a list of clipboard actions. Each action is a 3-element list whose
 // first element is the action tag, second the payload, and third the selection
-// target string ("clipboard", "primary", "select", or "cut-buffer-N"):
+// target string ("clipboard", "primary", or "select"):
 //   - ("write" TEXT TARGET) for a write action
 //   - ("query" nil  TARGET) for a query action
 // The TARGET lets Emacs route OSC 52 ; p to PRIMARY vs ; c to CLIPBOARD.
@@ -83,7 +83,6 @@ fn selection_target_name(target: crate::types::osc::SelectionTarget) -> String {
         SelectionTarget::Clipboard => "clipboard".to_owned(),
         SelectionTarget::Primary => "primary".to_owned(),
         SelectionTarget::Select => "select".to_owned(),
-        SelectionTarget::CutBuffer(n) => format!("cut-buffer-{n}"),
     }
 }
 
@@ -134,10 +133,6 @@ define_drain_session_vec_to_lisp!(
 //
 // See: <https://gitlab.freedesktop.org/Per_Bothner/specifications/-/blob/master/proposals/semantic-prompts.md>
 define_drain_session_vec_to_lisp!(
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "row/col are terminal dimensions (≤ 65535) and duration_ms is shell-supplied (≤ u64::MAX); usize/u64→i64 may wrap on adversarial input but is acceptable for a display-side hint"
-    )]
     kuro_core_poll_prompt_marks,
     "poll_prompt_marks",
     super::super::abstraction::session::TerminalSession::take_prompt_marks,
@@ -168,20 +163,28 @@ define_drain_session_vec_to_lisp!(
             None => false.into_lisp(env)?,
         };
 
-        Ok(build_emacs_list_from_values(
+        build_emacs_list_from_values(
             env,
-            [mark_val, row_val, col_val, exit_val, aid_val, duration_val, err_val],
-        )?)
+            [
+                mark_val,
+                row_val,
+                col_val,
+                exit_val,
+                aid_val,
+                duration_val,
+                err_val,
+            ],
+        )
     }
 );
 
-// Poll for pending OSC 51 eval commands and clear them.
+// Poll for pending OSC 51 command payloads and clear them.
 // Returns a list of command strings.
 define_drain_session_vec_to_lisp!(
     kuro_core_poll_eval_commands,
     "poll_eval_commands",
     super::super::abstraction::session::TerminalSession::take_eval_commands,
-    |env, cmd| { Ok(cmd.into_lisp(env)?) }
+    |env, cmd| { cmd.into_lisp(env) }
 );
 
 define_session_query_opt!(
@@ -248,18 +251,18 @@ define_session_data_query_or_false!(
     /// range per row.  `START` and `END` are buffer character offsets.
     /// Rows without hyperlinks are omitted.
     kuro_core_poll_hyperlink_ranges,
-        "poll_hyperlink_ranges",
-        |session| session.get_hyperlink_ranges(),
-        |kuro_env, ranges| {
-            build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, uri)| {
-                let row_val = (row as i64).into_lisp(env)?;
-                let start_val = (start as i64).into_lisp(env)?;
-                let end_val = (end as i64).into_lisp(env)?;
-                let uri_val = uri.into_lisp(env)?;
+    "poll_hyperlink_ranges",
+    |session| session.get_hyperlink_ranges(),
+    |kuro_env, ranges| {
+        build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, uri)| {
+            let row_val = (row as i64).into_lisp(env)?;
+            let start_val = (start as i64).into_lisp(env)?;
+            let end_val = (end as i64).into_lisp(env)?;
+            let uri_val = uri.into_lisp(env)?;
 
-                build_emacs_list_from_values(env, [row_val, start_val, end_val, uri_val])
-            })
-        }
+            build_emacs_list_from_values(env, [row_val, start_val, end_val, uri_val])
+        })
+    }
 );
 
 define_session_data_query_or_false!(
@@ -274,18 +277,18 @@ define_session_data_query_or_false!(
     /// `SCALED-PERMILLE` is the effective size multiplier ×1000 (e.g. `2000` =
     /// 2× size, `500` = half size).  Rows without any sized cells are omitted.
     kuro_core_poll_text_size_ranges,
-        "poll_text_size_ranges",
-        |session| session.get_text_size_ranges(),
-        |kuro_env, ranges| {
-            build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, permille)| {
-                let row_val = (row as i64).into_lisp(env)?;
-                let start_val = (start as i64).into_lisp(env)?;
-                let end_val = (end as i64).into_lisp(env)?;
-                let permille_val = i64::from(permille).into_lisp(env)?;
+    "poll_text_size_ranges",
+    |session| session.get_text_size_ranges(),
+    |kuro_env, ranges| {
+        build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, permille)| {
+            let row_val = (row as i64).into_lisp(env)?;
+            let start_val = (start as i64).into_lisp(env)?;
+            let end_val = (end as i64).into_lisp(env)?;
+            let permille_val = i64::from(permille).into_lisp(env)?;
 
-                build_emacs_list_from_values(env, [row_val, start_val, end_val, permille_val])
-            })
-        }
+            build_emacs_list_from_values(env, [row_val, start_val, end_val, permille_val])
+        })
+    }
 );
 
 define_session_data_query_mut!(

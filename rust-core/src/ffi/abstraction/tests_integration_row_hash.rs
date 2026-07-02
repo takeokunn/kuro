@@ -60,7 +60,7 @@ fn test_row_hash_skip_changed_row_returned() {
         !second.is_empty(),
         "Second poll must return the changed row"
     );
-    let returned_rows: Vec<usize> = second.iter().map(|(r, _, _, _)| *r).collect();
+    let returned_rows: Vec<usize> = second.iter().map(|line| line.row_index).collect();
     assert!(
         returned_rows.contains(&0),
         "Row 0 must be returned after its content changed, got: {returned_rows:?}"
@@ -268,7 +268,7 @@ fn test_row_hash_text_size_only_change_re_emits_row() {
 
     // The text is identical; only the text size differs. The row must re-emit.
     let third = session.get_dirty_lines_with_faces();
-    let rows: Vec<usize> = third.iter().map(|(r, _, _, _)| *r).collect();
+    let rows: Vec<usize> = third.iter().map(|line| line.row_index).collect();
     assert!(
         rows.contains(&0),
         "A text-size-only change must mark row 0 dirty (folded into hash), got: {rows:?}"
@@ -309,7 +309,7 @@ fn test_row_hash_text_size_removal_re_emits_and_clears_ranges() {
     // The grapheme content is identical; only the text size was removed. The
     // row must still re-emit because text_size folds into the hash.
     let after = session.get_dirty_lines_with_faces();
-    let rows: Vec<usize> = after.iter().map(|(r, _, _, _)| *r).collect();
+    let rows: Vec<usize> = after.iter().map(|line| line.row_index).collect();
     assert!(
         rows.contains(&0),
         "removing a text size must mark row 0 dirty (hash drops back), got: {rows:?}"

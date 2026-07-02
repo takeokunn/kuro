@@ -24,6 +24,7 @@
 ;;; Code:
 
 (require 'seq)
+(require 'subr-x)
 (require 'kuro-ffi)
 (require 'kuro-faces)
 (require 'kuro-faces-attrs)
@@ -121,6 +122,12 @@ Used by `kuro--animation-advance' to clamp the playback timer interval.")
 
 (defconst kuro--animation-min-gap-ms 20
   "Lower bound on the animation frame gap to avoid runaway timer churn.")
+
+(defconst kuro--inline-image-max-base64-bytes (* 16 1024 1024)
+  "Maximum base64 payload size accepted by `kuro--decode-png-image'.")
+
+(defconst kuro--inline-image-max-decoded-bytes (* 12 1024 1024)
+  "Maximum decoded PNG byte size accepted by `kuro--decode-png-image'.")
 
 (kuro--defvar-permanent-local kuro--animation-timers
   (make-hash-table :test 'eql)
@@ -232,7 +239,7 @@ Also cancels any in-flight animation playback timers."
   (kuro--clear-placeholder-overlays))
 
 (defun kuro--filter-overlays (overlays predicate &optional on-delete)
-  "Delete overlays from OVERLAYS when PREDICATE returns non-nil.
+  "Delete overlays from OVERLAYS when PREDICATE is non-nil.
 Return the surviving overlays in original order.  Call ON-DELETE for each
 deleted overlay after removing it from the buffer."
   (let ((remaining nil))
@@ -264,12 +271,93 @@ Uses `kuro--row-positions' cache for O(1) row navigation when available."
       (unless kuro--image-overlays
         (setq kuro--has-images nil)))))
 
+(defsubst kuro--base64-decoded-size-upper-bound (b64)
+  "Return a decoded byte-size upper bound for base64 string B64."
+  (/ (* (string-bytes b64) 3) 4))
+
+(defun kuro--finite-proper-list-p (value)
+  "Return non-nil when VALUE is a finite proper list."
+  (let ((slow value)
+        (fast value)
+        (ok t))
+    (while (and ok (consp fast))
+      (setq fast (cdr fast))
+      (cond
+       ((null fast))
+       ((not (consp fast))
+        (setq ok nil))
+       (t
+        (setq fast (cdr fast)
+              slow (cdr slow))
+        (when (eq slow fast)
+          (setq ok nil)))))
+    (and ok (null fast))))
+
+(defun kuro--list-length-p (value expected)
+  "Return non-nil when VALUE is a finite proper list of EXPECTED length."
+  (and (kuro--finite-proper-list-p value)
+       (= (length value) expected)))
+
+(defsubst kuro--nonnegative-integer-p (value)
+  "Return non-nil when VALUE is a non-negative integer."
+  (and (integerp value) (<= 0 value)))
+
+(defsubst kuro--positive-integer-p (value)
+  "Return non-nil when VALUE is a positive integer."
+  (and (integerp value) (< 0 value)))
+
+(defun kuro--strict-base64-payload-p (b64)
+  "Return non-nil when B64 is canonical ASCII base64 within decode budgets."
+  (and (stringp b64)
+       (< 0 (length b64))
+       (= (string-bytes b64) (length b64))
+       (<= (string-bytes b64) kuro--inline-image-max-base64-bytes)
+       (zerop (% (length b64) 4))
+       (string-match-p
+        "\\`\\(?:[A-Za-z0-9+/]\\{4\\}\\)*\\(?:[A-Za-z0-9+/]\\{4\\}\\|[A-Za-z0-9+/]\\{3\\}=\\|[A-Za-z0-9+/]\\{2\\}==\\)?\\'"
+        b64)
+       (<= (kuro--base64-decoded-size-upper-bound b64)
+           kuro--inline-image-max-decoded-bytes)))
+
+(defun kuro--image-notification-p (notif)
+  "Return non-nil when NOTIF is a typed image notification tuple."
+  (and (kuro--list-length-p notif 5)
+       (pcase-let ((`(,image-id ,row ,col ,cell-width ,cell-height) notif))
+         (and (kuro--positive-integer-p image-id)
+              (kuro--nonnegative-integer-p row)
+              (kuro--nonnegative-integer-p col)
+              (kuro--positive-integer-p cell-width)
+              (kuro--positive-integer-p cell-height)))))
+
+(defun kuro--placeholder-region-p (region)
+  "Return non-nil when REGION is a typed placeholder placement tuple."
+  (and (kuro--list-length-p region 10)
+       (pcase-let ((`(,image-id ,placement ,srow ,scol ,ccols ,crows
+                                ,img-row ,img-col ,img-rows ,img-cols)
+                    region))
+         (and (kuro--positive-integer-p image-id)
+              (kuro--nonnegative-integer-p placement)
+              (kuro--nonnegative-integer-p srow)
+              (kuro--nonnegative-integer-p scol)
+              (kuro--positive-integer-p ccols)
+              (kuro--positive-integer-p crows)
+              (kuro--nonnegative-integer-p img-row)
+              (kuro--nonnegative-integer-p img-col)
+              (kuro--positive-integer-p img-rows)
+              (kuro--positive-integer-p img-cols)
+              (<= (+ img-row crows) img-rows)
+              (<= (+ img-col ccols) img-cols)))))
+
 (defun kuro--decode-png-image (b64)
   "Decode base64 B64 and return an Emacs PNG image object.
-May signal an error if B64 is malformed or `create-image' fails."
-  (create-image
-   (encode-coding-string (base64-decode-string b64) 'binary)
-   'png t))
+Return nil when B64 is invalid, oversized, or `create-image' fails."
+  (when (kuro--strict-base64-payload-p b64)
+    (condition-case nil
+        (let* ((decoded (base64-decode-string b64))
+               (binary (encode-coding-string decoded 'binary)))
+          (when (<= (string-bytes binary) kuro--inline-image-max-decoded-bytes)
+            (create-image binary 'png t)))
+      (error nil))))
 
 (defun kuro--place-image-overlay (img row col cell-width &optional image-id)
   "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH cols.
@@ -300,16 +388,16 @@ NOTIF is a list of the form (IMAGE-ID ROW COL CELL-WIDTH CELL-HEIGHT).
 Creates an overlay with a `display' property at the correct grid position.
 When the image is a playing multi-frame Kitty animation, a timer-driven
 playback loop is (re)started via `kuro--maybe-start-animation'."
-  (pcase-let* ((`(,image-id ,row ,col ,raw-width . ,_) notif)
-               (cell-width (max 1 raw-width))
-               (b64 (kuro--get-image image-id)))
-    (when (and b64 (stringp b64) (not (string-empty-p b64)))
-      (condition-case err
-          (when-let* ((img (kuro--decode-png-image b64)))
-            (kuro--place-image-overlay img row col cell-width image-id)
-            (kuro--maybe-start-animation image-id))
-        (error
-         (message "kuro: image render error for id %d: %s" image-id err))))))
+  (when (kuro--image-notification-p notif)
+    (pcase-let* ((`(,image-id ,row ,col ,cell-width ,_cell-height) notif)
+                 (b64 (kuro--get-image image-id)))
+      (when (and b64 (stringp b64) (not (string-empty-p b64)))
+        (condition-case err
+            (when-let* ((img (kuro--decode-png-image b64)))
+              (kuro--place-image-overlay img row col cell-width image-id)
+              (kuro--maybe-start-animation image-id))
+          (error
+           (message "kuro: image render error for id %d: %s" image-id err)))))))
 
 ;;; Unicode-placeholder (U+10EEEE) fit-to-rectangle tiling
 
@@ -345,36 +433,37 @@ IMG-ROW IMG-COL IMG-ROWS IMG-COLS).  Fetches the referenced PNG via
 `kuro--get-image', then attaches one overlay per cell whose `display' property
 slices the image so cell (dr, dc) shows image tile (IMG-ROW+dr, IMG-COL+dc).
 Orphan / missing images and decode errors are skipped quietly."
-  (pcase-let* ((`(,image-id ,_placement ,srow ,scol ,ccols ,crows
-                            ,img-row ,img-col ,img-rows ,img-cols)
-                region)
-               (b64 (and (> image-id 0) (kuro--get-image image-id))))
-    (when (and b64 (stringp b64) (not (string-empty-p b64))
-               (> ccols 0) (> crows 0) (> img-rows 0) (> img-cols 0))
-      (condition-case err
-          (when-let* ((img (kuro--decode-png-image b64)))
-            (pcase-let* ((`(,px-w . ,px-h) (image-size img t))
-                         (tile-w (/ px-w img-cols))
-                         (tile-h (/ px-h img-rows)))
-              (dotimes (dr crows)
-                (dotimes (dc ccols)
-                  (let ((x (* (+ img-col dc) tile-w))
-                        (y (* (+ img-row dr) tile-h)))
-                    (kuro--place-placeholder-tile
-                     img (+ srow dr) (+ scol dc)
-                     (list 'slice x y tile-w tile-h)))))))
-        (error
-         (message "kuro: placeholder render error for id %d: %s"
-                  image-id err))))))
+  (when (kuro--placeholder-region-p region)
+    (pcase-let* ((`(,image-id ,_placement ,srow ,scol ,ccols ,crows
+                              ,img-row ,img-col ,img-rows ,img-cols)
+                  region)
+                 (b64 (kuro--get-image image-id)))
+      (when (and b64 (stringp b64) (not (string-empty-p b64)))
+        (condition-case err
+            (when-let* ((img (kuro--decode-png-image b64)))
+              (pcase-let* ((`(,px-w . ,px-h) (image-size img t))
+                           (tile-w (/ px-w img-cols))
+                           (tile-h (/ px-h img-rows)))
+                (dotimes (dr crows)
+                  (dotimes (dc ccols)
+                    (let ((x (* (+ img-col dc) tile-w))
+                          (y (* (+ img-row dr) tile-h)))
+                      (kuro--place-placeholder-tile
+                       img (+ srow dr) (+ scol dc)
+                       (list 'slice x y tile-w tile-h)))))))
+          (error
+           (message "kuro: placeholder render error for id %d: %s"
+                    image-id err)))))))
 
 (defun kuro--render-placeholder-regions (regions)
   "Re-render all Unicode-placeholder image REGIONS for the current frame.
 Clears the previous frame's placeholder tile overlays, then renders each region
 in REGIONS via `kuro--render-placeholder-region'.  A nil REGIONS list simply
-clears any stale tiles (e.g. after the placeholders scrolled off screen)."
+  clears any stale tiles (e.g. after the placeholders scrolled off screen)."
   (kuro--clear-placeholder-overlays)
-  (dolist (region regions)
-    (kuro--render-placeholder-region region)))
+  (when (kuro--finite-proper-list-p regions)
+    (dolist (region regions)
+      (kuro--render-placeholder-region region))))
 
 ;;; Animation playback (Kitty a=f frames + a=a control)
 
@@ -510,8 +599,9 @@ operation instead of two separate `=' comparisons."
   "Normalize a FACE-RANGES chunk at BASE, then call CONTINUATION.
 FACE-RANGES is a flat stride-6 vector with layout
 [start end fg bg flags ul ...].  BASE points at the first slot of one range.
-The start and end offsets are relative to LINE-START.  If the normalized
-range is empty after clamping, return nil without invoking CONTINUATION."
+The start and end offsets are relative to LINE-START and LINE-END.  If the
+normalized range is empty after clamping, return nil without invoking
+CONTINUATION."
   (let* ((start-pos (max line-start
                          (min line-end (+ line-start (aref face-ranges base)))))
          (end-pos   (max line-start

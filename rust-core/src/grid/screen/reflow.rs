@@ -100,8 +100,8 @@ fn coalesce_logical(
             // is the trailing default cell padding to be dropped.  A genuine
             // typed trailing space (e.g. "abcd ef" wrapping at width 5) must be
             // preserved — dropping it unconditionally corrupts logical content.
-            let next_is_wide_lead = idx + 1 < n_rows
-                && rows[idx + 1].cells.first().is_some_and(is_wide_lead);
+            let next_is_wide_lead =
+                idx + 1 < n_rows && rows[idx + 1].cells.first().is_some_and(is_wide_lead);
             let mut cells = std::mem::take(&mut rows[idx].cells);
             if next_is_wide_lead && cells.last().is_some_and(|c| *c == Cell::default()) {
                 cells.pop();
@@ -153,7 +153,9 @@ fn make_physical(mut cells: Vec<Cell>, new_cols: usize, soft: bool) -> Line {
         cells.truncate(new_cols);
     }
     let mut line = Line::new(new_cols);
-    let has_wide = cells.iter().any(|c| c.width == CellWidth::Wide || c.width == CellWidth::Full);
+    let has_wide = cells
+        .iter()
+        .any(|c| c.width == CellWidth::Wide || c.width == CellWidth::Full);
     line.cells = cells;
     line.has_wide = has_wide;
     line.wrapped = soft;
@@ -327,18 +329,12 @@ impl Screen {
         }
 
         // 4. Re-place: last `new_rows` rows are the live screen, rest scrollback.
-        let total = rows.len();
-        let mut rows_iter = rows.into_iter();
-
-        let screen_count = new_rows.min(total);
-        let scrollback_count = total - screen_count;
+        let scrollback_count = rows.len().saturating_sub(new_rows);
+        let live_rows = rows.split_off(scrollback_count);
 
         // Rebuild scrollback (capped to max).
         self.scrollback_buffer.clear();
-        for _ in 0..scrollback_count {
-            // Unwrap is safe: scrollback_count + screen_count == total.
-            self.scrollback_buffer.push_back(rows_iter.next().unwrap());
-        }
+        self.scrollback_buffer.extend(rows);
         // Cap scrollback to its configured maximum (oldest dropped first).
         let max = self.scrollback_max_lines;
         while self.scrollback_buffer.len() > max {
@@ -348,9 +344,7 @@ impl Screen {
 
         // Live screen rows.
         self.lines.clear();
-        for line in rows_iter {
-            self.lines.push_back(line);
-        }
+        self.lines.extend(live_rows);
         // Pad to exactly new_rows blank rows if the content was shorter.
         while self.lines.len() < new_rows {
             self.lines.push_back(Line::new(new_cols));

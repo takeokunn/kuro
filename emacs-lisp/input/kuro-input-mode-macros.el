@@ -60,9 +60,10 @@ CPS continuation."
      (kuro--line-mode-update-display)))
 
 (defmacro kuro--def-line-history-nav (name docstring guard stashp index-form buffer-form)
-  "Define NAME as a line-mode history navigation command.
+  "Define NAME using DOCSTRING as a line-mode history navigation command.
 GUARD decides whether the command changes history state.  When STASHP is
-non-nil, the current in-progress buffer is stashed before moving."
+non-nil, the current in-progress buffer is stashed before moving INDEX-FORM to
+the new position and BUFFER-FORM into the line buffer."
   (declare (indent 1))
   `(kuro--def-line-command ,name ,docstring
      (when ,guard

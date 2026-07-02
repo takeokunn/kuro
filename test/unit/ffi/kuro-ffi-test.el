@@ -254,7 +254,7 @@ has not been loaded yet."
   "kuro--poll-clipboard-actions passes through the stub result."
   (let ((kuro--initialized t))
     (cl-letf (((symbol-function 'kuro-core-poll-clipboard-actions)
-               (lambda (_id) '((write . "hello")))))
+               (lambda (_id) '((write "hello" "clipboard")))))
       (let ((actions (kuro--poll-clipboard-actions)))
         (should (= (length actions) 1))
         (should (eq (car (car actions)) 'write))))))
@@ -280,10 +280,12 @@ has not been loaded yet."
   (let ((kuro--initialized t)
         (called nil))
     (cl-letf (((symbol-function 'kuro-core-poll-updates-with-faces)
-               (lambda (_id) (setq called t) '((0 "line" nil nil)))))
+               (lambda (_id) (setq called t) (vector (vector 0 "line" [] [])))))
       (let ((result (kuro--poll-updates-with-faces)))
         (should called)
-        (should (listp result))))))
+        (should (vectorp result))
+        (should (= (length result) 1))
+        (should (equal (aref (aref result 0) 1) "line"))))))
 
 (ert-deftest kuro-ffi-resize-nil-when-not-initialized ()
   "kuro--resize returns nil when not initialized."

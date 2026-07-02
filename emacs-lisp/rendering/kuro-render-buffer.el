@@ -169,7 +169,7 @@ Must be called before the line text is replaced (uses pre-replace line-end)."
       (remhash row kuro--blink-overlays-by-row))))
 
 (defun kuro--clear-line-blink-overlays-by-scan (line-start line-end-before)
-  "Remove blink overlays by scanning the full overlay list."
+  "Remove blink overlays in the LINE-START..LINE-END-BEFORE range."
   (kuro--reset-blink-overlays
    (kuro--filter-overlays
     kuro--blink-overlays
@@ -184,7 +184,8 @@ FACE-RANGES is a FLAT stride-6 vector produced by `kuro--decode-face-ranges',
 or nil for no face data.  Layout: [s0 e0 fg0 bg0 f0 ul0 s1 e1 fg1 bg1 f1 ul1 …].
 Each range occupies 6 consecutive slots — start-buf, end-buf, fg-enc, bg-enc,
 flags, ul-color-enc — with byte offsets relative to LINE-START.
-Must be called after the line text has been inserted (post-insert line-end).
+Must be called after the line text has been inserted, when LINE-END reflects the
+post-insert position.
 
 Stride-6 flat layout eliminates the inner-vector allocation per range that the
 old vector-of-vectors required (~21,600 allocs/sec at 120fps × 30 dirty rows ×

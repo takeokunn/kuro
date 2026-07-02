@@ -189,11 +189,12 @@ impl Screen {
             if let Some(line) = screen.lines.get_mut(cursor_row) {
                 // Wide pair safety: extend erase range to include orphaned pair halves.
                 // 1. If start of range is a Wide placeholder, also erase its Full partner.
-                let erase_start = if cursor_col > 0 && line.cells[cursor_col].width == CellWidth::Wide {
-                    cursor_col - 1
-                } else {
-                    cursor_col
-                };
+                let erase_start =
+                    if cursor_col > 0 && line.cells[cursor_col].width == CellWidth::Wide {
+                        cursor_col - 1
+                    } else {
+                        cursor_col
+                    };
                 // 2. If end of range ends on a Full cell, also erase its Wide partner.
                 let erase_end = if end < cols && line.cells[end - 1].width == CellWidth::Full {
                     end + 1

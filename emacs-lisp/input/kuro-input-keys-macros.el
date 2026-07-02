@@ -4,6 +4,9 @@
 
 ;; Author: takeokunn
 
+;;; Commentary:
+;; Macro helpers for kuro-input-keys.
+
 ;;; Code:
 
 (defmacro kuro--def-key-sequence (name doc normal application &optional kkp-cp)

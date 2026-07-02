@@ -65,6 +65,17 @@
        ,@body)
      (nreverse captured)))
 
+(defmacro kuro-lifecycle-test--capture-send-paste-or-raw (&rest body)
+  "Execute BODY with `kuro--send-paste-or-raw' stubbed and capture calls."
+  `(let ((captured nil)
+         (kuro--initialized t))
+     (cl-letf (((symbol-function 'kuro--send-paste-or-raw)
+                (lambda (text) (push text captured)))
+               ((symbol-function 'kuro--schedule-immediate-render)
+                #'ignore))
+       ,@body)
+     (nreverse captured)))
+
 (defmacro kuro-lifecycle-test--with-kill-stubs (&rest body)
   "Execute BODY with the common `kuro-kill' dependencies stubbed."
   `(cl-letf (((symbol-function 'kuro--stop-render-loop)         (lambda () nil))
@@ -98,12 +109,14 @@
 
 (defmacro kuro-lifecycle-test--assert-noop-when-uninitialized (fn-call)
   "Assert FN-CALL is a no-op when `kuro--initialized' is nil.
-Verifies that `kuro-core-send-key' (the Rust FFI) is never reached,
-i.e. the init guard in `kuro--send-key' / `kuro--call' short-circuits."
+Verifies that Rust send FFIs are never reached, i.e. the init guard
+in `kuro--call' short-circuits."
   `(let ((kuro--initialized nil)
          (called nil))
      (cl-letf (((symbol-function 'kuro-core-send-key)
-                (lambda (_bytes) (setq called t))))
+                (lambda (&rest _) (setq called t)))
+               ((symbol-function 'kuro-core-send-paste)
+                (lambda (&rest _) (setq called t))))
        ,fn-call)
      (should-not called)))
 

@@ -131,24 +131,19 @@ impl TerminalSession {
     fn encode_line_with_faces_and_hash(
         encode_pool: &mut crate::ffi::codec::EncodePool,
         line: &crate::grid::line::Line,
-    ) -> (
-        String,
-        Vec<(usize, usize, u32, u32, u64, u32)>,
-        Vec<usize>,
-        u64,
-    ) {
-        let (text, face_ranges, col_to_buf) =
+    ) -> (crate::ffi::codec::EncodedLineData, u64) {
+        let encoded =
             crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, encode_pool);
         // `encode_line_with_pool` mem::takes text/face_ranges/col_to_buf but
         // leaves `text_sizes` in the pool — read it back to fold OSC 66 sizing
         // into the row hash so a text-size-only change still re-renders.
         let hash = crate::ffi::codec::compute_row_hash_from_encoded(
-            &text,
-            &face_ranges,
-            &col_to_buf,
+            &encoded.text,
+            &encoded.face_ranges,
+            &encoded.col_to_buf,
             &encode_pool.text_sizes,
         );
-        (text, face_ranges, col_to_buf, hash)
+        (encoded, hash)
     }
 
     fn encode_line_into_binary_frame_and_hash(
@@ -252,14 +247,13 @@ impl TerminalSession {
             let num_rows_offset = self.begin_binary_dirty_frame();
             self.texts_scratch = self.collect_scrollback_viewport_rows(|this, row| {
                 if let Some(line) = this.core.screen.get_scrollback_viewport_line(row) {
-                    let text = crate::ffi::codec::encode_line_into_buf(
+                    crate::ffi::codec::encode_line_into_buf(
                         &line.cells,
                         line.has_wide,
                         &mut this.encode_pool,
                         row,
                         &mut this.buf_scratch,
-                    );
-                    text
+                    )
                 } else {
                     // Emit an empty row entry.
                     #[expect(
@@ -330,24 +324,21 @@ impl TerminalSession {
     /// set, returns all rows as scrollback content. Otherwise falls through to the
     /// standard live dirty-line path.
     ///
-    /// Returns a list where each element is `(line_no, text, face_ranges, col_to_buf)`:
-    /// - `face_ranges`: `(start_buf, end_buf, fg_color, bg_color, flags)` in buffer offsets
-    /// - `col_to_buf`: mapping from grid column index to buffer char offset
-    pub fn get_dirty_lines_with_faces(&mut self) -> Vec<crate::ffi::codec::EncodedLine> {
+    /// Returns strongly typed encoded lines:
+    /// - `face_ranges`: buffer-offset style spans with encoded colors/attributes
+    /// - `col_to_buf`: grid column index to buffer char offset mapping
+    pub(crate) fn get_dirty_lines_with_faces(&mut self) -> Vec<crate::ffi::codec::EncodedLine> {
         // Scrollback viewport path: when scroll_dirty, return scrollback lines instead of live lines
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
             return self.collect_scrollback_viewport_rows(|this, row| {
                 match this.core.screen.get_scrollback_viewport_line(row) {
-                    Some(line) => {
-                        let (text, face_ranges, col_to_buf) =
-                            crate::ffi::codec::encode_line_with_pool(
-                                &line.cells,
-                                line.has_wide,
-                                &mut this.encode_pool,
-                            );
-                        (row, text, face_ranges, col_to_buf)
-                    }
-                    None => (row, String::new(), vec![], vec![]),
+                    Some(line) => crate::ffi::codec::encode_line_with_pool(
+                        &line.cells,
+                        line.has_wide,
+                        &mut this.encode_pool,
+                    )
+                    .with_row_index(row),
+                    None => crate::ffi::codec::EncodedLine::empty(row),
                 }
             });
         }
@@ -373,9 +364,8 @@ impl TerminalSession {
                 // full_dirty requires all rows — no version/hash-skip here.
                 // Row hashes are still updated so the subsequent partial-dirty
                 // frames can skip unchanged rows.
-                let (text, face_ranges, col_to_buf, hash) =
-                    Self::encode_line_with_faces_and_hash(encode_pool, line);
-                Some(((row, text, face_ranges, col_to_buf), hash))
+                let (encoded, hash) = Self::encode_line_with_faces_and_hash(encode_pool, line);
+                Some((encoded.with_row_index(row), hash))
             });
         }
 
@@ -383,9 +373,8 @@ impl TerminalSession {
         self.collect_dirty_rows_with_cache(
             epoch,
             |encode_pool, _buf_scratch, line, row, _cached, _epoch| {
-                let (text, face_ranges, col_to_buf, hash) =
-                    Self::encode_line_with_faces_and_hash(encode_pool, line);
-                Some(((row, text, face_ranges, col_to_buf), hash))
+                let (encoded, hash) = Self::encode_line_with_faces_and_hash(encode_pool, line);
+                Some((encoded.with_row_index(row), hash))
             },
         )
     }

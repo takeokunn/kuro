@@ -13,8 +13,7 @@
      (let ((inhibit-read-only t)
            (kuro--url-overlays nil)
            (kuro--url-detect-timer nil)
-           (kuro-url-detection t)
-           (kuro-file-line-detection t))
+           (kuro-url-detection t))
        ,@body)))
 
 (defmacro kuro-url-detect-test--deftest-url-matches (table)
@@ -44,19 +43,6 @@
                         input)
                (string-match kuro--url-regexp ,input)
                (should (string= (match-string 0 ,input) ,expected)))))
-        (symbol-value table))))
-
-(defmacro kuro-url-detect-test--deftest-file-line-matches (table)
-  "Generate file:line regexp tests from TABLE."
-  (declare (indent 1))
-  `(progn
-     ,@(mapcar
-        (lambda (case)
-          (let ((test-name (nth 0 case))
-                (input (nth 1 case)))
-            `(ert-deftest ,test-name ()
-               ,(format "`kuro--file-line-regexp' matches `%s'." input)
-               (should (string-match kuro--file-line-regexp ,input)))))
         (symbol-value table))))
 
 (defmacro kuro-url-detect-test--deftest-defcustom-defaults (table)
@@ -94,14 +80,12 @@
      ,@(mapcar
         (lambda (case)
           (let ((test-name (nth 0 case))
-                (url-flag (nth 1 case))
-                (file-flag (nth 2 case)))
+                (url-flag (nth 1 case)))
             `(ert-deftest ,test-name ()
-               ,(format "`kuro--url-detect-visible' scans when url=%s file-line=%s."
-                        url-flag file-flag)
+               ,(format "`kuro--url-detect-visible' scans when url=%s."
+                        url-flag)
                (kuro-url-detect-test--with-buffer
                  (let ((kuro-url-detection ,url-flag)
-                       (kuro-file-line-detection ,file-flag)
                        (scanned nil))
                    (cl-letf (((symbol-function 'derived-mode-p)
                               (lambda (&rest _) t))

@@ -37,10 +37,14 @@ const CANONICAL_DECSCUSR_SHAPES: &[(i64, CursorShape)] = &[
 impl From<CursorShape> for i64 {
     #[inline]
     fn from(shape: CursorShape) -> Self {
-        CANONICAL_DECSCUSR_SHAPES
-            .iter()
-            .find_map(|(value, candidate)| (*candidate == shape).then_some(*value))
-            .expect("all CursorShape variants must have canonical DECSCUSR values")
+        match shape {
+            CursorShape::BlinkingBlock => 0,
+            CursorShape::SteadyBlock => 2,
+            CursorShape::BlinkingUnderline => 3,
+            CursorShape::SteadyUnderline => 4,
+            CursorShape::BlinkingBar => 5,
+            CursorShape::SteadyBar => 6,
+        }
     }
 }
 

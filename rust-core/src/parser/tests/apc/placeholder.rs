@@ -4,7 +4,6 @@
 //! Module under test: `parser/vte_handler.rs` (`finalize_placeholder_cell`) +
 //! `grid/placeholder.rs`.
 
-use super::*;
 use crate::grid::placeholder::{PLACEHOLDER_CHAR, ROWCOLUMN_DIACRITICS};
 
 /// UTF-8 bytes for the placeholder base character.
@@ -45,7 +44,11 @@ fn placeholder_indexed_fg_decodes_id_and_associates_cell() {
 
     let cell = core.screen.get_cell(0, 0).expect("cell exists");
     assert_eq!(cell.image_id(), Some(42), "cell associated with image 42");
-    assert_eq!(placement_count(&core), 1, "one placeholder placement emitted");
+    assert_eq!(
+        placement_count(&core),
+        1,
+        "one placeholder placement emitted"
+    );
 }
 
 /// INTENT: a truecolor foreground encodes the 24-bit image id directly.
@@ -120,7 +123,11 @@ fn placeholder_multi_cell_grid() {
 
     assert_eq!(core.screen.get_cell(0, 0).unwrap().image_id(), Some(7));
     assert_eq!(core.screen.get_cell(0, 1).unwrap().image_id(), Some(7));
-    assert_eq!(placement_count(&core), 2, "one placement per placeholder cell");
+    assert_eq!(
+        placement_count(&core),
+        2,
+        "one placement per placeholder cell"
+    );
 }
 
 /// INTENT: a malformed placeholder (no fg id / default color) is ignored — no
@@ -135,7 +142,11 @@ fn placeholder_without_fg_id_is_ignored() {
     core.advance(&placeholder_bytes());
 
     let cell = core.screen.get_cell(0, 0).expect("cell exists");
-    assert_eq!(cell.image_id(), None, "malformed placeholder not associated");
+    assert_eq!(
+        cell.image_id(),
+        None,
+        "malformed placeholder not associated"
+    );
     assert_eq!(placement_count(&core), 0, "no placement emitted");
 }
 
@@ -152,7 +163,11 @@ fn placeholder_orphan_image_emits_no_notification() {
 
     let cell = core.screen.get_cell(0, 0).expect("cell exists");
     assert_eq!(cell.image_id(), Some(99), "cell still records the id");
-    assert_eq!(placement_count(&core), 0, "orphan placeholder draws nothing");
+    assert_eq!(
+        placement_count(&core),
+        0,
+        "orphan placeholder draws nothing"
+    );
 }
 
 /// INTENT: the placement id is decoded from the cell's underline color.

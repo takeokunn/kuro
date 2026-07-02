@@ -123,16 +123,20 @@
       (should (equal "/home/user/project" (kuro--get-cwd))))))
 
 (ert-deftest kuro-ffi-osc-poll-clipboard-actions-multiple-entries ()
-  "kuro--poll-clipboard-actions passes through a list with multiple action pairs."
+  "kuro--poll-clipboard-actions passes through strict clipboard actions."
   (let ((kuro--initialized t))
     (cl-letf (((symbol-function 'kuro-core-poll-clipboard-actions)
-               (lambda (_id) '((write . "text1") (query . nil) (write . "text2")))))
+               (lambda (_id) '((write "text1" "clipboard")
+                               (query nil "clipboard")
+                               (write "text2" "clipboard")))))
       (let ((result (kuro--poll-clipboard-actions)))
         (should (= (length result) 3))
         (should (eq (car (nth 0 result)) 'write))
         (should (eq (car (nth 1 result)) 'query))
-        (should (null (cdr (nth 1 result))))
-        (should (equal (cdr (nth 2 result)) "text2"))))))
+        (should (equal (cadr (nth 1 result)) nil))
+        (should (equal (caddr (nth 1 result)) "clipboard"))
+        (should (equal (cadr (nth 2 result)) "text2"))
+        (should (equal (caddr (nth 2 result)) "clipboard"))))))
 
 (ert-deftest kuro-ffi-osc-poll-prompt-marks-all-mark-types ()
   "kuro--poll-prompt-marks passes through all four mark type symbols."

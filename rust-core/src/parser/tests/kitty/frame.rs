@@ -12,7 +12,11 @@ test_kitty_payload_once_case!(
     payload = b"a=f,f=32,i=7,s=1,v=1;AAAAAA==",
     check = |result: Option<KittyCommand>| match result {
         Some(KittyCommand::Frame {
-            image_id, format, width, height, ..
+            image_id,
+            format,
+            width,
+            height,
+            ..
         }) => {
             assert_eq!(image_id, Some(7), "a=f must carry the target image id");
             assert_eq!(format, ImageFormat::Rgba);
@@ -29,7 +33,13 @@ test_kitty_payload_once_case!(
     payload = b"a=f,f=32,i=2,s=1,v=1,x=3,y=4,c=1,X=1,z=120;AAAAAA==",
     check = |result: Option<KittyCommand>| match result {
         Some(KittyCommand::Frame {
-            x, y, base_frame, replace, gap, edit_frame, ..
+            x,
+            y,
+            base_frame,
+            replace,
+            gap,
+            edit_frame,
+            ..
         }) => {
             assert_eq!(x, 3, "x= sets region top-left X");
             assert_eq!(y, 4, "y= sets region top-left Y");
@@ -78,7 +88,10 @@ test_kitty_payload_once_case!(
     payload = b"a=a,i=9,s=3,v=1,c=2",
     check = |result: Option<KittyCommand>| match result {
         Some(KittyCommand::AnimationControl {
-            image_id, state, loop_count, current_frame,
+            image_id,
+            state,
+            loop_count,
+            current_frame,
         }) => {
             assert_eq!(image_id, Some(9));
             assert_eq!(state, Some(3), "s=3 is the run/loop state");

@@ -96,37 +96,29 @@ pub struct HyperlinkState {
 
 /// Selection target for an OSC 52 clipboard operation.
 ///
-/// Carries the `Pc` selector parsed from `OSC 52 ; Pc ; Pd ST`. The wire
-/// selector is a string of chars from `{c,p,q,s,0-7}`; the first recognised
-/// char wins and an empty/absent selector defaults to [`SelectionTarget::Clipboard`]
-/// per the xterm convention.
+/// Carries the validated `Pc` selector parsed from `OSC 52 ; Pc ; Pd ST`.
+/// Only an empty selector and the exact selectors `c`, `p`, and `s` are
+/// accepted. Unsupported selectors are rejected before a clipboard action is
+/// queued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionTarget {
-    /// `c` — system clipboard (CLIPBOARD).
+    /// Empty or `c` - system clipboard (CLIPBOARD).
     Clipboard,
-    /// `p` — primary selection (PRIMARY).
+    /// `p` - primary selection (PRIMARY).
     Primary,
-    /// `s` — select / secondary (mapped to xterm's "select" buffer).
+    /// `s` - select / secondary (mapped to xterm's "select" buffer).
     Select,
-    /// `0`-`7` — numbered cut buffers.
-    CutBuffer(u8),
 }
 
 impl SelectionTarget {
-    /// Parse the OSC 52 `Pc` selector field. The first recognised selector
-    /// char determines the target; an empty selector (or one with no
-    /// recognised char) defaults to [`SelectionTarget::Clipboard`].
-    pub(crate) fn from_selector(sel: &[u8]) -> Self {
-        for &b in sel {
-            match b {
-                b'c' => return Self::Clipboard,
-                b'p' => return Self::Primary,
-                b's' | b'q' => return Self::Select,
-                b'0'..=b'7' => return Self::CutBuffer(b - b'0'),
-                _ => {}
-            }
+    /// Parse the OSC 52 `Pc` selector field.
+    pub(crate) fn from_selector(sel: &[u8]) -> Option<Self> {
+        match sel {
+            b"" | b"c" => Some(Self::Clipboard),
+            b"p" => Some(Self::Primary),
+            b"s" => Some(Self::Select),
+            _ => None,
         }
-        Self::Clipboard
     }
 }
 
@@ -213,7 +205,7 @@ pub struct OscData {
     pub(crate) palette: Vec<Option<[u8; 3]>>,
     /// Pending default-color-change notifications for FFI (fg, bg, cursor)
     pub(crate) default_colors_dirty: bool,
-    /// Pending Elisp eval commands from OSC 51 (security: whitelist-filtered on Elisp side)
+    /// Pending strict command payloads from OSC 51 (revalidated on the Elisp side).
     pub(crate) eval_commands: Vec<String>,
     /// Hostname from OSC 7 (None = localhost)
     pub(crate) cwd_host: Option<String>,

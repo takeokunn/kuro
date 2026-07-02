@@ -24,7 +24,7 @@
       (cl-letf (((symbol-function 'kill-new) #'ignore)
                 ((symbol-function 'message)
                  (lambda (fmt &rest _args) (setq msg-called fmt))))
-        (kuro--clipboard-write "data")
+        (kuro--clipboard-write "data" "clipboard")
         (should msg-called)))))
 
 (ert-deftest kuro-poll-modes-clipboard-write-write-only-emits-clipboard-message ()
@@ -35,7 +35,7 @@
       (cl-letf (((symbol-function 'kill-new) #'ignore)
                 ((symbol-function 'message)
                  (lambda (fmt &rest _args) (setq msg-called fmt))))
-        (kuro--clipboard-write "data")
+        (kuro--clipboard-write "data" "clipboard")
         (should msg-called)))))
 
 (ert-deftest kuro-poll-modes-clipboard-write-unknown-policy-does-not-call-kill-new ()
@@ -45,7 +45,7 @@
           (kill-new-called nil))
       (cl-letf (((symbol-function 'kill-new) (lambda (_) (setq kill-new-called t)))
                 ((symbol-function 'message) #'ignore))
-        (kuro--clipboard-write "text")
+        (kuro--clipboard-write "text" "clipboard")
         (should-not kill-new-called)))))
 
 (ert-deftest kuro-poll-modes-clipboard-write-prompt-includes-text-length ()
@@ -56,7 +56,7 @@
       (cl-letf (((symbol-function 'yes-or-no-p)
                  (lambda (msg) (setq prompt-text msg) nil))
                 ((symbol-function 'kill-new) #'ignore))
-        (kuro--clipboard-write "hello-world")
+        (kuro--clipboard-write "hello-world" "clipboard")
         ;; The prompt must mention the 11-character length.
         (should (string-match-p "11" prompt-text))))))
 
@@ -72,7 +72,7 @@ write-only allows the terminal to WRITE to Emacs, not READ from Emacs."
           (sent nil))
       (cl-letf (((symbol-function 'kuro--send-osc52-clipboard-response)
                  (lambda () (setq sent t))))
-        (kuro--clipboard-query)
+        (kuro--clipboard-query "clipboard")
         (should-not sent)))))
 
 (ert-deftest kuro-poll-modes-clipboard-query-unknown-policy-does-not-send ()
@@ -82,7 +82,7 @@ write-only allows the terminal to WRITE to Emacs, not READ from Emacs."
           (sent nil))
       (cl-letf (((symbol-function 'kuro--send-osc52-clipboard-response)
                  (lambda () (setq sent t))))
-        (kuro--clipboard-query)
+        (kuro--clipboard-query "clipboard")
         (should-not sent)))))
 
 

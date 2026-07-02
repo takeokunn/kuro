@@ -33,7 +33,12 @@ fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
 #[test]
 fn encode_screen_binary_single_row_no_text_no_faces_no_col_to_buf() {
     // A row with empty text, no face ranges, and no col_to_buf.
-    let lines: &[EncodedLine] = &[(0usize, String::new(), vec![], vec![])];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: String::new(),
+        face_ranges: vec![],
+        col_to_buf: vec![],
+    }];
     let result = encode_screen_binary(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
@@ -51,7 +56,12 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
     // A row with 5-byte ASCII text "Hello", no face ranges, no col_to_buf.
     let text = String::from("Hello");
     let text_len = text.len(); // 5
-    let lines: &[EncodedLine] = &[(3usize, text, vec![], vec![])];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 3,
+        text,
+        face_ranges: vec![],
+        col_to_buf: vec![],
+    }];
     let result = encode_screen_binary(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
@@ -76,8 +86,20 @@ fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
     let bg: u32 = 0x0000_0000;
     let flags: u64 = 0x0000_0001;
     let ul_color: u32 = 0xFF00_0000; // Color::Default sentinel
-    let face_ranges = vec![(0usize, 5usize, fg, bg, flags, ul_color)];
-    let lines: &[EncodedLine] = &[(0usize, String::from("Hello"), face_ranges, vec![])];
+    let face_ranges = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 5,
+        fg,
+        bg,
+        flags,
+        underline_color: ul_color,
+    }];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: String::from("Hello"),
+        face_ranges,
+        col_to_buf: vec![],
+    }];
     let result = encode_screen_binary(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
@@ -102,7 +124,12 @@ fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
 fn encode_screen_binary_single_row_nonempty_col_to_buf() {
     // col_to_buf = [0, 0, 1] (3 entries — one wide char at col 0 + placeholder)
     let col_to_buf = vec![0usize, 0usize, 1usize];
-    let lines: &[EncodedLine] = &[(0usize, String::from("AB"), vec![], col_to_buf)];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: String::from("AB"),
+        face_ranges: vec![],
+        col_to_buf,
+    }];
     let result = encode_screen_binary(lines);
 
     // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
@@ -136,7 +163,12 @@ fn encode_screen_binary_single_row_nonempty_col_to_buf() {
 #[test]
 fn encode_screen_binary_multiple_rows_num_rows_header() {
     let lines: Vec<EncodedLine> = (0..5)
-        .map(|i| (i, String::from("x"), vec![], vec![]))
+        .map(|i| EncodedLine {
+            row_index: i,
+            text: String::from("x"),
+            face_ranges: vec![],
+            col_to_buf: vec![],
+        })
         .collect();
     let result = encode_screen_binary(&lines);
     assert_binary_header!(&result, rows 5);
@@ -245,7 +277,14 @@ fn compute_row_hash_empty_vs_spaces_differ() {
 fn compute_row_hash_from_pool_is_deterministic() {
     let mut pool = EncodePool::new();
     pool.text = String::from("hello");
-    pool.face_ranges = vec![(0, 5, 0, 0, 0, 0)];
+    pool.face_ranges = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 5,
+        fg: 0,
+        bg: 0,
+        flags: 0,
+        underline_color: 0,
+    }];
     pool.col_to_buf = vec![0, 1, 2, 3, 4];
     let h1 = compute_row_hash_from_pool(&pool);
     let h2 = compute_row_hash_from_pool(&pool);
@@ -271,36 +310,63 @@ fn compute_row_hash_from_pool_differs_on_text_change() {
 fn compute_row_hash_from_pool_differs_on_face_range_change() {
     let mut pool_a = EncodePool::new();
     pool_a.text = String::from("x");
-    pool_a.face_ranges = vec![(0, 1, 0xFF_0000, 0, 0, 0)]; // red fg
+    pool_a.face_ranges = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 1,
+        fg: 0xFF_0000,
+        bg: 0,
+        flags: 0,
+        underline_color: 0,
+    }]; // red fg
 
     let mut pool_b = EncodePool::new();
     pool_b.text = String::from("x");
-    pool_b.face_ranges = vec![(0, 1, 0x00_FF00, 0, 0, 0)]; // green fg
+    pool_b.face_ranges = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 1,
+        fg: 0x00_FF00,
+        bg: 0,
+        flags: 0,
+        underline_color: 0,
+    }]; // green fg
 
     let ha = compute_row_hash_from_pool(&pool_a);
     let hb = compute_row_hash_from_pool(&pool_b);
-    assert_ne!(ha, hb, "different face_ranges must produce different hashes");
+    assert_ne!(
+        ha, hb,
+        "different face_ranges must produce different hashes"
+    );
 }
 
 /// Same encoded data → identical hashes.
 #[test]
 fn compute_row_hash_from_encoded_is_deterministic() {
     let text = "world";
-    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[(0, 5, 0, 0, 1, 0)];
+    let faces = [EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 5,
+        fg: 0,
+        bg: 0,
+        flags: 1,
+        underline_color: 0,
+    }];
     let ctb: &[usize] = &[0, 1, 2, 3, 4];
-    let h1 = compute_row_hash_from_encoded(text, faces, ctb, &[]);
-    let h2 = compute_row_hash_from_encoded(text, faces, ctb, &[]);
+    let h1 = compute_row_hash_from_encoded(text, &faces, ctb, &[]);
+    let h2 = compute_row_hash_from_encoded(text, &faces, ctb, &[]);
     assert_eq!(h1, h2, "same encoded inputs must produce identical hashes");
 }
 
 /// Changing `text` must change the encoded hash.
 #[test]
 fn compute_row_hash_from_encoded_differs_on_text_change() {
-    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[];
+    let faces: &[EncodedFaceRange] = &[];
     let ctb: &[usize] = &[];
     let ha = compute_row_hash_from_encoded("aaa", faces, ctb, &[]);
     let hb = compute_row_hash_from_encoded("bbb", faces, ctb, &[]);
-    assert_ne!(ha, hb, "different text must produce different encoded hashes");
+    assert_ne!(
+        ha, hb,
+        "different text must produce different encoded hashes"
+    );
 }
 
 /// `compute_row_hash_from_pool` and `compute_row_hash_from_encoded` must agree
@@ -308,7 +374,14 @@ fn compute_row_hash_from_encoded_differs_on_text_change() {
 #[test]
 fn compute_row_hash_pool_and_encoded_agree() {
     let text = "rust";
-    let faces: Vec<(usize, usize, u32, u32, u64, u32)> = vec![(0, 4, 1, 2, 0x3, 0)];
+    let faces = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 4,
+        fg: 1,
+        bg: 2,
+        flags: 0x3,
+        underline_color: 0,
+    }];
     let ctb: Vec<usize> = vec![0, 1, 2, 3];
 
     // Build a pool with the same data.
@@ -343,7 +416,7 @@ fn compute_row_hash_differs_on_text_size_change() {
     );
 
     // Encoded path: same text/faces/col_to_buf, only text_sizes slice differs.
-    let faces: &[(usize, usize, u32, u32, u64, u32)] = &[];
+    let faces: &[EncodedFaceRange] = &[];
     let ctb: &[usize] = &[];
     assert_ne!(
         compute_row_hash_from_encoded("x", faces, ctb, &[]),

@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'kuro-binary-decoder)
 
 ;;; Helpers
@@ -72,14 +73,39 @@
     (pcase-let ((`(,_name ,bytes ,offset ,expected) entry))
       (should (= (kuro--read-u32-le bytes offset) expected)))))
 
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-non-vector ()
+  "kuro--read-u32-le rejects non-vector input."
+  (should-error (kuro--read-u32-le '(0 0 0 0) 0)))
+
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-negative-offset ()
+  "kuro--read-u32-le rejects negative offsets."
+  (should-error (kuro--read-u32-le [0 0 0 0] -1)))
+
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-truncated-vector ()
+  "kuro--read-u32-le rejects truncated input before byte reads."
+  (should-error (kuro--read-u32-le [0 0 0] 0)))
+
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-negative-byte ()
+  "kuro--read-u32-le rejects byte values below 0."
+  (should-error (kuro--read-u32-le [-1 0 0 0] 0)))
+
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-overflow-byte ()
+  "kuro--read-u32-le rejects byte values above 255."
+  (should-error (kuro--read-u32-le [256 0 0 0] 0)))
+
+(ert-deftest kuro-binary-decoder-read-u32-le-rejects-nonnumeric-byte ()
+  "kuro--read-u32-le rejects non-integer byte values."
+  (should-error (kuro--read-u32-le ["x" 0 0 0] 0)))
+
 ;;; Group 5: kuro--decode-face-ranges, kuro--decode-col-to-buf
 
 (ert-deftest kuro-binary-decoder-decode-face-ranges-empty ()
-  "kuro--decode-face-ranges with 0 ranges returns nil and sets kuro--decode-pos."
+  "kuro--decode-face-ranges with 0 ranges returns an empty vector and sets kuro--decode-pos."
   (let ((v (make-vector 0 0)))
     (let* ((face-list (kuro--decode-face-ranges v 0 0 nil))
            (new-pos kuro--decode-pos))
-      (should (null face-list))
+      (should (vectorp face-list))
+      (should (= (length face-list) 0))
       (should (= new-pos 0)))))
 
 (ert-deftest kuro-binary-decoder-decode-face-ranges-one ()
@@ -169,6 +195,18 @@ decoder boundary."
     (should (= (/ (length result) 6) 3))
     (should (= new-pos 72))))    ; 3 × 24 bytes
 
+(ert-deftest kuro-binary-decoder-decode-face-ranges-rejects-negative-count ()
+  "kuro--decode-face-ranges rejects negative range counts."
+  (should-error (kuro--decode-face-ranges [] 0 -1 nil)))
+
+(ert-deftest kuro-binary-decoder-decode-face-ranges-rejects-truncated-v2-range ()
+  "kuro--decode-face-ranges rejects truncated v2 range payloads before allocation."
+  (should-error (kuro--decode-face-ranges [0 0 0 0] 0 1 t)))
+
+(ert-deftest kuro-binary-decoder-decode-face-ranges-rejects-huge-count-before-allocation ()
+  "kuro--decode-face-ranges rejects huge counts when bytes are unavailable."
+  (should-error (kuro--decode-face-ranges [] 0 #x100000 nil)))
+
 ;;; Group 10: kuro--decode-col-to-buf — additional cases
 
 (ert-deftest kuro-binary-decoder-decode-col-to-buf-single-entry ()
@@ -206,6 +244,19 @@ decoder boundary."
            (new-pos kuro--decode-pos))
       (should (= (aref col-to-buf 0) 5))
       (should (= new-pos 12)))))
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-rejects-truncated-header ()
+  "kuro--decode-col-to-buf rejects missing length bytes."
+  (should-error (kuro--decode-col-to-buf [1 0 0] 0)))
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-rejects-truncated-entry ()
+  "kuro--decode-col-to-buf rejects missing entry bytes before allocation."
+  (should-error (kuro--decode-col-to-buf [1 0 0 0 5] 0)))
+
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-rejects-huge-length-before-allocation ()
+  "kuro--decode-col-to-buf rejects huge lengths when bytes are unavailable."
+  (let ((vec (apply #'vector (kuro-binary-decoder-test--make-u32-le #x100000))))
+    (should-error (kuro--decode-col-to-buf vec 0))))
 
 ;;; Group 15: kuro--decode-binary-updates-with-strings
 
@@ -368,6 +419,49 @@ Row indices come from the binary data; text strings come from the vector."
          (vec (apply #'vector frame-bytes)))
     (should-error (kuro--decode-binary-updates-with-strings (vector) vec))))
 
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-non-vector-texts ()
+  "kuro--decode-binary-updates-with-strings rejects non-vector text payloads."
+  (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (should-error (kuro--decode-binary-updates-with-strings '("x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-text-count-mismatch ()
+  "kuro--decode-binary-updates-with-strings requires one text string per row."
+  (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x" "y") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-non-string-text-entry ()
+  "kuro--decode-binary-updates-with-strings rejects non-string text entries."
+  (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (should-error (kuro--decode-binary-updates-with-strings (vector 42) vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-truncated-header ()
+  "kuro--decode-binary-updates-with-strings rejects incomplete frame headers."
+  (should-error (kuro--decode-binary-updates-with-strings (vector) [2 0 0])))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-text-bytes ()
+  "kuro--decode-binary-updates-with-strings rejects non-zero text byte lengths."
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 0)))
+         (vec (apply #'vector frame-bytes)))
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-trailing-bytes ()
+  "kuro--decode-binary-updates-with-strings rejects trailing bytes after rows."
+  (let ((vec (vconcat (kuro-binary-decoder-test--make-v2-frame-no-text 0 0) [99])))
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-rejects-invalid-byte ()
+  "kuro--decode-binary-updates-with-strings rejects non-byte frame values."
+  (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (aset vec 0 256)
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
 ;;; Group 16: kuro--poll-updates-binary-optimised
 
 (ert-deftest kuro-binary-decoder-poll-optimised-returns-nil-when-ffi-nil ()
@@ -388,6 +482,24 @@ Row indices come from the binary data; text strings come from the vector."
         (should (= (length result) 1))
         ;; entry is a flat vector [row-index text face-ranges col-to-buf]
         (should (equal (aref entry 1) "decoded-row"))))))
+
+(ert-deftest kuro-binary-decoder-poll-optimised-rejects-non-cons-result ()
+  "kuro--poll-updates-binary-optimised rejects non-cons FFI results."
+  (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+             (lambda (_id) [1 2 3])))
+    (should-error (kuro--poll-updates-binary-optimised 'fake-id))))
+
+(ert-deftest kuro-binary-decoder-poll-optimised-rejects-non-vector-text-payload ()
+  "kuro--poll-updates-binary-optimised rejects non-vector text payloads."
+  (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+             (lambda (_id) (cons '("x") []))))
+    (should-error (kuro--poll-updates-binary-optimised 'fake-id))))
+
+(ert-deftest kuro-binary-decoder-poll-optimised-rejects-non-vector-byte-payload ()
+  "kuro--poll-updates-binary-optimised rejects non-vector byte payloads."
+  (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+             (lambda (_id) (cons (vector "x") '(1 2 3)))))
+    (should-error (kuro--poll-updates-binary-optimised 'fake-id))))
 
 ;;; ── Binary format version constants ──────────────────────────────────────────
 

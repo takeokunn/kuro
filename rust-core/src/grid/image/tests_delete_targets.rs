@@ -4,7 +4,7 @@
 //! Module under test: `grid/image.rs`
 
 use super::tests_support::*;
-use crate::grid::screen::{GraphicsStore, ImagePlacement};
+use crate::grid::screen::ImagePlacement;
 
 /// Build a placement with explicit geometry, z-index and pixel offsets.
 fn placement_full(
@@ -116,7 +116,11 @@ fn delete_at_cell_removes_covering_placement() {
 
     store.delete_at_cell(3, 6, false);
 
-    assert_eq!(store.placement_count(), 1, "only the covering placement is removed");
+    assert_eq!(
+        store.placement_count(),
+        1,
+        "only the covering placement is removed"
+    );
     let notifs = store.notifications_for_image(1);
     assert_eq!(notifs[0].row, 10);
 }
@@ -172,7 +176,11 @@ fn delete_at_cell_with_z_matches_both_cell_and_z() {
 
     store.delete_at_cell_with_z(0, 0, 5, false);
 
-    assert_eq!(store.placement_z_indices(), vec![9], "only z=5 layer removed");
+    assert_eq!(
+        store.placement_z_indices(),
+        vec![9],
+        "only z=5 layer removed"
+    );
 }
 
 // --- d=n : newest by number ---
@@ -219,7 +227,11 @@ fn delete_id_range_inclusive() {
 
     assert_image_present(&store, 10);
     assert_image_present(&store, 13);
-    assert_eq!(store.placement_count(), 2, "ids 11 and 12 placements removed");
+    assert_eq!(
+        store.placement_count(),
+        2,
+        "ids 11 and 12 placements removed"
+    );
 }
 
 /// INTENT: `d=R` (uppercase) id range frees image data in range.

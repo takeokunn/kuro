@@ -22,9 +22,9 @@
 
 ;; Add subdirectories to load-path so that (require 'kuro-xxx) works
 ;; regardless of which subdirectory the file lives in.  This is only
-;; needed in the source tree layout; MELPA installs all .el files flat
-;; into a single directory, in which case the subdirs do not exist and
-;; the dolist body is skipped entirely.
+;; needed in the source tree layout; installed packages place the .el
+;; files flat into a single directory, in which case the subdirs do
+;; not exist and the dolist body is skipped entirely.
 (let ((base (file-name-directory
              (directory-file-name
               (file-name-directory (or load-file-name buffer-file-name

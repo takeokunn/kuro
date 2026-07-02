@@ -94,7 +94,7 @@ impl TerminalSession {
     );
 
     take_vec_field!(
-        /// Drain and return all pending eval commands (OSC 51).
+        /// Drain and return all pending command payloads (OSC 51).
         fn take_eval_commands from osc_data take eval_commands : String
     );
 

@@ -1,5 +1,5 @@
-use super::*;
 use super::super::make_term;
+use super::*;
 
 #[test]
 fn test_resize_updates_tab_stops() {
@@ -28,7 +28,7 @@ fn test_flush_print_buf_empty_is_noop() {
 #[test]
 fn test_flush_print_buf_writes_content() {
     let mut term = make_term();
-    term.print_buf.extend_from_slice(b"ABC");
+    term.print_buf.try_extend_from_slice(b"ABC").unwrap();
     assert_eq!(
         term.print_buf.len(),
         3,
@@ -239,7 +239,7 @@ fn test_reset_restores_parser_state() {
     let mut term = make_term();
     // Corrupt parser state manually to simulate mid-sequence input.
     term.parser_in_ground = false;
-    term.print_buf.extend_from_slice(b"leftover");
+    term.print_buf.try_extend_from_slice(b"leftover").unwrap();
 
     term.reset();
 

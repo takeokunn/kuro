@@ -4,7 +4,7 @@
 
 ;;; Commentary:
 
-;; ERT tests for kuro-eval.el (OSC 51 command whitelist).
+;; ERT tests for kuro-eval.el (OSC 51 command allowlist).
 ;; Tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
 
 ;;; Code:
@@ -92,35 +92,39 @@
 
 (require 'kuro-eval)
 
-;;; Group 1: kuro--eval-command-allowed-p whitelist filtering
+;;; Group 1: kuro--eval-command-allowed-p allowlist filtering
 
 (ert-deftest kuro-eval-allowed-cd-bare ()
   "kuro--eval-command-allowed-p returns non-nil for bare \"cd /tmp\"."
   (should (kuro--eval-command-allowed-p "cd /tmp")))
 
-(ert-deftest kuro-eval-allowed-cd-sexp ()
-  "kuro--eval-command-allowed-p returns non-nil for sexp (cd \"/tmp\")."
-  (should (kuro--eval-command-allowed-p "(cd \"/tmp\")")))
+(ert-deftest kuro-eval-rejects-cd-sexp ()
+  "kuro--eval-command-allowed-p rejects legacy Elisp reader forms."
+  (should-not (kuro--eval-command-allowed-p "(cd \"/tmp\")")))
 
 (ert-deftest kuro-eval-allowed-setenv ()
   "kuro--eval-command-allowed-p returns non-nil for setenv command."
-  (should (kuro--eval-command-allowed-p "(setenv \"FOO\" \"bar\")")))
+  (should (kuro--eval-command-allowed-p "setenv FOO bar")))
 
 (ert-deftest kuro-eval-blocked-kuro-prefix ()
-  "kuro--eval-command-allowed-p returns nil for kuro- prefixed commands.
-The `kuro-' function-namespace prefix is deliberately excluded from
-`kuro-eval-command-whitelist': allowing it would let malicious terminal
-output invoke arbitrary kuro- commands via OSC 51 (see the defcustom
-security note)."
-  (should-not (kuro--eval-command-allowed-p "(kuro-create)")))
+  "kuro--eval-command-allowed-p returns nil for kuro- prefixed commands."
+  (should-not (kuro--eval-command-allowed-p "kuro-create")))
+
+(ert-deftest kuro-eval-blocked-cd-prefix ()
+  "kuro--eval-command-allowed-p returns nil for cd prefix matches."
+  (should-not (kuro--eval-command-allowed-p "cd-evil /tmp")))
+
+(ert-deftest kuro-eval-blocked-setenv-prefix ()
+  "kuro--eval-command-allowed-p returns nil for setenv prefix matches."
+  (should-not (kuro--eval-command-allowed-p "setenv-evil FOO bar")))
 
 (ert-deftest kuro-eval-blocked-delete-file ()
   "kuro--eval-command-allowed-p returns nil for delete-file."
-  (should-not (kuro--eval-command-allowed-p "(delete-file \"/etc/passwd\")")))
+  (should-not (kuro--eval-command-allowed-p "delete-file /etc/passwd")))
 
 (ert-deftest kuro-eval-blocked-eval ()
-  "kuro--eval-command-allowed-p returns nil for eval command."
-  (should-not (kuro--eval-command-allowed-p "(eval (something))")))
+  "kuro--eval-command-allowed-p returns nil for the literal eval verb."
+  (should-not (kuro--eval-command-allowed-p "eval something")))
 
 (ert-deftest kuro-eval-blocked-empty ()
   "kuro--eval-command-allowed-p returns nil for empty string."
@@ -129,6 +133,51 @@ security note)."
 (ert-deftest kuro-eval-blocked-whitespace-only ()
   "kuro--eval-command-allowed-p returns nil for whitespace-only string."
   (should-not (kuro--eval-command-allowed-p "   ")))
+
+(ert-deftest kuro-eval-blocked-non-string ()
+  "kuro--eval-command-allowed-p returns nil for non-string commands."
+  (should-not (kuro--eval-command-allowed-p 1)))
+
+(ert-deftest kuro-eval-blocked-control-character ()
+  "kuro--eval-command-allowed-p rejects control characters."
+  (should-not (kuro--eval-command-allowed-p "setenv FOO hello\nworld")))
+
+(ert-deftest kuro-eval-blocked-overlong-command ()
+  "kuro--eval-command-allowed-p rejects oversized command payloads."
+  (should-not
+   (kuro--eval-command-allowed-p
+    (concat "setenv FOO " (make-string kuro-eval--max-command-bytes ?a)))))
+
+(ert-deftest kuro-eval-blocked-relative-cd ()
+  "kuro--eval-command-allowed-p rejects relative cd targets."
+  (let* ((root (make-temp-file "kuro-eval-root-" t))
+         (child (expand-file-name "child" root)))
+    (make-directory child)
+    (unwind-protect
+        (let ((default-directory root))
+          (should-not (kuro--eval-command-allowed-p "cd child")))
+      (delete-directory root t))))
+
+(ert-deftest kuro-eval-blocked-nonexistent-cd ()
+  "kuro--eval-command-allowed-p rejects nonexistent cd targets."
+  (let ((missing (make-temp-file "kuro-eval-missing-" t)))
+    (delete-directory missing t)
+    (should-not (kuro--eval-command-allowed-p (format "cd %s" missing)))))
+
+(ert-deftest kuro-eval-blocked-remote-cd ()
+  "kuro--eval-command-allowed-p rejects remote cd targets."
+  (should-not (kuro--eval-command-allowed-p "cd /ssh:example:/tmp")))
+
+(ert-deftest kuro-eval-blocked-invalid-env-name ()
+  "kuro--eval-command-allowed-p rejects non-strict environment names."
+  (dolist (name '("1BAD" "BAD-NAME" "BAD.NAME" ""))
+    (should-not
+     (kuro--eval-command-allowed-p
+      (format "setenv %s value" (shell-quote-argument name))))))
+
+(ert-deftest kuro-eval-blocked-setenv-third-arg ()
+  "kuro--eval-command-allowed-p rejects extra setenv arguments."
+  (should-not (kuro--eval-command-allowed-p "setenv FOO bar extra")))
 
 ;;; Group 2: kuro--eval-osc51-command dispatch
 
@@ -143,33 +192,76 @@ security note)."
           (should (equal default-directory (file-name-as-directory target-dir))))
       (delete-directory target-dir t))))
 
-(ert-deftest kuro-eval-osc51-dispatches-setenv-sexp ()
-  "kuro--eval-osc51-command dispatches whitelisted setenv sexp."
-  (let ((var-name "KURO_TEST_OSC51_VAR"))
+(ert-deftest kuro-eval-osc51-dispatches-setenv-bare ()
+  "kuro--eval-osc51-command dispatches a typed setenv command."
+  (let ((var-name "KURO_TEST_VAR"))
     (unwind-protect
         (progn
-          (kuro--eval-osc51-command (format "(setenv \"%s\" \"hello\")" var-name))
-          (should (string= (getenv var-name) "hello")))
+          (setenv var-name nil)
+          (should (kuro--eval-osc51-command (format "setenv %s hello" var-name)))
+          (should (equal (getenv var-name) "hello")))
       (setenv var-name nil))))
 
 (ert-deftest kuro-eval-osc51-returns-nil-for-blocked ()
   "kuro--eval-osc51-command returns nil for blocked command."
-  (should-not (kuro--eval-osc51-command "(delete-file \"/etc/passwd\")")))
+  (should-not (kuro--eval-osc51-command "delete-file /etc/passwd")))
 
 (ert-deftest kuro-eval-osc51-handles-malformed-command ()
-  "kuro--eval-osc51-command handles malformed whitelisted commands gracefully."
-  (should-not (kuro--eval-osc51-command "(setenv)")))
+  "kuro--eval-osc51-command handles malformed allowed commands gracefully."
+  (should-not (kuro--eval-osc51-command "setenv"))
+  (should-not (kuro--eval-osc51-command "setenv FOO")))
+
+(ert-deftest kuro-eval-osc51-rejects-reader-forms-without-reading ()
+  "kuro--eval-osc51-command rejects S-expressions without using the Elisp reader."
+  (let ((var-name "KURO_TEST_READ_EVAL"))
+    (unwind-protect
+        (progn
+          (setenv var-name nil)
+          (should-not
+           (kuro--eval-osc51-command
+            (format "(setenv #.(setenv %S \"value\") \"ignored\")" var-name)))
+          (should-not (getenv var-name)))
+      (setenv var-name nil))))
+
+(ert-deftest kuro-eval-osc51-rejects-reader-cycle-syntax ()
+  "kuro--eval-osc51-command rejects reader cycle syntax as plain text."
+  (let ((var-name "KURO_TEST_CYCLE"))
+    (unwind-protect
+        (progn
+          (should-not
+           (kuro--eval-osc51-command
+            (format "(setenv \"%s\" . #1=(\"value\" . #1#))" var-name)))
+          (should-not (getenv var-name)))
+      (setenv var-name nil))))
+
+(ert-deftest kuro-eval-proper-list-p-rejects-cyclic-list-without-looping ()
+  "`kuro--eval-proper-list-p' rejects cyclic lists without hanging."
+  (let ((cycle (list "x")))
+    (setcdr cycle cycle)
+    (should-not (kuro--eval-proper-list-p cycle))))
+
+(ert-deftest kuro-eval-osc51-rejects-non-string-arguments ()
+  "kuro--eval-osc51-command builders reject non-string OSC 51 arguments."
+  (unwind-protect
+      (progn
+        (setenv "KURO_TEST_NON_STRING" nil)
+        (should-error (kuro--eval-osc51-command-form 1))
+        (should-error (kuro--eval-osc51-command--build "cd" (list 1) "cd 1"))
+        (should-error
+         (kuro--eval-osc51-command--build
+          "setenv"
+          (list "KURO_TEST_NON_STRING" 1)
+          "setenv KURO_TEST_NON_STRING 1"))
+        (should-not (getenv "KURO_TEST_NON_STRING")))
+    (setenv "KURO_TEST_NON_STRING" nil)))
 
 ;;; Group 3: defcustom defaults
 
-(ert-deftest kuro-eval-whitelist-default-entries ()
-  "kuro-eval-command-whitelist default has cd and setenv, but not kuro-.
-The `kuro-' prefix is intentionally excluded for security (see the
-defcustom docstring): allowing it would let terminal output invoke any
-kuro- command via OSC 51."
-  (should (member "cd" kuro-eval-command-whitelist))
-  (should (member "setenv" kuro-eval-command-whitelist))
-  (should-not (member "kuro-" kuro-eval-command-whitelist)))
+(ert-deftest kuro-eval-allowed-commands-default-entries ()
+  "kuro-eval-allowed-commands default has exact cd and setenv only."
+  (should (member "cd" kuro-eval-allowed-commands))
+  (should (member "setenv" kuro-eval-allowed-commands))
+  (should-not (member "kuro-" kuro-eval-allowed-commands)))
 
 ;;; Group 4: kuro--poll-eval-command-updates integration
 
@@ -178,11 +270,11 @@ kuro- command via OSC 51."
   (let ((kuro--initialized t)
         (processed nil))
     (cl-letf (((symbol-function 'kuro-core-poll-eval-commands)
-               (lambda (_id) '("(cd \"/tmp\")")))
+               (lambda (_id) '("cd /tmp")))
               ((symbol-function 'kuro--eval-osc51-command)
                (lambda (cmd) (push cmd processed) nil)))
       (kuro--poll-eval-command-updates)
-      (should (equal processed '("(cd \"/tmp\")"))))))
+      (should (equal processed '("cd /tmp"))))))
 
 (ert-deftest kuro-eval-poll-noop-when-no-commands ()
   "`kuro--poll-eval-command-updates' is a no-op when no commands are pending."
@@ -198,11 +290,11 @@ kuro- command via OSC 51."
   "`kuro--poll-eval-command-updates' processes all commands in order."
   (let ((processed nil))
     (cl-letf (((symbol-function 'kuro--poll-eval-commands)
-               (lambda () '("(cd \"/tmp\")" "(setenv \"K\" \"v\")")))
+               (lambda () '("cd /tmp" "setenv K v")))
               ((symbol-function 'kuro--eval-osc51-command)
                (lambda (cmd) (push cmd processed))))
       (kuro--poll-eval-command-updates)
-      (should (equal (reverse processed) '("(cd \"/tmp\")" "(setenv \"K\" \"v\")"))))))
+      (should (equal (reverse processed) '("cd /tmp" "setenv K v"))))))
 
 (provide 'kuro-eval-test)
 

@@ -40,7 +40,7 @@ capturing it in a new closure on every keypress."
   "Schedule a render cycle after `kuro-input-echo-delay' seconds.
 The small delay gives the PTY reader thread time to process the shell echo
 and deposit it in the channel before we poll for dirty lines and cursor
-updates. Cancels any previously pending timer so rapid typing coalesces
+updates.  Cancels any previously pending timer so rapid typing coalesces
 into a single render call."
   (when (timerp kuro--pending-render-timer)
     (cancel-timer kuro--pending-render-timer))

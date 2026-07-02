@@ -45,18 +45,14 @@ fn test_stamp_hyperlink_via_ascii_flush_stamps_each_cell() {
     term.advance(b"hello"); // 5 chars, cells 0-4 on row 0
     for col in 0..5_usize {
         assert_eq!(
-            term.screen
-                .get_cell(0, col)
-                .and_then(|c| c.hyperlink_id()),
+            term.screen.get_cell(0, col).and_then(|c| c.hyperlink_id()),
             Some("https://abc.test"),
             "col {col} must carry the hyperlink URI"
         );
     }
     // Cell 5 (not printed) must have no hyperlink.
     assert_eq!(
-        term.screen
-            .get_cell(0, 5)
-            .and_then(|c| c.hyperlink_id()),
+        term.screen.get_cell(0, 5).and_then(|c| c.hyperlink_id()),
         None,
         "col 5 (not printed) must not have a hyperlink"
     );
@@ -72,12 +68,10 @@ fn test_stamp_hyperlink_spans_row_boundary() {
     term.advance(b"\x1b]8;;https://row-boundary.test\x07");
     // Print 12 characters: 10 fill row 0, 2 overflow to row 1.
     term.advance(b"0123456789AB"); // row 0: 0-9, row 1: A B
-    // Row 1 cells 0 and 1 must have the hyperlink.
+                                   // Row 1 cells 0 and 1 must have the hyperlink.
     for col in 0..2_usize {
         assert_eq!(
-            term.screen
-                .get_cell(1, col)
-                .and_then(|c| c.hyperlink_id()),
+            term.screen.get_cell(1, col).and_then(|c| c.hyperlink_id()),
             Some("https://row-boundary.test"),
             "row 1 col {col} must carry the hyperlink URI"
         );
@@ -85,9 +79,7 @@ fn test_stamp_hyperlink_spans_row_boundary() {
     // Row 0 cells 0-9 must also have the hyperlink.
     for col in 0..10_usize {
         assert_eq!(
-            term.screen
-                .get_cell(0, col)
-                .and_then(|c| c.hyperlink_id()),
+            term.screen.get_cell(0, col).and_then(|c| c.hyperlink_id()),
             Some("https://row-boundary.test"),
             "row 0 col {col} must carry the hyperlink URI"
         );
@@ -106,9 +98,7 @@ fn test_stamp_hyperlink_stops_after_close() {
     // "OFF" cells must have no hyperlink.
     for col in 2..5_usize {
         assert_eq!(
-            term.screen
-                .get_cell(0, col)
-                .and_then(|c| c.hyperlink_id()),
+            term.screen.get_cell(0, col).and_then(|c| c.hyperlink_id()),
             None,
             "col {col} must not have a hyperlink after OSC 8 close"
         );

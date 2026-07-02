@@ -549,7 +549,11 @@ fn test_osc66_stamp_after_pending_wrap_lands_on_next_row() {
         term.advance(b"x");
     }
     let c = *term.screen.cursor();
-    assert_eq!((c.row, c.col), (0, 79), "precondition: cursor parked at (0,79)");
+    assert_eq!(
+        (c.row, c.col),
+        (0, 79),
+        "precondition: cursor parked at (0,79)"
+    );
     assert!(c.pending_wrap, "precondition: pending_wrap must be set");
 
     term.advance(b"\x1b]66;s=2;AB\x1b\\");
@@ -663,7 +667,10 @@ fn test_osc66_oversized_payload_capped_no_panic() {
     assert_eq!(term.screen.get_cell(0, 0).unwrap().char(), 'z');
     assert_eq!(cell_text_size(&term, 0, 0).map(|t| t.scale), Some(2));
     // Terminal must remain in a valid state (cursor within bounds).
-    assert!(term.screen.cursor().row < 24, "terminal stays valid after cap");
+    assert!(
+        term.screen.cursor().row < 24,
+        "terminal stays valid after cap"
+    );
 }
 
 /// INTENT (adversarial): multibyte UTF-8 at the 4096-byte cap boundary must be
@@ -779,13 +786,20 @@ fn test_osc1337_set_user_var_malformed_ignored() {
 #[test]
 fn test_osc1337_remote_host_stored() {
     let mut core = crate::TerminalCore::new(24, 80);
-    handle_osc(&mut core, &[b"1337", b"RemoteHost=alice@server.example"], false);
+    handle_osc(
+        &mut core,
+        &[b"1337", b"RemoteHost=alice@server.example"],
+        false,
+    );
     assert_eq!(
         core.osc_data.remote_host.as_deref(),
         Some("alice@server.example"),
         "RemoteHost must be stored"
     );
-    assert!(core.osc_data.remote_host_dirty, "remote_host_dirty must be set");
+    assert!(
+        core.osc_data.remote_host_dirty,
+        "remote_host_dirty must be set"
+    );
 }
 
 /// INTENT: an unknown OSC 1337 subcommand is silently ignored (no state change).
@@ -839,7 +853,11 @@ fn test_osc9_4_state_variants_and_clamp() {
     assert_eq!(core.osc_data.progress, ProgressState::Indeterminate);
 
     handle_osc(&mut core, &[b"9", b"4", b"4", b"999"], false);
-    assert_eq!(core.osc_data.progress, ProgressState::Warning(100), "percent clamps to 100");
+    assert_eq!(
+        core.osc_data.progress,
+        ProgressState::Warning(100),
+        "percent clamps to 100"
+    );
 
     // Out-of-range state 7: ignored, progress unchanged.
     handle_osc(&mut core, &[b"9", b"4", b"7", b"5"], false);

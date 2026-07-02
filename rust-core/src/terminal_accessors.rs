@@ -107,12 +107,7 @@ impl TerminalCore {
         self.screen
             .get_scrollback_lines(max_lines)
             .into_iter()
-            .map(|line| {
-                line.cells
-                    .iter()
-                    .map(types::cell::Cell::char)
-                    .collect()
-            })
+            .map(|line| line.cells.iter().map(types::cell::Cell::char).collect())
             .collect()
     }
 

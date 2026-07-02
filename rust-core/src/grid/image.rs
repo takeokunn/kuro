@@ -67,12 +67,7 @@ pub struct ImageData {
 impl ImageData {
     /// Construct a still image (no animation frames yet).
     #[must_use]
-    pub fn new(
-        pixels: Vec<u8>,
-        format: ImageFormat,
-        pixel_width: u32,
-        pixel_height: u32,
-    ) -> Self {
+    pub fn new(pixels: Vec<u8>, format: ImageFormat, pixel_width: u32, pixel_height: u32) -> Self {
         Self {
             pixels,
             format,
@@ -86,12 +81,7 @@ impl ImageData {
     /// Byte count of raw pixel data (base image + all animation frames)
     #[must_use]
     pub fn byte_count(&self) -> usize {
-        self.pixels.len()
-            + self
-                .frames
-                .iter()
-                .map(|f| f.pixels.len())
-                .sum::<usize>()
+        self.pixels.len() + self.frames.iter().map(|f| f.pixels.len()).sum::<usize>()
     }
 
     /// Total pixels in one full canvas at the base image dimensions.
@@ -452,13 +442,13 @@ impl Default for GraphicsStore {
 impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
-    fn rewrite_placements<F>(&mut self, mut f: F)
+    fn rewrite_placements<F>(&mut self, f: F)
     where
         F: FnMut(ImagePlacement) -> Option<ImagePlacement>,
     {
         self.placements = std::mem::take(&mut self.placements)
             .into_iter()
-            .filter_map(|placement| f(placement))
+            .filter_map(f)
             .collect();
     }
 
@@ -614,7 +604,9 @@ impl GraphicsStore {
     /// Display gap (ms) of frame `idx` for `image_id` (0 if absent).
     #[must_use]
     pub fn frame_gap_ms(&self, image_id: u32, idx: usize) -> u32 {
-        self.images.get(&image_id).map_or(0, |d| d.frame_gap_ms(idx))
+        self.images
+            .get(&image_id)
+            .map_or(0, |d| d.frame_gap_ms(idx))
     }
 
     /// Return `(playing, current_frame_1based, loop_count_or_0)` for `image_id`.

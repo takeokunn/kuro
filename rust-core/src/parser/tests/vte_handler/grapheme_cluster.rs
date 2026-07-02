@@ -40,7 +40,10 @@ fn dec_2027_set_and_reset_toggles_flag() {
         "mode 2027 must default OFF so existing behavior is unchanged"
     );
     term.advance(b"\x1b[?2027h");
-    assert!(term.dec_modes.grapheme_clustering, "?2027h must set the flag");
+    assert!(
+        term.dec_modes.grapheme_clustering,
+        "?2027h must set the flag"
+    );
     term.advance(b"\x1b[?2027l");
     assert!(
         !term.dec_modes.grapheme_clustering,
@@ -95,7 +98,11 @@ fn emoji_plus_vs16_is_one_cluster() {
 
     let cell = term.screen.get_cell(0, 0).unwrap();
     let cluster: Vec<char> = cell.grapheme().chars().collect();
-    assert_eq!(cluster, vec![HEART, VS16], "VS16 must join the heart's cell");
+    assert_eq!(
+        cluster,
+        vec![HEART, VS16],
+        "VS16 must join the heart's cell"
+    );
     assert_cursor!(term, row 0, col 1);
 }
 
@@ -110,7 +117,11 @@ fn jp_flag_is_one_width2_cluster() {
 
     let cell = term.screen.get_cell(0, 0).unwrap();
     let cluster: Vec<char> = cell.grapheme().chars().collect();
-    assert_eq!(cluster, vec![RI_J, RI_P], "both RIs must form one flag cell");
+    assert_eq!(
+        cluster,
+        vec![RI_J, RI_P],
+        "both RIs must form one flag cell"
+    );
     assert_eq!(
         cell.width,
         CellWidth::Full,
@@ -144,8 +155,20 @@ fn four_regional_indicators_form_two_flags() {
     let mut term = term_2027_on();
     term.advance(&bytes(&[RI_J, RI_P, RI_J, RI_P]));
 
-    let first: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
-    let second: Vec<char> = term.screen.get_cell(0, 2).unwrap().grapheme().chars().collect();
+    let first: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
+    let second: Vec<char> = term
+        .screen
+        .get_cell(0, 2)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(first, vec![RI_J, RI_P], "cols 0-1 = first flag");
     assert_eq!(second, vec![RI_J, RI_P], "cols 2-3 = second flag");
     assert_cursor!(term, row 0, col 4);
@@ -181,7 +204,13 @@ fn zwj_then_newline_then_char_no_cross_line_join() {
     term.advance(&bytes(&[WOMAN]));
 
     // The man emoji + ZWJ remain on row 0, unjoined by the next-line glyph.
-    let row0: Vec<char> = term.screen.get_cell(0, 0).unwrap().grapheme().chars().collect();
+    let row0: Vec<char> = term
+        .screen
+        .get_cell(0, 0)
+        .unwrap()
+        .grapheme()
+        .chars()
+        .collect();
     assert_eq!(row0, vec![MAN, ZWJ]);
     // WOMAN prints fresh on row 1, NOT appended to the row-0 cluster.
     assert_eq!(term.screen.get_cell(1, 0).unwrap().char(), WOMAN);

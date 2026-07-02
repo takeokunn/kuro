@@ -143,7 +143,7 @@ The average is computed in O(1) via the running sum."
         (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))
 
 (defsubst kuro--frame-budget-set-ratio (ratio)
-  "Update `kuro--frame-budget-ratio' and its derived absolute seconds."
+  "Update `kuro--frame-budget-ratio' with RATIO and its derived absolute seconds."
   (setq kuro--frame-budget-ratio ratio)
   (kuro--frame-budget-refresh-absolute-seconds))
 

@@ -5,7 +5,7 @@
 //! These tests write real files into [`std::env::temp_dir`] and clean them up.
 //! Each test uses a unique filename (PID + counter) to avoid cross-test races.
 
-use crate::parser::kitty::{process_apc_payload, ImageFormat, KittyCommand};
+use crate::parser::kitty::{process_apc_payload, KittyCommand};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -17,6 +17,13 @@ fn unique_temp_path(stem: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     std::env::temp_dir().join(format!("kuro-kitty-{stem}-{pid}-{n}"))
+}
+
+/// Build a unique temp path using the legacy kitty temp-media marker.
+fn unique_marked_temp_path() -> PathBuf {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("tty-graphics-protocol-{pid}-{n}"))
 }
 
 /// Run a single (non-chunked) APC payload and return the resulting command.
@@ -38,62 +45,55 @@ impl Drop for TempFileGuard {
     }
 }
 
-/// INTENT: t=f reads a real regular file written by the test and stores the
-/// image with the exact bytes/format/dimensions from the referenced file.
-#[test]
-fn test_t_f_reads_regular_file_and_stores_image() {
-    let path = unique_temp_path("regular");
-    // 2x1 RGBA = 8 bytes.
-    let pixels = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
-    std::fs::write(&path, &pixels).expect("write temp file");
-    let _guard = TempFileGuard(path.clone());
-
-    let payload = format!("a=t,t=f,f=32,s=2,v=1;{}", b64(path.to_str().unwrap()));
-    let cmd = run_once(payload.as_bytes());
-
-    match cmd {
-        Some(KittyCommand::Transmit {
-            pixels: got,
-            format,
-            pixel_width,
-            pixel_height,
-            ..
-        }) => {
-            assert_eq!(got, pixels, "file bytes must reach the stored image verbatim");
-            assert_eq!(format, ImageFormat::Rgba);
-            assert_eq!(pixel_width, 2);
-            assert_eq!(pixel_height, 1);
-        }
-        other => panic!("expected Transmit, got {other:?}"),
+/// RAII guard that removes a directory tree on drop.
+struct TempDirGuard(PathBuf);
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
-/// INTENT: t=f honors S=/O= partial reads — O skips leading bytes, S limits
-/// the count, so the stored image is the requested window of the file.
+/// INTENT: t=f is a host-file disclosure primitive and is refused outright,
+/// even for a small regular file owned by the test.
 #[test]
-fn test_t_f_partial_read_with_size_and_offset() {
-    let path = unique_temp_path("partial");
-    // 4 pixels of RGBA = 16 bytes; we want pixel index 1..3 (8 bytes) back.
+fn test_t_f_refuses_regular_file_path() {
+    let path = unique_temp_path("regular");
+    std::fs::write(path.as_path(), [1u8, 2, 3, 4]).expect("write temp file");
+    let _guard = TempFileGuard(path.clone());
+
+    let payload = format!("a=t,t=f,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "t=f must never read host filesystem paths"
+    );
+    assert!(Path::new(&path).exists(), "refused t=f file is untouched");
+}
+
+/// INTENT: t=t is refused even for a marked temp-media file with S=/O=.
+/// Kuro does not decode or read PTY-provided host path references.
+#[test]
+fn test_t_t_partial_read_reference_refused_and_preserved() {
+    let path = unique_marked_temp_path();
+    // 4 pixels of RGBA = 16 bytes; legacy implementations could window this.
     let mut pixels = Vec::new();
     for i in 0u8..16 {
         pixels.push(i);
     }
-    std::fs::write(&path, &pixels).expect("write temp file");
+    std::fs::write(path.as_path(), &pixels).expect("write temp file");
     let _guard = TempFileGuard(path.clone());
 
-    // O=4 (skip first pixel), S=8 (read two pixels) -> bytes 4..12.
+    // O=4 and S=8 would window legacy file reads, but no read is attempted.
     let payload = format!(
-        "a=t,t=f,f=32,s=2,v=1,O=4,S=8;{}",
+        "a=t,t=t,f=32,s=2,v=1,O=4,S=8;{}",
         b64(path.to_str().unwrap())
     );
     let cmd = run_once(payload.as_bytes());
 
-    match cmd {
-        Some(KittyCommand::Transmit { pixels: got, .. }) => {
-            assert_eq!(got, &pixels[4..12], "S/O must window the file bytes");
-        }
-        other => panic!("expected Transmit, got {other:?}"),
-    }
+    assert!(cmd.is_none(), "t=t host path reference must be refused");
+    assert!(
+        Path::new(&path).exists(),
+        "refused t=t temp file must be preserved"
+    );
 }
 
 /// INTENT: t=f refuses /dev/null (a character device, not a regular file).
@@ -118,7 +118,7 @@ fn test_t_f_refuses_proc_self_maps() {
     );
 }
 
-/// INTENT: t=f refuses a FIFO (named pipe) — only regular files are allowed.
+/// INTENT: t=f refuses a FIFO (named pipe). Host paths are never opened.
 #[test]
 #[cfg(unix)]
 fn test_t_f_refuses_fifo() {
@@ -190,7 +190,7 @@ fn test_t_f_refuses_relative_path_traversal() {
     let payload = format!("a=t,t=f,f=32,s=1,v=1;{}", b64("../../../../etc/passwd"));
     assert!(
         run_once(payload.as_bytes()).is_none(),
-        "relative/traversal path must be refused (absolute paths only)"
+        "relative/traversal path must be refused"
     );
     // Also a bare relative filename.
     let payload2 = format!("a=t,t=f,f=32,s=1,v=1;{}", b64("etc/hosts"));
@@ -200,112 +200,106 @@ fn test_t_f_refuses_relative_path_traversal() {
     );
 }
 
-/// INTENT (security regression): t=t must delete ONLY tty-graphics-protocol
-/// temp files — an arbitrary regular file in the temp dir is read but NEVER
-/// deleted, even though the deletion machinery runs for every t=t.
+/// INTENT (security regression): t=t refuses arbitrary temp files. A file in
+/// temp without the legacy marker is neither read nor deleted.
 #[test]
-fn test_t_t_never_deletes_arbitrary_temp_file() {
+fn test_t_t_refuses_arbitrary_temp_file_and_preserves() {
     // A normal file in the temp dir WITHOUT the marker substring.
     let path = unique_temp_path("important-user-data");
-    std::fs::write(&path, b"\x00\x01\x02\x03").expect("write temp file");
+    std::fs::write(path.as_path(), b"\x00\x01\x02\x03").expect("write temp file");
     let _guard = TempFileGuard(path.clone());
 
     let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
-    let _ = run_once(payload.as_bytes());
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "unmarked temp file must not be read"
+    );
     assert!(
         Path::new(&path).exists(),
-        "an arbitrary (unmarked) temp file must survive t=t deletion"
+        "an arbitrary unmarked temp file must survive t=t handling"
     );
 }
 
-/// INTENT (security regression): t=t must not delete a marked file that lives
-/// OUTSIDE a known temp directory — both conditions (marker AND temp dir) are
-/// required before deletion is permitted.
+/// INTENT (security regression): t=t refuses and preserves a marked file that
+/// lives outside a known temp directory.
 #[test]
 #[cfg(unix)]
-fn test_t_t_marked_file_outside_tempdir_not_deleted() {
-    // A home-rooted path containing the marker substring but NOT in /tmp etc.
-    // We synthesize it under temp_dir's PARENT so it has the marker but lives
-    // outside the recognized temp roots. To be robust across platforms we build
-    // an absolute path under the current dir's canonical root that still is not
-    // a temp dir. Use the test crate's own target-adjacent dir.
+fn test_t_t_refuses_marked_file_outside_tempdir_and_preserves() {
+    // A current-dir path containing the marker substring but NOT in /tmp etc.
     let base = std::env::current_dir().expect("cwd");
     let path = base.join(format!(
         "tty-graphics-protocol-outside-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
-    if std::fs::write(&path, b"keepme").is_err() {
+    if std::fs::write(path.as_path(), b"keepme").is_err() {
         return; // not writable here; skip gracefully
     }
     let _guard = TempFileGuard(path.clone());
 
     let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
-    let _ = run_once(payload.as_bytes());
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "marked file outside a temp dir must not be read"
+    );
     assert!(
         Path::new(&path).exists(),
         "marked file outside a temp dir must NOT be deleted"
     );
 }
 
-/// INTENT: an oversized partial-read window cannot exceed the cap — even with a
-/// legitimate small file, a malformed S= larger than the file is harmless (it
-/// just truncates to what exists).
+/// INTENT: S= cannot force a host-file read. Even a marked temp-media path with
+/// an oversized read window is refused and preserved.
 #[test]
-fn test_t_f_size_larger_than_file_is_harmless() {
-    let path = unique_temp_path("smallfile");
-    std::fs::write(&path, &[1u8, 2, 3, 4]).expect("write");
+fn test_t_t_size_larger_than_file_refused_and_preserved() {
+    let path = unique_marked_temp_path();
+    std::fs::write(path.as_path(), [1u8, 2, 3, 4]).expect("write");
     let _guard = TempFileGuard(path.clone());
-    // S=999999 far exceeds the 4-byte file; result is just the 4 bytes.
+    // S=999999 far exceeds the 4-byte file; no read is attempted.
     let payload = format!(
-        "a=t,t=f,f=32,s=1,v=1,S=999999;{}",
+        "a=t,t=t,f=32,s=1,v=1,S=999999;{}",
         b64(path.to_str().unwrap())
     );
-    match run_once(payload.as_bytes()) {
-        Some(KittyCommand::Transmit { pixels, .. }) => {
-            assert_eq!(pixels, vec![1, 2, 3, 4], "S= beyond EOF truncates to file len");
-        }
-        other => panic!("expected Transmit, got {other:?}"),
-    }
-}
-
-/// INTENT: t=t deletes the file after reading ONLY when its name contains the
-/// `tty-graphics-protocol` marker and it lives in a known temp dir.
-#[test]
-fn test_t_t_deletes_marked_temp_file() {
-    // Build a path that contains the marker AND lives under temp_dir.
-    let path = std::env::temp_dir().join(format!(
-        "tty-graphics-protocol-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let pixels = vec![10u8, 20, 30, 40];
-    std::fs::write(&path, &pixels).expect("write temp file");
-    let _guard = TempFileGuard(path.clone());
-
-    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
-    let cmd = run_once(payload.as_bytes());
-
-    assert!(cmd.is_some(), "marked temp file must still produce an image");
     assert!(
-        !Path::new(&path).exists(),
-        "marked tty-graphics-protocol temp file must be deleted after read"
+        run_once(payload.as_bytes()).is_none(),
+        "t=t host path reference must be refused"
+    );
+    assert!(
+        Path::new(&path).exists(),
+        "refused t=t temp file must be preserved"
     );
 }
 
-/// INTENT: t=t does NOT delete a file whose name lacks the marker, even though
-/// it is read successfully (narrow deletion rule).
+/// INTENT: t=t refuses even a marked file in a known temp dir. No host path is
+/// read and no file is deleted.
 #[test]
-fn test_t_t_does_not_delete_unmarked_file() {
-    let path = unique_temp_path("unmarked");
-    let pixels = vec![9u8, 8, 7, 6];
-    std::fs::write(&path, &pixels).expect("write temp file");
+fn test_t_t_marked_temp_file_refused_and_preserved() {
+    let path = unique_marked_temp_path();
+    let pixels = vec![10u8, 20, 30, 40];
+    std::fs::write(path.as_path(), &pixels).expect("write temp file");
     let _guard = TempFileGuard(path.clone());
 
     let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
     let cmd = run_once(payload.as_bytes());
 
-    assert!(cmd.is_some(), "unmarked temp file is still read");
+    assert!(cmd.is_none(), "t=t host path reference must be refused");
+    assert!(
+        Path::new(&path).exists(),
+        "marked tty-graphics-protocol temp file must be preserved"
+    );
+}
+
+/// INTENT: t=t refuses and preserves a file whose name lacks the legacy marker.
+#[test]
+fn test_t_t_refuses_unmarked_file_and_preserves() {
+    let path = unique_temp_path("unmarked");
+    std::fs::write(path.as_path(), [9u8, 8, 7, 6]).expect("write temp file");
+    let _guard = TempFileGuard(path.clone());
+
+    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
+    let cmd = run_once(payload.as_bytes());
+
+    assert!(cmd.is_none(), "unmarked temp file is refused");
     assert!(
         Path::new(&path).exists(),
         "unmarked temp file must NOT be deleted"
@@ -315,22 +309,124 @@ fn test_t_t_does_not_delete_unmarked_file() {
 /// INTENT: an oversized file (exceeding the APC byte cap) is rejected without
 /// reading it into a giant buffer.
 #[test]
-fn test_t_f_oversized_file_rejected() {
+fn test_t_t_oversized_file_rejected_and_preserved() {
     use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
-    let path = unique_temp_path("oversized");
+    let path = unique_marked_temp_path();
     // One byte over the cap.
     let big = vec![0u8; MAX_APC_PAYLOAD_BYTES + 1];
-    std::fs::write(&path, &big).expect("write temp file");
+    std::fs::write(path.as_path(), &big).expect("write temp file");
     let _guard = TempFileGuard(path.clone());
 
-    let payload = format!("a=t,t=f,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
+    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
     assert!(
         run_once(payload.as_bytes()).is_none(),
-        "file exceeding the size cap must be rejected"
+        "temp file exceeding the size cap must be rejected"
+    );
+    assert!(
+        Path::new(&path).exists(),
+        "oversized temp file was not consumed and must be preserved"
     );
 }
 
-/// INTENT: a missing path is ignored (no panic, no command).
+/// INTENT (security regression): paths that resemble temp roots are still
+/// refused and preserved.
+#[test]
+fn test_t_t_refuses_temp_prefix_confusion_path_and_preserves() {
+    let temp_dir = std::env::temp_dir();
+    let Some(parent) = temp_dir.parent() else {
+        return;
+    };
+    let Some(temp_name) = temp_dir.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let sibling = parent.join(format!(
+        "{temp_name}-evil-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    if std::fs::create_dir(&sibling).is_err() {
+        return;
+    }
+    let _dir_guard = TempDirGuard(sibling.clone());
+    let path = sibling.join(format!(
+        "tty-graphics-protocol-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(path.as_path(), b"\x00\x01\x02\x03").expect("write prefix-confusion file");
+    let _guard = TempFileGuard(path.clone());
+
+    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "sibling path that only string-prefixes a temp root must be refused"
+    );
+    assert!(
+        Path::new(&path).exists(),
+        "refused prefix-confusion file must not be deleted"
+    );
+}
+
+/// INTENT (security regression): even a marked temp path is refused when the
+/// final component is a symlink.
+#[test]
+#[cfg(unix)]
+fn test_t_t_refuses_marked_symlink() {
+    let target = unique_temp_path("symlink-target");
+    std::fs::write(target.as_path(), b"\x01\x02\x03\x04").expect("write symlink target");
+    let _target_guard = TempFileGuard(target.clone());
+
+    let link = unique_marked_temp_path();
+    if std::os::unix::fs::symlink(&target, &link).is_err() {
+        return;
+    }
+    let _link_guard = TempFileGuard(link.clone());
+
+    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(link.to_str().unwrap()));
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "marked temp symlink must be refused"
+    );
+    assert!(Path::new(&link).exists(), "refused symlink must survive");
+    assert!(Path::new(&target).exists(), "symlink target must survive");
+}
+
+/// INTENT (security regression): t=t refuses marked files reached through a
+/// symlinked ancestor directory.
+#[test]
+#[cfg(unix)]
+fn test_t_t_refuses_symlinked_temp_ancestor() {
+    let outside = unique_temp_path("ancestor-target-dir");
+    if std::fs::create_dir(&outside).is_err() {
+        return;
+    }
+    let _outside_guard = TempDirGuard(outside.clone());
+
+    let link = unique_temp_path("ancestor-link");
+    if std::os::unix::fs::symlink(&outside, &link).is_err() {
+        return;
+    }
+    let _link_guard = TempFileGuard(link.clone());
+
+    let path = link.join(format!(
+        "tty-graphics-protocol-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(path.as_path(), b"\x05\x06\x07\x08").expect("write through ancestor symlink");
+
+    let payload = format!("a=t,t=t,f=32,s=1,v=1;{}", b64(path.to_str().unwrap()));
+    assert!(
+        run_once(payload.as_bytes()).is_none(),
+        "marked file under a symlinked temp ancestor must be refused"
+    );
+    assert!(
+        Path::new(&path).exists(),
+        "refused ancestor-symlink target file must survive"
+    );
+}
+
+/// INTENT: a t=f reference to a missing path is ignored (no panic, no command).
 #[test]
 fn test_t_f_missing_path_ignored() {
     let path = unique_temp_path("does-not-exist");
@@ -343,7 +439,7 @@ fn test_t_f_missing_path_ignored() {
     );
 }
 
-/// INTENT: a malformed (non-base64) media payload is ignored.
+/// INTENT: a malformed (non-base64) media reference is ignored.
 #[test]
 fn test_t_f_malformed_base64_ignored() {
     // '!' is not a base64 alphabet char.
@@ -354,7 +450,7 @@ fn test_t_f_malformed_base64_ignored() {
     );
 }
 
-/// INTENT: an empty media payload (no path) is ignored.
+/// INTENT: an empty media reference is ignored.
 #[test]
 fn test_t_f_empty_payload_ignored() {
     let payload = b"a=t,t=f,f=32,s=1,v=1;";
@@ -364,14 +460,11 @@ fn test_t_f_empty_payload_ignored() {
     );
 }
 
-/// INTENT: t=s shared-memory reading round-trips real bytes through shm_open.
-/// Creates a POSIX shm object, writes image bytes, then transmits via t=s.
+/// INTENT: t=s is refused even when the named POSIX shm object exists.
 #[test]
 #[cfg(unix)]
-fn test_t_s_reads_shared_memory() {
+fn test_t_s_refuses_shared_memory_reference() {
     use std::ffi::CString;
-    use std::io::Write as _;
-    use std::os::unix::io::FromRawFd as _;
 
     let name = format!(
         "/kuro-kitty-shm-{}-{}",
@@ -392,17 +485,13 @@ fn test_t_s_reads_shared_memory() {
         // shm unsupported (e.g. sandbox); skip gracefully.
         return;
     }
-
-    let pixels = vec![100u8, 101, 102, 103];
-    {
-        // SAFETY: fd is freshly opened and owned here; File closes it on drop.
-        let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-        if f.set_len(pixels.len() as u64).is_err() || f.write_all(&pixels).is_err() {
-            unsafe {
-                libc::shm_unlink(cname.as_ptr());
-            }
-            return;
+    // SAFETY: fd was returned by shm_open and is owned here.
+    if unsafe { libc::close(fd) } != 0 {
+        // SAFETY: cname is valid; unlink the object we created before skipping.
+        unsafe {
+            libc::shm_unlink(cname.as_ptr());
         }
+        return;
     }
 
     let payload = format!("a=t,t=s,f=32,s=1,v=1;{}", b64(&name));
@@ -414,10 +503,8 @@ fn test_t_s_reads_shared_memory() {
         libc::shm_unlink(cname.as_ptr());
     }
 
-    match cmd {
-        Some(KittyCommand::Transmit { pixels: got, .. }) => {
-            assert_eq!(got, pixels, "shm bytes must reach the stored image");
-        }
-        other => panic!("expected Transmit from shm, got {other:?}"),
-    }
+    assert!(
+        cmd.is_none(),
+        "t=s must not read a host shared-memory object named by the PTY"
+    );
 }

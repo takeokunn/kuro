@@ -47,10 +47,6 @@ fn emit_error<'e>(env: &'e Env, e: &KuroError) -> EmacsResult<Value<'e>> {
 
 define_poll_updates_handler!(
     /// Poll for terminal updates and return dirty lines
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no is a terminal row index (≤ 65535); usize→i64 never wraps"
-    )]
     kuro_core_poll_updates,
     "panic in poll_updates",
     poll_dirty_lines,
@@ -80,15 +76,20 @@ define_poll_updates_handler!(
     /// dirty set — they will surface as dirty lines in the *next* render cycle.
     /// This is correct behaviour: the worst-case additional latency is bounded
     /// to `1 / frame_rate` (typically ≤ 16 ms at 60 fps), which is imperceptible.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_with_faces,
     "panic in poll_updates_with_faces",
     poll_encoded_lines,
     |env, lines| {
-        build_emacs_list_from_rev(env, lines, build_emacs_poll_updates_with_faces_line)
+        if lines.is_empty() {
+            return false.into_lisp(env);
+        }
+        build_emacs_vector_from_iter(
+            env,
+            lines.len(),
+            false.into_lisp(env)?,
+            lines,
+            build_emacs_poll_updates_with_faces_line,
+        )
     }
 );
 
@@ -104,10 +105,6 @@ define_poll_updates_handler!(
     /// produces, at the cost of a slightly more complex Elisp decoder.
     ///
     /// Returns `nil` (`false`) when no dirty lines are present.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_binary,
     "panic in poll_updates_binary",
     poll_encoded_lines,
@@ -149,10 +146,6 @@ define_poll_updates_handler!(
     ///   strings are provided via `TEXT-STRINGS` instead).
     ///
     /// Returns `nil` (`false`) when no dirty lines are present.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_binary_with_strings,
     "panic in poll_updates_binary_with_strings",
     poll_binary_direct,

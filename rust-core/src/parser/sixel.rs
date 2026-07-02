@@ -97,10 +97,6 @@ impl SixelDecoder {
     }
 
     #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "register index is bounds-checked against MAX_COLOR_REGISTERS before the u16 cast"
-    )]
     /// Create a new sixel decoder, optionally seeding the palette from terminal OSC 4 overrides.
     ///
     /// `osc4_palette` is the terminal's 256-entry OSC 4 palette; entries with `Some([r,g,b])`
@@ -276,14 +272,6 @@ impl SixelDecoder {
         self.handle_normal(byte);
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "register index: DCS params are u32 but we cap at MAX_COLOR_REGISTERS (1024); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255"
-    )]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation"
-    )]
     fn apply_color_command(&mut self) {
         let Some(reg) = Self::sixel_color_register(&self.params) else {
             return;

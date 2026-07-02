@@ -117,84 +117,61 @@
 
 (kuro-input-test--deftest-cases kuro-input-test--navigation-key-cases)
 
-;;; Group 6: kuro--sanitize-paste
+;;; Group 6: Paste dispatch boundary
 
-(ert-deftest kuro-input-sanitize-paste-removes-esc ()
-  "kuro--sanitize-paste strips ESC (0x1B) bytes."
-  (let ((esc (string #x1b)))
-    (should (equal (kuro--sanitize-paste (concat "hello" esc "world")) "helloworld"))))
+(ert-deftest kuro-input-send-paste-or-raw-rejects-non-string ()
+  "`kuro--send-paste-or-raw' rejects non-string values before FFI dispatch."
+  (should-error (kuro--send-paste-or-raw 42) :type 'wrong-type-argument))
 
-(ert-deftest kuro-input-sanitize-paste-clean-string-unchanged ()
-  "kuro--sanitize-paste leaves strings without ESC bytes unchanged."
-  (should (equal (kuro--sanitize-paste "hello world") "hello world")))
+(ert-deftest kuro-input-send-paste-or-raw-passes-esc-verbatim ()
+  "`kuro--send-paste-or-raw' delegates escape-containing text to Rust verbatim."
+  (let ((sent nil)
+        (esc (string #x1b)))
+    (cl-letf (((symbol-function 'kuro--send-paste)
+               (lambda (s) (push s sent))))
+      (kuro--send-paste-or-raw (concat "hello" esc "world")))
+    (should (equal sent (list (concat "hello" esc "world"))))))
 
-(ert-deftest kuro-input-sanitize-paste-multiple-escapes ()
-  "kuro--sanitize-paste removes all ESC bytes."
-  (let ((esc (string #x1b)))
-    (should (equal (kuro--sanitize-paste (concat esc "a" esc "b" esc "c")) "abc"))))
+(ert-deftest kuro-input-send-paste-or-raw-ignores-cached-bracketed-mode ()
+  "`kuro--send-paste-or-raw' does not branch on the render-cycle DEC 2004 cache."
+  (let ((sent nil)
+        (kuro--bracketed-paste-mode t))
+    (cl-letf (((symbol-function 'kuro--send-paste)
+               (lambda (s) (push s sent))))
+      (kuro--send-paste-or-raw "pasted text"))
+    (should (equal sent '("pasted text")))))
 
-(ert-deftest kuro-input-sanitize-paste-empty-string ()
-  "kuro--sanitize-paste handles empty strings."
-  (should (equal (kuro--sanitize-paste "") "")))
+;;; Group 7: kuro--yank paste dispatch
 
-;;; Group 7: kuro--yank (bracketed paste mode)
-
-(ert-deftest kuro-input-yank-plain-without-bracketed-paste ()
-  "kuro--yank sends text directly when bracketed paste mode is off."
+(ert-deftest kuro-input-yank-sends-kill-ring-through-paste-api ()
+  "`kuro--yank' sends kill-ring text through `kuro--send-paste'."
   (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode nil)
-        (kuro--initialized t))
+        (sent nil)
+        (render-called nil))
     (with-temp-buffer
       (kill-new "clipboard text")
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (equal sent '("clipboard text")))))))
+      (cl-letf (((symbol-function 'kuro--send-paste)
+                 (lambda (s) (push s sent)))
+                ((symbol-function 'kuro--schedule-immediate-render)
+                 (lambda () (setq render-called t))))
+        (kuro--yank))
+      (should (equal sent '("clipboard text")))
+      (should render-called))))
 
-(ert-deftest kuro-input-yank-wraps-with-bracketed-paste ()
-  "kuro--yank wraps with ESC[200~ / ESC[201~ when bracketed paste mode is on."
+(ert-deftest kuro-input-yank-preserves-esc-for-rust-paste-boundary ()
+  "`kuro--yank' leaves escape-containing text to Rust paste sanitization."
   (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode t)
-        (kuro--initialized t))
-    (with-temp-buffer
-      (kill-new "pasted text")
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (= (length sent) 1))
-        (let ((payload (car sent)))
-          (should (string-prefix-p "\e[200~" payload))
-          (should (string-suffix-p "\e[201~" payload))
-          (should (string-match-p "pasted text" payload)))))))
-
-(ert-deftest kuro-input-yank-strips-esc-in-bracketed-paste ()
-  "kuro--yank sanitizes ESC bytes from clipboard content in bracketed paste mode.
-The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ remain."
-  (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode t)
-        (kuro--initialized t)
+        (sent nil)
         (esc (string #x1b)))
     (with-temp-buffer
-      ;; Clipboard: "evil" + ESC + "[201~injection"
       (kill-new (concat "evil" esc "[201~injection"))
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (= (length sent) 1))
-        (let ((payload (car sent)))
-          ;; The payload starts with the open bracket
-          (should (string-prefix-p (concat esc "[200~") payload))
-          ;; The payload ends with the close bracket
-          (should (string-suffix-p (concat esc "[201~") payload))
-          ;; The user content should NOT contain ESC (injection neutralized)
-          (let* ((open-len (length (concat esc "[200~")))
-                 (close-len (length (concat esc "[201~")))
-                 (content (substring payload open-len
-                                     (- (length payload) close-len))))
-            (should-not (string-match-p esc content))))))))
+      (let ((kuro--bracketed-paste-mode t))
+        (cl-letf (((symbol-function 'kuro--send-paste)
+                   (lambda (s) (push s sent)))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () nil)))
+          (kuro--yank)))
+      (should (equal sent (list (concat "evil" esc "[201~injection")))))))
 
 ;;; Group 8: Mouse encoding (kuro--encode-mouse)
 

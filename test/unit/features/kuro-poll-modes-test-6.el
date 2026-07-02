@@ -31,16 +31,16 @@ The payload and target are extracted and forwarded."
         (should (equal target "clipboard"))))))
 
 (ert-deftest kuro-poll-modes-handle-clipboard-actions-dispatches-query ()
-  "kuro--handle-clipboard-actions dispatches (query) to kuro--clipboard-query."
+  "kuro--handle-clipboard-actions dispatches a strict query to kuro--clipboard-query."
   (kuro-poll-test--with-buffer
     (let ((queried nil))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((query . nil))))
+                 (lambda () '((query nil "clipboard"))))
                 ((symbol-function 'kuro--clipboard-write) #'ignore)
                 ((symbol-function 'kuro--clipboard-query)
-                 (lambda () (setq queried t))))
+                 (lambda (target) (setq queried target))))
         (kuro--handle-clipboard-actions)
-        (should queried)))))
+        (should (equal queried "clipboard"))))))
 
 (ert-deftest kuro-poll-modes-handle-clipboard-actions-empty-queue-is-noop ()
   "kuro--handle-clipboard-actions does nothing when action queue is empty."
@@ -48,8 +48,8 @@ The payload and target are extracted and forwarded."
     (let ((write-called nil)
           (query-called nil))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions) (lambda () nil))
-                ((symbol-function 'kuro--clipboard-write) (lambda (_) (setq write-called t)))
-                ((symbol-function 'kuro--clipboard-query) (lambda () (setq query-called t))))
+                ((symbol-function 'kuro--clipboard-write) (lambda (&rest _) (setq write-called t)))
+                ((symbol-function 'kuro--clipboard-query) (lambda (&rest _) (setq query-called t))))
         (kuro--handle-clipboard-actions)
         (should-not write-called)
         (should-not query-called)))))
@@ -65,7 +65,7 @@ The payload and target are extracted and forwarded."
                 ((symbol-function 'kuro--clipboard-write)
                  (lambda (text &optional _target) (push text written-texts)))
                 ((symbol-function 'kuro--clipboard-query)
-                 (lambda () (cl-incf query-count))))
+                 (lambda (&optional _target) (cl-incf query-count))))
         (kuro--handle-clipboard-actions)
         (should (equal (reverse written-texts) '("a" "b")))
         (should (= query-count 1))))))
@@ -120,21 +120,24 @@ The payload and target are extracted and forwarded."
         (should (equal killed "to-clip"))
         (should-not primary-called)))))
 
-(ert-deftest kuro-poll-modes-clipboard-cut-buffer-routes-to-kill-new ()
-  "A write with a \"cut-buffer-N\" target is treated as clipboard (kill-new)."
+(ert-deftest kuro-poll-modes-clipboard-cut-buffer-is-rejected ()
+  "A write with a \"cut-buffer-N\" target is rejected."
   (kuro-poll-test--with-buffer
     (let ((killed nil)
+          (primary-called nil)
           (kuro-clipboard-policy 'allow))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
                  (lambda () '((write "cb" "cut-buffer-0"))))
                 ((symbol-function 'kill-new) (lambda (text) (setq killed text)))
-                ((symbol-function 'gui-set-selection) #'ignore)
+                ((symbol-function 'gui-set-selection)
+                 (lambda (_sel _text) (setq primary-called t)))
                 ((symbol-function 'message) #'ignore))
         (kuro--handle-clipboard-actions)
-        (should (equal killed "cb"))))))
+        (should-not killed)
+        (should-not primary-called)))))
 
-(ert-deftest kuro-poll-modes-clipboard-legacy-2-element-defaults-to-clipboard ()
-  "A legacy 2-element action (cons) defaults to the clipboard path (kill-new)."
+(ert-deftest kuro-poll-modes-clipboard-legacy-cons-is-rejected ()
+  "A legacy cons action is rejected."
   (kuro-poll-test--with-buffer
     (let ((killed nil)
           (primary-called nil)
@@ -146,34 +149,40 @@ The payload and target are extracted and forwarded."
                  (lambda (_sel _text) (setq primary-called t)))
                 ((symbol-function 'message) #'ignore))
         (kuro--handle-clipboard-actions)
-        (should (equal killed "legacy"))
+        (should-not killed)
         (should-not primary-called)))))
 
-(ert-deftest kuro-poll-modes-clipboard-legacy-2-element-list-defaults-to-clipboard ()
-  "A legacy 2-element list action (TAG PAYLOAD) defaults to the clipboard path."
+(ert-deftest kuro-poll-modes-clipboard-legacy-list-is-rejected ()
+  "A legacy 2-element list action (TAG PAYLOAD) is rejected."
   (kuro-poll-test--with-buffer
     (let ((killed nil)
+          (primary-called nil)
           (kuro-clipboard-policy 'allow))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
                  (lambda () '((write "legacy-list"))))
                 ((symbol-function 'kill-new) (lambda (text) (setq killed text)))
-                ((symbol-function 'gui-set-selection) #'ignore)
+                ((symbol-function 'gui-set-selection)
+                 (lambda (_sel _text) (setq primary-called t)))
                 ((symbol-function 'message) #'ignore))
         (kuro--handle-clipboard-actions)
-        (should (equal killed "legacy-list"))))))
+        (should-not killed)
+        (should-not primary-called)))))
 
-(ert-deftest kuro-poll-modes-clipboard-unknown-target-defaults-to-clipboard ()
-  "A write with an unknown target string falls back to the clipboard path."
+(ert-deftest kuro-poll-modes-clipboard-unknown-target-is-rejected ()
+  "A write with an unknown target string is rejected."
   (kuro-poll-test--with-buffer
     (let ((killed nil)
+          (primary-called nil)
           (kuro-clipboard-policy 'allow))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
                  (lambda () '((write "x" "bogus"))))
                 ((symbol-function 'kill-new) (lambda (text) (setq killed text)))
-                ((symbol-function 'gui-set-selection) #'ignore)
+                ((symbol-function 'gui-set-selection)
+                 (lambda (_sel _text) (setq primary-called t)))
                 ((symbol-function 'message) #'ignore))
         (kuro--handle-clipboard-actions)
-        (should (equal killed "x"))))))
+        (should-not killed)
+        (should-not primary-called)))))
 
 (ert-deftest kuro-poll-modes-clipboard-query-3-element-is-handled ()
   "A 3-element query action is dispatched to kuro--clipboard-query."
@@ -183,9 +192,9 @@ The payload and target are extracted and forwarded."
                  (lambda () '((query nil "clipboard"))))
                 ((symbol-function 'kuro--clipboard-write) #'ignore)
                 ((symbol-function 'kuro--clipboard-query)
-                 (lambda () (setq queried t))))
+                 (lambda (target) (setq queried target))))
         (kuro--handle-clipboard-actions)
-        (should queried)))))
+        (should (equal queried "clipboard"))))))
 
 ;;; Group T: kuro--handle-notifications
 

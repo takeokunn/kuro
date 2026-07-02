@@ -149,13 +149,14 @@
       (should (= kuro--last-dirty-count 3)))))
 
 (ert-deftest kuro-renderer-pipeline-apply-dirty-lines-single-row-calls-update-once ()
-  "kuro--apply-dirty-lines calls kuro--update-line-full exactly once for a 1-entry list."
+  "kuro--apply-dirty-lines calls kuro--update-line-full exactly once for a 1-entry vector."
   (kuro-renderer-pipeline-test--with-buffer
     (insert "row\n")
-    (let ((call-count 0))
+    (let ((call-count 0)
+          (kuro--last-rows 1))
       (cl-letf (((symbol-function 'kuro--update-line-full)
                  (lambda (_row _text _faces _c2b) (cl-incf call-count))))
-        (kuro--apply-dirty-lines (vector (vector 0 "hello" nil nil)))
+        (kuro--apply-dirty-lines (vector (vector 0 "hello" [] [])))
         (should (= call-count 1))))))
 
 ;;; Group 25: kuro--update-frame-budget-ratio

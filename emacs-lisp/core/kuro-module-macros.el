@@ -11,11 +11,14 @@
 ;;; Code:
 
 (defvar kuro-module--search-tiers)
+(declare-function kuro-module--library-candidate-from-path
+                  "kuro-module" (path &optional required source))
 
 (defmacro kuro--module-try (path-expr)
-  "Return PATH-EXPR if it names an existing file, nil otherwise."
+  "Return a validated module library candidate for PATH-EXPR, or nil."
   `(let ((p ,path-expr))
-     (when (and p (file-exists-p p)) p)))
+     (and p (kuro-module--library-candidate-from-path
+             p nil "module search tier"))))
 
 (defmacro kuro--run-module-search-tiers ()
   "Run the fixed module search tiers in priority order.

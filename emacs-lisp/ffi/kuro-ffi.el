@@ -79,6 +79,7 @@ and `insert' for speed (no echo-area overhead)."
 ;; declare-function suppresses byte/native compiler "not known to be defined" warnings.
 (declare-function kuro-core-init                    "ext:kuro-core" (command shell-args rows cols))
 (declare-function kuro-core-send-key                "ext:kuro-core" (session-id bytes))
+(declare-function kuro-core-send-paste              "ext:kuro-core" (session-id text))
 (declare-function kuro-core-poll-updates-with-faces "ext:kuro-core" (session-id))
 (declare-function kuro-core-resize                  "ext:kuro-core" (session-id rows cols))
 (declare-function kuro-core-set-cell-pixel-size     "ext:kuro-core" (session-id width height))
@@ -156,14 +157,23 @@ Returns t if successful, nil otherwise."
                    (apply #'string (append data nil)))))
       (kuro-core-send-key kuro--session-id bytes))))
 
+(defun kuro--send-paste (text)
+  "Send TEXT to the terminal through the Rust paste API.
+TEXT must be a string.  Rust checks the session's current DEC 2004 mode and
+applies bracketed-paste wrapping and sanitization when the mode is active."
+  (unless (stringp text)
+    (signal 'wrong-type-argument (list 'stringp text)))
+  (kuro--call nil
+    (kuro-core-send-paste kuro--session-id text)))
+
 (kuro--define-ffi-getters
  (kuro--poll-updates-with-faces
   kuro-core-poll-updates-with-faces nil
   "Poll for terminal updates with face information.
-Returns (DIRTY-LINES . COL-TO-BUF-VECTOR) where DIRTY-LINES is a list
-of ((ROW . TEXT) . FACE-RANGES) and COL-TO-BUF-VECTOR is a vector mapping
-grid columns to buffer character offsets.  FACE-RANGES is a list of
-\(START-COL END-COL FG BG FLAGS) for each text segment."))
+Returns nil or a vector of dirty update vectors.  Each dirty update is
+[ROW TEXT FACE-RANGES COL-TO-BUF], where ROW is a u32 row index, TEXT is a
+string, FACE-RANGES is a flat stride-6 u32 vector, and COL-TO-BUF is a u32
+vector.  Schema validation happens before renderer mutation."))
 
 (defun kuro--resize (rows cols)
   "Resize the terminal to ROWS x COLS.

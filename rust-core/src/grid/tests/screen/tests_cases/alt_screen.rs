@@ -36,4 +36,3 @@ fn test_alt_screen_scroll_down_does_not_queue_events() {
     assert_eq!(up, 0);
     assert_eq!(down, 0);
 }
-

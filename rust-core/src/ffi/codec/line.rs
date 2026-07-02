@@ -1,4 +1,4 @@
-//! Line encoding: cell data → (text, face_ranges, col_to_buf) triplets.
+//! Line encoding: cell data → strongly typed FFI line payloads.
 //!
 //! The core encoding kernel [`fill_encode_pool`] populates a reusable
 //! [`EncodePool`] from a cell slice.  Higher-level entry points
@@ -10,24 +10,69 @@ use std::mem;
 
 use super::color::{encode_attrs, encode_color, COLOR_DEFAULT_SENTINEL};
 
-/// Encoded line data for FFI transfer: `(row, text, face_ranges, col_to_buf)`.
-///
-/// - `row`: grid row index
-/// - `text`: UTF-8 content with wide-placeholder cells removed
-/// - `face_ranges`: `(start_buf, end_buf, fg, bg, flags, ul_color)` in buffer offsets
-/// - `col_to_buf`: maps grid column → buffer char offset (empty = identity)
-pub(crate) type EncodedLine = (
-    usize,
-    String,
-    Vec<(usize, usize, u32, u32, u64, u32)>,
-    Vec<usize>,
-);
+/// Encoded face range in buffer offsets.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct EncodedFaceRange {
+    pub(crate) start_buf: usize,
+    pub(crate) end_buf: usize,
+    pub(crate) fg: u32,
+    pub(crate) bg: u32,
+    pub(crate) flags: u64,
+    pub(crate) underline_color: u32,
+}
 
-/// Inner line data without row index: `(text, face_ranges, col_to_buf)`.
+/// Encoded line data without row index.
 ///
-/// Used as the return type of [`encode_line`]. [`EncodedLine`] prepends the
-/// row index (`usize`) to produce the full FFI transfer tuple.
-pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64, u32)>, Vec<usize>);
+/// `col_to_buf` maps grid columns to buffer offsets. An empty vector means
+/// identity mapping for the ASCII/non-wide fast path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EncodedLineData {
+    pub(crate) text: String,
+    pub(crate) face_ranges: Vec<EncodedFaceRange>,
+    pub(crate) col_to_buf: Vec<usize>,
+}
+
+impl EncodedLineData {
+    #[inline]
+    pub(crate) fn empty() -> Self {
+        Self {
+            text: String::new(),
+            face_ranges: Vec::new(),
+            col_to_buf: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn with_row_index(self, row_index: usize) -> EncodedLine {
+        EncodedLine {
+            row_index,
+            text: self.text,
+            face_ranges: self.face_ranges,
+            col_to_buf: self.col_to_buf,
+        }
+    }
+}
+
+/// Encoded line data for FFI transfer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EncodedLine {
+    pub(crate) row_index: usize,
+    pub(crate) text: String,
+    pub(crate) face_ranges: Vec<EncodedFaceRange>,
+    pub(crate) col_to_buf: Vec<usize>,
+}
+
+impl EncodedLine {
+    #[inline]
+    pub(crate) fn empty(row_index: usize) -> Self {
+        Self {
+            row_index,
+            text: String::new(),
+            face_ranges: Vec::new(),
+            col_to_buf: Vec::new(),
+        }
+    }
+}
 
 /// Reusable allocation pool for encoding dirty lines.
 ///
@@ -39,7 +84,7 @@ pub(crate) type EncodedLineData = (String, Vec<(usize, usize, u32, u32, u64, u32
 /// line per frame.
 pub(crate) struct EncodePool {
     pub text: String,
-    pub face_ranges: Vec<(usize, usize, u32, u32, u64, u32)>,
+    pub face_ranges: Vec<EncodedFaceRange>,
     pub col_to_buf: Vec<usize>,
     /// Kitty text-sizing (OSC 66) per-cell effective multiplier in permille.
     ///
@@ -197,14 +242,14 @@ pub(super) fn fill_encode_pool(cells: &[Cell], has_wide: bool, pool: &mut Encode
             || ul_color != current_ul_color
         {
             if buf_offset > current_start_buf {
-                pool.face_ranges.push((
-                    current_start_buf,
-                    buf_offset,
-                    current_fg,
-                    current_bg,
-                    current_flags,
-                    current_ul_color,
-                ));
+                pool.face_ranges.push(EncodedFaceRange {
+                    start_buf: current_start_buf,
+                    end_buf: buf_offset,
+                    fg: current_fg,
+                    bg: current_bg,
+                    flags: current_flags,
+                    underline_color: current_ul_color,
+                });
                 current_start_buf = buf_offset;
             }
             current_fg = fg;
@@ -226,18 +271,18 @@ pub(super) fn fill_encode_pool(cells: &[Cell], has_wide: bool, pool: &mut Encode
     }
 
     if current_start_buf < buf_offset {
-        pool.face_ranges.push((
-            current_start_buf,
-            buf_offset,
-            current_fg,
-            current_bg,
-            current_flags,
-            current_ul_color,
-        ));
+        pool.face_ranges.push(EncodedFaceRange {
+            start_buf: current_start_buf,
+            end_buf: buf_offset,
+            fg: current_fg,
+            bg: current_bg,
+            flags: current_flags,
+            underline_color: current_ul_color,
+        });
     }
 }
 
-/// Encode a slice of cells into `(text, face_ranges, col_to_buf)` for FFI transfer.
+/// Encode a slice of cells into [`EncodedLineData`] for FFI transfer.
 ///
 /// ## Wide character handling
 ///
@@ -280,16 +325,16 @@ pub(crate) fn encode_line_with_pool(
 ) -> EncodedLineData {
     pool.clear();
     if cells.is_empty() {
-        return (String::new(), Vec::new(), Vec::new());
+        return EncodedLineData::empty();
     }
     fill_encode_pool(cells, has_wide, pool);
     // mem::take moves each field out in O(1) (pointer swap), leaving the pool
     // with empty-but-valid fields.  Avoids three heap malloc+memcpy per dirty row.
-    (
-        mem::take(&mut pool.text),
-        mem::take(&mut pool.face_ranges),
-        mem::take(&mut pool.col_to_buf),
-    )
+    EncodedLineData {
+        text: mem::take(&mut pool.text),
+        face_ranges: mem::take(&mut pool.face_ranges),
+        col_to_buf: mem::take(&mut pool.col_to_buf),
+    }
 }
 
 /// Serialise one 28-byte v2 face range into `buf`.
@@ -302,22 +347,14 @@ pub(crate) fn encode_line_with_pool(
     clippy::cast_possible_truncation,
     reason = "start_buf/end_buf are buffer char offsets (≤ line length ≤ 65535); fit u32"
 )]
-pub(super) fn write_face_range(
-    buf: &mut Vec<u8>,
-    start_buf: usize,
-    end_buf: usize,
-    fg: u32,
-    bg: u32,
-    flags: u64,
-    ul_color: u32,
-) {
+pub(super) fn write_face_range(buf: &mut Vec<u8>, range: &EncodedFaceRange) {
     let mut range_buf = [0u8; 28];
-    range_buf[0..4].copy_from_slice(&(start_buf as u32).to_le_bytes());
-    range_buf[4..8].copy_from_slice(&(end_buf as u32).to_le_bytes());
-    range_buf[8..12].copy_from_slice(&fg.to_le_bytes());
-    range_buf[12..16].copy_from_slice(&bg.to_le_bytes());
-    range_buf[16..24].copy_from_slice(&flags.to_le_bytes());
-    range_buf[24..28].copy_from_slice(&ul_color.to_le_bytes());
+    range_buf[0..4].copy_from_slice(&(range.start_buf as u32).to_le_bytes());
+    range_buf[4..8].copy_from_slice(&(range.end_buf as u32).to_le_bytes());
+    range_buf[8..12].copy_from_slice(&range.fg.to_le_bytes());
+    range_buf[12..16].copy_from_slice(&range.bg.to_le_bytes());
+    range_buf[16..24].copy_from_slice(&range.flags.to_le_bytes());
+    range_buf[24..28].copy_from_slice(&range.underline_color.to_le_bytes());
     buf.extend_from_slice(&range_buf);
 }
 
@@ -376,8 +413,8 @@ pub(crate) fn encode_line_into_buf(
 
     // Coalesce 6 separate extend_from_slice calls into a single 28-byte stack-buffer write.
     // At 30 dirty rows × 6 ranges × 120fps = 21,600 range writes/sec.
-    for &(start_buf, end_buf, fg, bg, flags, ul_color) in &pool.face_ranges {
-        write_face_range(buf, start_buf, end_buf, fg, bg, flags, ul_color);
+    for range in &pool.face_ranges {
+        write_face_range(buf, range);
     }
 
     #[expect(

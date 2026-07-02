@@ -49,7 +49,7 @@ the unchanged-state fast path and always query Rust for fresh cursor data."
 
 (defmacro kuro--with-update-entry (entry-form row text face-ranges col-to-buf &rest body)
   "Bind flat UPDATE-ENTRY fields from ENTRY-FORM and execute BODY.
-ENTRY-FORM is the `[row text face-ranges col-to-buf]' vector produced by the
+ENTRY-FORM is the `[ROW TEXT FACE-RANGES COL-TO-BUF]' vector produced by the
 polling pipeline.  Centralizing the layout here keeps `aref' indexing out of
 the render logic and makes the data shape explicit at the boundary."
   (declare (indent 5))
@@ -62,7 +62,8 @@ the render logic and makes the data shape explicit at the boundary."
          ,@body))))
 
 (defmacro kuro--do-update-list (update-list row text face-ranges col-to-buf &rest body)
-  "Iterate UPDATE-LIST and bind one entry into the given locals.
+  "Iterate UPDATE-LIST and bind each entry before executing BODY.
+Each entry provides ROW, TEXT, FACE-RANGES, and COL-TO-BUF.
 The loop shape is shared by the renderer's line-application and face-counting
 paths, so this macro keeps the data-shape handling in one place while leaving
 the per-entry logic at the call site."
@@ -97,7 +98,7 @@ untimed pipelines can share the same structure."
 
 (defmacro kuro--core-render-pipeline-run-with-timing
     (updates-var t0-var ffi-ms apply-ms cursor-ms &rest body)
-  "Run BODY inside the shared core render envelope and emit perf stats."
+  "Bind UPDATES-VAR, T0-VAR, FFI-MS, APPLY-MS, and CURSOR-MS, then run BODY."
   (declare (indent 5))
   `(let ((,t0-var (float-time))
          ,ffi-ms ,apply-ms ,cursor-ms

@@ -70,10 +70,10 @@ Returns a list of (TAG PAYLOAD TARGET) 3-element lists where TAG is
 For `write' actions, PAYLOAD is the text string to place on the selection.
 For `query' actions, PAYLOAD is nil (terminal is requesting contents).
 TARGET is the selection-target string from the OSC 52 field — one of
-\"clipboard\", \"primary\", \"select\", or \"cut-buffer-N\" — used to route
-the write to the correct Emacs selection (see `kuro--clipboard-write').
-A legacy 2-element action (TAG PAYLOAD) or cons (TAG . PAYLOAD) is also
-accepted and defaults TARGET to \"clipboard\".
+\"clipboard\", \"primary\", or \"select\" — used to route the action to the
+correct Emacs selection (see `kuro--clipboard-write').
+Malformed actions, unsupported targets, and legacy 2-element actions are
+ignored by the Lisp-side dispatcher.
 Returns nil if no actions are pending.")
 
  (kuro--poll-notifications
@@ -155,7 +155,7 @@ Returns 0 if not initialized.")
 
  (kuro--poll-eval-commands
   kuro-core-poll-eval-commands nil
-  "Poll for pending OSC 51 eval commands from the terminal.
+  "Poll for pending OSC 51 command payloads from the terminal.
 Returns a list of command strings, or nil if none are pending.")
 
  (kuro--get-cwd-host

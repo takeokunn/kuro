@@ -8,27 +8,31 @@ use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 define_session_data_query_or_false!(
-    /// Retrieve a stored Kitty Graphics image as a base64-encoded PNG string.
-    ///
-    /// Returns the base64-encoded PNG string if the image exists, or nil if not found.
-        /// The Elisp caller should decode: `(base64-decode-string data t)` to get unibyte PNG bytes
-        /// suitable for `(create-image bytes 'png t)`.
-        kuro_core_get_image,
-        "get_image",
-        image_id: u32,
-        |session| session.get_image_png_base64(image_id),
-        |kuro_env, b64| {
-            if b64.is_empty() {
-                false.into_lisp(kuro_env)
-            } else {
-                b64.into_lisp(kuro_env)
-            }
+/// Retrieve a stored Kitty Graphics image as a base64-encoded PNG string.
+///
+/// Returns the base64-encoded PNG string if the image exists, or nil if not found.
+    /// The Elisp caller should decode: `(base64-decode-string data t)` to get unibyte PNG bytes
+    /// suitable for `(create-image bytes 'png t)`.
+    kuro_core_get_image,
+    "get_image",
+    image_id: u32,
+    |session| session.get_image_png_base64(image_id),
+    |kuro_env, b64| {
+        if b64.is_empty() {
+            false.into_lisp(kuro_env)
+        } else {
+            b64.into_lisp(kuro_env)
         }
-    );
+    }
+);
 
 /// Return the number of Kitty animation frames for an image (0 = still image).
 #[defun]
-fn kuro_core_image_frame_count(env: &Env, session_id: u64, image_id: u32) -> EmacsResult<Value<'_>> {
+fn kuro_core_image_frame_count(
+    env: &Env,
+    session_id: u64,
+    image_id: u32,
+) -> EmacsResult<Value<'_>> {
     query_session_data_to_lisp_or_false(
         env,
         "image_frame_count",

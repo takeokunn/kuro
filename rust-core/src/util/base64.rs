@@ -39,8 +39,7 @@ pub(crate) fn encode(input: &[u8]) -> String {
             b'='
         });
     }
-    // SAFETY: ALPHABET contains only ASCII bytes; b'=' is ASCII.
-    unsafe { String::from_utf8_unchecked(out) }
+    out.into_iter().map(char::from).collect()
 }
 
 /// Decode base64 (standard alphabet, `=` padding). Returns `Err` on invalid input.

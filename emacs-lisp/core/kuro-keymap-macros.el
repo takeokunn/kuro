@@ -44,8 +44,8 @@ declarative at the call site."
 (defmacro kuro--define-keymap (&rest bindings)
   "Build a sparse keymap from BINDINGS.
 Each binding is (KEY . COMMAND).  String KEYs are wrapped with `kbd'
-so that descriptions like \"C-c C-t\" bind the actual control-key sequence
-rather than the literal character string."
+so that descriptions bind the actual control-key sequence rather than the
+literal character string."
   `(let ((map (make-sparse-keymap)))
      ,@(mapcar (lambda (binding)
                  (let ((key (car binding)))
@@ -57,8 +57,8 @@ rather than the literal character string."
 (defmacro kuro--define-keymap-with-parent (parent &rest bindings)
   "Build a sparse keymap from BINDINGS and set PARENT as its parent.
 Each binding is (KEY . COMMAND).  String KEYs are wrapped with `kbd'
-so that descriptions like \"C-c C-t\" bind the actual control-key sequence
-rather than the literal character string."
+so that descriptions bind the actual control-key sequence rather than the
+literal character string."
   `(let ((map (make-sparse-keymap)))
      (set-keymap-parent map ,parent)
      ,@(mapcar (lambda (binding)

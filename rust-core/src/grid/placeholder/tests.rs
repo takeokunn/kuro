@@ -117,7 +117,8 @@ fn decode_placeholder_row_col_from_diacritics() {
 fn decode_placeholder_high_byte_extension() {
     // row=0, col=0, extra=2 → id |= (2 << 24)
     let g = placeholder_grapheme(&[0, 0, 2]);
-    let info = decode_placeholder(&g, Color::Rgb(0x00, 0x00, 0x01), Color::Default).expect("decodes");
+    let info =
+        decode_placeholder(&g, Color::Rgb(0x00, 0x00, 0x01), Color::Default).expect("decodes");
     assert_eq!(info.image_id, (2u32 << 24) | 1);
 }
 

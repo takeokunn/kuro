@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 ;; Coverage for kuro-mux-ext2.el functions:
-;;   - kuro-mux--parse-layout-plists (pure filter)
-;;   - kuro-mux--session-spec (buffer-local → plist)
+;;   - kuro-mux--parse-layout-plists (strict validator)
+;;   - kuro-mux--session-spec (buffer-local -> typed session)
 ;;   - kuro-mux--read-layout-file (file I/O)
 ;;   - kuro-mux-broadcast-toggle (state toggle)
 ;;   - kuro-mux-clock (message output)
@@ -18,6 +18,13 @@
 (unless (fboundp 'kuro-mode)
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
+(defun kuro-mux-test-4--layout-session-field (session key)
+  "Return typed layout SESSION field for KEY."
+  (cond
+   ((eq key :name) (kuro-mux--layout-session-name session))
+   ((eq key :directory) (kuro-mux--layout-session-directory session))
+   (t nil)))
+
 
 ;;; Group 30 — kuro-mux--parse-layout-plists
 
@@ -26,34 +33,58 @@
   (should (null (kuro-mux--parse-layout-plists nil))))
 
 (ert-deftest kuro-mux-test--parse-layout-plists-valid-entry ()
-  "`kuro-mux--parse-layout-plists' keeps plists that have :command."
-  (let ((specs (list '(:command "fish" :name "work" :directory "/tmp"))))
+  "`kuro-mux--parse-layout-plists' keeps strictly typed session specs."
+  (let ((specs (list `(:name "work" :directory ,temporary-file-directory))))
     (let ((result (kuro-mux--parse-layout-plists specs)))
       (should (= 1 (length result)))
-      (should (equal "fish" (plist-get (car result) :command))))))
+      (should (kuro-mux--layout-session-p (car result)))
+      (should (equal "work" (kuro-mux-test-4--layout-session-field
+                             (car result) :name)))
+      (should (equal (file-name-as-directory temporary-file-directory)
+                     (kuro-mux-test-4--layout-session-field
+                      (car result) :directory)))
+      (should-not (kuro-mux-test-4--layout-session-field
+                   (car result) :command)))))
 
-(ert-deftest kuro-mux-test--parse-layout-plists-filters-invalid ()
-  "`kuro-mux--parse-layout-plists' drops entries lacking :command."
-  (let ((specs (list '(:name "no-cmd")
-                     '(:command "zsh" :name "ok"))))
+(ert-deftest kuro-mux-test--parse-layout-plists-rejects-invalid ()
+  "`kuro-mux--parse-layout-plists' rejects malformed or weakly typed specs."
+  (let ((specs (list '(:directory "/tmp")
+                     '(:name "" :directory "/tmp")
+                     '(:name "bad-cmd" :command "bash")
+                     '(:name 42 :directory "/tmp")
+                     `(:name "bad-dir"
+                       :directory ,(expand-file-name "missing-kuro-dir" temporary-file-directory))
+                     '(:name "ok" :directory "/tmp"))))
     (let ((result (kuro-mux--parse-layout-plists specs)))
-      (should (= 1 (length result)))
-      (should (equal "zsh" (plist-get (car result) :command))))))
+      (should (null result)))))
 
 (ert-deftest kuro-mux-test--parse-layout-plists-all-invalid ()
-  "`kuro-mux--parse-layout-plists' returns nil when no entry has :command."
-  (let ((specs (list '(:name "a") '(:directory "/") "not-a-list")))
+  "`kuro-mux--parse-layout-plists' returns nil when all entries are invalid."
+  (let ((specs (list '(:directory "/")
+                     '(:name "")
+                     '(:name "bad" :command "bash")
+                     '(:name "bad" :directory 99)
+                     "not-a-list")))
     (should (null (kuro-mux--parse-layout-plists specs)))))
 
 (ert-deftest kuro-mux-test--parse-layout-plists-multiple-valid ()
   "`kuro-mux--parse-layout-plists' keeps all valid entries in order."
-  (let ((specs (list '(:command "bash" :name "s1")
-                     '(:name "bad")
-                     '(:command "zsh"  :name "s2"))))
+  (let ((specs (list '(:name "s1" :directory "/tmp")
+                     '(:name "s2" :directory "/tmp"))))
     (let ((result (kuro-mux--parse-layout-plists specs)))
       (should (= 2 (length result)))
-      (should (equal "bash" (plist-get (nth 0 result) :command)))
-      (should (equal "zsh"  (plist-get (nth 1 result) :command))))))
+      (should (kuro-mux--layout-session-p (nth 0 result)))
+      (should (kuro-mux--layout-session-p (nth 1 result)))
+      (should (equal "s1" (kuro-mux-test-4--layout-session-field
+                           (nth 0 result) :name)))
+      (should (equal (file-name-as-directory "/tmp")
+                     (kuro-mux-test-4--layout-session-field
+                      (nth 0 result) :directory)))
+      (should (equal "s2" (kuro-mux-test-4--layout-session-field
+                           (nth 1 result) :name)))
+      (should (equal (file-name-as-directory "/tmp")
+                     (kuro-mux-test-4--layout-session-field
+                      (nth 1 result) :directory))))))
 
 
 ;;; Group 31 — kuro-mux--session-spec
@@ -70,12 +101,16 @@
     (unwind-protect
         (with-current-buffer buf
           (setq-local kuro-mux--name "my-session")
-          (setq-local kuro-mux--command "fish")
-          (setq-local kuro-mux--directory "/tmp")
-          (setq-local kuro-shell "sh")
-          (let ((spec (kuro-mux--session-spec buf)))
-            (should (equal "my-session" (plist-get spec :name)))
-            (should (equal "fish"       (plist-get spec :command)))))
+            (setq-local kuro-mux--directory "/tmp")
+            (setq-local kuro-shell "sh")
+            (let ((spec (kuro-mux--session-spec buf)))
+              (should (kuro-mux--layout-session-p spec))
+              (should (equal "my-session"
+                             (kuro-mux-test-4--layout-session-field spec :name)))
+              (should (equal (file-name-as-directory "/tmp")
+                             (kuro-mux-test-4--layout-session-field
+                              spec :directory)))
+              (should-not (kuro-mux-test-4--layout-session-field spec :command))))
       (kill-buffer buf))))
 
 (ert-deftest kuro-mux-test--session-spec-falls-back-to-buffer-name ()
@@ -84,24 +119,28 @@
     (unwind-protect
         (with-current-buffer buf
           (setq-local kuro-mux--name nil)
-          (setq-local kuro-mux--command "bash")
-          (setq-local kuro-mux--directory "/home")
-          (setq-local kuro-shell "sh")
-          (let ((spec (kuro-mux--session-spec buf)))
-            (should (equal (buffer-name buf) (plist-get spec :name)))))
+            (setq-local kuro-mux--directory "/home")
+            (setq-local kuro-shell "sh")
+            (let ((spec (kuro-mux--session-spec buf)))
+              (should (kuro-mux--layout-session-p spec))
+              (should (equal (buffer-name buf)
+                             (kuro-mux-test-4--layout-session-field spec :name)))))
       (kill-buffer buf))))
 
 (ert-deftest kuro-mux-test--session-spec-includes-directory ()
   "`kuro-mux--session-spec' includes :directory from buffer-local var."
-  (let ((buf (generate-new-buffer "*test-spec-dir*")))
+  (let ((buf (generate-new-buffer "*test-spec-dir*"))
+        (dir temporary-file-directory))
     (unwind-protect
         (with-current-buffer buf
           (setq-local kuro-mux--name nil)
-          (setq-local kuro-mux--command "fish")
-          (setq-local kuro-mux--directory "/projects/kuro")
-          (setq-local kuro-shell "sh")
-          (let ((spec (kuro-mux--session-spec buf)))
-            (should (equal "/projects/kuro" (plist-get spec :directory)))))
+            (setq-local kuro-mux--directory dir)
+            (setq-local kuro-shell "sh")
+            (let ((spec (kuro-mux--session-spec buf)))
+              (should (kuro-mux--layout-session-p spec))
+              (should (equal (file-name-as-directory dir)
+                             (kuro-mux-test-4--layout-session-field
+                              spec :directory)))))
       (kill-buffer buf))))
 
 
@@ -119,7 +158,7 @@
     (unwind-protect
         (progn
           (with-temp-file tmp
-            (insert "(kuro-mux-layout (:command \"fish\" :name \"s1\"))"))
+            (insert "(kuro-mux-layout (:name \"s1\" :directory \"/tmp\"))"))
           (let ((result (kuro-mux--read-layout-file)))
             (should (eq 'kuro-mux-layout (car result)))))
       (delete-file tmp))))

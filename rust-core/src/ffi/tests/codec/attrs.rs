@@ -153,9 +153,9 @@ fn encode_attrs_wide_char_col_to_buf_via_encode_line() {
         ..Default::default()
     };
     let cells = vec![wide_cell, placeholder];
-    let (_, _, col_to_buf) = encode_line(&cells);
+    let encoded = encode_line(&cells);
     assert!(
-        !col_to_buf.is_empty(),
+        !encoded.col_to_buf.is_empty(),
         "wide char line must produce non-empty col_to_buf"
     );
 }

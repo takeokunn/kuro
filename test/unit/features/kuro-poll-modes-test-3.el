@@ -217,7 +217,7 @@ and the resulting positions are stored in `kuro--prompt-positions'."
                    ,@(when (eq policy 'prompt)
                        `(((symbol-function 'yes-or-no-p)
                           (lambda (_) ,yes-or-no-result)))))
-           (kuro--clipboard-write "hello")
+           (kuro--clipboard-write "hello" "clipboard")
            ,(if added-p
                 `(should (equal added "hello"))
               `(should-not added)))))))
@@ -243,7 +243,7 @@ and the resulting positions are stored in `kuro--prompt-positions'."
           (cl-letf (((symbol-function 'kill-new) (lambda (t) (setq added t)))
                     ((symbol-function 'message) #'ignore)
                     ((symbol-function 'yes-or-no-p) (lambda (_) yes-or-no)))
-            (kuro--clipboard-write "hello")
+            (kuro--clipboard-write "hello" "clipboard")
             (if added-p
                 (should (equal added "hello"))
               (should-not added))))))))
@@ -268,7 +268,7 @@ and the resulting positions are stored in `kuro--prompt-positions'."
                    ,@(when (eq policy 'prompt)
                        `(((symbol-function 'yes-or-no-p)
                           (lambda (_) ,yes-or-no-result)))))
-           (kuro--clipboard-query)
+           (kuro--clipboard-query "clipboard")
            ,(if sent-p `(should sent) `(should-not sent)))))))
 
 (kuro-poll-modes-test--def-clipboard-query-policy
@@ -290,7 +290,7 @@ and the resulting positions are stored in `kuro--prompt-positions'."
           (cl-letf (((symbol-function 'kuro--send-osc52-clipboard-response)
                      (lambda () (setq sent t)))
                     ((symbol-function 'yes-or-no-p) (lambda (_) yes-or-no)))
-            (kuro--clipboard-query)
+            (kuro--clipboard-query "clipboard")
             (if sent-p (should sent) (should-not sent))))))))
 
 (provide 'kuro-poll-modes-test-3)

@@ -1,5 +1,5 @@
-use super::*;
 use super::super::make_term;
+use super::*;
 
 #[test]
 fn test_esc_m_reverse_index_at_top_scrolls_down() {

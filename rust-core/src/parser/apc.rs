@@ -1,5 +1,6 @@
 //! APC (Application Program Command) pre-scanner for Kitty Graphics Protocol
 
+use crate::grid::screen::PrintableAsciiRun;
 use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
 use crate::TerminalCore;
 
@@ -108,22 +109,17 @@ fn advance_ascii_fast_path(core: &mut TerminalCore, bytes: &[u8]) -> usize {
         && core.active_charset() == crate::types::charset::CharsetType::Ascii
         && !core.dec_modes.insert_mode
     {
-        let mut pos = 0;
-        while pos < bytes.len() && bytes[pos] >= 0x20 && bytes[pos] <= 0x7E {
-            pos += 1;
-        }
-        if pos > 0 {
-            // Track last char for REP (CSI Ps b) — fast-path bypasses VTE print().
-            core.last_printed_char = bytes[..pos].last().map(|&b| b as char);
-            core.screen.print_ascii_run(
-                &bytes[..pos],
-                core.current_attrs,
-                core.dec_modes.auto_wrap,
-            );
-            // Stamp hyperlink on the cells just written (if active)
-            if core.osc_data.hyperlink.uri.is_some() {
-                core.stamp_hyperlink_on_last_n_cells(pos);
-            }
+        let Some(run) = PrintableAsciiRun::longest_prefix(bytes) else {
+            return 0;
+        };
+        let pos = run.len();
+        // Track last char for REP (CSI Ps b) — fast-path bypasses VTE print().
+        core.last_printed_char = run.as_bytes().last().map(|&b| char::from(b));
+        core.screen
+            .print_ascii_run(run, core.current_attrs, core.dec_modes.auto_wrap);
+        // Stamp hyperlink on the cells just written (if active)
+        if core.osc_data.hyperlink.uri.is_some() {
+            core.stamp_hyperlink_on_last_n_cells(pos);
         }
         pos
     } else {
@@ -139,7 +135,10 @@ fn advance_vte_parser(core: &mut TerminalCore, bytes: &[u8], pos: usize) {
     core.vte_callback_count = 0;
     core.vte_last_ground = false;
 
-    let mut parser = core.parser.take().expect("parser must be present");
+    let Some(mut parser) = core.parser.take() else {
+        core.parser_in_ground = false;
+        return;
+    };
     parser.advance(core, &bytes[pos..]);
     core.parser = Some(parser);
 

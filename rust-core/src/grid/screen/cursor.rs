@@ -6,6 +6,106 @@ use super::{
     Cell, CellWidth, Color, Cursor, DirtySet as _, Screen, SgrAttributes, UnicodeWidthChar,
 };
 
+#[inline]
+const fn is_printable_ascii(byte: u8) -> bool {
+    byte >= 0x20 && byte <= 0x7e
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NonPrintableAsciiByte {
+    pub(crate) byte: u8,
+    pub(crate) index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PrintableAsciiRun<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> PrintableAsciiRun<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, NonPrintableAsciiByte> {
+        if let Some(index) = bytes.iter().position(|&byte| !is_printable_ascii(byte)) {
+            let byte = bytes[index];
+            return Err(NonPrintableAsciiByte { byte, index });
+        }
+
+        Ok(Self { bytes })
+    }
+
+    pub(crate) fn longest_prefix(bytes: &'a [u8]) -> Option<Self> {
+        let len = bytes
+            .iter()
+            .position(|&byte| !is_printable_ascii(byte))
+            .unwrap_or(bytes.len());
+        if len == 0 {
+            None
+        } else {
+            Some(Self {
+                bytes: &bytes[..len],
+            })
+        }
+    }
+
+    pub(crate) const fn as_bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub(crate) const fn len(self) -> usize {
+        self.bytes.len()
+    }
+
+    pub(crate) const fn is_empty(self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PrintableAsciiBuffer {
+    bytes: Vec<u8>,
+}
+
+impl PrintableAsciiBuffer {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.bytes.clear();
+    }
+
+    pub(crate) fn try_extend_from_slice(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), NonPrintableAsciiByte> {
+        PrintableAsciiRun::new(bytes)?;
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    pub(crate) fn push_printable_char(&mut self, c: char) -> bool {
+        if !c.is_ascii() {
+            return false;
+        }
+
+        let byte = c as u8;
+        self.try_extend_from_slice(&[byte]).is_ok()
+    }
+
+    pub(crate) fn as_run(&self) -> PrintableAsciiRun<'_> {
+        PrintableAsciiRun { bytes: &self.bytes }
+    }
+}
+
 impl Screen {
     /// Get reference to the active screen's cursor
     #[inline]
@@ -226,7 +326,12 @@ impl Screen {
 
         if col + width <= screen.cols as usize {
             // Character fits on the current line.
-            screen.place_printed_cell(row, col, Cell::with_char_and_width(c, attrs, cell_width), width);
+            screen.place_printed_cell(
+                row,
+                col,
+                Cell::with_char_and_width(c, attrs, cell_width),
+                width,
+            );
             screen.advance_print_cursor(width, auto_wrap);
         } else {
             // Character doesn't fit (wide char at last column) — wrap to next line.
@@ -253,13 +358,20 @@ impl Screen {
     /// output, this avoids the overhead of VTE state machine dispatch,
     /// `UnicodeWidthChar` lookups, and per-character `Cell` construction.
     ///
-    /// Caller must ensure all bytes are in the range 0x20..=0x7E.
+    /// The `PrintableAsciiRun` type ensures all bytes are in the range
+    /// 0x20..=0x7E before this fast path can be called.
     /// This method must only be called when the VTE parser is in Ground state.
     #[inline]
-    pub fn print_ascii_run(&mut self, bytes: &[u8], attrs: SgrAttributes, auto_wrap: bool) {
-        if bytes.is_empty() {
+    pub(crate) fn print_ascii_run(
+        &mut self,
+        run: PrintableAsciiRun<'_>,
+        attrs: SgrAttributes,
+        auto_wrap: bool,
+    ) {
+        if run.is_empty() {
             return;
         }
+        let bytes = run.as_bytes();
 
         // Pre-compute before borrowing self through active_screen_mut()
         let is_primary = !self.is_alternate_active;
@@ -306,10 +418,8 @@ impl Screen {
                         || cell.extras.is_some()
                     {
                         if !grapheme_matches {
-                            // SAFETY: byte is guaranteed 0x20..=0x7E (printable ASCII),
-                            // which is always valid UTF-8.
-                            let buf = [byte];
-                            let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+                            let mut buf = [0; 4];
+                            let s = char::from(byte).encode_utf8(&mut buf);
                             cell.grapheme = CompactString::new(s);
                         }
                         cell.attrs = attrs;

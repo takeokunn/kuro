@@ -3,8 +3,6 @@
 //!
 //! Module under test: `parser/apc.rs` (`handle_kitty_delete`).
 
-use super::*;
-
 /// Transmit-and-display a 1×1 RGB image at (row, col) with `cols`×`rows` cells
 /// and optional z-index.
 fn place_image(
@@ -37,7 +35,10 @@ fn delete_z_lowercase_removes_layer_keeps_image() {
     core.advance(b"\x1b_Ga=d,d=z,z=3\x1b\\");
 
     assert_eq!(placement_count(&core), 1);
-    assert!(!core.get_image_png_base64(1).is_empty(), "image survives d=z");
+    assert!(
+        !core.get_image_png_base64(1).is_empty(),
+        "image survives d=z"
+    );
 }
 
 /// INTENT: `a=d,d=Z` (uppercase) frees the backing image data.
@@ -48,7 +49,10 @@ fn delete_z_uppercase_frees_image() {
 
     core.advance(b"\x1b_Ga=d,d=Z,z=4\x1b\\");
 
-    assert!(core.get_image_png_base64(2).is_empty(), "d=Z frees image data");
+    assert!(
+        core.get_image_png_base64(2).is_empty(),
+        "d=Z frees image data"
+    );
 }
 
 // --- d=p : at cell (x=,y=) ---
@@ -147,7 +151,11 @@ fn delete_c_at_cursor() {
     core.screen.move_cursor(6, 6);
     core.advance(b"\x1b_Ga=d,d=c\x1b\\");
 
-    assert_eq!(placement_count(&core), 0, "cursor-covered placement removed");
+    assert_eq!(
+        placement_count(&core),
+        0,
+        "cursor-covered placement removed"
+    );
 }
 
 // --- d=r : id range (x=min, y=max) ---

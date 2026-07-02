@@ -1,6 +1,6 @@
 //! `TerminalCore` — integrates VTE parser, virtual screen, and PTY state.
 
-use crate::grid::screen::Screen;
+use crate::grid::screen::{PrintableAsciiBuffer, Screen};
 use crate::parser;
 use crate::parser::dec_private::DecModes;
 use crate::parser::tabs::TabStops;
@@ -47,7 +47,7 @@ pub struct TerminalCore {
     /// Buffer for batching ASCII characters from VTE `print()` callbacks.
     /// Flushed via `Screen::print_ascii_run()` when a non-print callback
     /// fires, a non-ASCII char is printed, or VTE `advance()` returns.
-    pub(crate) print_buf: Vec<u8>,
+    pub(crate) print_buf: PrintableAsciiBuffer,
     /// G0 character set designation (ESC ( 0 / ESC ( B)
     pub(crate) g0_charset: types::charset::CharsetType,
     /// G1 character set designation (ESC ) 0 / ESC ) B)
@@ -100,7 +100,7 @@ impl TerminalCore {
             parser_in_ground: true,
             vte_callback_count: 0,
             vte_last_ground: true,
-            print_buf: Vec::with_capacity(256),
+            print_buf: PrintableAsciiBuffer::with_capacity(256),
             g0_charset: types::charset::CharsetType::Ascii,
             g1_charset: types::charset::CharsetType::Ascii,
             gl_is_g1: false,
@@ -139,7 +139,7 @@ impl TerminalCore {
         if !self.print_buf.is_empty() {
             let len = self.print_buf.len();
             self.screen.print_ascii_run(
-                &self.print_buf,
+                self.print_buf.as_run(),
                 self.current_attrs,
                 self.dec_modes.auto_wrap,
             );
@@ -229,8 +229,7 @@ impl TerminalCore {
 
             if stamp {
                 let cursor_after = *self.screen.cursor();
-                let (write_row, write_col) =
-                    text_size_write_position(pre_cursor, cursor_after);
+                let (write_row, write_col) = text_size_write_position(pre_cursor, cursor_after);
                 if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
                     cell.set_text_size(Some(ts));
                 }

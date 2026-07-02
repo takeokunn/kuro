@@ -1,5 +1,5 @@
-use crate::Screen;
 use crate::types::cell::Cell;
+use crate::Screen;
 
 macro_rules! assert_cursor {
     ($screen:expr, row $r:expr, col $c:expr) => {
@@ -38,8 +38,6 @@ macro_rules! assert_cell_width {
     };
 }
 
-
-
 macro_rules! screen_with_scrollback {
     ($rows:literal x $cols:literal, scrollback $n:expr) => {{
         let mut _s = Screen::new($rows, $cols);
@@ -49,8 +47,6 @@ macro_rules! screen_with_scrollback {
         _s
     }};
 }
-
-
 
 pub(super) fn fill_rows(screen: &mut Screen) {
     let rows = screen.rows() as usize;

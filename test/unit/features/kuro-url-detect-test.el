@@ -1,8 +1,8 @@
 ;;; kuro-url-detect-test.el --- Unit tests for kuro-url-detect.el  -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Unit tests for kuro-url-detect.el (URL detection, file:line detection,
-;; overlay management, and idle timer lifecycle).
+;; Unit tests for kuro-url-detect.el (URL detection, overlay management,
+;; and idle timer lifecycle).
 ;; These tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
 
 ;;; Code:
@@ -19,26 +19,7 @@
 (kuro-url-detect-test--deftest-trailing-punctuation
   kuro-url-detect-test--trailing-punctuation-cases)
 
-;;; Group 3: kuro--file-line-regexp matching
-
-(kuro-url-detect-test--deftest-file-line-matches
-  kuro-url-detect-test--file-line-match-cases)
-
-(ert-deftest kuro-url-detect--file-line-regexp-captures-file ()
-  "kuro--file-line-regexp group 1 captures the file path."
-  (string-match kuro--file-line-regexp "/home/user/file.rs:42")
-  (should (string= (match-string 1 "/home/user/file.rs:42") "/home/user/file.rs")))
-
-(ert-deftest kuro-url-detect--file-line-regexp-captures-line ()
-  "kuro--file-line-regexp group 2 captures the line number."
-  (string-match kuro--file-line-regexp "/home/user/file.rs:42")
-  (should (string= (match-string 2 "/home/user/file.rs:42") "42")))
-
-(ert-deftest kuro-url-detect--file-line-regexp-no-match-relative ()
-  "kuro--file-line-regexp does not match relative paths (no leading /)."
-  (should-not (string-match kuro--file-line-regexp "file.rs:42")))
-
-;;; Group 4: kuro--clear-url-overlays
+;;; Group 3: kuro--clear-url-overlays
 
 (ert-deftest kuro-url-detect--clear-removes-all-overlays ()
   "kuro--clear-url-overlays removes all overlays and empties the list."
@@ -67,7 +48,7 @@
     (kuro--clear-url-overlays)
     (should (null kuro--url-overlays))))
 
-;;; Group 5: kuro--make-url-overlay
+;;; Group 4: kuro--make-url-overlay
 
 (ert-deftest kuro-url-detect--make-url-overlay-creates-overlay ()
   "kuro--make-url-overlay creates an overlay with correct properties."
@@ -89,21 +70,31 @@
     (kuro--make-url-overlay 1 20 "https://example.com")
     (should (= (length kuro--url-overlays) 1))))
 
-;;; Group 6: kuro--make-file-line-overlay
-
-(ert-deftest kuro-url-detect--make-file-line-overlay-creates-overlay ()
-  "kuro--make-file-line-overlay creates an overlay with correct properties."
+(ert-deftest kuro-url-detect--make-url-overlay-rejects-invalid-target ()
+  "kuro--make-url-overlay rejects unsafe browser targets."
   (kuro-url-detect-test--with-buffer
-    (insert "/home/user/file.rs:42\n")
-    (let ((ov (kuro--make-file-line-overlay 1 22 "/home/user/file.rs" 42)))
-      (should (overlayp ov))
-      (should (overlay-get ov 'kuro-url))
-      (should (string= (overlay-get ov 'kuro-file-target) "/home/user/file.rs"))
-      (should (= (overlay-get ov 'kuro-line-target) 42))
-      (should (eq (overlay-get ov 'face) 'link))
-      (should (string= (overlay-get ov 'help-echo) "/home/user/file.rs:42")))))
+    (insert "https://example.com\n")
+    (should-error (kuro--make-url-overlay 1 20 "file:///tmp/x"))
+    (should-error (kuro--make-url-overlay 1 20 "https:///path"))
+    (should-error (kuro--make-url-overlay 1 20 "https:path"))
+    (should-error (kuro--make-url-overlay 1 20 "https://user@example.com"))
+    (should-error (kuro--make-url-overlay 1 20 "https://example.com/bad path"))
+    (should-error (kuro--make-url-overlay 1 20 "https://example.com:bad/path"))
+    (should-error (kuro--make-url-overlay 1 20 "https://example.com:999999/path"))
+    (should-error (kuro--make-url-overlay 1 20 "https://999.999.999.999/path"))
+    (should-error (kuro--make-url-overlay 1 20 "https://[dead:beef]/path"))
+    (should-error (kuro--make-url-overlay 1 20 "http://example.com:0/path"))))
 
-;;; Group 7: kuro-open-url-at-point
+(ert-deftest kuro-url-detect--make-url-overlay-rejects-invalid-range ()
+  "kuro--make-url-overlay rejects non-integer and out-of-buffer ranges."
+  (kuro-url-detect-test--with-buffer
+    (insert "https://example.com\n")
+    (should-error (kuro--make-url-overlay 0 20 "https://example.com"))
+    (should-error (kuro--make-url-overlay 1 1 "https://example.com"))
+    (should-error (kuro--make-url-overlay 1 (1+ (point-max))
+                                          "https://example.com"))))
+
+;;; Group 5: kuro-open-url-at-point
 
 (ert-deftest kuro-url-detect--open-url-dispatches-browse-url ()
   "kuro-open-url-at-point calls browse-url for URL overlays."
@@ -117,24 +108,14 @@
         (kuro-open-url-at-point)
         (should (string= called "https://example.com"))))))
 
-(ert-deftest kuro-url-detect--open-url-dispatches-find-file ()
-  "kuro-open-url-at-point calls find-file-other-window for file overlays."
+(ert-deftest kuro-url-detect--open-url-ignores-non-url-overlay ()
+  "kuro-open-url-at-point ignores overlays without `kuro-url-target'."
   (kuro-url-detect-test--with-buffer
     (insert "/tmp/test-file.el:10\n")
-    (kuro--make-file-line-overlay 1 21 "/tmp/test-file.el" 10)
-    (goto-char 1)
-    (let ((opened-file nil))
-      (cl-letf (((symbol-function 'file-exists-p)
-                 (lambda (_f) t))
-                ((symbol-function 'find-file-other-window)
-                 (lambda (f) (setq opened-file f))))
-        (kuro-open-url-at-point)
-        (should (string= opened-file "/tmp/test-file.el"))))))
-
-(ert-deftest kuro-url-detect--open-url-noop-when-no-overlay-at-point ()
-  "kuro-open-url-at-point is a no-op when there is no overlay at point."
-  (kuro-url-detect-test--with-buffer
-    (insert "plain text\n")
+    (let ((ov (make-overlay 1 21 nil t nil)))
+      (overlay-put ov 'kuro-url t)
+      (overlay-put ov 'kuro-file-target "/tmp/test-file.el")
+      (overlay-put ov 'kuro-line-target 10))
     (goto-char 1)
     (let ((called nil))
       (cl-letf (((symbol-function 'browse-url)
@@ -144,20 +125,47 @@
         (kuro-open-url-at-point)
         (should-not called)))))
 
-(ert-deftest kuro-url-detect--open-url-noop-when-file-not-found ()
-  "kuro-open-url-at-point skips find-file when the file does not exist."
+(ert-deftest kuro-url-detect--open-url-ignores-invalid-url-target ()
+  "kuro-open-url-at-point ignores crafted overlays with unsafe URL targets."
   (kuro-url-detect-test--with-buffer
-    (insert "/nonexistent/path.el:5\n")
-    (kuro--make-file-line-overlay 1 23 "/nonexistent/path.el" 5)
+    (insert "unsafe\n")
+    (let ((ov (make-overlay 1 7 nil t nil)))
+      (overlay-put ov 'kuro-url t)
+      (overlay-put ov 'kuro-url-target "file:///tmp/test-file.el"))
     (goto-char 1)
-    (let ((opened nil))
-      (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
-                ((symbol-function 'find-file-other-window)
-                 (lambda (f) (setq opened f))))
+    (let ((called nil))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (_) (setq called t))))
         (kuro-open-url-at-point)
-        (should-not opened)))))
+        (should-not called)))))
 
-;;; Group 8: kuro--scan-urls-in-region
+(ert-deftest kuro-url-detect--open-url-selects-valid-url-overlay ()
+  "kuro-open-url-at-point selects a valid URL when another overlay is present."
+  (kuro-url-detect-test--with-buffer
+    (insert "https://example.com\n")
+    (let ((noise (make-overlay 1 20 nil nil t))
+          (called nil))
+      (overlay-put noise 'kuro-url t)
+      (overlay-put noise 'kuro-url-target "file:///tmp/test-file.el")
+      (kuro--make-url-overlay 1 20 "https://example.com")
+      (goto-char 1)
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url) (setq called url))))
+        (kuro-open-url-at-point)
+        (should (string= called "https://example.com"))))))
+
+(ert-deftest kuro-url-detect--open-url-noop-when-no-overlay-at-point ()
+  "kuro-open-url-at-point is a no-op when there is no overlay at point."
+  (kuro-url-detect-test--with-buffer
+    (insert "plain text\n")
+    (goto-char 1)
+    (let ((called nil))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (_) (setq called t))))
+        (kuro-open-url-at-point)
+        (should-not called)))))
+
+;;; Group 6: kuro--scan-urls-in-region
 
 (ert-deftest kuro-url-detect--scan-creates-url-overlays ()
   "kuro--scan-urls-in-region creates overlays for URLs in the buffer."
@@ -169,6 +177,16 @@
       (should (string= (overlay-get ov 'kuro-url-target)
                         "https://example.com")))))
 
+(ert-deftest kuro-url-detect--scan-creates-bracketed-ipv6-url-overlay ()
+  "kuro--scan-urls-in-region creates overlays for strict bracketed IPv6 URLs."
+  (kuro-url-detect-test--with-buffer
+    (insert "Visit https://[2001:db8::1]/path now\n")
+    (kuro--scan-urls-in-region (point-min) (point-max))
+    (should (= (length kuro--url-overlays) 1))
+    (let ((ov (car kuro--url-overlays)))
+      (should (string= (overlay-get ov 'kuro-url-target)
+                       "https://[2001:db8::1]/path")))))
+
 (ert-deftest kuro-url-detect--scan-skips-duplicate-overlays ()
   "kuro--scan-urls-in-region does not create duplicate overlays."
   (kuro-url-detect-test--with-buffer
@@ -177,14 +195,47 @@
     (kuro--scan-urls-in-region (point-min) (point-max))
     (should (= (length kuro--url-overlays) 1))))
 
-(ert-deftest kuro-url-detect--scan-skips-duplicate-file-line-overlays ()
-  "kuro--scan-urls-in-region does not create duplicate file:line overlays."
+(ert-deftest kuro-url-detect--scan-does-not-link-file-line-text ()
+  "kuro--scan-urls-in-region does not create overlays for local file text."
   (kuro-url-detect-test--with-buffer
     (insert "/tmp/test-file.el:10\n")
     (cl-letf (((symbol-function 'file-exists-p) (lambda (_) t)))
       (kuro--scan-urls-in-region (point-min) (point-max))
+      (should (null kuro--url-overlays)))))
+
+(ert-deftest kuro-url-detect--scan-rejects-hostless-http-url ()
+  "kuro--scan-urls-in-region rejects hostless HTTP(S) matches."
+  (kuro-url-detect-test--with-buffer
+    (insert "Bad https:///tmp/path\n")
+    (kuro--scan-urls-in-region (point-min) (point-max))
+    (should (null kuro--url-overlays))))
+
+(ert-deftest kuro-url-detect--scan-rejects-userinfo-http-url ()
+  "kuro--scan-urls-in-region rejects URLs with userinfo."
+  (kuro-url-detect-test--with-buffer
+    (insert "Bad https://user@example.com/path\n")
+    (kuro--scan-urls-in-region (point-min) (point-max))
+    (should (null kuro--url-overlays))))
+
+(ert-deftest kuro-url-detect--scan-rejects-invalid-port-http-url ()
+  "kuro--scan-urls-in-region rejects URLs with malformed or invalid ports."
+  (dolist (input '("Bad https://example.com:bad/path\n"
+                   "Bad https://example.com:999999/path\n"
+                   "Bad http://example.com:0/path\n"))
+    (kuro-url-detect-test--with-buffer
+      (insert input)
       (kuro--scan-urls-in-region (point-min) (point-max))
-      (should (= (length kuro--url-overlays) 1)))))
+      (should (null kuro--url-overlays)))))
+
+(ert-deftest kuro-url-detect--scan-rejects-malformed-ip-literals ()
+  "kuro--scan-urls-in-region rejects malformed IPv4 and IPv6 literals."
+  (dolist (input '("Bad https://999.999.999.999/path\n"
+                   "Bad https://[dead:beef]/path\n"
+                   "Bad https://[:::]/path\n"))
+    (kuro-url-detect-test--with-buffer
+      (insert input)
+      (kuro--scan-urls-in-region (point-min) (point-max))
+      (should (null kuro--url-overlays)))))
 
 (ert-deftest kuro-url-detect--scan-creates-multiple-url-overlays ()
   "kuro--scan-urls-in-region creates overlays for multiple URLs."
@@ -193,7 +244,7 @@
     (kuro--scan-urls-in-region (point-min) (point-max))
     (should (= (length kuro--url-overlays) 2))))
 
-;;; Group 9: kuro--start-url-detection / kuro--stop-url-detection
+;;; Group 7: kuro--start-url-detection / kuro--stop-url-detection
 
 (ert-deftest kuro-url-detect--start-creates-timer ()
   "kuro--start-url-detection creates an idle timer."
@@ -223,12 +274,12 @@
           (should (eq kuro--url-detect-timer first-timer))
         (kuro--stop-url-detection)))))
 
-;;; Group 10: defcustom defaults
+;;; Group 8: defcustom defaults
 
 (kuro-url-detect-test--deftest-defcustom-defaults
   kuro-url-detect-test--defcustom-default-cases)
 
-;;; Group 11: kuro--url-detect-visible
+;;; Group 9: kuro--url-detect-visible
 
 (ert-deftest kuro-url-detect--visible-skips-when-not-kuro-mode ()
   "`kuro--url-detect-visible' does nothing when `derived-mode-p' returns nil."
@@ -240,11 +291,10 @@
         (kuro--url-detect-visible)
         (should-not scanned)))))
 
-(ert-deftest kuro-url-detect--visible-skips-when-both-detection-off ()
-  "`kuro--url-detect-visible' does nothing when both detection flags are nil."
+(ert-deftest kuro-url-detect--visible-skips-when-url-detection-off ()
+  "`kuro--url-detect-visible' does nothing when URL detection is nil."
   (kuro-url-detect-test--with-buffer
     (let ((kuro-url-detection nil)
-          (kuro-file-line-detection nil)
           (scanned nil))
       (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
                 ((symbol-function 'kuro--scan-urls-in-region)
@@ -258,10 +308,9 @@
 (ert-deftest kuro-url-detect--visible-detection-flag-invariant ()
   "Invariant: `kuro--url-detect-visible' scans for every entry in detection table."
   (dolist (entry kuro-url-detect-test--detection-flag-table)
-    (pcase-let ((`(,_name ,url-flag ,file-flag) entry))
+    (pcase-let ((`(,_name ,url-flag) entry))
       (kuro-url-detect-test--with-buffer
         (let ((kuro-url-detection url-flag)
-              (kuro-file-line-detection file-flag)
               (scanned nil))
           (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
                     ((symbol-function 'window-start) (lambda () (point-min)))
@@ -276,7 +325,6 @@
   (kuro-url-detect-test--with-buffer
     (insert "0123456789")
     (let ((kuro-url-detection t)
-          (kuro-file-line-detection nil)
           (scan-start nil) (scan-end nil))
       (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
                 ((symbol-function 'window-start) (lambda () 3))
@@ -294,7 +342,6 @@
     (let* ((live-ov (make-overlay 1 4))
            (dead-ov (make-overlay 1 4))
            (kuro-url-detection t)
-           (kuro-file-line-detection nil)
            (kuro--url-overlays (list live-ov dead-ov)))
       ;; Kill dead-ov before the call; live-ov is outside window (window=5..11)
       (delete-overlay dead-ov)
@@ -306,21 +353,6 @@
         (should (= 1 (length kuro--url-overlays)))
         (should (eq live-ov (car kuro--url-overlays))))
       (delete-overlay live-ov))))
-
-(ert-deftest kuro-url-detect--make-file-line-overlay-pushes-to-url-overlays ()
-  "kuro--make-file-line-overlay pushes the new overlay onto kuro--url-overlays."
-  (kuro-url-detect-test--with-buffer
-    (insert "/tmp/foo.rs:7\n")
-    (kuro--make-file-line-overlay 1 14 "/tmp/foo.rs" 7)
-    (should (= (length kuro--url-overlays) 1))
-    (should (equal (overlay-get (car kuro--url-overlays) 'kuro-file-target) "/tmp/foo.rs"))))
-
-(ert-deftest kuro-url-detect--make-file-line-overlay-keymap-is-bound ()
-  "kuro--make-file-line-overlay attaches kuro--url-keymap to the overlay."
-  (kuro-url-detect-test--with-buffer
-    (insert "/tmp/bar.el:3\n")
-    (let ((ov (kuro--make-file-line-overlay 1 14 "/tmp/bar.el" 3)))
-      (should (eq (overlay-get ov 'keymap) kuro--url-keymap)))))
 
 (provide 'kuro-url-detect-test)
 

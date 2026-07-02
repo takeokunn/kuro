@@ -61,7 +61,11 @@ fn two_by_two_grid_yields_one_region() {
     }
 
     let regions = screen.collect_placeholder_regions();
-    assert_eq!(regions.len(), 1, "contiguous 2x2 must collapse to one region");
+    assert_eq!(
+        regions.len(),
+        1,
+        "contiguous 2x2 must collapse to one region"
+    );
     assert_eq!(
         regions[0],
         PlaceholderRegion {
@@ -182,9 +186,17 @@ fn descending_img_col_in_run_no_underflow() {
     put(&mut screen, 0, 1, placeholder_cell(11, 0, 2, None));
 
     let regions = screen.collect_placeholder_regions();
-    assert_eq!(regions.len(), 1, "contiguous same-image run stays one region");
+    assert_eq!(
+        regions.len(),
+        1,
+        "contiguous same-image run stays one region"
+    );
     let r = regions[0];
     assert_eq!(r.cell_cols, 2);
     // img_cols must be a small sane number, never a wrapped ~4 billion value.
-    assert!(r.img_cols < 1000, "img_cols sane, not underflow-wrapped: {}", r.img_cols);
+    assert!(
+        r.img_cols < 1000,
+        "img_cols sane, not underflow-wrapped: {}",
+        r.img_cols
+    );
 }

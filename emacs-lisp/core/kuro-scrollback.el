@@ -75,8 +75,8 @@ The original terminal buffer is not modified; the PTY continues to run."
 ;;;###autoload
 (defun kuro-scrollback-send ()
   "Send the snapshot buffer contents to the source Kuro PTY and close.
-The entire buffer is sent via `kuro--send-paste-or-raw' which applies
-bracketed-paste wrapping when the target terminal has mode 2004 active.
+The entire buffer is sent via the Rust paste API, which reads the
+target terminal's current mode 2004 state at send time.
 Signals `user-error' when the source buffer no longer exists."
   (interactive)
   (kuro--with-mode kuro-scrollback-edit-mode "Not in a Kuro scrollback edit buffer"

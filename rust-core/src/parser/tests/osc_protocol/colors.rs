@@ -166,6 +166,25 @@ fn test_decode_iterm2_image_valid_png_returns_dimensions() {
     assert_eq!(pixels.len(), 4);
 }
 
+#[test]
+fn test_decode_iterm2_image_grayscale_png_converts_to_rgba() {
+    let png_b64 = test_1x1_png_b64!(png::ColorType::Grayscale, [0x80]);
+    let (pixels, width, height) =
+        super::decode_iterm2_image(&png_b64).expect("grayscale PNG must decode");
+
+    assert_eq!((width, height), (1, 1));
+    assert_eq!(pixels, vec![0x80, 0x80, 0x80, 0xff]);
+}
+
+#[test]
+fn test_decode_iterm2_image_oversized_dimensions_returns_none() {
+    let png_b64 = support::encode_empty_png_with_dimensions_b64(1025, 1025);
+    assert!(
+        super::decode_iterm2_image(&png_b64).is_none(),
+        "oversized PNG dimensions must be rejected before decoded allocation"
+    );
+}
+
 // ── handle_osc_1337 dispatch ───────────────────────────────────────────────────
 
 // "File=" prefix but no ':' separator — no crash; no side effects on clipboard

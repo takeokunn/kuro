@@ -26,12 +26,22 @@
        (kuro-mux--register))
      buf))
 
+(defun kuro-mux-test--layout-session-field (session key)
+  "Return typed layout SESSION field for KEY."
+  (cond
+   ((eq key :name) (kuro-mux--layout-session-name session))
+   ((eq key :directory) (kuro-mux--layout-session-directory session))
+   (t nil)))
+
 (defmacro kuro-mux-test--check-spec (buf-name setup-form key expected)
-  "Make session BUF-NAME, apply SETUP-FORM, and check plist KEY equals EXPECTED."
+  "Make session BUF-NAME, apply SETUP-FORM, and check typed session KEY equals EXPECTED."
   `(kuro-mux-test--with-registry
      (let ((buf (kuro-mux-test--make-session ,buf-name)))
        (with-current-buffer buf ,setup-form)
-       (should (equal (plist-get (kuro-mux--session-spec buf) ,key) ,expected))
+       (let ((spec (kuro-mux--session-spec buf)))
+         (should (kuro-mux--layout-session-p spec))
+         (should (equal (kuro-mux-test--layout-session-field spec ,key)
+                        ,expected)))
        (kill-buffer buf))))
 
 (defmacro kuro-mux-test--with-layout-file (&rest body)
@@ -65,7 +75,7 @@
 (defmacro kuro-mux-test--def-session-spec (test-name buf-name var key expected)
   "Define TEST-NAME for one `kuro-mux--session-spec' field."
   `(ert-deftest ,test-name ()
-     ,(format "`kuro-mux--session-spec' includes `%s' in the plist." key)
+     ,(format "`kuro-mux--session-spec' includes `%s' in the typed session." key)
      (kuro-mux-test--check-spec ,buf-name (setq ,var ,expected) ,key ,expected)))
 
 (defmacro kuro-mux-test--deftest-session-specs ()
@@ -84,9 +94,13 @@
      ,(format "`kuro-mux--parse-layout-plists' parses %S." raw)
      (let ((parsed (kuro-mux--parse-layout-plists ',raw)))
        (should (= (length parsed) ,expected-length))
+       (dolist (session parsed)
+         (should (kuro-mux--layout-session-p session)))
        ,@(cl-loop for (key value) on expected-first-fields by #'cddr
                   collect
-                  `(should (string= (plist-get (car parsed) ,key) ,value))))))
+                  `(should (equal (kuro-mux-test--layout-session-field
+                                   (car parsed) ,key)
+                                  ,value))))))
 
 (defmacro kuro-mux-test--deftest-parse-layout-plists ()
   "Define all `kuro-mux--parse-layout-plists' tests."

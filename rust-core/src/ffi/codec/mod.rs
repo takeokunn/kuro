@@ -49,7 +49,10 @@ pub use color::{
 
 // Line encoding
 pub use line::encode_line;
-pub(crate) use line::{encode_line_into_buf, encode_line_with_pool, EncodePool, EncodedLine};
+pub use line::EncodedLineData;
+pub(crate) use line::{
+    encode_line_into_buf, encode_line_with_pool, EncodePool, EncodedFaceRange, EncodedLine,
+};
 
 // Binary frame encoding + hash
 #[cfg(test)]

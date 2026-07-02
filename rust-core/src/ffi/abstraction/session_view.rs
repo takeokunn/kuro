@@ -3,10 +3,7 @@
 use super::TerminalSession;
 use crate::Result;
 
-fn encode_dirty_row(
-    screen: &crate::grid::screen::Screen,
-    row: usize,
-) -> Option<(usize, String)> {
+fn encode_dirty_row(screen: &crate::grid::screen::Screen, row: usize) -> Option<(usize, String)> {
     screen.get_line(row).map(|line| {
         let text: String = line
             .cells
@@ -65,13 +62,13 @@ impl TerminalSession {
     }
 
     /// Encode a line of cells into text and face ranges.
+    #[cfg(test)]
     #[must_use]
-    pub fn encode_line_faces(
+    pub(crate) fn encode_line_faces(
         row: usize,
         cells: &[crate::types::cell::Cell],
     ) -> crate::ffi::codec::EncodedLine {
-        let (text, face_ranges, col_to_buf) = crate::ffi::codec::encode_line(cells);
-        (row, text, face_ranges, col_to_buf)
+        crate::ffi::codec::encode_line(cells).with_row_index(row)
     }
 
     /// Resize the terminal core and PTY, if any.

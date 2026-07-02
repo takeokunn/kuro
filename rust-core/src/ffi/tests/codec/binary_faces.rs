@@ -11,8 +11,20 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
     let bg: u32 = 0xFF00_0000;
     let flags: u64 = 0x0000_0001; // bold
     let ul_color: u32 = 0xFF00_0000; // Color::Default sentinel
-    let face_ranges = vec![(0usize, 3usize, fg, bg, flags, ul_color)];
-    let lines: &[EncodedLine] = &[(0usize, String::from("ABC"), face_ranges, vec![])];
+    let face_ranges = vec![EncodedFaceRange {
+        start_buf: 0,
+        end_buf: 3,
+        fg,
+        bg,
+        flags,
+        underline_color: ul_color,
+    }];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: String::from("ABC"),
+        face_ranges,
+        col_to_buf: vec![],
+    }];
     let result = encode_screen_binary(lines);
 
     // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
@@ -23,8 +35,18 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
 #[test]
 fn encode_screen_binary_two_rows_row_indices_in_order() {
     let lines: Vec<EncodedLine> = vec![
-        (7usize, String::from("X"), vec![], vec![]),
-        (15usize, String::from("Y"), vec![], vec![]),
+        EncodedLine {
+            row_index: 7,
+            text: String::from("X"),
+            face_ranges: vec![],
+            col_to_buf: vec![],
+        },
+        EncodedLine {
+            row_index: 15,
+            text: String::from("Y"),
+            face_ranges: vec![],
+            col_to_buf: vec![],
+        },
     ];
     let result = encode_screen_binary(&lines);
     // format_version at offset 0, num_rows at offset 4
@@ -224,7 +246,12 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
     let text = String::from("テ");
     let text_len = text.len(); // 3 bytes
     let col_to_buf = vec![0usize, 0usize];
-    let lines: &[EncodedLine] = &[(0usize, text, vec![], col_to_buf)];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text,
+        face_ranges: vec![],
+        col_to_buf,
+    }];
     let result = encode_screen_binary(lines);
 
     // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
@@ -260,10 +287,29 @@ fn encode_screen_binary_two_face_ranges_same_row() {
     let flags2: u64 = 0x0000_0004; // italic
     let ul2: u32 = 0x00FF_0000; // Rgb red as underline color
     let face_ranges = vec![
-        (0usize, 2usize, fg1, bg1, flags1, ul1),
-        (2usize, 4usize, fg2, bg2, flags2, ul2),
+        EncodedFaceRange {
+            start_buf: 0,
+            end_buf: 2,
+            fg: fg1,
+            bg: bg1,
+            flags: flags1,
+            underline_color: ul1,
+        },
+        EncodedFaceRange {
+            start_buf: 2,
+            end_buf: 4,
+            fg: fg2,
+            bg: bg2,
+            flags: flags2,
+            underline_color: ul2,
+        },
     ];
-    let lines: &[EncodedLine] = &[(0usize, String::from("ABCD"), face_ranges, vec![])];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: String::from("ABCD"),
+        face_ranges,
+        col_to_buf: vec![],
+    }];
     let result = encode_screen_binary(lines);
 
     // num_face_ranges header (at byte 12 = header[8]+row_idx[4]) must be 2.

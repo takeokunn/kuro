@@ -2,99 +2,6 @@
 
 ;;; Code:
 
-(defconst kuro-paste-test--sanitize-cases
-  '((kuro-input-paste--sanitize-clean-string-unchanged
-     "kuro--sanitize-paste leaves strings containing no ESC bytes unchanged."
-     "hello world"
-     "hello world")
-    (kuro-input-paste--sanitize-strips-single-esc
-     "kuro--sanitize-paste removes a single ESC (0x1B) byte."
-     (concat "hello" (string #x1b) "world")
-     "helloworld")
-    (kuro-input-paste--sanitize-strips-multiple-esc
-     "kuro--sanitize-paste removes all ESC bytes from the input."
-     (concat (string #x1b) "a" (string #x1b) "b" (string #x1b) "c")
-     "abc")
-    (kuro-input-paste--sanitize-leading-esc
-     "kuro--sanitize-paste removes a leading ESC byte."
-     (concat (string #x1b) "text")
-     "text")
-    (kuro-input-paste--sanitize-trailing-esc
-     "kuro--sanitize-paste removes a trailing ESC byte."
-     (concat "text" (string #x1b))
-     "text")
-    (kuro-input-paste--sanitize-only-esc-bytes
-     "kuro--sanitize-paste returns empty string when input is all ESC bytes."
-     (concat (string #x1b) (string #x1b) (string #x1b))
-     "")
-    (kuro-input-paste--sanitize-empty-input
-     "kuro--sanitize-paste handles an empty string without error."
-     ""
-     "")
-    (kuro-input-paste--sanitize-long-input-no-truncation
-     "kuro--sanitize-paste passes through long input without truncation."
-     (apply #'concat (make-list 100 "abcdefghij"))
-     (apply #'concat (make-list 100 "abcdefghij")))
-    (kuro-input-paste--sanitize-newlines-preserved
-     "kuro--sanitize-paste preserves newline characters."
-     "line1\nline2\nline3"
-     "line1\nline2\nline3")
-    (kuro-input-paste--sanitize-tabs-preserved
-     "kuro--sanitize-paste preserves tab characters."
-     "col1\tcol2"
-     "col1\tcol2")
-    (kuro-input-paste--sanitize-injection-sequence-neutralized
-     "kuro--sanitize-paste neutralizes a bracketed paste escape injection attempt."
-     (concat "evil" (string #x1b) "[201~injection")
-     "evil[201~injection")
-    (kuro-input-paste--sanitize-c1-csi-injection-neutralized
-     "kuro--sanitize-paste neutralizes 8-bit C1 CSI injection."
-     (concat "evil" (string #x9b) "201~injection")
-     "evil201~injection")
-    (kuro-input-paste--sanitize-mixed-esc-and-c1
-     "kuro--sanitize-paste strips both ESC and C1 CSI bytes from the same string."
-     (concat "a" (string #x1b) "b" (string #x9b) "c")
-     "abc")
-    (kuro-input-paste--sanitize-only-c1-bytes
-     "kuro--sanitize-paste returns empty string when input is all C1 CSI bytes."
-     (concat (string #x9b) (string #x9b) (string #x9b))
-     "")
-    (kuro-input-paste--sanitize-preserves-unicode
-     "kuro--sanitize-paste preserves multibyte Unicode characters."
-     "日本語テスト"
-     "日本語テスト")
-    (kuro-input-paste--sanitize-esc-between-unicode
-     "kuro--sanitize-paste strips ESC bytes interspersed with Unicode."
-     (concat "日本" (string #x1b) "語")
-     "日本語")
-    (kuro-input-paste--sanitize-long-string-with-c1
-     "kuro--sanitize-paste handles a long string with C1 CSI bytes mixed in."
-     (let ((clean (make-string 50 ?a))
-           (c1 (string #x9b)))
-       (concat clean c1 clean c1 clean c1 clean))
-     (make-string 200 ?a))
-    (kuro-input-paste--sanitize-preserves-cr-lf
-     "kuro--sanitize-paste preserves CR and LF characters."
-     "line1\r\nline2\rline3\n"
-     "line1\r\nline2\rline3\n")
-    (kuro-input-paste--sanitize-consecutive-esc-and-c1
-     "kuro--sanitize-paste strips multiple consecutive ESC and C1 bytes."
-     (concat (string #x1b) (string #x1b) (string #x9b) (string #x9b)
-             "text" (string #x1b) (string #x9b))
-     "text")
-    (kuro-input-paste--sanitize-does-not-strip-del
-     "kuro--sanitize-paste does not strip DEL."
-     (concat "a" (string #x7f) "b")
-     (concat "a" (string #x7f) "b"))
-    (kuro-input-paste--sanitize-null-byte-preserved
-     "kuro--sanitize-paste preserves NUL bytes."
-     (concat "a" (string 0) "b")
-     (concat "a" (string 0) "b"))
-    (kuro-input-paste--sanitize-c1-then-injection-sequence
-     "kuro--sanitize-paste neutralizes 8-bit injection attempt via C1 CSI + 201~ ."
-     (concat "evil" (string #x9b) "201~injection")
-     "evil201~injection")))
-
 (defconst kuro-paste-test--yank-arg-cases
   '((kuro-input-paste--yank-with-numeric-arg
      "kuro--yank with numeric arg 2 retrieves the second kill-ring entry."
@@ -111,49 +18,71 @@
      ("entry-a" "entry-b" "entry-c")
      3
      ("entry-a"))
+    (kuro-input-paste--yank-raw-prefix-4-fetches-fourth-entry
+     "kuro--yank accepts Emacs raw prefix list values."
+     ("entry-1" "entry-2" "entry-3" "entry-4")
+     '(4)
+     ("entry-1"))
     (kuro-input-paste--yank-no-arg-fetches-most-recent
      "kuro--yank with no arg (nil) fetches the most recent kill-ring entry."
      ("top-of-ring")
      nil
      ("top-of-ring"))))
 
+(defconst kuro-paste-test--yank-error-cases
+  '((kuro-input-paste--yank-rejects-zero-arg
+     "kuro--yank rejects zero because yank indices are one-based at the command boundary."
+     ("only-entry")
+     0
+     user-error)
+    (kuro-input-paste--yank-rejects-negative-arg
+     "kuro--yank rejects negative prefix values before kill-ring lookup."
+     ("only-entry")
+     -1
+     user-error)
+    (kuro-input-paste--yank-rejects-string-arg
+     "kuro--yank rejects non-prefix programmatic arguments before kill-ring lookup."
+     ("only-entry")
+     "1"
+     wrong-type-argument)))
+
 (defconst kuro-paste-test--yank-send-cases
   '((kuro-input-paste--yank-plain-sends-text-directly
-     "kuro--yank sends text directly when bracketed paste mode is off."
+     "kuro--yank sends text to `kuro--send-paste'."
      "clipboard text"
      nil
      (list :expected '("clipboard text")))
     (kuro-input-paste--yank-plain-preserves-content
-     "kuro--yank in plain mode sends content verbatim (no wrapping or sanitization)."
+     "kuro--yank passes escape-containing content verbatim to Rust."
      (concat "raw" (string #x1b) "content")
      nil
      (list :expected (list (concat "raw" (string #x1b) "content"))))
-    (kuro-input-paste--yank-bracketed-wraps-with-sequences
-     "kuro--yank wraps content with ESC[200~ and ESC[201~ in bracketed paste mode."
+    (kuro-input-paste--yank-bracketed-cache-is-ignored
+     "kuro--yank ignores the cached bracketed paste mode and delegates to Rust."
      "pasted text"
      t
-     (list :wrapped (list :contains "pasted text")))
-    (kuro-input-paste--yank-bracketed-sanitizes-esc
-     "kuro--yank strips ESC from clipboard content in bracketed paste mode."
+     (list :expected '("pasted text")))
+    (kuro-input-paste--yank-bracketed-cache-preserves-esc
+     "kuro--yank leaves escape sanitization to the Rust paste boundary."
      (concat "evil" (string #x1b) "[201~injection")
      t
-     (list :wrapped (list :content-lacks (string #x1b))))
+     (list :expected (list (concat "evil" (string #x1b) "[201~injection"))))
     (kuro-input-paste--yank-bracketed-empty-kill
-     "kuro--yank with empty kill-ring entry still wraps correctly."
+     "kuro--yank sends an empty kill-ring entry as an empty paste payload."
      ""
      t
-     (list :expected (list (concat kuro--paste-open kuro--paste-close))))))
+     (list :expected '("")))))
 
 (defconst kuro-paste-test--yank-pop-send-cases
-  '((kuro-input-paste--yank-pop-wraps-in-bracketed-mode
-     "kuro--yank-pop wraps content with bracketed paste sequences when mode is on."
+  '((kuro-input-paste--yank-pop-bracketed-cache-is-ignored
+     "kuro--yank-pop ignores cached bracketed paste mode and delegates to Rust."
      "pop text"
      kuro--yank
      t
      0
-     (list :wrapped nil))
+     (list :expected '("pop text")))
     (kuro-input-paste--yank-pop-plain-sends-directly
-     "kuro--yank-pop sends content directly when bracketed paste mode is off."
+     "kuro--yank-pop sends content through `kuro--send-paste'."
      "pop plain"
      kuro--yank
      nil
@@ -180,86 +109,74 @@
      7
      0)))
 
-(defconst kuro-paste-test--sequence-cases
-  '((kuro-input-paste--paste-open-is-correct-sequence
-     "kuro--paste-open is exactly ESC[200~ (DEC mode 2004 open bracket)."
-     (equal kuro--paste-open "\e[200~"))
-    (kuro-input-paste--paste-close-is-correct-sequence
-     "kuro--paste-close is exactly ESC[201~ (DEC mode 2004 close bracket)."
-     (equal kuro--paste-close "\e[201~"))
-    (kuro-input-paste--paste-open-starts-with-esc
-     "kuro--paste-open starts with ESC (0x1B)."
-     (= (aref kuro--paste-open 0) #x1b))
-    (kuro-input-paste--paste-close-starts-with-esc
-     "kuro--paste-close starts with ESC (0x1B)."
-     (= (aref kuro--paste-close 0) #x1b))
-    (kuro-input-paste--paste-sequences-are-distinct
-     "kuro--paste-open and kuro--paste-close are different strings."
-     (not (equal kuro--paste-open kuro--paste-close)))))
-
 (defconst kuro-paste-test--send-paste-or-raw-cases
   '((kuro-input-paste--send-paste-or-raw-plain-mode
-     "kuro--send-paste-or-raw sends text verbatim when bracketed paste is off."
+     "kuro--send-paste-or-raw delegates text to `kuro--send-paste'."
      "hello"
      nil
      (list :expected '("hello")))
-    (kuro-input-paste--send-paste-or-raw-bracketed-mode-wraps
-     "kuro--send-paste-or-raw wraps text with open/close sequences when mode is on."
+    (kuro-input-paste--send-paste-or-raw-bracketed-cache-is-ignored
+     "kuro--send-paste-or-raw ignores cached bracketed paste mode."
      "world"
      t
-     (list :wrapped (list :contains "world")))
-    (kuro-input-paste--send-paste-or-raw-bracketed-mode-sanitizes
-     "kuro--send-paste-or-raw sanitizes ESC from text in bracketed mode."
+     (list :expected '("world")))
+    (kuro-input-paste--send-paste-or-raw-bracketed-cache-preserves-esc
+     "kuro--send-paste-or-raw leaves escape sanitization to Rust."
      (concat "a" (string #x1b) "b")
      t
-     (list :wrapped (list :content-lacks (string #x1b))))
+     (list :expected (list (concat "a" (string #x1b) "b"))))
     (kuro-input-paste--send-paste-or-raw-plain-preserves-esc
-     "kuro--send-paste-or-raw does NOT sanitize in plain mode; ESC passes through."
+     "kuro--send-paste-or-raw passes ESC bytes through to Rust."
      (concat "a" (string #x1b) "b")
      nil
      (list :expected (list (concat "a" (string #x1b) "b"))))
     (kuro-input-paste--send-paste-or-raw-bracketed-long-string
-     "kuro--send-paste-or-raw does not truncate long strings in bracketed mode."
+     "kuro--send-paste-or-raw does not truncate long strings."
      (make-string 10000 ?x)
      t
-     (list :payload-length (+ (length kuro--paste-open)
-                              10000
-                              (length kuro--paste-close))))
+     (list :expected (list (make-string 10000 ?x))))
     (kuro-input-paste--paste-newlines-sent-verbatim
-     "kuro--send-paste-or-raw sends newlines verbatim in plain mode (no \\r substitution)."
+     "kuro--send-paste-or-raw sends newlines verbatim."
      "line1\nline2\nline3"
      nil
      (list :expected '("line1\nline2\nline3")))
-    (kuro-input-paste--paste-bracketed-wraps-multiline
-     "kuro--send-paste-or-raw in bracketed mode wraps multi-line text correctly."
+    (kuro-input-paste--paste-bracketed-cache-preserves-multiline
+     "kuro--send-paste-or-raw passes multi-line text verbatim to Rust."
      "line1\nline2"
      t
-     (list :wrapped (list :contains "line1\nline2")))
+     (list :expected '("line1\nline2")))
     (kuro-input-paste--paste-nul-byte-preserved-in-plain-mode
-     "NUL (\\x00) bytes pass through kuro--send-paste-or-raw in plain mode unchanged."
+     "NUL (\\x00) bytes pass through kuro--send-paste-or-raw unchanged."
      (concat "a" (string 0) "b")
      nil
      (list :expected (list (concat "a" (string 0) "b"))))
-    (kuro-input-paste--paste-esc-stripped-in-bracketed-mode
-     "ESC bytes are stripped from content inside the bracketed paste wrapper."
+    (kuro-input-paste--paste-esc-preserved-for-rust-boundary
+     "ESC bytes pass through to the Rust paste boundary."
      (concat "a" (string #x1b) "b")
      t
-     (list :wrapped (list :content-lacks (string #x1b))))
+     (list :expected (list (concat "a" (string #x1b) "b"))))
     (kuro-input-paste--paste-unicode-preserved-in-bracketed-mode
-     "Unicode characters survive kuro--sanitize-paste and bracketed wrapping."
+     "Unicode characters pass through to the Rust paste boundary."
      "日本語テスト"
      t
-     (list :wrapped (list :contains "日本語テスト")))
+     (list :expected '("日本語テスト")))
     (kuro-input-paste--send-paste-or-raw-empty-bracketed
-     "kuro--send-paste-or-raw with empty string in bracketed mode sends open+close."
+     "kuro--send-paste-or-raw sends an empty string as an empty paste payload."
      ""
      t
-     (list :expected (list (concat kuro--paste-open kuro--paste-close))))))
+     (list :expected '("")))))
 
 (defconst kuro-paste-test--yank-render-cases
   '((kuro-input-paste--yank-calls-schedule-render
      "kuro--yank calls kuro--schedule-immediate-render after sending."
      "text")))
+
+(defconst kuro-paste-test--yank-pop-render-cases
+  '((kuro-input-paste--yank-pop-calls-schedule-render
+     "kuro--yank-pop calls kuro--schedule-immediate-render after sending."
+     "text"
+     kuro--yank
+     0)))
 
 (defconst kuro-paste-test--yank-pop-last-command-cases
   '((kuro-input-paste--yank-pop-accepts-yank-as-last-cmd
@@ -276,13 +193,13 @@
      nil
      0
      (list :expected '("entry2")))
-    (kuro-input-paste--yank-pop-sanitizes-c1-in-bracketed-mode
-     "kuro--yank-pop strips C1 CSI from content when bracketed paste mode is active."
+    (kuro-input-paste--yank-pop-bracketed-cache-preserves-c1
+     "kuro--yank-pop leaves C1 CSI sanitization to the Rust paste boundary."
      (concat "evil" (string #x9b) "201~payload")
      kuro--yank
      t
      0
-     (list :wrapped (list :content-lacks (string #x9b))))
+     (list :expected (list (concat "evil" (string #x9b) "201~payload"))))
     (kuro-input-paste--yank-pop-plain-no-wrapping
      "kuro--yank-pop in plain mode sends the raw text without any bracket sequences."
      "unwrapped"
@@ -299,26 +216,26 @@
      (list :expected '("kill-pop-text")))))
 
 (defconst kuro-paste-test--yank-extra-cases
-  '((kuro-input-paste--yank-calls-send-key-exactly-once
-     "kuro--yank calls kuro--send-key exactly once per invocation."
+  '((kuro-input-paste--yank-calls-send-paste-exactly-once
+     "kuro--yank calls `kuro--send-paste' exactly once per invocation."
      "single-call"
      t
-     (list :wrapped nil))
+     (list :expected '("single-call")))
     (kuro-input-paste--yank-dispatches-to-send-paste-or-raw
-     "kuro--yank ends up calling kuro--send-key exactly once per call."
+     "kuro--yank dispatches through the paste boundary exactly once per call."
      "dispatch-check"
      nil
      (list :expected '("dispatch-check")))
-    (kuro-input-paste--yank-empty-string-sends-empty-brackets
-     "kuro--yank with empty kill-ring entry sends just the open+close sequences."
+    (kuro-input-paste--yank-empty-string-sends-empty-paste
+     "kuro--yank with empty kill-ring entry sends an empty paste payload."
      ""
      t
-     (list :expected (list (concat kuro--paste-open kuro--paste-close))))
-    (kuro-input-paste--yank-multiline-correct-wrapping
-     "kuro--yank with multi-line kill content wraps exactly once with open+close."
+     (list :expected '("")))
+    (kuro-input-paste--yank-multiline-passes-verbatim
+     "kuro--yank with multi-line kill content delegates the verbatim payload to Rust."
      "first\nsecond\nthird"
      t
-     (list :wrapped nil))))
+     (list :expected '("first\nsecond\nthird")))))
 
 (defconst kuro-paste-test--extra-error-cases
   '((kuro-input-paste--yank-pop-errors-on-unrelated-last-command
@@ -326,23 +243,19 @@
      forward-char
      nil
      nil
-     user-error)))
+     user-error)
+    (kuro-input-paste--yank-pop-rejects-string-arg
+     "kuro--yank-pop rejects non-prefix programmatic arguments before kill-ring lookup."
+     kuro--yank
+     nil
+     "1"
+     wrong-type-argument)))
 
 (defconst kuro-paste-test--initial-value-cases
   '((kuro-input-paste--keyboard-flags-initial-value-is-zero
      "kuro--keyboard-flags has an initial value of 0 in a fresh buffer."
      kuro--keyboard-flags
      0)))
-
-(defconst kuro-paste-test--sequence-structure-cases
-  '((kuro-input-paste--bracketed-sequence-open-close-structure
-     "Bracketed paste sequence has open=ESC[200~ and close=ESC[201~ structure."
-     ((equal kuro--paste-open  "\e[200~")
-      (equal kuro--paste-close "\e[201~")
-      (string-prefix-p "\e[" kuro--paste-open)
-      (string-suffix-p "~" kuro--paste-open)
-      (string-prefix-p "\e[" kuro--paste-close)
-      (string-suffix-p "~" kuro--paste-close)))))
 
 (provide 'kuro-input-paste-test-cases)
 ;;; kuro-input-paste-test-cases.el ends here

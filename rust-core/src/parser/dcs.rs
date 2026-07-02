@@ -47,7 +47,12 @@ pub fn dcs_hook(
         (b"$", 't') => {
             // DECTABSR: DCS 2 $ t ST — request tab stop report.
             // Only respond when the first parameter is 2 (tab stop request).
-            let p0 = params.iter().next().and_then(|g| g.first()).copied().unwrap_or(0);
+            let p0 = params
+                .iter()
+                .next()
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(0);
             if p0 == 2 {
                 core.meta.dcs_state = DcsState::Dectabsr;
             }

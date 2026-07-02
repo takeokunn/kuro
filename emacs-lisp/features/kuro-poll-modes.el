@@ -350,64 +350,72 @@ image tiles.  Skips the work entirely when no placeholders are present."
      (format "\e]52;c;%s\a"
              (base64-encode-string (or text "") t)))))
 
+(defsubst kuro--clipboard-action-strict-p (action)
+  "Return non-nil when ACTION is exactly (TAG PAYLOAD TARGET)."
+  (and (consp action)
+       (consp (cdr action))
+       (consp (cddr action))
+       (null (cdddr action))))
+
 (defsubst kuro--clipboard-action-payload (action)
-  "Return the payload string of clipboard ACTION.
-ACTION is the new 3-element list (TAG PAYLOAD TARGET) or a legacy
-2-element form — the list (TAG PAYLOAD) or the cons (TAG . PAYLOAD).
-The cons form is detected by a non-list cdr."
-  (let ((rest (cdr action)))
-    (if (listp rest) (car rest) rest)))
+  "Return the payload slot of strict clipboard ACTION."
+  (cadr action))
 
 (defsubst kuro--clipboard-action-target (action)
-  "Return the selection-target string of clipboard ACTION, or nil.
-Only the new 3-element list (TAG PAYLOAD TARGET) carries a target; legacy
-2-element actions yield nil, defaulting writes to the clipboard."
-  (let ((rest (cdr action)))
-    (and (consp rest) (nth 1 rest))))
+  "Return the target slot of strict clipboard ACTION."
+  (caddr action))
+
+(defsubst kuro--clipboard-target-kind (target)
+  "Return normalized selection kind for strict OSC 52 TARGET, or nil."
+  (cond
+   ((equal target "clipboard") 'clipboard)
+   ((or (equal target "primary") (equal target "select")) 'primary)
+   (t nil)))
 
 (defun kuro--clipboard-set-selection (text target)
   "Place TEXT on the Emacs selection chosen by TARGET.
-TARGET is a string from the OSC 52 selection field:
-  \"primary\" / \"select\" → the X PRIMARY selection;
-  \"clipboard\", \"cut-buffer-N\", nil, or any unknown value →
-  the kill ring and the CLIPBOARD selection (the default path)."
-  (pcase target
-    ((or "primary" "select")
+TARGET must be \"clipboard\", \"primary\", or \"select\"."
+  (pcase (kuro--clipboard-target-kind target)
+    ('clipboard
+     (kill-new text))
+    ('primary
      (gui-set-selection 'PRIMARY text))
-    (_
-     (kill-new text))))
+    (_ nil)))
 
-(defun kuro--clipboard-write (text &optional target)
+(defun kuro--clipboard-write (text target)
   "Place TEXT on the Emacs selection chosen by TARGET per `kuro-clipboard-policy'.
-TARGET routes the write (see `kuro--clipboard-set-selection'); when nil the
-write goes to the clipboard for backward compatibility.
+TARGET must be \"clipboard\", \"primary\", or \"select\".
 Under `write-only' or `allow': accepts silently.  Under `prompt': asks first.
 Under `deny' or any other value: does nothing."
-  (pcase kuro-clipboard-policy
-    ((or 'write-only 'allow)
-     (kuro--clipboard-set-selection text target)
-     (message "Kuro: clipboard updated from terminal"))
-    ('prompt
-     (when (yes-or-no-p
-            (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
-                    (length text)))
-       (kuro--clipboard-set-selection text target)))))
+  (when (and (stringp text) (kuro--clipboard-target-kind target))
+    (pcase kuro-clipboard-policy
+      ((or 'write-only 'allow)
+       (kuro--clipboard-set-selection text target)
+       (message "Kuro: clipboard updated from terminal"))
+      ('prompt
+       (when (yes-or-no-p
+              (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
+                      (length text)))
+         (kuro--clipboard-set-selection text target))))))
 
-(defun kuro--clipboard-query ()
+(defun kuro--clipboard-query (target)
   "Respond to a clipboard read request per `kuro-clipboard-policy'.
+TARGET must be \"clipboard\", \"primary\", or \"select\".
 Under `allow': responds immediately.  Under `prompt': asks first.
 Under `deny', `write-only', or any other value: does nothing."
-  (pcase kuro-clipboard-policy
-    ('allow (kuro--send-osc52-clipboard-response))
-    ('prompt
-     (when (yes-or-no-p "Kuro: terminal wants to read clipboard.  Allow? ")
-       (kuro--send-osc52-clipboard-response)))))
+  (when (kuro--clipboard-target-kind target)
+    (pcase kuro-clipboard-policy
+      ('allow (kuro--send-osc52-clipboard-response))
+      ('prompt
+       (when (yes-or-no-p "Kuro: terminal wants to read clipboard.  Allow? ")
+         (kuro--send-osc52-clipboard-response))))))
 
 (defun kuro--handle-clipboard-actions ()
   "Process pending OSC 52 clipboard actions per `kuro-clipboard-policy'.
-Drains the action queue from `kuro--poll-clipboard-actions' and dispatches:
-  `write' → `kuro--clipboard-write'
-  `query' → `kuro--clipboard-query'"
+Drains strict (TAG PAYLOAD TARGET) actions from `kuro--poll-clipboard-actions'
+and dispatches:
+  `write' -> `kuro--clipboard-write'
+  `query' -> `kuro--clipboard-query'"
   (dolist (action (kuro--poll-clipboard-actions))
     (kuro--dispatch-clipboard-action action)))
 

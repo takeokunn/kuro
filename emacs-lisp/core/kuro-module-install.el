@@ -10,12 +10,13 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'kuro-module-platform)
 (require 'subr-x)
 (require 'url)
 
 (defun kuro-module--ensure-https-base-url (base-url)
-  "Return BASE-URL when it uses https://, otherwise signal an error."
+  "Return BASE-URL when BASE-URL begins with https://; otherwise signal an error."
   (unless (string-prefix-p "https://" base-url)
     (error "Kuro: kuro-module-release-base-url must use https://, got: %s"
            base-url))
@@ -41,34 +42,112 @@ Must use the https:// scheme; http:// values are rejected at set time."
   :set (lambda (sym val)
          (set-default sym (kuro-module--ensure-https-base-url val))))
 
+(defconst kuro-module--install-directory-mode #o700
+  "Filesystem mode required for the native module install directory.")
+
+(defconst kuro-module--installed-file-mode #o600
+  "Filesystem mode required for installed native module files.")
+
+(cl-defstruct (kuro-module--sha256
+               (:constructor kuro-module--sha256-create (digest))
+               (:copier nil))
+  "Validated lowercase SHA256 digest."
+  (digest nil :read-only t))
+
+(defun kuro-module--parse-sha256 (value source)
+  "Return VALUE as a validated SHA256 digest object from SOURCE."
+  (unless (and (stringp value)
+               (string-match-p "\\`[0-9a-f]\\{64\\}\\'" value))
+    (error "Kuro: invalid SHA256 for %s: %S" source value))
+  (kuro-module--sha256-create value))
+
 (defun kuro-module--verify-sha256 (file expected-hash)
-  "Return non-nil when FILE matches EXPECTED-HASH (a hex SHA256 digest).
-When EXPECTED-HASH is nil, emit a warning via `display-warning' and return t
-so that callers can opt in to verification incrementally."
-  (cond
-   ((null expected-hash)
-    (display-warning 'kuro
-                     (format "No known SHA256 for %s; skipping verification."
-                             file)
-                     :warning)
-    t)
-   (t
-    (let ((actual (with-temp-buffer
-                    (set-buffer-multibyte nil)
-                    (insert-file-contents-literally file)
-                    (secure-hash 'sha256 (current-buffer)))))
-      (equal actual expected-hash)))))
+  "Return non-nil when FILE matches EXPECTED-HASH.
+EXPECTED-HASH must be a `kuro-module--sha256' object."
+  (unless (kuro-module--sha256-p expected-hash)
+    (error "Kuro: expected SHA256 must be a validated digest object: %S"
+           expected-hash))
+  (let ((actual (with-temp-buffer
+                  (set-buffer-multibyte nil)
+                  (insert-file-contents-literally file)
+                  (secure-hash 'sha256 (current-buffer)))))
+    (equal actual (kuro-module--sha256-digest expected-hash))))
 
 (defun kuro-module--target-path ()
   "Return the directory in which prebuilt or cargo-built binaries are installed.
 Honours XDG_DATA_HOME when set; otherwise defaults to \"~/.local/share\".
-Creates the target directory if it does not yet exist."
+Creates the target directory if it does not yet exist and enforces the native
+module install directory contract."
   (let* ((xdg (getenv "XDG_DATA_HOME"))
          (base (or xdg "~/.local/share"))
          (dir (expand-file-name "kuro" base)))
-    (unless (file-directory-p dir)
-      (make-directory dir t))
-    dir))
+    (kuro-module--ensure-private-install-directory dir)))
+
+(defun kuro-module--ensure-private-install-directory (dir)
+  "Create DIR and enforce Kuro's native module install directory contract."
+  (when (file-remote-p dir)
+    (error "Kuro: native module install directory must be local: %s" dir))
+  (when (file-symlink-p dir)
+    (error "Kuro: native module install directory must not be a symlink: %s" dir))
+  (when (and (file-exists-p dir)
+             (not (file-directory-p dir)))
+    (error "Kuro: native module install path must be a directory: %s" dir))
+  (unless (file-directory-p dir)
+    (make-directory dir t))
+  (when (file-symlink-p dir)
+    (error "Kuro: native module install directory must not be a symlink: %s" dir))
+  (unless (file-directory-p dir)
+    (error "Kuro: native module install path must be a directory: %s" dir))
+  (set-file-modes dir kuro-module--install-directory-mode)
+  (let ((modes (file-modes dir)))
+    (unless (and (integerp modes)
+                 (= (logand modes #o777) kuro-module--install-directory-mode))
+      (error "Kuro: native module install directory must have mode 0700: %s" dir)))
+  dir)
+
+(defun kuro-module--ensure-single-link-regular-file (file role)
+  "Require FILE to be a local non-symlink regular file with one link.
+ROLE is a human-readable file role used in error messages."
+  (when (file-remote-p file)
+    (error "Kuro: %s must be local: %s" role file))
+  (when (file-symlink-p file)
+    (error "Kuro: %s must not be a symlink: %s" role file))
+  (unless (file-regular-p file)
+    (error "Kuro: %s must be a regular file: %s" role file))
+  (let ((links (file-nlinks file)))
+    (unless (and (integerp links) (= links 1))
+      (error "Kuro: %s must have exactly one filesystem link: %s" role file)))
+  file)
+
+(defun kuro-module--ensure-install-destination (file)
+  "Require FILE to be a safe native module install destination."
+  (when (file-remote-p file)
+    (error "Kuro: native module destination must be local: %s" file))
+  (unless (equal (file-name-nondirectory file) (kuro-module--shared-library-name))
+    (error "Kuro: native module destination must be named %s: %s"
+           (kuro-module--shared-library-name) file))
+  (when (file-symlink-p file)
+    (error "Kuro: native module destination must not be a symlink: %s" file))
+  (when (file-exists-p file)
+    (kuro-module--ensure-single-link-regular-file file
+                                                  "native module destination"))
+  file)
+
+(defun kuro-module--copy-validated-module-file (source destination)
+  "Copy SOURCE to DESTINATION after validating both filesystem endpoints."
+  (let* ((destination (expand-file-name destination))
+         (target-dir (file-name-directory destination)))
+    (unless target-dir
+      (error "Kuro: native module destination must include a directory: %s"
+             destination))
+    (kuro-module--ensure-private-install-directory target-dir)
+    (kuro-module--ensure-single-link-regular-file source "native module source")
+    (kuro-module--ensure-install-destination destination)
+    (copy-file source destination t)
+    (set-file-modes destination kuro-module--installed-file-mode)
+    (kuro-module--ensure-single-link-regular-file destination
+                                                 "installed native module")
+    destination))
 
 (defun kuro-module--shared-library-name ()
   "Return the filename of the native shared library for the current platform."
@@ -106,12 +185,12 @@ expected blank-line separator."
   (point))
 
 (defun kuro-module--http-response-body-string (source)
-  "Return the HTTP body as a string from the current response buffer."
+  "Return the HTTP body as a string from SOURCE."
   (let ((body-start (kuro-module--http-response-body-start source)))
     (buffer-substring-no-properties body-start (point-max))))
 
 (defun kuro-module--fetch-sha256 (sha-url)
-  "Fetch the SHA256 digest from SHA-URL and return it as a string."
+  "Fetch the SHA256 digest from SHA-URL and return a validated digest object."
   (let ((buffer (url-retrieve-synchronously sha-url t t 30)))
     (unless buffer
       (error "Kuro: failed to fetch SHA256 from %s" sha-url))
@@ -119,13 +198,12 @@ expected blank-line separator."
         (with-current-buffer buffer
           (let ((hash (string-trim (kuro-module--http-response-body-string
                                     sha-url))))
-            (unless (string-match-p "\\`[0-9a-f]\\{64\\}\\'" hash)
-              (error "Kuro: invalid SHA256 in sidecar response: %S" hash))
-            hash))
+            (kuro-module--parse-sha256 hash "sidecar response")))
       (kill-buffer buffer))))
 
 (defun kuro-module--write-http-body-to-file (buffer file source)
-  "Write the HTTP body from BUFFER to FILE in binary mode."
+  "Write the HTTP body from BUFFER to FILE in binary mode.
+SOURCE is used to locate the response body in BUFFER."
   (with-current-buffer buffer
     (let ((body-start (kuro-module--http-response-body-start source))
           (coding-system-for-write 'binary))
@@ -143,21 +221,54 @@ expected blank-line separator."
           (kuro-module--write-http-body-to-file buffer tmp-file url)
         (kill-buffer buffer)))
     (unless (kuro-module--verify-sha256 tmp-file expected-hash)
-      (error "Kuro: SHA256 mismatch for %s (expected %s)" url expected-hash))))
+      (error "Kuro: SHA256 mismatch for %s (expected %s)"
+             url
+             (kuro-module--sha256-digest expected-hash)))))
+
+(defun kuro-module--archive-members (tar-bin archive)
+  "Return the member names in ARCHIVE using TAR-BIN."
+  (with-temp-buffer
+    (let ((rc (call-process tar-bin nil (current-buffer) nil "-tzf" archive)))
+      (unless (zerop rc)
+        (error "Kuro: tar listing failed (exit %d, see *kuro-module-download*)" rc))
+      (split-string (buffer-string) "\n" t))))
+
+(defun kuro-module--extract-archive-member (tar-bin archive destination member)
+  "Extract MEMBER from ARCHIVE with TAR-BIN into DESTINATION."
+  (let ((rc (call-process tar-bin nil "*kuro-module-download*" t
+                          "-xzf" archive "-C" destination member)))
+    (unless (zerop rc)
+      (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))))
 
 (defun kuro-module--install-release-archive (tar-bin tmp-file target-dir)
-  "Extract TMP-FILE with TAR-BIN into TARGET-DIR and return the installed path."
-  (let ((rc (call-process tar-bin nil "*kuro-module-download*" t
-                          "-xzf" tmp-file "-C" target-dir)))
-    (delete-file tmp-file)
-    (unless (zerop rc)
-      (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))
-    (let ((installed (kuro-module--installed-module-path target-dir)))
-      (unless (file-exists-p installed)
-        (error "Kuro: extracted archive does not contain %s"
-               (kuro-module--shared-library-name)))
-      (message "Kuro: installed prebuilt module at %s" installed)
-      installed)))
+  "Install the shared library from TMP-FILE with TAR-BIN into TARGET-DIR."
+  (let* ((extract-dir (make-temp-file "kuro-module-extract-" t))
+         (library-name (kuro-module--shared-library-name))
+         (members (kuro-module--archive-members tar-bin tmp-file))
+         (extracted (expand-file-name library-name extract-dir))
+         (installed (kuro-module--installed-module-path target-dir)))
+    (unwind-protect
+        (progn
+          (unless (equal members (list library-name))
+            (error "Kuro: archive must contain exactly %s, got %S"
+                   library-name members))
+          (kuro-module--extract-archive-member tar-bin tmp-file extract-dir library-name)
+          (when (file-symlink-p extracted)
+            (error "Kuro: extracted archive contains symlink for %s" library-name))
+          (unless (file-regular-p extracted)
+            (error "Kuro: extracted archive does not contain %s" library-name))
+          (kuro-module--ensure-single-link-regular-file extracted
+                                                         "extracted native module")
+          (let ((installed-path (kuro-module--copy-validated-module-file
+                                 extracted
+                                 installed)))
+            (message "Kuro: installed prebuilt module at %s" installed-path)
+            installed-path))
+      (when (file-exists-p extract-dir)
+        (delete-directory extract-dir t))
+      (when (file-exists-p tmp-file)
+        (delete-file tmp-file)))))
+
 
 ;;;###autoload
 (defun kuro-module-download (&optional version)
@@ -213,12 +324,12 @@ otherwise."
     (expand-file-name (concat "target/release/" lib-name) rust-root)))
 
 (defun kuro-module--install-built-library (built dest)
-  "Copy BUILT to DEST and return DEST after validating the source exists."
+  "Copy BUILT to DEST and return DEST after validating filesystem endpoints."
   (unless (file-exists-p built)
     (error "Kuro: cargo reported success but %s is missing" built))
-  (copy-file built dest t)
-  (message "Kuro: built and installed module at %s" dest)
-  dest)
+  (let ((installed (kuro-module--copy-validated-module-file built dest)))
+    (message "Kuro: built and installed module at %s" installed)
+    installed))
 
 ;;;###autoload
 (defun kuro-module-build ()

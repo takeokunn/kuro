@@ -58,4 +58,3 @@ fn test_erase_chars_blanks_wide_partner() {
     assert_cell_char!(screen, row 0, col 0, ' ');
     assert_cell_width!(screen, row 0, col 0, CellWidth::Half);
 }
-

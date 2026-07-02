@@ -5,7 +5,7 @@ use super::{
     define_session_query_bool, define_session_query_default, query_session, query_session_mut,
 };
 use crate::ffi::abstraction::{
-    attach_session, detach_session, init_session, list_sessions, shutdown_session,
+    attach_session, detach_session, init_session, list_sessions, shutdown_session, PasteText,
 };
 use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
@@ -68,10 +68,6 @@ fn build_session_list_entry<'e>(
 /// programs (vim, htop, …) that start before the resize is processed will render
 /// using the stale 24×80 geometry and never re-draw correctly.
 // `#[defun]` requires owned String for Emacs string arguments — &str is not supported.
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "session_id is a monotonically increasing counter starting at 1; will never reach i64::MAX in practice"
-)]
 #[defun]
 fn kuro_core_init<'e>(
     env: &'e Env,
@@ -92,6 +88,13 @@ define_session_query_bool!(
     kuro_core_send_key,
     |data: String| query_session_mut,
     |session| session.send_input(&data.into_bytes()).is_ok()
+);
+
+define_session_query_bool!(
+    /// Send pasted text to the terminal using the session's current DEC 2004 mode
+    kuro_core_send_paste,
+    |data: String| query_session_mut,
+    |session| session.send_paste_text(PasteText::new(&data)).is_ok()
 );
 
 define_session_query_bool!(
@@ -154,10 +157,6 @@ define_session_query_default!(
 /// Returns a proper list where each element is `(SESSION-ID COMMAND DETACHED-P ALIVE-P)`.
 /// SESSION-ID is an integer, COMMAND is a string, DETACHED-P and ALIVE-P are booleans.
 #[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "session IDs are small monotonically increasing counters; will never reach i64::MAX"
-)]
 fn kuro_core_list_sessions(env: &Env) -> EmacsResult<Value<'_>> {
     let sessions = list_sessions();
     build_emacs_list_from_rev(

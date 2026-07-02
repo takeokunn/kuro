@@ -185,8 +185,7 @@ impl TerminalCore {
 
     #[inline]
     fn buffer_ascii_print(&mut self, c: char) -> bool {
-        if c.is_ascii() && !self.dec_modes.insert_mode {
-            self.print_buf.push(c as u8);
+        if !self.dec_modes.insert_mode && self.print_buf.push_printable_char(c) {
             return true;
         }
         false
@@ -291,7 +290,8 @@ impl TerminalCore {
     #[inline]
     fn append_to_previous_cluster(&mut self, c: char) -> bool {
         let cursor = *self.screen.cursor();
-        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) else {
+        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize)
+        else {
             return false;
         };
         let base_col = self.cluster_base_col(row, col);
@@ -324,7 +324,8 @@ impl TerminalCore {
     #[inline]
     fn merge_regional_indicator(&mut self, c: char) -> bool {
         let cursor = *self.screen.cursor();
-        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) else {
+        let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize)
+        else {
             return false;
         };
         self.screen.merge_flag_pair(row, col, c);

@@ -117,8 +117,8 @@ Returns empty string when no name is set."
   "Send TEXT to the kuro session named NAME.
 Interactively, prompts for a session name (with completion) and for
 the text to send.  TEXT is delivered via `kuro--send-paste-or-raw'
-in the target buffer, which applies bracketed-paste wrapping when
-the session has that terminal mode active.
+in the target buffer, which delegates paste encoding to Rust using
+the session's current terminal mode.
 Signals `user-error' when no session matching NAME is found."
   (interactive
    (list (completing-read "Kuro session: "
@@ -136,7 +136,7 @@ Signals `user-error' when no session matching NAME is found."
 ;;;; Tab-bar integration
 
 (defun kuro-mux--tab-bar-update ()
-  "Ensure the tab-bar contains one tab for each live kuro session.
+  "Make the tab-bar contain one tab for each live kuro session.
 Each missing session tab is created and named by
 `kuro-mux--session-display-name'."
   (when (fboundp 'tab-bar-tabs)

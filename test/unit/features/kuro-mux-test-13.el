@@ -24,11 +24,18 @@ to a no-op, cleaning up the buffer on exit."
            (cl-letf (((symbol-function 'kuro-create)
                       (lambda (_cmd) (set-buffer buf)))
                      ((symbol-function 'kuro-mux--register) #'ignore))
-             ,@body))
-       (when (buffer-live-p buf) (kill-buffer buf)))))
+              ,@body))
+        (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(defun kuro-mux-test-13--layout-session (name &optional directory)
+  "Return a typed layout session parsed from NAME and DIRECTORY."
+  (car (kuro-mux--parse-layout-plists
+        (list (append (list :name name)
+                      (when directory
+                        (list :directory directory)))))))
 
 (ert-deftest kuro-mux-test-restore-session-calls-kuro-create ()
-  "`kuro-mux--restore-session' calls `kuro-create' with the spec's :command."
+  "`kuro-mux--restore-session' calls `kuro-create' with the default command."
   (let ((buf (get-buffer-create " *kuro-rs-cmd*"))
         (called-with :not-called))
     (unwind-protect
@@ -37,35 +44,38 @@ to a no-op, cleaning up the buffer on exit."
           (cl-letf (((symbol-function 'kuro-create)
                      (lambda (cmd) (setq called-with cmd) (set-buffer buf)))
                     ((symbol-function 'kuro-mux--register) #'ignore))
-            (kuro-mux--restore-session '(:command "bash")))
-          (should (equal called-with "bash")))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+            (kuro-mux--restore-session
+             (kuro-mux-test-13--layout-session "bash")))
+          (should (null called-with)))
+       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest kuro-mux-test-restore-session-sets-command ()
-  "`kuro-mux--restore-session' stores :command in `kuro-mux--command'."
+(ert-deftest kuro-mux-test-restore-session-leaves-command-nil ()
+  "`kuro-mux--restore-session' does not persist :command in `kuro-mux--command'."
   (kuro-mux-test-13--with-restore-buf " *kuro-rs-set-cmd*"
-    (kuro-mux--restore-session '(:command "fish"))
-    (should (equal (buffer-local-value 'kuro-mux--command buf) "fish"))))
+    (kuro-mux--restore-session
+     (kuro-mux-test-13--layout-session "fish"))
+    (should (null (buffer-local-value 'kuro-mux--command buf)))))
 
 (ert-deftest kuro-mux-test-restore-session-sets-name ()
   "`kuro-mux--restore-session' stores :name in `kuro-mux--name' when provided."
   (kuro-mux-test-13--with-restore-buf " *kuro-rs-set-name*"
-    (kuro-mux--restore-session '(:command "zsh" :name "my-session"))
+    (kuro-mux--restore-session
+     (kuro-mux-test-13--layout-session "my-session"))
     (should (equal (buffer-local-value 'kuro-mux--name buf) "my-session"))))
 
-(ert-deftest kuro-mux-test-restore-session-no-name-leaves-nil ()
-  "`kuro-mux--restore-session' leaves `kuro-mux--name' nil when :name is absent."
+(ert-deftest kuro-mux-test-restore-session-rejects-missing-name ()
+  "`kuro-mux--restore-session' rejects raw specs without a typed session."
   (kuro-mux-test-13--with-restore-buf " *kuro-rs-no-name*"
-    (with-current-buffer buf (setq kuro-mux--name nil))
-    (kuro-mux--restore-session '(:command "zsh"))
-    (should (null (buffer-local-value 'kuro-mux--name buf)))))
+    (should-error (kuro-mux--restore-session '(:directory "/tmp"))
+                  :type 'user-error)))
 
 (ert-deftest kuro-mux-test-restore-session-sets-directory ()
   "`kuro-mux--restore-session' stores :directory in `kuro-mux--directory'."
   (kuro-mux-test-13--with-restore-buf " *kuro-rs-set-dir*"
-    (kuro-mux--restore-session `(:command "bash" :directory ,temporary-file-directory))
+    (kuro-mux--restore-session
+     (kuro-mux-test-13--layout-session "bash" temporary-file-directory))
     (should (equal (buffer-local-value 'kuro-mux--directory buf)
-                   temporary-file-directory))))
+                   (file-name-as-directory temporary-file-directory)))))
 
 (ert-deftest kuro-mux-test-restore-session-calls-register ()
   "`kuro-mux--restore-session' calls `kuro-mux--register' after creation."
@@ -78,9 +88,10 @@ to a no-op, cleaning up the buffer on exit."
                      (lambda (_) (set-buffer buf)))
                     ((symbol-function 'kuro-mux--register)
                      (lambda () (setq registered t))))
-            (kuro-mux--restore-session '(:command "bash")))
+            (kuro-mux--restore-session
+             (kuro-mux-test-13--layout-session "bash")))
           (should registered))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kuro-mux-test-restore-session-noop-outside-kuro-mode ()
   "`kuro-mux--restore-session' skips annotations when `kuro-create' lands in a non-kuro buffer."
@@ -93,9 +104,41 @@ to a no-op, cleaning up the buffer on exit."
                      (lambda (_) (set-buffer buf)))
                     ((symbol-function 'kuro-mux--register)
                      (lambda () (setq registered t))))
-            (kuro-mux--restore-session '(:command "bash" :name "ignored")))
+            (kuro-mux--restore-session
+             (kuro-mux-test-13--layout-session "ignored")))
           (should-not registered))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+       (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest kuro-mux-test-restore-session-rejects-command-field ()
+  "`kuro-mux--restore-session' rejects raw persisted :command fields."
+  (cl-letf (((symbol-function 'kuro-create)
+             (lambda (_) (error "kuro-create must not be called"))))
+    (should-error (kuro-mux--restore-session '(:name "bash" :command ""))
+                  :type 'user-error)))
+
+(ert-deftest kuro-mux-test-restore-session-rejects-invalid-name ()
+  "`kuro-mux--restore-session' rejects raw plist input before creating a buffer."
+  (cl-letf (((symbol-function 'kuro-create)
+             (lambda (_) (error "kuro-create must not be called"))))
+    (should-error (kuro-mux--restore-session '(:name 42))
+                  :type 'user-error)))
+
+(ert-deftest kuro-mux-test-restore-session-rejects-missing-directory ()
+  "`kuro-mux--parse-layout-plists' rejects missing :directory before creating a buffer."
+  (cl-letf (((symbol-function 'kuro-create)
+             (lambda (_) (error "kuro-create must not be called"))))
+    (should-not
+     (kuro-mux--parse-layout-plists
+      (list `(:name "bash"
+              :directory ,(expand-file-name "missing-kuro-dir"
+                                             temporary-file-directory)))))))
+
+(ert-deftest kuro-mux-test-restore-session-rejects-dotted-spec ()
+  "`kuro-mux--restore-session' rejects raw dotted plists before creating a buffer."
+  (cl-letf (((symbol-function 'kuro-create)
+             (lambda (_) (error "kuro-create must not be called"))))
+    (should-error (kuro-mux--restore-session '(:name "bash" . :broken))
+                  :type 'user-error)))
 
 
 (provide 'kuro-mux-test-13)

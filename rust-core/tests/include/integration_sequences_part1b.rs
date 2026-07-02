@@ -197,7 +197,10 @@ fn test_rep_repeats_non_ascii_char() {
     term.advance("€\x1b[2b".as_bytes());
     for col in 0..3 {
         let ch = cell_char(&term, 0, col);
-        assert_eq!(ch, '€', "REP non-ASCII: cell (0,{col}) must be '€', got {ch:?}");
+        assert_eq!(
+            ch, '€',
+            "REP non-ASCII: cell (0,{col}) must be '€', got {ch:?}"
+        );
     }
 }
 
@@ -210,9 +213,9 @@ fn test_rep_repeats_non_ascii_char() {
 fn test_xtpushtitle_xtpoptitle_roundtrip() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b]2;original title\x07"); // set title
-    term.advance(b"\x1b[22;0;0t");              // push
+    term.advance(b"\x1b[22;0;0t"); // push
     term.advance(b"\x1b]2;temporary title\x07"); // change title
-    term.advance(b"\x1b[23;0;0t");              // pop → restore
+    term.advance(b"\x1b[23;0;0t"); // pop → restore
     assert_eq!(term.title(), "original title");
     assert!(term.title_dirty(), "title_dirty must be set after pop");
 }
@@ -249,11 +252,14 @@ fn test_xtpoptitle_on_empty_stack_is_noop() {
 #[test]
 fn test_soft_reset_clears_sgr_stack() {
     let mut term = TerminalCore::new(24, 80);
-    term.advance(b"\x1b[1m");       // bold on
+    term.advance(b"\x1b[1m"); // bold on
     term.advance(b"\x1b[#{\x1b[0m"); // push bold, reset
-    term.advance(b"\x1b[!p");       // DECSTR: soft reset — must clear the stack
-    term.advance(b"\x1b[#}");       // pop from (now empty) stack — must be noop
-    assert!(!term.current_bold(), "bold must NOT be restored after soft_reset cleared stack");
+    term.advance(b"\x1b[!p"); // DECSTR: soft reset — must clear the stack
+    term.advance(b"\x1b[#}"); // pop from (now empty) stack — must be noop
+    assert!(
+        !term.current_bold(),
+        "bold must NOT be restored after soft_reset cleared stack"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,7 +289,11 @@ fn test_xtmodkeys_reset_to_zero() {
 fn test_xtmodkeys_non_4_type_is_noop() {
     let mut term = TerminalCore::new(24, 80);
     term.advance(b"\x1b[>1;1m"); // type 1 = modifyCursorKeys (not tracked)
-    assert_eq!(term.dec_modes().modify_other_keys, 0, "untracked type must not affect modify_other_keys");
+    assert_eq!(
+        term.dec_modes().modify_other_keys,
+        0,
+        "untracked type must not affect modify_other_keys"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,17 +329,23 @@ fn test_decera_fills_rectangle_with_spaces() {
     term.advance(b"\x1b[1;1HAAAAAAAAAAAAAAAAAAAA"); // row 0 (1-indexed): 20 A's
     term.advance(b"\x1b[2;1HBBBBBBBBBBBBBBBBBBBB"); // row 1 (1-indexed): 20 B's
     term.advance(b"\x1b[3;1HCCCCCCCCCCCCCCCCCCCC"); // row 2 (1-indexed): 20 C's
-    // Erase rectangle: rows 2-3, cols 5-10 (1-indexed) → 0-indexed: rows 1-2, cols 4-9
+                                                    // Erase rectangle: rows 2-3, cols 5-10 (1-indexed) → 0-indexed: rows 1-2, cols 4-9
     term.advance(b"\x1b[2;5;3;10$z");
     // Row 0 should be untouched: 20 A's
     for col in 0..20 {
-        assert_eq!(cell_char(&term, 0, col), 'A',
-            "row 0 col {col} must be untouched");
+        assert_eq!(
+            cell_char(&term, 0, col),
+            'A',
+            "row 0 col {col} must be untouched"
+        );
     }
     // Row 1 cols 4-9 (0-indexed) should be spaces
     for col in 4..10 {
-        assert_eq!(cell_char(&term, 1, col), ' ',
-            "row 1 col {col} must be erased");
+        assert_eq!(
+            cell_char(&term, 1, col),
+            ' ',
+            "row 1 col {col} must be erased"
+        );
     }
     // Row 1 col 10 (0-indexed, outside rect) should be B
     assert_eq!(cell_char(&term, 1, 10), 'B');

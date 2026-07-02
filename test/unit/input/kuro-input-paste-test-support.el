@@ -2,10 +2,10 @@
 
 ;;; Code:
 
-;; kuro-input-paste requires kuro-ffi at load time.  Stub the symbols it
-;; uses so the file loads in a batch/test environment without the module.
-(unless (fboundp 'kuro--send-key)
-  (defalias 'kuro--send-key (lambda (_data) nil)))
+;; kuro-input-paste requires kuro-ffi at load time.  Stub the symbols it uses so
+;; the file loads in a batch/test environment without the dynamic module.
+(unless (fboundp 'kuro--send-paste)
+  (defalias 'kuro--send-paste (lambda (_data) nil)))
 (unless (fboundp 'kuro--schedule-immediate-render)
   (defalias 'kuro--schedule-immediate-render (lambda () nil)))
 

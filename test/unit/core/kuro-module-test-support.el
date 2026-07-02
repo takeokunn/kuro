@@ -16,6 +16,22 @@
 (require 'kuro-config)
 (require 'kuro-module)
 
+(defun kuro-module-test--candidate-path (candidate)
+  "Return CANDIDATE path after asserting it is a typed module candidate."
+  (should (kuro-module--library-candidate-p candidate))
+  (kuro-module--library-candidate-path candidate))
+
+(defun kuro-module-test--write-valid-library-file (path)
+  "Create a loadable test library file at PATH."
+  (make-directory (file-name-directory path) t)
+  (with-temp-file path)
+  (set-file-modes path #o600)
+  path)
+
+(defun kuro-module-test--candidate-for-path (path)
+  "Create a validated typed module candidate for PATH."
+  (kuro-module--library-candidate-from-path path t "test fixture"))
+
 (defmacro kuro-module-test--with-env-var (var value &rest body)
   "Stub `getenv' so VAR returns VALUE; all other vars pass through."
   (declare (indent 2))
@@ -28,12 +44,22 @@
        ,@body)))
 
 (defmacro kuro-module-test--with-dev-stubs (&rest body)
-  "Stub `locate-library' and `file-exists-p' for tier-dev tests."
+  "Create a temporary development tree for tier-dev tests."
   (declare (indent 0))
-  `(cl-letf (((symbol-function 'locate-library)
-              (lambda (_name) "/stub/emacs-lisp/core/kuro-module.el"))
-             ((symbol-function 'file-exists-p) (lambda (_) t)))
-     ,@body))
+  `(kuro-module-test--with-temp-dir (root "kuro-dev-stub-")
+     (let* ((core-dir (expand-file-name "emacs-lisp/core" root))
+            (release-dir (expand-file-name "target/release" root))
+            (module-el (expand-file-name "kuro-module.el" core-dir))
+            (library (expand-file-name (kuro-module--lib-name) release-dir)))
+       (make-directory core-dir t)
+       (make-directory release-dir t)
+       (with-temp-file module-el)
+       (kuro-module-test--write-valid-library-file library)
+       (cl-letf (((symbol-function 'locate-library)
+                  (lambda (_name) module-el)))
+         (let ((load-file-name nil)
+               (buffer-file-name nil))
+           ,@body)))))
 
 (defmacro kuro-module-test--with-temp-dir (spec &rest body)
   "Bind VAR to a temporary directory created from PREFIX for BODY."
@@ -67,7 +93,7 @@
   (cl-destructuring-bind (dir-var file-var prefix filename) spec
     `(kuro-module-test--with-temp-dir (,dir-var ,prefix)
        (let ((,file-var (expand-file-name ,filename ,dir-var)))
-         (with-temp-file ,file-var)
+         (kuro-module-test--write-valid-library-file ,file-var)
          ,@body))))
 
 (defmacro kuro-module-test--with-cargo-toml-tree (spec &rest body)

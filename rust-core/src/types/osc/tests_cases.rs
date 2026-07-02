@@ -167,7 +167,7 @@ fn clipboard_action_query_variant() {
 fn selection_target_empty_defaults_clipboard() {
     assert_eq!(
         SelectionTarget::from_selector(b""),
-        SelectionTarget::Clipboard
+        Some(SelectionTarget::Clipboard)
     );
 }
 
@@ -176,46 +176,37 @@ fn selection_target_empty_defaults_clipboard() {
 fn selection_target_p_is_primary() {
     assert_eq!(
         SelectionTarget::from_selector(b"p"),
-        SelectionTarget::Primary
+        Some(SelectionTarget::Primary)
     );
 }
 
 #[test]
-// PARSE: `s` and `q` selectors map to Select.
-fn selection_target_s_and_q_are_select() {
-    assert_eq!(SelectionTarget::from_selector(b"s"), SelectionTarget::Select);
-    assert_eq!(SelectionTarget::from_selector(b"q"), SelectionTarget::Select);
-}
-
-#[test]
-// PARSE: numeric selectors `0`-`7` map to the corresponding cut buffer.
-fn selection_target_digits_are_cut_buffers() {
+// PARSE: `s` selector maps to Select.
+fn selection_target_s_is_select() {
     assert_eq!(
-        SelectionTarget::from_selector(b"0"),
-        SelectionTarget::CutBuffer(0)
-    );
-    assert_eq!(
-        SelectionTarget::from_selector(b"7"),
-        SelectionTarget::CutBuffer(7)
+        SelectionTarget::from_selector(b"s"),
+        Some(SelectionTarget::Select)
     );
 }
 
 #[test]
-// PARSE: the first recognised selector char wins.
-fn selection_target_first_recognised_char_wins() {
-    assert_eq!(
-        SelectionTarget::from_selector(b"pc"),
-        SelectionTarget::Primary
-    );
+// PARSE: q and numeric selectors are rejected.
+fn selection_target_legacy_selectors_are_rejected() {
+    assert_eq!(SelectionTarget::from_selector(b"q"), None);
+    assert_eq!(SelectionTarget::from_selector(b"0"), None);
+    assert_eq!(SelectionTarget::from_selector(b"7"), None);
 }
 
 #[test]
-// PARSE: an unrecognised selector falls back to Clipboard.
-fn selection_target_unknown_defaults_clipboard() {
-    assert_eq!(
-        SelectionTarget::from_selector(b"xyz"),
-        SelectionTarget::Clipboard
-    );
+// PARSE: multi-character selectors are rejected.
+fn selection_target_multi_char_is_rejected() {
+    assert_eq!(SelectionTarget::from_selector(b"pc"), None);
+}
+
+#[test]
+// PARSE: an unrecognised selector is rejected.
+fn selection_target_unknown_is_rejected() {
+    assert_eq!(SelectionTarget::from_selector(b"xyz"), None);
 }
 
 #[test]
@@ -269,8 +260,10 @@ fn osc_data_set_default_color_updates_slot_and_dirty_flag() {
 #[test]
 // MUTATION: reset_default_color() clears the requested slot and still marks defaults dirty.
 fn osc_data_reset_default_color_clears_slot() {
-    let mut d = OscData::default();
-    d.default_bg = Some(Color::Rgb(4, 5, 6));
+    let mut d = OscData {
+        default_bg: Some(Color::Rgb(4, 5, 6)),
+        ..OscData::default()
+    };
     d.reset_default_color(DefaultColorSlot::Background);
     assert!(d.default_bg.is_none());
     assert!(d.default_colors_dirty);

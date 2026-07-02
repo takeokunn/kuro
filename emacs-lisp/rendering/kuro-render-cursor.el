@@ -47,11 +47,11 @@ Used to skip redundant cursor position computation when unchanged.")
 
 (defun kuro--grid-col-to-buffer-pos (row col)
   "Convert grid (ROW, COL) to a buffer position using the col-to-buf map.
-col_to_buf[col] gives the buffer char offset for cursor column COL on ROW.
-For pure ASCII lines, col == buf-offset; for CJK lines, col > buf-offset
+The `col-to-buf' vector gives the buffer char offset for cursor column COL on
+ROW.  For pure ASCII lines, COL == buf-offset; for CJK lines, COL > buf-offset
 because wide placeholder cells are skipped in the buffer.
 Falls back to COL when the mapping is absent or shorter than COL
-\(e.g. cursor past last content — trailing spaces are pure ASCII).
+\(e.g. cursor past last content - trailing spaces are pure ASCII).
 Uses `kuro--row-positions' cache for O(1) row navigation when available;
 falls back to O(row) `forward-line' only when the cache misses."
   (let* ((row-map    (gethash row kuro--col-to-buf-map))
@@ -164,7 +164,7 @@ every live frame's window tree — called only on cache miss."
     (list row col visible shape)))
 
 (defsubst kuro--apply-cursor-state-change (win row col visible shape)
-  "Persist cursor state and re-anchor WIN at the new position."
+  "Persist cursor state for WIN, ROW, COL, VISIBLE, and SHAPE."
   (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
     (kuro--cache-cursor-state row col visible shape)
     (kuro--ensure-cursor-marker target-pos)
@@ -172,14 +172,14 @@ every live frame's window tree — called only on cache miss."
     (kuro--apply-cursor-display visible shape)))
 
 (defsubst kuro--reanchor-cursor-window (win row col)
-  "Re-anchor WIN to the cached or fallback cursor position."
+  "Re-anchor WIN to the cached or fallback cursor position for ROW and COL."
   (kuro--anchor-window-at-pos win (kuro--cursor-fallback-pos row col)))
 
 ;;; Cursor update
 
 (defun kuro--update-cursor ()
   "Update cursor position and shape in buffer.
-  Uses the consolidated `kuro--get-cursor-state' to fetch position,
+Uses the consolidated `kuro--get-cursor-state' to fetch position,
 visibility, and shape in a single Mutex acquisition (PERF-004).
 Skips buffer position computation when cursor state is unchanged,
 but ALWAYS re-anchors the window at point-min to prevent Emacs'

@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DEC private mode 2031 (`color_scheme_notifications`) and DSR 996: terminal answers `CSI ? 996 n` with `CSI ? 997 ; 1 n` and proactively emits color-scheme change notifications when mode 2031 is set (FR-119).
 - OSC 133 prompt extras (aid, duration, err path) are now surfaced to Emacs via the extended 7-tuple returned by `kuro-core-poll-prompt-marks` and rendered as end-of-line annotations by the `kuro-prompt-status` feature. Gated by `kuro-prompt-status-show-extras` (default t). New face `kuro-prompt-extras` (FR-124).
 - Automatic dark/light theme bridge: Emacs's `enable-theme-functions` is debounced and forwarded to `kuro-core-set-color-scheme`, so DSR 996 queries and DEC private mode 2031 notifications reflect the real Emacs theme. New defcustom `kuro-color-scheme-debounce-seconds`, autoload `M-x kuro-color-scheme-refresh` (FR-125).
-- `.elpaignore` for clean package distribution (excludes Rust, tests, docs from package)
-- `package-lint` CI step for MELPA compliance validation
+- `.elpaignore` for packaging hygiene (excludes Rust, tests, docs from package)
+- `package-lint` CI step for Emacs Lisp packaging hygiene
 - Module availability detection in E2E tests (`kuro-test--module-loaded`)
 
 ### Changed
@@ -123,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Release Infrastructure**
 
-- MELPA recipe preparation and `package.el`-compatible packaging
+- Package metadata maintenance and `package.el` compatibility
 - Pre-built `.so` / `.dylib` release artifacts for Linux glibc, Linux musl, macOS x86_64, and macOS ARM64
 - CI/CD pipeline for automated build, test, and release artifact generation
 - `cargo-audit` integration for dependency vulnerability scanning

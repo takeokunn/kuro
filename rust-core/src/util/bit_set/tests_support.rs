@@ -16,7 +16,10 @@ impl ExpectedBits {
             assert!(bit_set.get(i), "{label}: bit {i} should be set in {self:?}");
         }
         for &i in self.clear {
-            assert!(!bit_set.get(i), "{label}: bit {i} should be clear in {self:?}");
+            assert!(
+                !bit_set.get(i),
+                "{label}: bit {i} should be clear in {self:?}"
+            );
         }
     }
 }

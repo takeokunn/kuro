@@ -52,7 +52,10 @@ fn logical_text(s: &Screen) -> Vec<String> {
 }
 
 fn nonblank_logical(s: &Screen) -> Vec<String> {
-    logical_text(s).into_iter().filter(|l| !l.is_empty()).collect()
+    logical_text(s)
+        .into_iter()
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 // ───────────────────────── (1) CONTENT LOSS ─────────────────────────
@@ -70,7 +73,10 @@ fn round_trip_80_40_80_multiwrap_byte_identical() {
 
     s.resize(10, 80);
     let after = nonblank_logical(&s);
-    assert_eq!(after, before, "content byte-identical after 80->40->80 round trip");
+    assert_eq!(
+        after, before,
+        "content byte-identical after 80->40->80 round trip"
+    );
 }
 
 #[test]
@@ -95,8 +101,7 @@ fn round_trip_multiple_paragraphs_preserved() {
 /// Verify every wide-char lead (`Full`) is immediately followed by `Wide` and
 /// never sits in the final column of a row (which would mean it was split).
 fn assert_wide_chars_intact(s: &Screen) {
-    let all: Vec<&super::super::Line> =
-        s.scrollback_buffer.iter().chain(s.lines.iter()).collect();
+    let all: Vec<&super::super::Line> = s.scrollback_buffer.iter().chain(s.lines.iter()).collect();
     for line in &all {
         let n = line.cells.len();
         for (i, cell) in line.cells.iter().enumerate() {
@@ -174,7 +179,11 @@ fn cursor_at_end_of_wrapped_line() {
     s.resize(5, 80);
     // 80 chars at width 80: cursor at logical offset 80 → clamp to col 79.
     assert_eq!(s.cursor().row, 0);
-    assert!(s.cursor().col >= 79, "cursor at end of single wide row, got {}", s.cursor().col);
+    assert!(
+        s.cursor().col >= 79,
+        "cursor at end of single wide row, got {}",
+        s.cursor().col
+    );
 }
 
 #[test]
@@ -209,7 +218,7 @@ fn cursor_past_content_does_not_panic_and_clamps() {
 fn logical_line_taller_than_screen_with_scrollback_eviction() {
     let mut s = Screen::new(3, 80);
     s.scrollback_max_lines = 4; // tiny cap to force eviction
-    // One logical line of 800 chars → 10 rows at width 80.
+                                // One logical line of 800 chars → 10 rows at width 80.
     type_str(&mut s, &"L".repeat(800));
     s.resize(3, 40);
     // 800 chars at width 40 → 20 physical rows. Screen holds 3, scrollback cap 4.
@@ -223,7 +232,10 @@ fn logical_line_taller_than_screen_with_scrollback_eviction() {
         .collect::<String>()
         .trim_end_matches(' ')
         .to_string();
-    assert!(tail.chars().all(|c| c == 'L'), "live tail is all L's, no corruption: {tail:?}");
+    assert!(
+        tail.chars().all(|c| c == 'L'),
+        "live tail is all L's, no corruption: {tail:?}"
+    );
     // No panic is the main assertion.
 }
 
@@ -246,7 +258,11 @@ fn incremental_resizes_down_and_back_no_drift() {
         s.resize(10, w);
         assert_eq!(nonblank_logical(&s), before, "no drift widening to {w}");
     }
-    assert_eq!(nonblank_logical(&s), before, "round trip identity preserved");
+    assert_eq!(
+        nonblank_logical(&s),
+        before,
+        "round trip identity preserved"
+    );
 }
 
 #[test]
@@ -277,7 +293,11 @@ fn incremental_resizes_with_wide_chars_no_drift() {
         s.resize(10, w);
         assert_wide_chars_intact(&s);
     }
-    assert_eq!(nonblank_logical(&s), before, "mixed content identity after round trip");
+    assert_eq!(
+        nonblank_logical(&s),
+        before,
+        "mixed content identity after round trip"
+    );
 }
 
 // ──────── (6) ALTERNATE screen NOT reflowed, primary IS ────────
@@ -296,9 +316,15 @@ fn alt_active_resize_then_switch_back_primary_reflowed() {
     // Switch back to primary — it must have been reflowed to width 40.
     s.switch_to_primary();
     let primary_after = nonblank_logical(&s);
-    assert_eq!(primary_after, primary_before, "primary content preserved & reflowed");
+    assert_eq!(
+        primary_after, primary_before,
+        "primary content preserved & reflowed"
+    );
     // Primary rows are now 40 cols.
-    assert!(s.lines.iter().all(|l| l.cells.len() == 40), "primary rows reflowed to 40 cols");
+    assert!(
+        s.lines.iter().all(|l| l.cells.len() == 40),
+        "primary rows reflowed to 40 cols"
+    );
 }
 
 // ──────── (7) hard-newline boundaries, empties, trailing whitespace ────────
@@ -311,7 +337,11 @@ fn hard_newline_boundary_preserved_not_merged() {
     type_str(&mut s, "beta");
     s.resize(6, 40);
     let nb = nonblank_logical(&s);
-    assert_eq!(nb, vec!["alpha".to_string(), "beta".to_string()], "hard newline kept as boundary");
+    assert_eq!(
+        nb,
+        vec!["alpha".to_string(), "beta".to_string()],
+        "hard newline kept as boundary"
+    );
 }
 
 #[test]
@@ -326,7 +356,10 @@ fn empty_lines_between_content_preserved() {
     // Find positions of "one" and "two" with a blank between.
     let one = all.iter().position(|l| l == "one").expect("one present");
     let two = all.iter().position(|l| l == "two").expect("two present");
-    assert!(two > one + 1, "blank logical line preserved between one and two: {all:?}");
+    assert!(
+        two > one + 1,
+        "blank logical line preserved between one and two: {all:?}"
+    );
 }
 
 #[test]
@@ -392,7 +425,10 @@ fn resize_to_one_column_with_wide_char() {
         .flat_map(|l| l.cells.iter())
         .map(|c| c.grapheme().to_string())
         .collect();
-    assert!(joined.contains('a') || joined.contains('b'), "ascii survived width-1 reflow");
+    assert!(
+        joined.contains('a') || joined.contains('b'),
+        "ascii survived width-1 reflow"
+    );
 }
 
 #[test]
@@ -411,7 +447,11 @@ fn resize_one_to_eighty_then_back() {
     type_str(&mut s, "wxyz"); // each on its own row at width 1
     s.resize(4, 80);
     let nb = nonblank_logical(&s);
-    assert_eq!(nb.join(""), "wxyz", "content reassembled when widened from 1");
+    assert_eq!(
+        nb.join(""),
+        "wxyz",
+        "content reassembled when widened from 1"
+    );
     s.resize(4, 1);
     let joined: String = s
         .scrollback_buffer
@@ -442,7 +482,11 @@ fn typed_space_at_wrap_column_not_lost_on_reflow() {
 
     s.resize(4, 10);
     let nb = nonblank_logical(&s);
-    assert_eq!(nb, vec!["abcd ef".to_string()], "typed wrap-column space preserved on widen");
+    assert_eq!(
+        nb,
+        vec!["abcd ef".to_string()],
+        "typed wrap-column space preserved on widen"
+    );
 }
 
 // ──────── PART 1 adversarial probes (final verify session) ────────
@@ -457,8 +501,10 @@ fn styled_blank_final_line_survives_reflow_probe() {
     type_str(&mut s, "header");
     newline(&mut s);
     // A line of spaces carrying a non-default background.
-    let mut attrs = SgrAttributes::default();
-    attrs.background = Color::Indexed(4);
+    let attrs = SgrAttributes {
+        background: Color::Indexed(4),
+        ..SgrAttributes::default()
+    };
     for _ in 0..10 {
         s.print(' ', attrs, true);
     }
@@ -474,7 +520,11 @@ fn styled_blank_final_line_survives_reflow_probe() {
     let before = count_styled(&s);
     assert_eq!(before, 10, "10 styled spaces present pre-reflow");
     s.resize(5, 12);
-    assert_eq!(count_styled(&s), 10, "styled background spaces preserved across reflow");
+    assert_eq!(
+        count_styled(&s),
+        10,
+        "styled background spaces preserved across reflow"
+    );
 }
 
 /// Reflow when scrollback is already non-empty before the resize: the combined
@@ -489,12 +539,18 @@ fn preexisting_scrollback_reflowed_with_live_rows() {
         type_str(&mut s, &tag.to_string().repeat(60)); // wraps at 40
         newline(&mut s);
     }
-    assert!(!s.scrollback_buffer.is_empty(), "scrollback must be populated for this probe");
+    assert!(
+        !s.scrollback_buffer.is_empty(),
+        "scrollback must be populated for this probe"
+    );
     let before = nonblank_logical(&s);
     s.resize(3, 25);
     s.resize(3, 40);
     let after = nonblank_logical(&s);
-    assert_eq!(after, before, "scrollback+live content identical across 40->25->40");
+    assert_eq!(
+        after, before,
+        "scrollback+live content identical across 40->25->40"
+    );
 }
 
 /// Cursor sitting on the final column of a soft-wrapped row whose trailing blank
@@ -510,5 +566,8 @@ fn cursor_on_popped_wide_wrap_blank_resolves_in_bounds() {
     // Just assert the cursor is in-bounds and content intact.
     assert!(s.cursor().row < 4);
     assert!(s.cursor().col < 12);
-    assert_eq!(nonblank_logical(&s).join("").replace(' ', ""), "12345678世X");
+    assert_eq!(
+        nonblank_logical(&s).join("").replace(' ', ""),
+        "12345678世X"
+    );
 }

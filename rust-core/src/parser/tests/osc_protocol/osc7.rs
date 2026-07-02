@@ -21,6 +21,20 @@ test_osc_7_hostname!(
     host Some("myhost")
 );
 
+test_osc_7_hostname!(
+    osc7_dotted_dns_host_preserved,
+    b"file://build01.example.com/home/user",
+    cwd "/home/user",
+    host Some("build01.example.com")
+);
+
+test_osc_7_hostname!(
+    osc7_uppercase_localhost_yields_none_host,
+    b"file://LOCALHOST/home/user",
+    cwd "/home/user",
+    host None
+);
+
 test_osc_7_hostname_reset!(
     osc7_host_cleared_on_localhost,
     first b"file://remotehost/srv",

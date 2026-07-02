@@ -11,6 +11,27 @@
 (unless (fboundp 'kuro-mode)
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
+(defmacro kuro-mux-ext-test--with-pipe-pane-dir (&rest body)
+  "Run BODY with an isolated pipe-pane capture directory."
+  (declare (indent 0) (debug t))
+  `(let ((kuro-mux-pipe-pane-directory
+          (make-temp-file "kuro-pipe-pane-ext-test-" t)))
+     (unwind-protect
+         (progn ,@body)
+       (when (file-directory-p kuro-mux-pipe-pane-directory)
+         (delete-directory kuro-mux-pipe-pane-directory t)))))
+
+(defun kuro-mux-ext-test--pipe-pane-path (name)
+  "Return NAME inside the isolated pipe-pane capture directory."
+  (expand-file-name name
+                    (file-name-as-directory
+                     (file-truename kuro-mux-pipe-pane-directory))))
+
+(defun kuro-mux-ext-test--pipe-pane-target-path (target)
+  "Return the path from pipe-pane TARGET."
+  (should (kuro-mux--pipe-pane-target-p target))
+  (kuro-mux--pipe-pane-target-path target))
+
 (kuro-mux-ext-test--deftest-interactive-commands)
 
 ;;; Group 55 — kuro-mux-break-pane
@@ -284,34 +305,39 @@
 
 (ert-deftest kuro-mux-ext-pipe-pane-watcher-appends-text ()
   "`kuro-mux--pipe-pane-watcher' appends buffer text to the pipe file."
-  (let ((buf (generate-new-buffer " *kuro-pipe-test*")))
-    (unwind-protect
-        (with-current-buffer buf
-          (insert "hello world")
-          (let ((kuro-mux--pipe-pane-file "/tmp/kuro-test-pipe.log")
-                written-text)
-            (cl-letf (((symbol-function 'write-region)
-                       (lambda (text _ignored _file _append _)
-                         (setq written-text text))))
-              (kuro-mux--pipe-pane-watcher 1 6 0)
-              (should (equal written-text "hello")))))
-      (kill-buffer buf))))
+  (kuro-mux-ext-test--with-pipe-pane-dir
+    (let ((buf (generate-new-buffer " *kuro-pipe-test*")))
+      (unwind-protect
+          (with-current-buffer buf
+            (insert "hello world")
+            (let ((kuro-mux--pipe-pane-file
+                   (kuro-mux--pipe-pane-prepare-file "kuro-test-pipe.log"))
+                  written-text)
+              (cl-letf (((symbol-function 'write-region)
+                         (lambda (text _ignored _file _append _)
+                           (setq written-text text))))
+                (kuro-mux--pipe-pane-watcher 1 6 0)
+                (should (equal written-text "hello")))))
+        (kill-buffer buf)))))
 
 (ert-deftest kuro-mux-ext-pipe-pane-start-adds-hook ()
   "`kuro-mux-pipe-pane' with a non-nil FILE sets the var and adds the hook."
-  (kuro-mux-ext-test--with-buf
-    (let ((kuro-mux--pipe-pane-file nil) hook-added)
-      (cl-letf (((symbol-function 'expand-file-name) (lambda (f) f))
-                ((symbol-function 'add-hook)
-                 (lambda (hook fn &rest _) (setq hook-added (cons hook fn)))))
-        (kuro-mux-pipe-pane "/tmp/kuro-test.log")
-        (should (equal kuro-mux--pipe-pane-file "/tmp/kuro-test.log"))
-        (should (eq (car hook-added) 'after-change-functions))))))
+  (kuro-mux-ext-test--with-pipe-pane-dir
+    (kuro-mux-ext-test--with-buf
+      (let ((kuro-mux--pipe-pane-file nil) hook-added)
+        (cl-letf (((symbol-function 'add-hook)
+                   (lambda (hook fn &rest _) (setq hook-added (cons hook fn)))))
+          (kuro-mux-pipe-pane "kuro-test.log")
+          (should (equal (kuro-mux-ext-test--pipe-pane-target-path
+                          kuro-mux--pipe-pane-file)
+                         (kuro-mux-ext-test--pipe-pane-path
+                          "kuro-test.log")))
+          (should (eq (car hook-added) 'after-change-functions)))))))
 
 (ert-deftest kuro-mux-ext-pipe-pane-stop-clears-var ()
   "`kuro-mux-pipe-pane' with nil FILE clears var and removes hook."
   (kuro-mux-ext-test--with-buf
-    (let ((kuro-mux--pipe-pane-file "/tmp/old.log") hook-removed)
+    (let ((kuro-mux--pipe-pane-file "old.log") hook-removed)
       (cl-letf (((symbol-function 'remove-hook)
                  (lambda (hook fn &rest _) (setq hook-removed (cons hook fn)))))
         (kuro-mux-pipe-pane nil)

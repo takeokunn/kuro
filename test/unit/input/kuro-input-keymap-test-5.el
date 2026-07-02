@@ -96,12 +96,12 @@ returns the last string sent by `kuro--send-key'."
          (should (eq (lookup-key map (vector 'remap orig-fn)) remap-fn)))))))
 
 (ert-deftest kuro-input-keymap-clipboard-yank-remap-sends-kill-ring-text ()
-  "Invoking the [remap clipboard-yank] binding sends kill-ring text via kuro--send-key."
+  "Invoking the [remap clipboard-yank] binding sends kill-ring text via kuro--send-paste."
   (let* ((map (kuro-keymap-test--built-map))
          (binding (lookup-key map [remap clipboard-yank]))
          (sent nil))
     (should (functionp binding))
-    (cl-letf (((symbol-function 'kuro--send-key)
+    (cl-letf (((symbol-function 'kuro--send-paste)
                (lambda (s) (push s sent)))
               ((symbol-function 'kuro--schedule-immediate-render)
                (lambda () nil)))

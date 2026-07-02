@@ -20,6 +20,69 @@ fn test_osc7_empty_string_rejected() {
     assert_osc7_rejected!(b"", "empty string");
 }
 
+#[test]
+fn test_osc7_percent_decodes_absolute_path() {
+    assert_osc7_cwd_accepted!(b"file:///tmp/kuro%20work", "/tmp/kuro work");
+}
+
+#[test]
+fn test_osc7_relative_path_rejected() {
+    assert_osc7_rejected!(b"file://tmp", "relative file URL path");
+}
+
+#[test]
+fn test_osc7_invalid_percent_escape_rejected() {
+    assert_osc7_rejected!(b"file:///tmp/%ZZ", "invalid percent escape");
+}
+
+#[test]
+fn test_osc7_control_character_rejected() {
+    assert_osc7_rejected!(b"file:///tmp/\n", "control character in path");
+}
+
+#[test]
+fn test_osc7_invalid_utf8_rejected() {
+    assert_osc7_rejected!(b"file:///tmp/\xff", "invalid UTF-8");
+}
+
+#[test]
+fn test_osc7_percent_encoded_control_character_rejected() {
+    assert_osc7_rejected!(b"file:///tmp/%0A", "percent-encoded control character");
+}
+
+#[test]
+fn test_osc7_host_percent_encoded_slash_rejected() {
+    assert_osc7_rejected!(b"file://bad%2Fhost/tmp", "invalid host slash");
+}
+
+#[test]
+fn test_osc7_host_tramp_separator_rejected() {
+    assert_osc7_rejected!(b"file://user:host/tmp", "TRAMP host separator");
+}
+
+#[test]
+fn test_osc7_host_percent_encoded_tramp_metachar_rejected() {
+    assert_osc7_rejected!(b"file://user%40host/tmp", "TRAMP user separator");
+    assert_osc7_rejected!(b"file://host%7Cproxy/tmp", "TRAMP hop separator");
+    assert_osc7_rejected!(b"file://host%23frag/tmp", "TRAMP fragment separator");
+}
+
+#[test]
+fn test_osc7_host_non_ascii_rejected() {
+    assert_osc7_rejected!(b"file://h%C3%B6st/tmp", "non-ASCII host");
+}
+
+#[test]
+fn test_osc7_host_empty_label_rejected() {
+    assert_osc7_rejected!(b"file://bad..host/tmp", "empty DNS label");
+}
+
+#[test]
+fn test_osc7_host_dash_edge_label_rejected() {
+    assert_osc7_rejected!(b"file://-bad/tmp", "leading dash in host label");
+    assert_osc7_rejected!(b"file://bad-/tmp", "trailing dash in host label");
+}
+
 /// OSC 0 with an empty title byte slice must be silently rejected.
 ///
 /// The handler has an explicit `if raw.is_empty() { return; }` guard before

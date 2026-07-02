@@ -4,6 +4,9 @@
 
 ;; Author: takeokunn
 
+;;; Commentary:
+;; Macro helpers for lifecycle command definitions.
+
 ;;; Code:
 
 (defmacro kuro--def-control-key (name sequence doc)

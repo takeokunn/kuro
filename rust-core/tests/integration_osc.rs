@@ -129,7 +129,9 @@ fn osc104_reset_all() {
     t.advance(b"\x1b]4;1;rgb:00/ff/00\x07");
     t.advance(b"\x1b]104\x07"); // reset all
     assert!(
-        t.osc_data().palette().iter()
+        t.osc_data()
+            .palette()
+            .iter()
             .all(std::option::Option::is_none),
         "OSC 104 with no args must reset all palette entries"
     );

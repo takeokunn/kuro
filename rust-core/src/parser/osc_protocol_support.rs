@@ -9,18 +9,43 @@ use crate::types::osc::{
 };
 use crate::TerminalCore;
 
+fn osc51_command_has_nonempty_args(cmd: &str, name: &str) -> bool {
+    let Some(rest) = cmd.strip_prefix(name) else {
+        return false;
+    };
+    matches!(rest.as_bytes().first(), Some(byte) if byte.is_ascii_whitespace())
+        && !rest.trim().is_empty()
+}
+
+fn osc51_command_wire_safe(cmd: &str) -> Option<&str> {
+    if cmd.bytes().any(|byte| byte < 0x20 || byte == 0x7F) {
+        return None;
+    }
+
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    (osc51_command_has_nonempty_args(trimmed, "cd")
+        || osc51_command_has_nonempty_args(trimmed, "setenv"))
+    .then_some(trimmed)
+}
+
 fn push_osc_51_eval_command(core: &mut TerminalCore, cmd_raw: &[u8]) {
     if cmd_raw.len() > OSC51_MAX_EVAL_BYTES {
         return;
     }
 
     if let Ok(cmd) = std::str::from_utf8(cmd_raw) {
-        core.osc_data.eval_commands.push(cmd.to_owned());
+        if let Some(cmd) = osc51_command_wire_safe(cmd) {
+            core.osc_data.eval_commands.push(cmd.to_owned());
+        }
     }
 }
 
 pub(super) fn handle_osc_51(core: &mut TerminalCore, params: &[&[u8]]) {
-    // Wire format: OSC 51 ; e ; COMMAND ST.
+    // Wire format: OSC 51 ; e ; COMMAND ST, where COMMAND is a strict typed string.
     let Some(sub) = params.get(1) else {
         return;
     };
@@ -34,11 +59,7 @@ pub(super) fn handle_osc_51(core: &mut TerminalCore, params: &[&[u8]]) {
     push_osc_51_eval_command(core, cmd_raw);
 }
 
-fn push_osc_52_clipboard_write(
-    core: &mut TerminalCore,
-    target: SelectionTarget,
-    data_raw: &[u8],
-) {
+fn push_osc_52_clipboard_write(core: &mut TerminalCore, target: SelectionTarget, data_raw: &[u8]) {
     if data_raw.len() > 1_048_576 {
         return;
     }
@@ -57,9 +78,11 @@ pub(super) fn handle_osc_52(core: &mut TerminalCore, params: &[&[u8]]) {
         return;
     };
 
-    // Wire format: OSC 52 ; Pc ; Pd ST. The `Pc` selector defaults to clipboard
-    // when empty or absent.
-    let target = SelectionTarget::from_selector(params.get(1).copied().unwrap_or(b""));
+    // Wire format: OSC 52 ; Pc ; Pd ST. Reject unsupported selector forms
+    // instead of silently routing them to the clipboard.
+    let Some(target) = SelectionTarget::from_selector(params.get(1).copied().unwrap_or(b"")) else {
+        return;
+    };
 
     if data_raw == b"?" {
         core.osc_data

@@ -198,30 +198,30 @@ impl RawFFI {
     }
 
     /// Create a string value
-#[expect(
-    clippy::as_ptr_cast_mut,
-    reason = "test double stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type"
-)]
-const fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
-    // In a real implementation, this would call env.make_string(s)
-    // For now, return a pointer to the string (placeholder)
-    s.as_ptr() as *mut emacs_value
-}
+    #[expect(
+        clippy::as_ptr_cast_mut,
+        reason = "test double stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type"
+    )]
+    const fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
+        // In a real implementation, this would call env.make_string(s)
+        // For now, return a pointer to the string (placeholder)
+        s.as_ptr() as *mut emacs_value
+    }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX"
-)]
-fn window_dim(value: i64) -> u16 {
-    value as u16
-}
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX"
+    )]
+    fn window_dim(value: i64) -> u16 {
+        value as u16
+    }
 
-/// Create a cons cell (pair)
-#[expect(
-    clippy::similar_names,
-    reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent"
-)]
+    /// Create a cons cell (pair)
+    #[expect(
+        clippy::similar_names,
+        reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent"
+    )]
     fn cons(
         _env: *mut emacs_env,
         car: *mut emacs_value,
@@ -338,7 +338,6 @@ fn window_dim(value: i64) -> u16 {
 ///     pub fn cdr(env: *mut emacs_env, cons_cell: *mut emacs_value) -> *mut emacs_value;
 /// }
 /// ```
-
 #[cfg(test)]
 #[path = "fallback_tests.rs"]
 mod tests;

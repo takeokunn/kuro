@@ -1,7 +1,12 @@
 use super::tests_support::*;
+use crate::grid::screen::PrintableAsciiRun;
 use crate::types::SgrAttributes;
 use crate::{Color, Screen};
 use proptest::prelude::*;
+
+fn ascii(bytes: &[u8]) -> PrintableAsciiRun<'_> {
+    PrintableAsciiRun::new(bytes).expect("test bytes must be printable ASCII")
+}
 
 #[test]
 fn move_cursor_cases_clamp_and_clear_pending_wrap() {
@@ -49,7 +54,7 @@ fn auto_wrap_marks_line_soft_wrapped() {
 #[test]
 fn print_ascii_run_auto_wrap_marks_line_soft_wrapped() {
     let mut screen = Screen::new(3, 5);
-    screen.print_ascii_run(b"abcdef", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b"abcdef"), SgrAttributes::default(), true);
     assert!(screen.lines[0].wrapped);
     assert!(!screen.lines[1].wrapped);
 }
@@ -76,7 +81,7 @@ fn no_decawm_does_not_mark_soft_wrap() {
 #[test]
 fn clear_line_resets_wrapped_flag() {
     let mut screen = Screen::new(3, 5);
-    screen.print_ascii_run(b"abcdef", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b"abcdef"), SgrAttributes::default(), true);
     assert!(screen.lines[0].wrapped);
     screen.lines[0].clear();
     assert!(!screen.lines[0].wrapped);
@@ -183,7 +188,7 @@ fn cursor_mut_on_primary_modifies_primary() {
 #[test]
 fn print_ascii_run_writes_bytes_and_advances_cursor() {
     let mut screen = make_screen();
-    screen.print_ascii_run(b"ABC", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b"ABC"), SgrAttributes::default(), true);
     assert_cell(&screen, 0, 0, 'A');
     assert_cell(&screen, 0, 1, 'B');
     assert_cell(&screen, 0, 2, 'C');
@@ -194,8 +199,22 @@ fn print_ascii_run_writes_bytes_and_advances_cursor() {
 fn print_ascii_run_empty_slice_is_noop() {
     let mut screen = make_screen();
     screen.move_cursor(0, 10);
-    screen.print_ascii_run(b"", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b""), SgrAttributes::default(), true);
     assert_eq!(screen.cursor().col, 10);
+}
+
+#[test]
+fn printable_ascii_run_rejects_control_bytes() {
+    let err = PrintableAsciiRun::new(b"A\n").unwrap_err();
+    assert_eq!(err.byte, b'\n');
+    assert_eq!(err.index, 1);
+    assert!(PrintableAsciiRun::longest_prefix(b"\nABC").is_none());
+    assert_eq!(
+        PrintableAsciiRun::longest_prefix(b"ABC\n")
+            .unwrap()
+            .as_bytes(),
+        b"ABC"
+    );
 }
 
 #[test]
@@ -203,14 +222,14 @@ fn print_ascii_run_wrap_cases() {
     let attrs = SgrAttributes::default();
     let mut wrapped = make_screen();
     wrapped.move_cursor(0, 78);
-    wrapped.print_ascii_run(b"XYZ", attrs, true);
+    wrapped.print_ascii_run(ascii(b"XYZ"), attrs, true);
     assert_cell(&wrapped, 0, 78, 'X');
     assert_cell(&wrapped, 0, 79, 'Y');
     assert_cell(&wrapped, 1, 0, 'Z');
 
     let mut clamped = make_screen();
     clamped.move_cursor(0, 78);
-    clamped.print_ascii_run(b"XYZ", attrs, false);
+    clamped.print_ascii_run(ascii(b"XYZ"), attrs, false);
     assert_cell(&clamped, 0, 78, 'X');
     assert_cell(&clamped, 0, 79, 'Z');
     assert_cell(&clamped, 1, 0, ' ');
@@ -222,14 +241,14 @@ fn print_ascii_run_marks_row_dirty() {
     let mut screen = make_screen();
     let _ = screen.take_dirty_lines();
     screen.move_cursor(3, 0);
-    screen.print_ascii_run(b"hello", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b"hello"), SgrAttributes::default(), true);
     assert!(screen.take_dirty_lines().contains(&3));
 }
 
 #[test]
 fn print_ascii_run_preserves_cell_count_at_line_boundary() {
     let mut screen = Screen::new(4, 10);
-    screen.print_ascii_run(b"1234567890", SgrAttributes::default(), true);
+    screen.print_ascii_run(ascii(b"1234567890"), SgrAttributes::default(), true);
     assert_eq!(screen.get_line(0).unwrap().cells.len(), 10);
 }
 
@@ -387,7 +406,7 @@ proptest! {
         let mut screen = make_screen();
         let bytes: Vec<u8> = (0..len).map(|i| b'A' + (i % 26) as u8).collect();
         screen.move_cursor(0, start_col);
-        screen.print_ascii_run(&bytes, SgrAttributes::default(), auto_wrap);
+        screen.print_ascii_run(ascii(&bytes), SgrAttributes::default(), auto_wrap);
         prop_assert!(screen.cursor().row < 24);
         prop_assert!(screen.cursor().col < 80);
         prop_assert_eq!(screen.get_line(0).unwrap().cells.len(), 80);

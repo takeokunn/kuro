@@ -7,23 +7,19 @@
 ;;; Group 17: kuro--render-image-notification — error handling paths
 
 (ert-deftest kuro-overlays-ext-render-image-notification-handles-bad-base64 ()
-  "kuro--render-image-notification catches errors from malformed base64 without propagating.
-The condition-case in `kuro--render-image-notification' must swallow the error
-that `kuro--decode-png-image' signals when base64-decode-string fails."
+  "kuro--render-image-notification ignores malformed base64 without propagating."
   (kuro-overlays-test--with-buffer
     (insert "line0\nline1\n")
     (cl-letf (((symbol-function 'kuro--get-image)
                (lambda (_id) "not-valid-base64!!!!")))
-      ;; No error must escape — condition-case catches and messages it
       (should-not
        (condition-case err
            (progn (kuro--render-image-notification '(1 0 0 2 1)) nil)
-         (error err))))))
+         (error err)))
+      (should (null kuro--image-overlays)))))
 
 (ert-deftest kuro-overlays-ext-render-image-notification-handles-create-image-error ()
-  "kuro--render-image-notification catches errors from create-image failing.
-When `kuro--decode-png-image' signals because `create-image' errors, the
-outer condition-case must absorb it and leave no overlay."
+  "kuro--render-image-notification ignores images that `create-image' rejects."
   (kuro-overlays-test--with-buffer
     (insert "line0\nline1\n")
     (let* ((fake-b64 (base64-encode-string "PNG")))
@@ -34,7 +30,6 @@ outer condition-case must absorb it and leave no overlay."
          (condition-case err
              (progn (kuro--render-image-notification '(1 0 0 2 1)) nil)
            (error err)))
-        ;; No overlay should have been placed
         (should (null kuro--image-overlays))))))
 
 (ert-deftest kuro-overlays-ext-render-image-notification-noop-when-no-image ()
@@ -146,9 +141,93 @@ The `when (and b64 ...)' guard must short-circuit and leave the overlay list emp
         (should (eq captured-type 'png))
         (should (stringp captured-data))))))
 
-(ert-deftest kuro-overlays-decode-png-image-signals-on-invalid-base64 ()
-  "`kuro--decode-png-image' signals an error when base64 decoding fails."
-  (should-error (kuro--decode-png-image "not-valid-base64!!!")))
+(ert-deftest kuro-overlays-decode-png-image-returns-nil-on-invalid-base64 ()
+  "`kuro--decode-png-image' returns nil when base64 decoding fails."
+  (should-not (kuro--decode-png-image "not-valid-base64!!!")))
+
+(ert-deftest kuro-overlays-decode-png-image-rejects-non-canonical-base64-before-decoding ()
+  "Non-canonical base64 is rejected before decode and image creation."
+  (dolist (payload '("" "AAA" "AAAA\n" "====" "A===" "あ==="))
+    (let ((decode-called nil)
+          (create-called nil))
+      (cl-letf (((symbol-function 'base64-decode-string)
+                 (lambda (_b64)
+                   (setq decode-called t)
+                   "x"))
+                ((symbol-function 'create-image)
+                 (lambda (&rest _args)
+                   (setq create-called t)
+                   'mock-image)))
+        (should-not (kuro--decode-png-image payload))
+        (should-not decode-called)
+        (should-not create-called)))))
+
+(ert-deftest kuro-overlays-decode-png-image-rejects-oversized-base64-before-decoding ()
+  "`kuro--decode-png-image' rejects huge base64 strings before decoding."
+  (let ((kuro--inline-image-max-base64-bytes 4)
+        (decode-called nil)
+        (create-called nil))
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (_b64)
+                 (setq decode-called t)
+                 "x"))
+              ((symbol-function 'create-image)
+               (lambda (&rest _args)
+                 (setq create-called t)
+                 'mock-image)))
+      (should-not (kuro--decode-png-image "AAAAAA"))
+      (should-not decode-called)
+      (should-not create-called))))
+
+(ert-deftest kuro-overlays-decode-png-image-measures-base64-limit-in-bytes ()
+  "`kuro--decode-png-image' applies the base64 payload limit in bytes."
+  (let ((kuro--inline-image-max-base64-bytes 1)
+        (decode-called nil))
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (_b64)
+                 (setq decode-called t)
+                 "x")))
+      (should-not (kuro--decode-png-image "あ"))
+      (should-not decode-called))))
+
+(ert-deftest kuro-overlays-decode-png-image-rejects-decoded-upper-bound-before-decoding ()
+  "`kuro--decode-png-image' rejects payloads whose decoded upper bound is too large."
+  (let ((kuro--inline-image-max-base64-bytes 100)
+        (kuro--inline-image-max-decoded-bytes 2)
+        (decode-called nil)
+        (create-called nil))
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (_b64)
+                 (setq decode-called t)
+                 "xxx"))
+              ((symbol-function 'create-image)
+               (lambda (&rest _args)
+                 (setq create-called t)
+                 'mock-image)))
+      (should-not (kuro--decode-png-image "AAAA"))
+      (should-not decode-called)
+      (should-not create-called))))
+
+(ert-deftest kuro-overlays-decode-png-image-rejects-oversized-decoded-bytes ()
+  "`kuro--decode-png-image' rejects oversized decoded bytes before create-image."
+  (let ((kuro--inline-image-max-base64-bytes 100)
+        (kuro--inline-image-max-decoded-bytes 3)
+        (create-called nil))
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (_b64) "xxxx"))
+              ((symbol-function 'create-image)
+               (lambda (&rest _args)
+                 (setq create-called t)
+                 'mock-image)))
+      (should-not (kuro--decode-png-image "AAAA"))
+      (should-not create-called))))
+
+(ert-deftest kuro-overlays-decode-png-image-returns-nil-on-create-image-error ()
+  "`kuro--decode-png-image' returns nil when `create-image' rejects data."
+  (let ((b64 (base64-encode-string "PNG")))
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (&rest _args) (error "create-image failed"))))
+      (should-not (kuro--decode-png-image b64)))))
 
 (defconst kuro-overlays-test--place-image-overlay-table
   '((kuro-overlays-place-image-overlay-creates-overlay-at-position 0 0 1 1 2 "line0\nline1\n")
@@ -354,6 +433,60 @@ leave exactly one live overlay, not accumulate."
       (insert "ab\ncd\n")
       (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) nil)))
         (kuro--render-placeholder-regions '((7 0 0 0 2 2 0 0 2 2)))
+        (should (null kuro--placeholder-overlays))))))
+
+(ert-deftest kuro-overlays-placeholder-rejects-malformed-tuples ()
+  "Malformed placeholder tuples are rejected before image lookup."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil)
+          (get-called nil))
+      (insert "ab\ncd\n")
+      (cl-letf (((symbol-function 'kuro--get-image)
+                 (lambda (_id)
+                   (setq get-called t)
+                   "ZmFrZQ==")))
+        (dolist (region '(nil (7 0 0 0 1 1 0 0 1)
+                              (7 0 0 0 1 1 0 0 1 1 99)
+                              (0 0 0 0 1 1 0 0 1 1)
+                              (7 0 -1 0 1 1 0 0 1 1)
+                              (7 0 0 0 0 1 0 0 1 1)
+                              (7 0 0 0 1 0 0 0 1 1)
+                              ("7" 0 0 0 1 1 0 0 1 1)))
+          (should-not
+           (condition-case err
+               (progn (kuro--render-placeholder-region region) nil)
+              (error err))))
+        (should-not get-called)
+        (should (null kuro--placeholder-overlays))))))
+
+(ert-deftest kuro-overlays-placeholder-rejects-out-of-bounds-tiles ()
+  "Placeholder tile bounds must fit inside the image grid."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil)
+          (get-called nil))
+      (insert "ab\ncd\n")
+      (cl-letf (((symbol-function 'kuro--get-image)
+                 (lambda (_id)
+                   (setq get-called t)
+                   "ZmFrZQ==")))
+        (kuro--render-placeholder-region '(7 0 0 0 2 2 1 1 2 2))
+        (should-not get-called)
+        (should (null kuro--placeholder-overlays))))))
+
+(ert-deftest kuro-overlays-placeholder-regions-rejects-cyclic-list ()
+  "`kuro--render-placeholder-regions' rejects cyclic region lists without hanging."
+  (kuro-overlays-test--with-buffer
+    (let ((kuro--placeholder-overlays nil)
+          (regions (list '(7 0 0 0 1 1 0 0 1 1)))
+          (get-called nil))
+      (insert "ab\ncd\n")
+      (setcdr regions regions)
+      (cl-letf (((symbol-function 'kuro--get-image)
+                 (lambda (_id)
+                   (setq get-called t)
+                   "ZmFrZQ==")))
+        (kuro--render-placeholder-regions regions)
+        (should-not get-called)
         (should (null kuro--placeholder-overlays))))))
 
 (provide 'kuro-overlays-test-3)

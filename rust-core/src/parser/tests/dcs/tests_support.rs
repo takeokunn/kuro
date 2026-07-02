@@ -15,7 +15,7 @@ pub(crate) fn run_dcs(core: &mut crate::TerminalCore, intermediates: &[u8], c: c
 }
 
 /// Collect DCS responses as UTF-8 strings.
-pub(crate) fn dcs_response_texts<'a>(core: &'a crate::TerminalCore) -> Vec<&'a str> {
+pub(crate) fn dcs_response_texts(core: &crate::TerminalCore) -> Vec<&str> {
     core.meta
         .pending_responses
         .iter()

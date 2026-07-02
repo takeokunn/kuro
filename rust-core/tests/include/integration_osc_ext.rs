@@ -72,20 +72,21 @@ fn osc7_cwd_round_trip() {
         Some("/home/user/projects"),
         "OSC 7 must store the path component in osc_data().cwd"
     );
-    assert!(t.osc_data().cwd_dirty(), "cwd_dirty must be set after OSC 7");
+    assert!(
+        t.osc_data().cwd_dirty(),
+        "cwd_dirty must be set after OSC 7"
+    );
 }
 
-/// OSC 7 with a path containing special characters must be stored verbatim
-/// (no URL-decode occurs in the handler).
+/// OSC 7 stores the decoded path, not the raw URL text.
 #[test]
-fn osc7_cwd_with_spaces_percent_encoded() {
+fn osc7_cwd_percent_decodes_path() {
     let mut t = common::new_terminal();
-    // Spaces are percent-encoded in the URL; the handler stores the raw path
     t.advance(b"\x1b]7;file://localhost/home/user/my%20project\x07");
     assert_eq!(
         t.osc_data().cwd(),
-        Some("/home/user/my%20project"),
-        "OSC 7 must store percent-encoded path verbatim"
+        Some("/home/user/my project"),
+        "OSC 7 must store a decoded cwd path"
     );
 }
 
@@ -134,10 +135,16 @@ fn osc110_resets_default_fg_to_none() {
     let mut t = common::new_terminal();
     // Set fg to a color first (OSC 10 ; rgb:ff/00/00)
     t.advance(b"\x1b]10;rgb:ff/00/00\x07");
-    assert!(t.osc_data().default_fg().is_some(), "default_fg must be Some after OSC 10");
+    assert!(
+        t.osc_data().default_fg().is_some(),
+        "default_fg must be Some after OSC 10"
+    );
     // Now reset via OSC 110
     t.advance(b"\x1b]110\x07");
-    assert!(t.osc_data().default_fg().is_none(), "default_fg must be None after OSC 110");
+    assert!(
+        t.osc_data().default_fg().is_none(),
+        "default_fg must be None after OSC 110"
+    );
 }
 
 /// OSC 111 resets the default background color to None.
@@ -145,9 +152,15 @@ fn osc110_resets_default_fg_to_none() {
 fn osc111_resets_default_bg_to_none() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]11;rgb:00/ff/00\x07");
-    assert!(t.osc_data().default_bg().is_some(), "default_bg must be Some after OSC 11");
+    assert!(
+        t.osc_data().default_bg().is_some(),
+        "default_bg must be Some after OSC 11"
+    );
     t.advance(b"\x1b]111\x07");
-    assert!(t.osc_data().default_bg().is_none(), "default_bg must be None after OSC 111");
+    assert!(
+        t.osc_data().default_bg().is_none(),
+        "default_bg must be None after OSC 111"
+    );
 }
 
 /// OSC 112 resets the cursor color to None.
@@ -155,9 +168,15 @@ fn osc111_resets_default_bg_to_none() {
 fn osc112_resets_cursor_color_to_none() {
     let mut t = common::new_terminal();
     t.advance(b"\x1b]12;rgb:00/00/ff\x07");
-    assert!(t.osc_data().cursor_color().is_some(), "cursor_color must be Some after OSC 12");
+    assert!(
+        t.osc_data().cursor_color().is_some(),
+        "cursor_color must be Some after OSC 12"
+    );
     t.advance(b"\x1b]112\x07");
-    assert!(t.osc_data().cursor_color().is_none(), "cursor_color must be None after OSC 112");
+    assert!(
+        t.osc_data().cursor_color().is_none(),
+        "cursor_color must be None after OSC 112"
+    );
 }
 
 /// OSC 110 on an already-unset fg is a no-op (must not panic).

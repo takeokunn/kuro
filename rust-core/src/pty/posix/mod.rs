@@ -6,7 +6,7 @@ mod shell;
 
 // Re-export for unit tests that test the child-env setup directly.
 #[cfg(test)]
-pub(crate) use child::setup_child_env;
+pub(crate) use child::build_child_env_strings_for_test;
 
 use crate::{
     ffi::error::{pty_operation_error, pty_spawn_error},
@@ -22,7 +22,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd as _, IntoRawFd as _, RawFd};
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 /// Channel capacity for PTY data - prevents unbounded memory growth
@@ -38,7 +38,7 @@ pub struct Pty {
     receiver: std::sync::mpsc::Receiver<Vec<u8>>,
     /// One-item peek buffer populated by `has_pending_data` so that `read` can
     /// drain it first without losing the already-consumed channel item.
-    peek_buffer: std::sync::Mutex<Option<Vec<u8>>>,
+    peek_buffer: Mutex<Option<Vec<u8>>>,
     /// Shutdown signal for reader thread
     shutdown: Arc<AtomicBool>,
     /// Thread handle for PTY reader
@@ -48,22 +48,11 @@ pub struct Pty {
 }
 
 impl Pty {
-    /// Search `$PATH` for an executable named `command`.
-    ///
-    /// Returns the first absolute path found, or `None` if not found.
-    #[cfg(test)]
-    fn find_in_path(command: &str) -> Option<PathBuf> {
-        ShellCommand::find_in_path(command)
-    }
-
-    /// Validate shell command against whitelist
+    /// Validate shell command against the allowlist
     ///
     /// Ensures only allowed shells can be spawned to prevent command injection.
-    /// Resolves the command to an absolute path and checks the basename.
-    ///
-    /// For absolute paths (e.g. NixOS Nix store paths like `/nix/store/…/bin/fish`),
-    /// validates existence and executability directly without a PATH lookup.
-    /// For short names, resolves via `which` as before.
+    /// The command must be an absolute path; `$PATH` is never consulted, so
+    /// validation and exec target the same filesystem object.
     #[cfg(test)]
     fn validate_shell(command: &str) -> Result<PathBuf> {
         ShellCommand::resolve(command).map(ShellCommand::into_path)
@@ -165,14 +154,17 @@ impl Pty {
     }
 
     fn take_peek_buffer(&self) -> Option<Vec<u8>> {
-        self.peek_buffer
-            .lock()
-            .expect("peek_buffer lock poisoned")
-            .take()
+        self.peek_buffer_guard().take()
     }
 
     fn store_peek_buffer(&self, data: Vec<u8>) {
-        *self.peek_buffer.lock().expect("peek_buffer lock poisoned") = Some(data);
+        *self.peek_buffer_guard() = Some(data);
+    }
+
+    fn peek_buffer_guard(&self) -> MutexGuard<'_, Option<Vec<u8>>> {
+        self.peek_buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn drain_pending_bytes(&mut self, max_bytes: Option<usize>) -> Vec<u8> {
@@ -195,7 +187,10 @@ impl Pty {
             all_data.extend(data);
         }
 
-        while max_bytes.map_or(true, |max_bytes| all_data.len() < max_bytes) {
+        while match max_bytes {
+            Some(max_bytes) => all_data.len() < max_bytes,
+            None => true,
+        } {
             match self.receiver.try_recv() {
                 Ok(mut data) => {
                     if let Some(max_bytes) = max_bytes {
@@ -232,7 +227,7 @@ impl Pty {
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
     pub fn spawn(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
-        // Validate command against whitelist
+        // Validate command against the allowlist
         let shell = ShellCommand::resolve(command)?;
 
         // Open PTY master/slave pair with the correct initial window size.
@@ -258,9 +253,14 @@ impl Pty {
         // takes ownership; the fd will only be accessed through this File handle.
         let reader_file = unsafe { std::fs::File::from_raw_fd(reader_fd) };
 
+        // Build all allocation-backed child inputs before fork. The child path
+        // must only perform fd/session syscalls and execve/_exit.
+        let exec =
+            child::build_child_exec_context(shell.as_path(), rows, cols, command, shell_args)?;
+
         // Fork to create child process
         // SAFETY: all shared state (channel sender, Arc clones, reader_fd) is fully set
-        // up before forking; the Child branch runs only async-signal-safe code until exec.
+        // up before forking; the Child branch runs only async-signal-safe code until execve.
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child }) => Ok(Self::spawn_parent_pty(
                 master_file,
@@ -271,23 +271,14 @@ impl Pty {
                 reader_file,
                 process_exited,
             )),
-            Ok(ForkResult::Child) => {
-                // Child process: delegate all setup to the helper.
-                // If the helper returns Err, the error propagates out of spawn() in the
-                // child process (the parent is in a separate address space and unaffected).
-                child::exec_in_child(child::ChildExecContext {
-                    slave,
-                    master_file,
-                    reader_fd,
-                    shell_path: shell.as_path(),
-                    rows,
-                    cols,
-                    command,
-                    shell_args,
-                })?;
-                // exec_in_child calls execv which replaces the process on success.
-                std::process::exit(1);
-            }
+            Ok(ForkResult::Child) => child::exec_in_child(child::ChildExecContext {
+                slave,
+                master_file,
+                reader_fd,
+                rows,
+                cols,
+                exec,
+            }),
             Err(errno) => Err(pty_spawn_error(
                 command,
                 &format!("Failed to fork: {errno}"),
@@ -338,7 +329,7 @@ impl Pty {
     pub fn has_pending_data(&self) -> bool {
         // Check peek buffer first (previously peeked item)
         {
-            let peek = self.peek_buffer.lock().expect("peek_buffer lock poisoned");
+            let peek = self.peek_buffer_guard();
             if peek.is_some() {
                 return true;
             }

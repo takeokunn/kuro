@@ -1,4 +1,4 @@
-use super::support::encode_1x1_png_b64;
+use super::support::{encode_1x1_png_b64, encode_empty_png_with_dimensions_b64};
 use crate::parser::kitty::{KittyCommand, KittyParams};
 
 // ── PNG color-type expansion ───────────────────────────────────────────────────
@@ -24,6 +24,18 @@ test_png_pixel_round_trip!(
 );
 
 // ── KittyParams field coverage ─────────────────────────────────────────────────
+
+test_kitty_payload_once_case!(
+    test_kitty_png_oversized_dimensions_returns_none,
+    payload = format!(
+        "a=t,f=100,i=41,s=1025,v=1025;{}",
+        encode_empty_png_with_dimensions_b64(1025, 1025)
+    ),
+    check = |result: Option<KittyCommand>| assert!(
+        result.is_none(),
+        "oversized PNG dimensions must be rejected before decoded allocation"
+    ),
+);
 
 test_kitty_payload_once_case!(
     test_kitty_params_empty_data_produces_none_action,
@@ -121,17 +133,15 @@ test_kitty_params_case!(
     },
 );
 
-// `t=t` (temp-file) with an EMPTY payload (no base64 path) must be rejected:
-// file/temp/shm transmission requires a path reference; an absent one yields
-// None. (Successful t=t reads are covered in tests/kitty_media.rs.)
+// `t=t` (temp-file) must be rejected. Kuro accepts only inline/chunked Kitty
+// image bytes, not PTY-provided host-object references.
 test_unsupported_transmission!(
     test_unsupported_transmission_temp_file_returns_none,
     payload = b"a=t,t=t,i=1;",
     label = "temp-file (t=t) with no path",
 );
 
-// `t=s` (shared-memory) with an EMPTY payload (no shm name) must be rejected.
-// (Successful t=s reads are covered in tests/kitty_media.rs.)
+// `t=s` (shared-memory) is refused; an empty payload is ignored without state.
 test_unsupported_transmission!(
     test_unsupported_transmission_shared_mem_returns_none,
     payload = b"a=t,t=s,i=2;",
@@ -164,16 +174,11 @@ test_kitty_params_case!(
     ),
 );
 
-// `decode_png` Indexed color type branch: an Indexed-color PNG must not panic
-// and must produce an `ImageFormat::Rgba` result with the raw palette-expanded
-// bytes from the `png` crate.
-//
-// This exercises the `png::ColorType::Indexed => (buf, ImageFormat::Rgba)` arm,
-// which is the one remaining uncovered branch in `decode_png`.
+// Indexed-color PNGs are normalized by the shared decoder into explicit RGB.
 // The `png` crate requires a PLTE chunk for Indexed-color PNGs.
 // Build a 1×1 Indexed PNG with a single-entry palette at runtime.
 test_kitty_png_transmit_case!(
-    test_kitty_png_indexed_color_type_produces_rgba_format,
+    test_kitty_png_indexed_color_type_expands_to_rgb,
     payload = {
         let mut png_bytes: Vec<u8> = Vec::new();
         {
@@ -191,8 +196,10 @@ test_kitty_png_transmit_case!(
             crate::util::base64::encode(&png_bytes)
         )
     },
-    fmt_var = Rgba,
-    expected_len = 1,
-    pixels = pixels => {},
+    fmt_var = Rgb,
+    expected_len = 3,
+    pixels = pixels => {
+        assert_eq!(pixels, vec![0xAB, 0xCD, 0xEF]);
+    },
     expected = "Transmit",
 );

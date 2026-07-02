@@ -11,6 +11,13 @@ use crate::TerminalCore;
 
 use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_BYTES};
 
+const OSC7_MAX_HOST_BYTES: usize = 253;
+
+struct Osc7Cwd {
+    host: Option<String>,
+    path: String,
+}
+
 /// Handle OSC sequences dispatched from the VTE parser.
 /// Called from `TerminalCore::osc_dispatch`.
 ///
@@ -26,7 +33,7 @@ use crate::parser::limits::{MAX_TITLE_BYTES, OSC7_MAX_PATH_BYTES, OSC8_MAX_URI_B
 /// - OSC 22: Window pointer cursor shape (CSS cursor name, e.g. "pointer", "default").
 /// - OSC 23: Query current cursor shape — respond `OSC 23 ; <decscusr> ST`.
 /// - OSC 110/111/112: Reset default foreground/background/cursor color to terminal default.
-/// - OSC 51: Emacs eval command request (security: Elisp-side whitelist filtering).
+/// - OSC 51: Typed command request (security: validated on Rust and Elisp sides).
 /// - OSC 52: Clipboard access.
 /// - OSC 99: Kitty desktop notifications (`metadata ; payload`, colon-separated metadata).
 /// - OSC 104: Reset color palette.
@@ -160,29 +167,86 @@ fn handle_osc_cursor_shape_query(core: &mut TerminalCore, params: &[&[u8]]) {
     core.meta.pending_responses.push(resp.into_bytes());
 }
 
-fn osc7_host_and_path(after_scheme: &str) -> (&str, &str) {
-    match after_scheme.find('/') {
-        Some(i) => (&after_scheme[..i], &after_scheme[i..]),
-        None => ("", after_scheme),
+fn has_control_char(text: &str) -> bool {
+    text.chars().any(|ch| ch.is_control() || ch == '\u{7f}')
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
-fn osc7_cwd_from_raw(raw: &[u8]) -> Option<(Option<String>, String)> {
-    let url = osc_lossy_text(raw);
-    let after_scheme = url.strip_prefix("file://")?;
-    let (host, path) = osc7_host_and_path(after_scheme);
+fn percent_decode_utf8(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
 
-    if path.len() > OSC7_MAX_PATH_BYTES {
+    while idx < bytes.len() {
+        if bytes[idx] == b'%' {
+            let hi = hex_nibble(*bytes.get(idx + 1)?)?;
+            let lo = hex_nibble(*bytes.get(idx + 2)?)?;
+            decoded.push((hi << 4) | lo);
+            idx += 3;
+        } else {
+            decoded.push(bytes[idx]);
+            idx += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn is_osc7_hostname_label(label: &str) -> bool {
+    if label.is_empty() || label.len() > 63 {
+        return false;
+    }
+
+    let bytes = label.as_bytes();
+    let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+    first.is_ascii_alphanumeric()
+        && last.is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+}
+
+fn is_osc7_safe_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= OSC7_MAX_HOST_BYTES
+        && host.is_ascii()
+        && !has_control_char(host)
+        && host.split('.').all(is_osc7_hostname_label)
+}
+
+fn osc7_host_from_raw(raw_host: &str) -> Option<Option<String>> {
+    let host = percent_decode_utf8(raw_host)?;
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        Some(None)
+    } else if is_osc7_safe_host(&host) {
+        Some(Some(host))
+    } else {
+        None
+    }
+}
+
+fn osc7_cwd_from_raw(raw: &[u8]) -> Option<Osc7Cwd> {
+    let url = std::str::from_utf8(raw).ok()?;
+    let after_scheme = url.strip_prefix("file://")?;
+    let slash = after_scheme.find('/')?;
+    let (raw_host, raw_path) = after_scheme.split_at(slash);
+
+    let host = osc7_host_from_raw(raw_host)?;
+    let path = percent_decode_utf8(raw_path)?;
+    if path.len() > OSC7_MAX_PATH_BYTES || !path.starts_with('/') || has_control_char(&path) {
         return None;
     }
 
-    let host = match host {
-        "" | "localhost" => None,
-        host => Some(host.to_owned()),
-    };
-    let path = path.to_owned();
-
-    Some((host, path))
+    Some(Osc7Cwd { host, path })
 }
 
 fn osc8_uri_from_raw(raw: &[u8]) -> Option<Option<String>> {
@@ -198,8 +262,8 @@ fn reset_osc_default_color(core: &mut TerminalCore, slot: DefaultColorSlot) {
 
 #[inline]
 fn handle_osc_7(core: &mut TerminalCore, params: &[&[u8]]) {
-    osc_apply_param(params, 1, osc7_cwd_from_raw, |(host, path)| {
-        core.osc_data.set_cwd(host, Some(path));
+    osc_apply_param(params, 1, osc7_cwd_from_raw, |cwd| {
+        core.osc_data.set_cwd(cwd.host, Some(cwd.path));
     });
 }
 

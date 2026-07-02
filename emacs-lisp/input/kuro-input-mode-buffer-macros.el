@@ -22,8 +22,8 @@
 (declare-function kuro--line-mode-update-display "kuro-input-mode-line-display" ())
 
 (defmacro kuro--line-splice (from to replacement new-point)
-  "Replace buffer[FROM..TO] with REPLACEMENT and set point to NEW-POINT.
-Does NOT call `kuro--line-mode-update-display'; compose with
+  "Replace text between FROM and TO with REPLACEMENT and set point to NEW-POINT.
+Does not call `kuro--line-mode-update-display'; compose with
 `kuro--line-splice-with-undo' to get the undo and display continuations."
   (declare (indent 0))
   `(setq kuro--line-buffer
@@ -33,7 +33,8 @@ Does NOT call `kuro--line-mode-update-display'; compose with
          kuro--line-point ,new-point))
 
 (defmacro kuro--line-splice-with-undo (from to replacement new-point)
-  "Push undo state, splice the line buffer, then refresh display."
+  "Push undo state and splice the line buffer from FROM to TO with REPLACEMENT.
+Then move point to NEW-POINT and refresh display."
   (declare (indent 0))
   `(progn
      (kuro--line-undo-push)
@@ -61,7 +62,8 @@ Does NOT call `kuro--line-mode-update-display'; compose with
   `(kuro--line-splice-with-undo ,from ,to "" ,from))
 
 (defmacro kuro--line-replace-range-with-undo (from to replacement-form)
-  "Replace buffer text from FROM to TO and move point to the end of it."
+  "Replace buffer text from FROM to TO with REPLACEMENT-FORM.
+Move point to the end of it."
   (declare (indent 0))
   `(let ((from ,from)
          (to ,to)

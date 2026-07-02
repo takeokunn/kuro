@@ -44,7 +44,7 @@ This is the standard control sequence for `backward-kill-word' in readline/bash.
     (aref exc 2)))
 
 (defun kuro--keymap-clear-exception (map exc)
-  "Unbind EXC in MAP and clear its ESC-prefix fallback when applicable."
+  "Unbind EXC in MAP and clear its `ESC-prefix' fallback when applicable."
   (ignore-errors
     (define-key map (kbd exc) nil)
     (let ((char (kuro--meta-exception-char exc)))

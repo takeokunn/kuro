@@ -10,6 +10,8 @@
 ;; history-navigation modules.  Loaded automatically at the end of
 ;; `kuro-input-mode'.
 
+;;; Code:
+
 (require 'kuro-input-mode-completion)
 (require 'kuro-input-mode-history-nav)
 

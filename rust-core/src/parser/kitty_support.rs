@@ -162,12 +162,9 @@ pub(super) fn apply_kitty_param(params: &mut KittyParams, kv: &[u8]) {
         return;
     };
 
-    if apply_kitty_char_param(params, key, val)
+    let _ = apply_kitty_char_param(params, key, val)
         || apply_kitty_u32_param(params, key, val)
-        || apply_kitty_control_param(params, key, val)
-    {
-        return;
-    }
+        || apply_kitty_control_param(params, key, val);
 }
 
 #[inline]
@@ -341,34 +338,9 @@ pub(super) fn build_command(params: KittyParams, raw_data: Vec<u8>) -> Option<Ki
 ///
 /// PNG format 100 is always decoded to Rgb or Rgba on storage.
 /// The `ImageFormat::Png` variant does not exist in the stored enum.
-fn decode_png(data: &[u8]) -> Result<(Vec<u8>, ImageFormat), &'static str> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(data));
-    let mut reader = decoder.read_info().map_err(|_| "png decode error")?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).map_err(|_| "png frame error")?;
-    buf.truncate(info.buffer_size());
-
-    let (pixels, format) = match info.color_type {
-        png::ColorType::Rgb => (buf, ImageFormat::Rgb),
-        png::ColorType::Rgba => (buf, ImageFormat::Rgba),
-        png::ColorType::Grayscale => {
-            // Expand to RGB
-            let rgb = buf.iter().flat_map(|&v| [v, v, v]).collect();
-            (rgb, ImageFormat::Rgb)
-        }
-        png::ColorType::GrayscaleAlpha => {
-            // Expand to RGBA
-            let rgba = buf
-                .chunks(2)
-                .flat_map(|ch| [ch[0], ch[0], ch[0], ch[1]])
-                .collect();
-            (rgba, ImageFormat::Rgba)
-        }
-        png::ColorType::Indexed => {
-            // Indexed and other types: unsupported, treat as opaque
-            (buf, ImageFormat::Rgba)
-        }
-    };
-
-    Ok((pixels, format))
+fn decode_png(
+    data: &[u8],
+) -> Result<(Vec<u8>, ImageFormat), crate::parser::png_decode::PngDecodeError> {
+    crate::parser::png_decode::decode_inline_png(data)
+        .map(|decoded| decoded.into_pixels_and_format())
 }

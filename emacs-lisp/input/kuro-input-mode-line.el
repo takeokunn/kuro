@@ -109,8 +109,8 @@ the final carriage return, so the shell runs each line in sequence."
 
 (defun kuro--line-commit ()
   "Send accumulated line buffer to the PTY followed by a carriage return.
-  Clears the overlay and the accumulator before dispatching so a failed
-  send does not leave stale visual state."
+Clears the overlay and the accumulator before dispatching so a failed
+send does not leave stale visual state."
   (interactive)
   (let ((text kuro--line-buffer))
     (when (> (length text) 0)

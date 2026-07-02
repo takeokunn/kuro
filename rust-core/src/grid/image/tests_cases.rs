@@ -399,7 +399,10 @@ fn delete_by_col_leaves_other_cols_intact() {
 /// Build a 2x2 RGBA image (all transparent black) for compose tests.
 fn store_with_2x2(id: u32) -> GraphicsStore {
     let mut store = GraphicsStore::new();
-    store.store_image(Some(id), ImageData::new(vec![0u8; 2 * 2 * 4], ImageFormat::Rgba, 2, 2));
+    store.store_image(
+        Some(id),
+        ImageData::new(vec![0u8; 2 * 2 * 4], ImageFormat::Rgba, 2, 2),
+    );
     store
 }
 
@@ -408,8 +411,21 @@ fn add_frame_materializes_base_as_frame_one() {
     let mut store = store_with_2x2(1);
     assert_eq!(store.frame_count(1), 0, "still image has no frames yet");
     // Add a 2x2 opaque-red full-canvas frame.
-    let red: Vec<u8> = std::iter::repeat([0xFF, 0, 0, 0xFF]).take(4).flatten().collect();
-    let n = store.add_frame(1, &red, ImageFormat::Rgba, 0, 0, 0, 0, None, None, 0, true, 50);
+    let red: Vec<u8> = [0xFFu8, 0, 0, 0xFF].repeat(4);
+    let n = store.add_frame(
+        1,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        0,
+        true,
+        50,
+    );
     assert_eq!(n, Some(2), "base becomes frame 1, new frame is frame 2");
     assert_eq!(store.frame_count(1), 2, "frame 1 (base) + frame 2");
     assert_eq!(store.frame_gap_ms(1, 1), 50, "frame 2 gap recorded");
@@ -420,7 +436,20 @@ fn add_frame_replace_overwrites_region() {
     let mut store = store_with_2x2(1);
     // Replace just the top-left pixel with opaque green using X=replace.
     let green = [0u8, 0xFF, 0, 0xFF];
-    store.add_frame(1, &green, ImageFormat::Rgba, 0, 0, 1, 1, None, None, 0, true, 0);
+    store.add_frame(
+        1,
+        &green,
+        ImageFormat::Rgba,
+        0,
+        0,
+        1,
+        1,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
     let png = store.frame_png_base64(1, 1);
     assert!(!png.is_empty(), "composed frame must render to PNG");
 }
@@ -429,12 +458,38 @@ fn add_frame_replace_overwrites_region() {
 fn add_frame_edit_target_composes_in_place() {
     let mut store = store_with_2x2(1);
     // Frame 2 created.
-    let red: Vec<u8> = std::iter::repeat([0xFF, 0, 0, 0xFF]).take(4).flatten().collect();
-    store.add_frame(1, &red, ImageFormat::Rgba, 0, 0, 0, 0, None, None, 0, true, 0);
+    let red: Vec<u8> = [0xFFu8, 0, 0, 0xFF].repeat(4);
+    store.add_frame(
+        1,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
     assert_eq!(store.frame_count(1), 2);
     // Edit frame 2 in place (r=2) — no new frame added.
     let blue = [0u8, 0, 0xFF, 0xFF];
-    let n = store.add_frame(1, &blue, ImageFormat::Rgba, 0, 0, 1, 1, None, Some(2), 0, true, 0);
+    let n = store.add_frame(
+        1,
+        &blue,
+        ImageFormat::Rgba,
+        0,
+        0,
+        1,
+        1,
+        None,
+        Some(2),
+        0,
+        true,
+        0,
+    );
     assert_eq!(n, Some(2), "r=2 edits frame 2 in place");
     assert_eq!(store.frame_count(1), 2, "edit must not add a frame");
 }
@@ -442,11 +497,37 @@ fn add_frame_edit_target_composes_in_place() {
 #[test]
 fn add_frame_base_canvas_copies_existing_frame() {
     let mut store = store_with_2x2(1);
-    let red: Vec<u8> = std::iter::repeat([0xFF, 0, 0, 0xFF]).take(4).flatten().collect();
-    store.add_frame(1, &red, ImageFormat::Rgba, 0, 0, 0, 0, None, None, 0, true, 0); // frame 2
-    // New frame uses c=2 as canvas, overlay one green pixel.
+    let red: Vec<u8> = [0xFFu8, 0, 0, 0xFF].repeat(4);
+    store.add_frame(
+        1,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        0,
+        true,
+        0,
+    ); // frame 2
+       // New frame uses c=2 as canvas, overlay one green pixel.
     let green = [0u8, 0xFF, 0, 0xFF];
-    let n = store.add_frame(1, &green, ImageFormat::Rgba, 1, 1, 1, 1, Some(2), None, 0, true, 0);
+    let n = store.add_frame(
+        1,
+        &green,
+        ImageFormat::Rgba,
+        1,
+        1,
+        1,
+        1,
+        Some(2),
+        None,
+        0,
+        true,
+        0,
+    );
     assert_eq!(n, Some(3), "c=2 canvas → frame 3 appended");
     assert_eq!(store.frame_count(1), 3);
 }
@@ -454,7 +535,20 @@ fn add_frame_base_canvas_copies_existing_frame() {
 #[test]
 fn add_frame_unknown_image_returns_none() {
     let mut store = GraphicsStore::new();
-    let n = store.add_frame(99, &[0u8; 4], ImageFormat::Rgba, 0, 0, 1, 1, None, None, 0, true, 0);
+    let n = store.add_frame(
+        99,
+        &[0u8; 4],
+        ImageFormat::Rgba,
+        0,
+        0,
+        1,
+        1,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
     assert_eq!(n, None, "a=f on unknown image is a no-op");
 }
 
@@ -480,8 +574,15 @@ fn add_frame_huge_region_dimensions_rejected_without_allocation() {
         true,
         0,
     );
-    assert_eq!(n, None, "oversized a=f region must be refused, not allocated");
-    assert_eq!(store.frame_count(1), 0, "no frame may be created on rejection");
+    assert_eq!(
+        n, None,
+        "oversized a=f region must be refused, not allocated"
+    );
+    assert_eq!(
+        store.frame_count(1),
+        0,
+        "no frame may be created on rejection"
+    );
 }
 
 /// INTENT (security/DoS regression): an a=f frame onto an image whose *declared*
@@ -497,9 +598,26 @@ fn add_frame_huge_canvas_dimensions_rejected_without_allocation() {
         ImageData::new(vec![0u8; 4], ImageFormat::Rgba, 50000, 50000),
     );
     let red = [0xFFu8, 0, 0, 0xFF];
-    let n = store.add_frame(7, &red, ImageFormat::Rgba, 0, 0, 1, 1, None, None, 0, true, 0);
+    let n = store.add_frame(
+        7,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        1,
+        1,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
     assert_eq!(n, None, "oversized canvas must refuse frame composition");
-    assert_eq!(store.frame_count(7), 0, "no frame materialized on rejection");
+    assert_eq!(
+        store.frame_count(7),
+        0,
+        "no frame materialized on rejection"
+    );
 }
 
 /// INTENT: a frame exactly at the canvas-pixel cap is still accepted — the guard
@@ -512,7 +630,20 @@ fn add_frame_at_reasonable_large_size_is_accepted() {
         Some(3),
         ImageData::new(vec![0u8; 1024 * 256 * 4], ImageFormat::Rgba, 1024, 256),
     );
-    let n = store.add_frame(3, &[0u8; 4], ImageFormat::Rgba, 0, 0, 1, 1, None, None, 0, true, 0);
+    let n = store.add_frame(
+        3,
+        &[0u8; 4],
+        ImageFormat::Rgba,
+        0,
+        0,
+        1,
+        1,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
     assert_eq!(n, Some(2), "a bounded large frame is accepted");
 }
 
@@ -521,9 +652,25 @@ fn add_frame_at_reasonable_large_size_is_accepted() {
 #[test]
 fn set_animation_run_state_marks_playing_and_infinite_loop() {
     let mut store = store_with_2x2(1);
-    let red: Vec<u8> = std::iter::repeat([0xFF, 0, 0, 0xFF]).take(4).flatten().collect();
-    store.add_frame(1, &red, ImageFormat::Rgba, 0, 0, 0, 0, None, None, 0, true, 0);
-    assert!(store.set_animation(1, Some(3), Some(1), None), "image exists");
+    let red: Vec<u8> = [0xFFu8, 0, 0, 0xFF].repeat(4);
+    store.add_frame(
+        1,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        0,
+        true,
+        0,
+    );
+    assert!(
+        store.set_animation(1, Some(3), Some(1), None),
+        "image exists"
+    );
     let (playing, current, loops) = store.animation_state(1).expect("state present");
     assert!(playing, "s=3 starts playback");
     assert_eq!(current, 1, "current frame defaults to 1");
@@ -542,8 +689,21 @@ fn set_animation_stop_state_pauses() {
 #[test]
 fn set_animation_current_frame_clamps_and_selects() {
     let mut store = store_with_2x2(1);
-    let red: Vec<u8> = std::iter::repeat([0xFF, 0, 0, 0xFF]).take(4).flatten().collect();
-    store.add_frame(1, &red, ImageFormat::Rgba, 0, 0, 0, 0, None, None, 0, true, 0); // 2 frames
+    let red: Vec<u8> = [0xFFu8, 0, 0, 0xFF].repeat(4);
+    store.add_frame(
+        1,
+        &red,
+        ImageFormat::Rgba,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        0,
+        true,
+        0,
+    ); // 2 frames
     store.set_animation(1, None, None, Some(99)); // beyond range
     let (_, current, _) = store.animation_state(1).expect("state present");
     assert_eq!(current, 2, "out-of-range current frame clamps to last");
@@ -560,7 +720,10 @@ fn set_animation_finite_loop_count_recorded() {
 #[test]
 fn set_animation_unknown_image_returns_false() {
     let mut store = GraphicsStore::new();
-    assert!(!store.set_animation(42, Some(3), None, None), "unknown image → false");
+    assert!(
+        !store.set_animation(42, Some(3), None, None),
+        "unknown image → false"
+    );
 }
 
 #[test]

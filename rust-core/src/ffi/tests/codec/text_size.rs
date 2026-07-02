@@ -33,11 +33,7 @@ fn text_size_ranges_single_contiguous_run() {
     let cells: Vec<Cell> = (0..5).map(|_| sized('a', 2)).collect();
     let ranges = encode_text_size_ranges(&cells);
     assert_eq!(ranges.len(), 1, "single contiguous run → 1 range");
-    assert_eq!(
-        ranges[0],
-        (0, 5, 2000),
-        "scale 2 over 5 cells → (0,5,2000)"
-    );
+    assert_eq!(ranges[0], (0, 5, 2000), "scale 2 over 5 cells → (0,5,2000)");
 }
 
 #[test]

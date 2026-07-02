@@ -122,19 +122,19 @@ proptest! {
         cells in proptest::collection::vec(arb_ascii_cell(), 0..=80),
     ) {
         let n = cells.len();
-        let (text, face_ranges, col_to_buf) = encode_line(&cells);
+        let encoded = encode_line(&cells);
 
         prop_assert!(
-            col_to_buf.is_empty(),
+            encoded.col_to_buf.is_empty(),
             "pure ASCII must produce empty col_to_buf, got len={}",
-            col_to_buf.len()
+            encoded.col_to_buf.len()
         );
 
         if n == 0 {
-            prop_assert_eq!(text, "");
-            prop_assert!(face_ranges.is_empty());
+            prop_assert_eq!(encoded.text, "");
+            prop_assert!(encoded.face_ranges.is_empty());
         } else {
-            let char_count = text.chars().count();
+            let char_count = encoded.text.chars().count();
             prop_assert_eq!(
                 char_count,
                 n,
@@ -142,26 +142,26 @@ proptest! {
                 n, n
             );
             prop_assert!(
-                !face_ranges.is_empty(),
+                !encoded.face_ranges.is_empty(),
                 "non-empty cell slice must produce at least one face range"
             );
             prop_assert_eq!(
-                face_ranges[0].0,
+                encoded.face_ranges[0].start_buf,
                 0,
                 "first face range must start at buffer offset 0"
             );
-            let last_end = face_ranges.last().unwrap().1;
+            let last_end = encoded.face_ranges.last().unwrap().end_buf;
             prop_assert_eq!(
                 last_end,
                 n,
                 "last face range must end at buffer offset {}",
                 n
             );
-            for w in face_ranges.windows(2) {
+            for w in encoded.face_ranges.windows(2) {
                 prop_assert_eq!(
-                    w[0].1, w[1].0,
+                    w[0].end_buf, w[1].start_buf,
                     "face ranges must be contiguous: [{},{}] then [{},{}]",
-                    w[0].0, w[0].1, w[1].0, w[1].1
+                    w[0].start_buf, w[0].end_buf, w[1].start_buf, w[1].end_buf
                 );
             }
         }
@@ -173,9 +173,14 @@ proptest! {
     fn prop_encode_line_face_ranges_non_empty(
         cells in proptest::collection::vec(arb_ascii_cell(), 1..=40),
     ) {
-        let (_, face_ranges, _) = encode_line(&cells);
-        for (s, e, _, _, _, _) in &face_ranges {
-            prop_assert!(s < e, "face range [{},{}] must be non-empty", s, e);
+        let encoded = encode_line(&cells);
+        for range in &encoded.face_ranges {
+            prop_assert!(
+                range.start_buf < range.end_buf,
+                "face range [{},{}] must be non-empty",
+                range.start_buf,
+                range.end_buf
+            );
         }
     }
 
@@ -293,9 +298,9 @@ fn test_pbt_encode_attrs_underline_style_bits() {
 fn test_pbt_encode_line_text_length_matches_cells() {
     let ascii: &str = "The quick brown fox";
     let cells: Vec<Cell> = ascii.chars().map(Cell::new).collect();
-    let (text, _, _) = encode_line(&cells);
+    let encoded = encode_line(&cells);
     assert_eq!(
-        text.chars().count(),
+        encoded.text.chars().count(),
         cells.len(),
         "ASCII cell count must equal text char count"
     );
@@ -327,11 +332,14 @@ fn test_pbt_encode_line_face_ranges_cover_full() {
             },
         ),
     ];
-    let (text, ranges, _) = encode_line(&cells);
-    assert_eq!(ranges[0].0, 0, "first range must start at 0");
+    let encoded = encode_line(&cells);
     assert_eq!(
-        ranges.last().unwrap().1,
-        text.chars().count(),
+        encoded.face_ranges[0].start_buf, 0,
+        "first range must start at 0"
+    );
+    assert_eq!(
+        encoded.face_ranges.last().unwrap().end_buf,
+        encoded.text.chars().count(),
         "last range must end at text length"
     );
 }
@@ -369,12 +377,12 @@ fn test_pbt_encode_line_face_ranges_contiguous() {
             },
         ),
     ];
-    let (_, ranges, _) = encode_line(&cells);
-    for w in ranges.windows(2) {
+    let encoded = encode_line(&cells);
+    for w in encoded.face_ranges.windows(2) {
         assert_eq!(
-            w[0].1, w[1].0,
+            w[0].end_buf, w[1].start_buf,
             "face ranges must be contiguous: [{},{}] then [{},{}]",
-            w[0].0, w[0].1, w[1].0, w[1].1
+            w[0].start_buf, w[0].end_buf, w[1].start_buf, w[1].end_buf
         );
     }
 }
@@ -400,10 +408,19 @@ fn test_pbt_encode_screen_binary_empty() {
 #[test]
 // LAYOUT: Single row "A", no face ranges, col_to_buf=[0].
 fn test_pbt_encode_screen_binary_one_row_no_faces() {
-    let lines: &[ScreenLine] = &[(0, "A".to_string(), vec![], vec![0])];
+    let lines: &[EncodedLine] = &[EncodedLine {
+        row_index: 0,
+        text: "A".to_string(),
+        face_ranges: vec![],
+        col_to_buf: vec![0],
+    }];
     let out = encode_screen_binary(lines);
 
     let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb [0]);
-    assert_eq!(out.len(), 8 + binary_row_len(1, 0, 1), "total byte count mismatch");
+    assert_eq!(
+        out.len(),
+        8 + binary_row_len(1, 0, 1),
+        "total byte count mismatch"
+    );
     assert_eq!(next, out.len(), "row payload length mismatch");
 }

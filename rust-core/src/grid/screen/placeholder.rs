@@ -81,8 +81,7 @@ impl Screen {
                 Some(pc) => match current.as_mut() {
                     // Extend the active run when it stays on the same image/placement.
                     Some(run)
-                        if run.image_id == pc.image_id
-                            && run.placement_id == pc.placement_id =>
+                        if run.image_id == pc.image_id && run.placement_id == pc.placement_id =>
                     {
                         run.cell_cols += 1;
                         // Span from the run's origin column to this tile. Guard
@@ -129,8 +128,11 @@ impl Screen {
     /// normalised to `0` when none is encoded.
     #[inline]
     fn decode_renderable_placeholder(&self, cell: &crate::types::Cell) -> Option<PlaceholderCell> {
-        let info =
-            decode_placeholder(cell.grapheme(), cell.attrs.foreground, cell.attrs.underline_color)?;
+        let info = decode_placeholder(
+            cell.grapheme(),
+            cell.attrs.foreground,
+            cell.attrs.underline_color,
+        )?;
         if !self.active_graphics().contains_image(info.image_id) {
             return None;
         }

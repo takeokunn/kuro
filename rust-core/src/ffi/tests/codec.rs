@@ -20,15 +20,6 @@ fn read_u64_le(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
-/// Tuple type for a single binary-encoded screen row:
-/// `(row_index, text, face_ranges, col_to_buf)`.
-type ScreenLine = (
-    usize,
-    String,
-    Vec<(usize, usize, u32, u32, u64, u32)>,
-    Vec<usize>,
-);
-
 /// Return the byte length of one encoded row payload.
 #[inline]
 fn binary_row_len(text_len: usize, num_face_ranges: usize, col_to_buf_len: usize) -> usize {
@@ -70,7 +61,12 @@ macro_rules! attrs_underline {
 /// Usage: `assert_face_range!(ranges, 0: buf 0, 5, fg 0xFF000000, bg 0x00000000, flags 0x01)`
 macro_rules! assert_face_range {
     ($ranges:expr, $idx:literal: buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr) => {{
-        let (start, end, fg, bg, flags, _ul_color) = $ranges[$idx];
+        let range = &$ranges[$idx];
+        let start = range.start_buf;
+        let end = range.end_buf;
+        let fg = range.fg;
+        let bg = range.bg;
+        let flags = range.flags;
         assert_eq!(start, $s, "face_range[{}] start_buf", $idx);
         assert_eq!(end, $e, "face_range[{}] end_buf", $idx);
         assert_eq!(fg, $fg, "face_range[{}] fg", $idx);
@@ -111,7 +107,7 @@ macro_rules! assert_binary_header {
 macro_rules! assert_binary_row {
     ($buf:expr, $base:expr, row $row:expr, text $text:expr, faces $faces:expr, ctb [$($ctb:expr),* $(,)?]) => {{
         let text = $text.as_bytes();
-        let ctb = &[$($ctb as u32),*];
+        let ctb: &[u32] = &[$($ctb as u32),*];
         let faces = $faces as usize;
         let ctb_base = $base + 12 + text.len() + (28 * faces);
 
@@ -195,21 +191,21 @@ macro_rules! test_encode_attrs {
     };
 }
 
-#[path = "codec/color.rs"]
-mod color;
 #[path = "codec/attrs.rs"]
 mod attrs;
-#[path = "codec/line.rs"]
-mod line;
 #[path = "codec/binary.rs"]
 mod binary;
 #[path = "codec/binary_faces.rs"]
 mod binary_faces;
+#[path = "codec/color.rs"]
+mod color;
 #[path = "codec/hyperlink.rs"]
 mod hyperlink;
-#[path = "codec/text_size.rs"]
-mod text_size;
+#[path = "codec/line.rs"]
+mod line;
 #[path = "codec/properties.rs"]
 mod properties;
 #[path = "codec/property_edges.rs"]
 mod property_edges;
+#[path = "codec/text_size.rs"]
+mod text_size;

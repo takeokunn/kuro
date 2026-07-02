@@ -8,7 +8,9 @@
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
-use super::line::{encode_line_into_buf, write_face_range, EncodePool, EncodedLine};
+use super::line::{
+    encode_line_into_buf, write_face_range, EncodePool, EncodedFaceRange, EncodedLine,
+};
 
 /// Current binary frame format version.
 ///
@@ -58,12 +60,12 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     // Pre-compute total capacity to avoid repeated reallocation.
     let capacity = {
         let mut cap = 8usize; // format_version + num_rows header
-        for (_, text, face_ranges, col_to_buf) in lines {
+        for line in lines {
             cap += 12; // row_index + num_face_ranges + text_byte_len
-            cap += text.len();
-            cap += face_ranges.len() * 28; // 28 bytes per face range (version 2)
+            cap += line.text.len();
+            cap += line.face_ranges.len() * 28; // 28 bytes per face range (version 2)
             cap += 4; // col_to_buf_len
-            cap += col_to_buf.len() * 4;
+            cap += line.col_to_buf.len() * 4;
         }
         cap
     };
@@ -77,32 +79,32 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
     )]
     buf.extend_from_slice(&(lines.len() as u32).to_le_bytes());
 
-    for (row_index, text, face_ranges, col_to_buf) in lines {
+    for line in lines {
         // row_index
         #[expect(
             clippy::cast_possible_truncation,
             reason = "row index is a terminal row (≤ 65535); fits u32"
         )]
-        buf.extend_from_slice(&(*row_index as u32).to_le_bytes());
+        buf.extend_from_slice(&(line.row_index as u32).to_le_bytes());
 
         // num_face_ranges
         #[expect(
             clippy::cast_possible_truncation,
             reason = "face range count is bounded by terminal width (≤ 65535); fits u32"
         )]
-        buf.extend_from_slice(&(face_ranges.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&(line.face_ranges.len() as u32).to_le_bytes());
 
         // text_byte_len + text bytes
         #[expect(
             clippy::cast_possible_truncation,
             reason = "UTF-8 text byte length for one terminal line fits u32"
         )]
-        buf.extend_from_slice(&(text.len() as u32).to_le_bytes());
-        buf.extend_from_slice(text.as_bytes());
+        buf.extend_from_slice(&(line.text.len() as u32).to_le_bytes());
+        buf.extend_from_slice(line.text.as_bytes());
 
         // Per face range: coalesce into single 28-byte stack write via write_face_range.
-        for &(start_buf, end_buf, fg, bg, flags, ul_color) in face_ranges {
-            write_face_range(&mut buf, start_buf, end_buf, fg, bg, flags, ul_color);
+        for range in &line.face_ranges {
+            write_face_range(&mut buf, range);
         }
 
         // col_to_buf section: length header + u32 entries
@@ -110,8 +112,8 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> Vec<u8> {
             clippy::cast_possible_truncation,
             reason = "col_to_buf length is bounded by terminal width (≤ 65535); fits u32"
         )]
-        buf.extend_from_slice(&(col_to_buf.len() as u32).to_le_bytes());
-        for &offset in col_to_buf {
+        buf.extend_from_slice(&(line.col_to_buf.len() as u32).to_le_bytes());
+        for &offset in &line.col_to_buf {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "col_to_buf entries are buffer char offsets (≤ terminal width ≤ 65535); fit u32"
@@ -168,11 +170,12 @@ pub(crate) fn encode_line_into_buf_and_hash(
 ///
 /// Use this after [`encode_line_with_pool`], which moves data out of the pool
 /// via `mem::take`.  Hashes the same representation as [`compute_row_hash_from_pool`]
-/// but operates on the caller-owned tuple rather than the (now-empty) pool.
+/// but operates on the caller-owned encoded line data rather than the
+/// (now-empty) pool.
 #[inline]
 pub(crate) fn compute_row_hash_from_encoded(
     text: &str,
-    face_ranges: &[(usize, usize, u32, u32, u64, u32)],
+    face_ranges: &[EncodedFaceRange],
     col_to_buf: &[usize],
     text_sizes: &[u32],
 ) -> u64 {

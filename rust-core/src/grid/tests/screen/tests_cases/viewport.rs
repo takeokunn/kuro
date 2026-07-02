@@ -34,4 +34,3 @@ fn test_viewport_scroll_ignored_in_alternate_screen() {
 
     assert_eq!(screen.scroll_offset(), before);
 }
-

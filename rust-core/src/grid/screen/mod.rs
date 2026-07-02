@@ -11,6 +11,7 @@ pub use crate::grid::image::{GraphicsStore, ImageData, ImageNotification, ImageP
 
 mod alternate;
 mod cursor;
+pub(crate) use cursor::{PrintableAsciiBuffer, PrintableAsciiRun};
 mod dirty;
 mod edit;
 mod graphics;
@@ -268,10 +269,7 @@ impl Screen {
 
     /// Run `f` on the currently active screen, if one exists.
     #[inline]
-    pub(super) fn with_active_screen<'a, R>(
-        &'a self,
-        f: impl FnOnce(&'a Self) -> R,
-    ) -> Option<R> {
+    pub(super) fn with_active_screen<'a, R>(&'a self, f: impl FnOnce(&'a Self) -> R) -> Option<R> {
         self.active_screen().map(f)
     }
 

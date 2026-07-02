@@ -125,7 +125,7 @@ Uses the pre-compiled `kuro--title-sanitize-regexp'."
   (1- (line-number-at-pos (point-max))))
 
 (defun kuro--adjust-buffer-row-count (rows)
-  "Grow or shrink the current buffer so it contains ROWS renderer rows."
+  "Grow or shrink the current buffer to contain ROWS renderer rows."
   (kuro--with-render-buffer-mutation
     (let ((current-rows (kuro--current-buffer-row-count)))
       (cond
@@ -214,7 +214,7 @@ stale entries are pruned to prevent unbounded growth during long sessions.")
            kuro--col-to-buf-map))
 
 (defun kuro--evict-empty-dirty-col-to-buf-rows (dirty-rows)
-  "Remove dirty rows whose updated col-to-buf vector is empty."
+  "Remove DIRTY-ROWS entries whose updated col-to-buf vector is empty."
   (kuro--do-update-list dirty-rows row _text _face-ranges col-to-buf
     (when (zerop (length col-to-buf))
       (remhash row kuro--col-to-buf-map))))
@@ -239,6 +239,78 @@ Returns nil."
 
 ;;; Dirty-line application
 
+(defun kuro--dirty-update-error (format-string &rest args)
+  "Signal a malformed dirty update error using FORMAT-STRING and ARGS."
+  (apply #'error (concat "Kuro: malformed dirty update list: " format-string) args))
+
+(defsubst kuro--dirty-update-u32-p (value)
+  "Return non-nil when VALUE is an unsigned 32-bit integer."
+  (and (integerp value) (<= 0 value) (<= value #xffffffff)))
+
+(defun kuro--validate-dirty-face-ranges (face-ranges entry-index)
+  "Validate FACE-RANGES for dirty update ENTRY-INDEX."
+  (unless (and (vectorp face-ranges)
+               (zerop (% (length face-ranges) 6)))
+    (kuro--dirty-update-error
+     "Entry %d face-ranges must be a stride-6 vector, got %S"
+     entry-index face-ranges))
+  (let ((i 0))
+    (while (< i (length face-ranges))
+      (unless (kuro--dirty-update-u32-p (aref face-ranges i))
+        (kuro--dirty-update-error
+         "Entry %d face-ranges[%d] must be u32, got %S"
+         entry-index i (aref face-ranges i)))
+      (setq i (1+ i)))))
+
+(defun kuro--validate-dirty-col-to-buf (col-to-buf entry-index)
+  "Validate COL-TO-BUF for dirty update ENTRY-INDEX."
+  (unless (vectorp col-to-buf)
+    (kuro--dirty-update-error
+     "Entry %d col-to-buf must be a vector, got %S"
+     entry-index col-to-buf))
+  (let ((i 0))
+    (while (< i (length col-to-buf))
+      (unless (kuro--dirty-update-u32-p (aref col-to-buf i))
+        (kuro--dirty-update-error
+         "Entry %d col-to-buf[%d] must be u32, got %S"
+         entry-index i (aref col-to-buf i)))
+      (setq i (1+ i)))))
+
+(defun kuro--validate-dirty-update-entry (entry entry-index)
+  "Validate dirty update ENTRY at ENTRY-INDEX."
+  (unless (and (vectorp entry) (= (length entry) 4))
+    (kuro--dirty-update-error
+     "Entry %d must be a 4-element vector, got %S" entry-index entry))
+  (let ((row (aref entry 0))
+        (text (aref entry 1))
+        (face-ranges (aref entry 2))
+        (col-to-buf (aref entry 3)))
+    (unless (and (integerp kuro--last-rows) (> kuro--last-rows 0))
+      (kuro--dirty-update-error
+       "Renderer row count must be positive before dirty updates, got %S"
+       kuro--last-rows))
+    (unless (and (integerp row) (<= 0 row) (< row kuro--last-rows))
+      (kuro--dirty-update-error
+       "Entry %d row must be in [0,%d), got %S"
+       entry-index kuro--last-rows row))
+    (unless (stringp text)
+      (kuro--dirty-update-error
+       "Entry %d text must be a string, got %S" entry-index text))
+    (kuro--validate-dirty-face-ranges face-ranges entry-index)
+    (kuro--validate-dirty-col-to-buf col-to-buf entry-index)))
+
+(defun kuro--validate-dirty-update-list (update-list)
+  "Validate UPDATE-LIST before it enters the render buffer mutation path."
+  (unless (vectorp update-list)
+    (kuro--dirty-update-error
+     "Update list must be a vector, got %S" update-list))
+  (let ((entry-index 0))
+    (while (< entry-index (length update-list))
+      (kuro--validate-dirty-update-entry
+       (aref update-list entry-index) entry-index)
+      (setq entry-index (1+ entry-index))))
+  update-list)
+
 (defun kuro--apply-dirty-lines (update-list)
   "Rewrite each dirty row from UPDATE-LIST into the buffer.
 UPDATE-LIST comes from `kuro--poll-updates-with-faces'.  Each element is
@@ -246,10 +318,12 @@ a flat 4-element vector [row text face-ranges col-to-buf].
 A single `condition-case' wraps the entire loop (not each iteration) to avoid
 installing a C-level setjmp target ~3,600 times per second.  In practice
 `kuro--update-line-full' never signals, so the handler is a safety net only."
-  (condition-case err
-      (kuro--do-update-list update-list row text face-ranges col-to-buf
-        (kuro--update-line-full row text face-ranges col-to-buf))
-    (error (message "kuro: apply-dirty-lines error: %S" err))))
+  (when update-list
+    (kuro--validate-dirty-update-list update-list)
+    (condition-case err
+        (kuro--do-update-list update-list row text face-ranges col-to-buf
+          (kuro--update-line-full row text face-ranges col-to-buf))
+      (error (message "Kuro: apply-dirty-lines error: %S" err)))))
 
 ;;; Core render pipeline
 

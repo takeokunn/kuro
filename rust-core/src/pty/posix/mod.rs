@@ -195,7 +195,7 @@ impl Pty {
             all_data.extend(data);
         }
 
-        while max_bytes.map_or(true, |max_bytes| all_data.len() < max_bytes) {
+        while max_bytes.is_none_or(|max_bytes| all_data.len() < max_bytes) {
             match self.receiver.try_recv() {
                 Ok(mut data) => {
                     if let Some(max_bytes) = max_bytes {
@@ -356,12 +356,8 @@ impl Pty {
     /// Return the child process PID.
     #[inline]
     #[must_use]
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "PIDs are non-negative; as_raw() returns i32 by POSIX convention but valid PIDs never exceed i32::MAX"
-    )]
-    pub const fn pid(&self) -> u32 {
-        self.child_pid.as_raw() as u32
+    pub fn pid(&self) -> u32 {
+        u32::try_from(self.child_pid.as_raw()).expect("child PID must be non-negative")
     }
 
     /// Returns true if the child process has not yet exited.

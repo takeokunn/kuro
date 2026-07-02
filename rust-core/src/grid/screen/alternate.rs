@@ -21,7 +21,7 @@ impl Screen {
 
         // Clear alternate screen
         if let Some(alt_screen) = self.alternate_screen.as_mut() {
-            let rows = alt_screen.rows() as usize;
+            let rows = usize::from(alt_screen.rows());
             alt_screen.clear_lines(0, rows);
             // Mark all lines dirty
             alt_screen.full_dirty = true;

@@ -21,15 +21,13 @@ use crate::types::cursor::CursorShape;
 /// scroll-region margins. This matches CUU/CUD behaviour in this codebase.
 #[inline]
 pub fn handle_csi_cursor(term: &mut crate::TerminalCore, params: &vte::Params, c: char) {
-    if handle_csi_cursor_relative_dispatch(term, params, c) {
+    if handle_csi_cursor_relative_dispatch(term, params, c)
+        || handle_csi_cursor_absolute_dispatch(term, params, c)
+    {
         return;
     }
-    if handle_csi_cursor_absolute_dispatch(term, params, c) {
-        return;
-    }
-    if handle_csi_cursor_report_dispatch(term, params, c) {
-        return;
-    }
+
+    let _ = handle_csi_cursor_report_dispatch(term, params, c);
 }
 
 #[inline]
@@ -241,7 +239,8 @@ fn csi_param_zero_based(params: &vte::Params, index: usize) -> usize {
         .and_then(|p| p.iter().next())
         .copied()
         .unwrap_or(1)
-        .saturating_sub(1) as usize
+        .saturating_sub(1)
+        .into()
 }
 
 fn csi_origin_row(term: &crate::TerminalCore, row: usize) -> usize {
@@ -266,8 +265,7 @@ fn csi_cha(term: &mut crate::TerminalCore, params: &vte::Params) {
     let col = csi_param_zero_based(params, 0);
 
     // Move cursor to absolute column, keep current row
-    term.screen
-        .move_cursor(term.screen.cursor().row, col as usize);
+    term.screen.move_cursor(term.screen.cursor().row, col);
 }
 
 fn csi_hvp(term: &mut crate::TerminalCore, params: &vte::Params) {

@@ -148,7 +148,8 @@ impl TerminalCore {
     #[inline]
     fn buffer_ascii_print(&mut self, c: char) -> bool {
         if c.is_ascii() && !self.dec_modes.insert_mode {
-            self.print_buf.push(c as u8);
+            let byte = u8::try_from(u32::from(c)).expect("ASCII char fits in u8");
+            self.print_buf.push(byte);
             return true;
         }
         false
@@ -161,7 +162,8 @@ impl TerminalCore {
         }
 
         let cursor = *self.screen.cursor();
-        if let Some((row, col)) = combining_attach_position(cursor, self.screen.cols() as usize) {
+        if let Some((row, col)) = combining_attach_position(cursor, usize::from(self.screen.cols()))
+        {
             self.screen.attach_combining(row, col, c);
         } else {
             self.screen
@@ -185,7 +187,7 @@ impl TerminalCore {
             && cursor.col == 0
             && cursor.row > 0
         {
-            let last_col = (self.screen.cols() as usize).saturating_sub(1);
+            let last_col = usize::from(self.screen.cols()).saturating_sub(1);
             self.screen.move_cursor(cursor.row - 1, last_col);
         } else {
             self.screen.backspace();

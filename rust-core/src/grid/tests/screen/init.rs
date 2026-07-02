@@ -27,8 +27,8 @@ proptest::proptest! {
         col in 0usize..50usize,
     ) {
         let s = Screen::new(rows, cols);
-        let r = row % rows as usize;
-        let c = col % cols as usize;
+        let r = row % usize::from(rows);
+        let c = col % usize::from(cols);
         proptest::prop_assert!(s.get_cell(r, c).is_some());
     }
 
@@ -38,16 +38,16 @@ proptest::proptest! {
         cols in 1u16..=50u16,
     ) {
         let s = Screen::new(rows, cols);
-        proptest::prop_assert!(s.get_cell(rows as usize, 0).is_none());
-        proptest::prop_assert!(s.get_cell(0, cols as usize).is_none());
+        proptest::prop_assert!(s.get_cell(usize::from(rows), 0).is_none());
+        proptest::prop_assert!(s.get_cell(0, usize::from(cols)).is_none());
     }
 
     #[test]
     fn prop_move_cursor_clamped_init(rows in 1u16..=50u16, cols in 1u16..=50u16) {
         let mut s = Screen::new(rows, cols);
         s.move_cursor(usize::MAX, usize::MAX);
-        proptest::prop_assert!(s.cursor().row < rows as usize);
-        proptest::prop_assert!(s.cursor().col < cols as usize);
+        proptest::prop_assert!(s.cursor().row < usize::from(rows));
+        proptest::prop_assert!(s.cursor().col < usize::from(cols));
     }
 
     #[test]

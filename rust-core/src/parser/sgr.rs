@@ -286,13 +286,10 @@ fn apply_sgr_color_group(
 #[inline]
 fn apply_sgr_group(attrs: &mut SgrAttributes, groups: &[&[u16]], i: &mut usize, group: &[u16]) {
     let param = group[0];
-    if apply_sgr_flag_group(attrs, param)
+    let _ = apply_sgr_flag_group(attrs, param)
         || apply_sgr_underline_group(attrs, param, group)
         || apply_sgr_style_group(attrs, param)
-        || apply_sgr_color_group(attrs, groups, i, group, param)
-    {
-        return;
-    }
+        || apply_sgr_color_group(attrs, groups, i, group, param);
 }
 
 #[inline]

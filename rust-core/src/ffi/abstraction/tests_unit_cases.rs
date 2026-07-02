@@ -107,11 +107,14 @@ fn test_sync_output_reset_marks_all_dirty() {
 #[test]
 fn test_encode_line_faces_empty_line() {
     let cells: Vec<crate::types::cell::Cell> = vec![];
-    let (row, text, face_ranges, col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
-    assert_eq!(row, 0);
-    assert_eq!(text, "", "empty cell slice should produce empty text");
-    assert!(face_ranges.is_empty());
-    assert!(col_to_buf.is_empty());
+    let encoded = TerminalSession::encode_line_faces(0, &cells);
+    assert_eq!(encoded.row, 0);
+    assert_eq!(
+        encoded.data.text, "",
+        "empty cell slice should produce empty text"
+    );
+    assert!(encoded.data.face_ranges.is_empty());
+    assert!(encoded.data.col_to_buf.is_empty());
 }
 
 #[test]

@@ -30,6 +30,25 @@ pub enum SessionState {
 /// processed on the next frame.
 const MAX_BYTES_PER_POLL: usize = 4 * 1024;
 
+/// Cached render identity for one visible row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RowRenderCache {
+    pub(super) line_version: u64,
+    pub(super) content_hash: u64,
+    pub(super) palette_epoch: u64,
+}
+
+impl RowRenderCache {
+    #[inline]
+    pub(super) const fn new(line_version: u64, content_hash: u64, palette_epoch: u64) -> Self {
+        Self {
+            line_version,
+            content_hash,
+            palette_epoch,
+        }
+    }
+}
+
 /// Terminal session state (shared by all FFI implementations)
 ///
 /// This struct contains the actual terminal logic, independent of any
@@ -49,7 +68,7 @@ pub struct TerminalSession {
     pub(super) pending_input: Vec<u8>,
     /// Per-row hash cache for skip-unchanged-rows optimisation.
     ///
-    /// Indexed by `row_index → Some((line_version, content_hash, palette_epoch))`.
+    /// Indexed by `row_index → Some(RowRenderCache)`.
     ///
     /// Fast path: if `line.version == stored_version && palette_epoch == stored_epoch`,
     /// the row is skipped without computing a hash — O(1) per unchanged row.
@@ -60,7 +79,7 @@ pub struct TerminalSession {
     /// (≤ screen height, typically ≤ 200), making direct indexing O(1) with no
     /// hash overhead.  The Vec is grown lazily on first insert and reset to all
     /// `None` on resize or alt-screen switch.
-    pub(super) row_hashes: Vec<Option<(u64, u64, u64)>>,
+    pub(super) row_hashes: Vec<Option<RowRenderCache>>,
     /// Monotonically increasing counter, bumped whenever the 256-color palette
     /// changes (OSC 4 set, OSC 104 reset).  Stored alongside each row hash so
     /// that a palette change invalidates every cached row without clearing the

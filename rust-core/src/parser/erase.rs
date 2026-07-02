@@ -149,7 +149,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
             }
 
             // Then erase all lines below
-            for r in (row + 1)..term.screen.rows() as usize {
+            for r in (row + 1)..usize::from(term.screen.rows()) {
                 clear_line_with_bg_and_mark_dirty(term, r, bg);
             }
         }
@@ -167,7 +167,7 @@ fn csi_ed(term: &mut crate::TerminalCore, params: &vte::Params) {
         }
         2 | 3 => {
             // Erase entire screen
-            for r in 0..term.screen.rows() as usize {
+            for r in 0..usize::from(term.screen.rows()) {
                 clear_line_with_bg_and_mark_dirty(term, r, bg);
             }
             term.screen.mark_all_dirty();

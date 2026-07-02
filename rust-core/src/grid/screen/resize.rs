@@ -1,6 +1,6 @@
 //! Screen resize methods for Screen
 
-use super::{Line, Screen, ScrollRegion, VecDeque};
+use super::{assert_non_zero_dimensions, Line, Screen, ScrollRegion, VecDeque};
 
 /// Grow or shrink `lines` to exactly `new_rows` rows, then resize every
 /// existing row to `new_cols` columns.
@@ -30,16 +30,20 @@ fn resize_line_buffer(lines: &mut VecDeque<Line>, new_rows: usize, new_cols: usi
 
 #[inline]
 fn clamp_cursor(cursor_row: &mut usize, cursor_col: &mut usize, new_rows: u16, new_cols: u16) {
-    *cursor_row = (*cursor_row).min(new_rows.saturating_sub(1) as usize);
-    *cursor_col = (*cursor_col).min(new_cols.saturating_sub(1) as usize);
+    *cursor_row = (*cursor_row).min(usize::from(new_rows.saturating_sub(1)));
+    *cursor_col = (*cursor_col).min(usize::from(new_cols.saturating_sub(1)));
 }
 
 #[inline]
 fn resize_buffered_screen_content(screen: &mut Screen, new_rows: u16, new_cols: u16) {
-    resize_line_buffer(&mut screen.lines, new_rows as usize, new_cols as usize);
+    resize_line_buffer(
+        &mut screen.lines,
+        usize::from(new_rows),
+        usize::from(new_cols),
+    );
 
     for line in &mut screen.scrollback_buffer {
-        line.resize(new_cols as usize);
+        line.resize(usize::from(new_cols));
     }
 
     clamp_cursor(
@@ -56,7 +60,7 @@ fn resize_active_screen_state(screen: &mut Screen, new_rows: u16, new_cols: u16)
     screen.cols = new_cols;
 
     resize_buffered_screen_content(screen, new_rows, new_cols);
-    screen.scroll_region = ScrollRegion::full_screen(new_rows as usize);
+    screen.scroll_region = ScrollRegion::full_screen(usize::from(new_rows));
     screen.cursor.pending_wrap = false;
 }
 
@@ -67,7 +71,11 @@ fn resize_primary_while_alternate_active(screen: &mut Screen, new_rows: u16, new
 
 #[inline]
 fn resize_cached_alternate_screen(screen: &mut Screen, new_rows: u16, new_cols: u16) {
-    resize_line_buffer(&mut screen.lines, new_rows as usize, new_cols as usize);
+    resize_line_buffer(
+        &mut screen.lines,
+        usize::from(new_rows),
+        usize::from(new_cols),
+    );
     screen.rows = new_rows;
     screen.cols = new_cols;
     clamp_cursor(
@@ -76,12 +84,14 @@ fn resize_cached_alternate_screen(screen: &mut Screen, new_rows: u16, new_cols: 
         new_rows,
         new_cols,
     );
-    screen.scroll_region = ScrollRegion::full_screen(new_rows as usize);
+    screen.scroll_region = ScrollRegion::full_screen(usize::from(new_rows));
 }
 
 impl Screen {
     /// Resize the screen
     pub fn resize(&mut self, new_rows: u16, new_cols: u16) {
+        assert_non_zero_dimensions(new_rows, new_cols);
+
         self.rows = new_rows;
         self.cols = new_cols;
 

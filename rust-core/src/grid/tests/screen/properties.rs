@@ -14,9 +14,9 @@ proptest::proptest! {
     ) {
         let mut screen = Screen::new(rows, cols);
         screen.print(ch, SgrAttributes::default(), auto_wrap);
-        proptest::prop_assert!(screen.cursor.row < rows as usize,
+        proptest::prop_assert!(screen.cursor.row < usize::from(rows),
             "cursor.row {} >= rows {}", screen.cursor.row, rows);
-        proptest::prop_assert!(screen.cursor.col < cols as usize,
+        proptest::prop_assert!(screen.cursor.col < usize::from(cols),
             "cursor.col {} >= cols {}", screen.cursor.col, cols);
     }
 
@@ -29,10 +29,10 @@ proptest::proptest! {
         auto_wrap in proptest::bool::ANY,
     ) {
         let mut screen = Screen::new(rows, cols);
-        screen.move_cursor(0, cols as usize - 1);
+        screen.move_cursor(0, usize::from(cols) - 1);
         screen.print(ch, SgrAttributes::default(), auto_wrap);
-        proptest::prop_assert!(screen.cursor.row < rows as usize);
-        proptest::prop_assert!(screen.cursor.col < cols as usize);
+        proptest::prop_assert!(screen.cursor.row < usize::from(rows));
+        proptest::prop_assert!(screen.cursor.col < usize::from(cols));
     }
 }
 
@@ -65,23 +65,17 @@ fn test_resize_minimum_1x1() {
 }
 
 #[test]
-fn test_resize_zero_rows_does_not_panic() {
+#[should_panic(expected = "screen rows must be non-zero")]
+fn test_resize_zero_rows_panics() {
     let mut screen = Screen::new(10, 80);
     screen.resize(0, 80);
-    assert_eq!(
-        screen.cursor.row, 0,
-        "cursor.row should be clamped to 0 when resizing to 0 rows"
-    );
 }
 
 #[test]
-fn test_resize_zero_cols_does_not_panic() {
+#[should_panic(expected = "screen cols must be non-zero")]
+fn test_resize_zero_cols_panics() {
     let mut screen = Screen::new(10, 80);
     screen.resize(10, 0);
-    assert_eq!(
-        screen.cursor.col, 0,
-        "cursor.col should be clamped to 0 when resizing to 0 cols"
-    );
 }
 
 #[test]

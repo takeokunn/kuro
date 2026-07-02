@@ -203,13 +203,14 @@ fn xterm_default_color(idx: usize) -> [u8; 3] {
                 if v == 0 {
                     0
                 } else {
-                    (55 + 40 * v) as u8
+                    u8::try_from(55 + 40 * v).expect("xterm color cube component fits in u8")
                 }
             };
             [c(r), c(g), c(b)]
         }
         232..=255 => {
-            let v = (8 + 10 * (idx - 232)) as u8;
+            let v =
+                u8::try_from(8 + 10 * (idx - 232)).expect("xterm grayscale component fits in u8");
             [v, v, v]
         }
         _ => [0, 0, 0],

@@ -6,7 +6,8 @@ use std::collections::HashMap;
 
 use support::{
     resized_sixel_canvas, seed_default_palette, seed_osc4_palette_overrides, sixel_color_rgb,
-    sixel_dimensions_are_usable, sixel_draw_limits, sixel_painted_rows, MAX_COLOR_REGISTERS,
+    sixel_dimensions_are_usable, sixel_draw_limits, sixel_painted_rows, sixel_pixel_offset,
+    SixelColorRegister,
 };
 
 /// In-progress sixel decoder state.
@@ -69,11 +70,8 @@ macro_rules! accumulate_digit {
 mod support;
 
 impl SixelDecoder {
-    fn sixel_color_register(params: &[u32]) -> Option<u16> {
-        params
-            .first()
-            .copied()
-            .map(|reg| (reg as u16).min(MAX_COLOR_REGISTERS - 1))
+    fn sixel_color_register(params: &[u32]) -> Option<SixelColorRegister> {
+        params.first().copied().and_then(SixelColorRegister::parse)
     }
 
     fn sixel_color_definition_rgb(params: &[u32]) -> Option<[u8; 3]> {
@@ -97,10 +95,6 @@ impl SixelDecoder {
     }
 
     #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "register index is bounds-checked against MAX_COLOR_REGISTERS before the u16 cast"
-    )]
     /// Create a new sixel decoder, optionally seeding the palette from terminal OSC 4 overrides.
     ///
     /// `osc4_palette` is the terminal's 256-entry OSC 4 palette; entries with `Some([r,g,b])`
@@ -180,8 +174,13 @@ impl SixelDecoder {
     fn write_sixel_pixel(&mut self, x: u32, y: u32, rgb: [u8; 3]) {
         self.ensure_size(x + 1, y + 1);
 
-        let pixel_offset = ((y as usize) * (self.width as usize) + x as usize) * 4;
-        if pixel_offset + 3 >= self.pixels.len() {
+        let Some(pixel_offset) = sixel_pixel_offset(x, y, self.width) else {
+            return;
+        };
+        let Some(alpha_offset) = pixel_offset.checked_add(3) else {
+            return;
+        };
+        if alpha_offset >= self.pixels.len() {
             return;
         }
 
@@ -276,18 +275,11 @@ impl SixelDecoder {
         self.handle_normal(byte);
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "register index: DCS params are u32 but we cap at MAX_COLOR_REGISTERS (1024); RGB percentages are clamped to 0-100 before × 255 / 100 → always ≤ 255"
-    )]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "converting integer percentage (0-100) to f32 for HLS math; precision loss is negligible for color computation"
-    )]
     fn apply_color_command(&mut self) {
         let Some(reg) = Self::sixel_color_register(&self.params) else {
             return;
         };
+        let reg = u16::from(reg);
         self.current_color = reg;
 
         let Some(rgb) = Self::sixel_color_definition_rgb(&self.params) else {

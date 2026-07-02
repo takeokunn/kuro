@@ -74,7 +74,10 @@ impl Screen {
         if self.is_alternate_active {
             return;
         }
-        let new_offset = (self.scroll_offset + n).min(self.scrollback_line_count);
+        let new_offset = self
+            .scroll_offset
+            .saturating_add(n)
+            .min(self.scrollback_line_count);
         if new_offset != self.scroll_offset {
             set_scroll_offset(self, new_offset);
         }
@@ -102,24 +105,21 @@ impl Screen {
     ///
     /// Mapping: viewport row `r` maps to scrollback index
     /// `(n - scroll_offset) + r - (rows - 1)`, where `n` is the scrollback
-    /// line count. Returns `None` when the computed index is negative.
+    /// line count. Returns `None` when the computed index is outside the
+    /// scrollback buffer.
     #[must_use]
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "terminal dimensions are bounded by u16::MAX; usize/u32→isize for signed arithmetic index bounds checking"
-    )]
     pub fn get_scrollback_viewport_line(&self, row_in_viewport: usize) -> Option<&Line> {
-        let n = self.scrollback_line_count as isize;
-        let offset = self.scroll_offset as isize;
-        let rows = self.rows as isize;
-        let row = row_in_viewport as isize;
-        // anchor = the scrollback index shown at the bottom of the viewport
-        let anchor = n - offset;
-        let idx = anchor + row - (rows - 1);
-        if idx < 0 || idx >= n {
+        let rows = usize::from(self.rows);
+        if rows == 0 || row_in_viewport >= rows {
             return None;
         }
-        self.scrollback_buffer.get(idx.cast_unsigned())
+
+        // `scroll_offset` points to the scrollback line shown at the bottom of
+        // the viewport. Rows above it move further back from the scrollback end.
+        let rows_above_bottom = rows - 1 - row_in_viewport;
+        let distance_from_end = self.scroll_offset.checked_add(rows_above_bottom)?;
+        let idx = self.scrollback_line_count.checked_sub(distance_from_end)?;
+        self.scrollback_buffer.get(idx)
     }
 
     /// Return true if the viewport scroll position changed and a re-render is needed

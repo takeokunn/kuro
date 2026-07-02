@@ -21,13 +21,15 @@ pub fn handle_insert_delete(term: &mut crate::TerminalCore, params: &vte::Params
 
 /// Extract the first parameter, defaulting to 1 (minimum 1).
 fn get_param(params: &vte::Params) -> usize {
-    params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1) as usize
+    usize::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    )
 }
 
 fn blank_cell_with_background(background: crate::Color) -> crate::types::Cell {
@@ -118,7 +120,7 @@ where
 pub fn handle_decic(term: &mut crate::TerminalCore, params: &vte::Params) {
     let n = get_param(params);
     let cursor_col = term.screen.cursor().col;
-    let cols = term.screen.cols() as usize;
+    let cols = usize::from(term.screen.cols());
     let shift = n.min(cols.saturating_sub(cursor_col));
     if shift == 0 {
         return;

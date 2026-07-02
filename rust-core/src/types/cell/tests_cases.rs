@@ -272,44 +272,74 @@ fn test_is_all_default_true_for_fresh_attrs() {
 
 #[test]
 fn test_is_all_default_false_when_flags_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.flags = SgrFlags::BOLD;
-    assert!(!attrs.is_all_default(), "BOLD flag must make is_all_default false");
+    let attrs = SgrAttributes {
+        flags: SgrFlags::BOLD,
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "BOLD flag must make is_all_default false"
+    );
 }
 
 #[test]
 fn test_is_all_default_false_when_overline_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.overline = true;
-    assert!(!attrs.is_all_default(), "overline must make is_all_default false");
+    let attrs = SgrAttributes {
+        overline: true,
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "overline must make is_all_default false"
+    );
 }
 
 #[test]
 fn test_is_all_default_false_when_foreground_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.foreground = Color::Named(crate::types::NamedColor::Red);
-    assert!(!attrs.is_all_default(), "non-default foreground must make is_all_default false");
+    let attrs = SgrAttributes {
+        foreground: Color::Named(crate::types::NamedColor::Red),
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "non-default foreground must make is_all_default false"
+    );
 }
 
 #[test]
 fn test_is_all_default_false_when_background_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.background = Color::Indexed(100);
-    assert!(!attrs.is_all_default(), "non-default background must make is_all_default false");
+    let attrs = SgrAttributes {
+        background: Color::Indexed(100),
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "non-default background must make is_all_default false"
+    );
 }
 
 #[test]
 fn test_is_all_default_false_when_underline_color_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.underline_color = Color::Rgb(10, 20, 30);
-    assert!(!attrs.is_all_default(), "non-default underline_color must make is_all_default false");
+    let attrs = SgrAttributes {
+        underline_color: Color::Rgb(10, 20, 30),
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "non-default underline_color must make is_all_default false"
+    );
 }
 
 #[test]
 fn test_is_all_default_false_when_underline_style_set() {
-    let mut attrs = SgrAttributes::default();
-    attrs.underline_style = UnderlineStyle::Curly;
-    assert!(!attrs.is_all_default(), "Curly underline style must make is_all_default false");
+    let attrs = SgrAttributes {
+        underline_style: UnderlineStyle::Curly,
+        ..Default::default()
+    };
+    assert!(
+        !attrs.is_all_default(),
+        "Curly underline style must make is_all_default false"
+    );
 }
 
 #[test]
@@ -347,31 +377,52 @@ fn test_sgr_flags_bits_roundtrip() {
 fn test_sgr_flags_insert_adds_bits() {
     let mut flags = SgrFlags::BOLD;
     flags.insert(SgrFlags::ITALIC);
-    assert!(flags.contains(SgrFlags::BOLD), "BOLD must remain set after insert(ITALIC)");
-    assert!(flags.contains(SgrFlags::ITALIC), "ITALIC must be set after insert(ITALIC)");
+    assert!(
+        flags.contains(SgrFlags::BOLD),
+        "BOLD must remain set after insert(ITALIC)"
+    );
+    assert!(
+        flags.contains(SgrFlags::ITALIC),
+        "ITALIC must be set after insert(ITALIC)"
+    );
 }
 
 #[test]
 fn test_sgr_flags_remove_clears_bits() {
     let mut flags = SgrFlags::BOLD | SgrFlags::ITALIC;
     flags.remove(SgrFlags::BOLD);
-    assert!(!flags.contains(SgrFlags::BOLD), "BOLD must be clear after remove(BOLD)");
-    assert!(flags.contains(SgrFlags::ITALIC), "ITALIC must remain after remove(BOLD)");
+    assert!(
+        !flags.contains(SgrFlags::BOLD),
+        "BOLD must be clear after remove(BOLD)"
+    );
+    assert!(
+        flags.contains(SgrFlags::ITALIC),
+        "ITALIC must remain after remove(BOLD)"
+    );
 }
 
 #[test]
 fn test_sgr_flags_set_true_inserts() {
     let mut flags = SgrFlags::default();
     flags.set(SgrFlags::DIM, true);
-    assert!(flags.contains(SgrFlags::DIM), "set(DIM, true) must add the DIM bit");
+    assert!(
+        flags.contains(SgrFlags::DIM),
+        "set(DIM, true) must add the DIM bit"
+    );
 }
 
 #[test]
 fn test_sgr_flags_set_false_removes() {
     let mut flags = SgrFlags::DIM | SgrFlags::BOLD;
     flags.set(SgrFlags::DIM, false);
-    assert!(!flags.contains(SgrFlags::DIM), "set(DIM, false) must clear the DIM bit");
-    assert!(flags.contains(SgrFlags::BOLD), "BOLD must be unaffected by set(DIM, false)");
+    assert!(
+        !flags.contains(SgrFlags::DIM),
+        "set(DIM, false) must clear the DIM bit"
+    );
+    assert!(
+        flags.contains(SgrFlags::BOLD),
+        "BOLD must be unaffected by set(DIM, false)"
+    );
 }
 
 #[test]

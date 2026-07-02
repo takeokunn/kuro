@@ -1,5 +1,5 @@
 /// Collect APC responses as UTF-8 strings.
-fn apc_response_texts<'a>(core: &'a crate::TerminalCore) -> Vec<&'a str> {
+fn apc_response_texts(core: &crate::TerminalCore) -> Vec<&str> {
     core.meta
         .pending_responses
         .iter()
@@ -18,7 +18,7 @@ pub fn assert_no_apc_responses(core: &crate::TerminalCore) {
 
 /// Assert that an APC sequence produced exactly one pending response and
 /// return it as UTF-8 text.
-pub fn single_apc_response_text<'a>(core: &'a crate::TerminalCore) -> &'a str {
+pub fn single_apc_response_text(core: &crate::TerminalCore) -> &str {
     assert_eq!(
         core.meta.pending_responses.len(),
         1,

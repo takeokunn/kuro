@@ -224,37 +224,64 @@ fn test_sgr_256color_missing_index_unchanged() {
 }
 
 #[test]
-fn test_sgr_truecolor_partial_rgb_defaults_to_zero() {
-    // \x1b[38;2;255m — truecolor with only R component, G and B missing
-    // Missing components default to 0 (see parse_extended_color unwrap_or(0))
+fn test_sgr_256color_out_of_range_unchanged() {
     let mut term = crate::TerminalCore::new(24, 80);
-    term.advance(b"\x1b[38;2;255m");
-    // Should not panic; R=255, G=0, B=0 (missing = 0)
-    assert_eq!(
-        term.current_attrs.foreground,
-        crate::types::Color::Rgb(255, 0, 0),
-        "Partial truecolor should fill missing components with 0"
+    term.advance(b"\x1b[38;5;256m");
+    assert!(
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Foreground should remain Default when 256-color index is out of range"
     );
 }
 
 #[test]
-fn test_sgr_truecolor_overflow_truncates_to_u8() {
+fn test_sgr_colon_256color_out_of_range_unchanged() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[38:5:256m");
+    assert!(
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Foreground should remain Default when colon-form 256-color index is out of range"
+    );
+}
+
+#[test]
+fn test_sgr_truecolor_partial_rgb_unchanged() {
+    // \x1b[38;2;255m — truecolor with only R component, G and B missing
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[38;2;255m");
+    assert!(
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Partial truecolor should be ignored instead of defaulting missing components to 0"
+    );
+}
+
+#[test]
+fn test_sgr_colon_truecolor_partial_rgb_unchanged() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[38:2:255m");
+    assert!(
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Partial colon-form truecolor should be ignored"
+    );
+}
+
+#[test]
+fn test_sgr_truecolor_out_of_range_unchanged() {
     // \x1b[38;2;300;300;300m — values exceed u8 range
-    // Values are truncated by `as u8` cast (300u16 as u8 == 44)
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[38;2;300;300;300m");
-    // Should not panic; values are silently truncated via as u8
     assert!(
-        matches!(
-            term.current_attrs.foreground,
-            crate::types::Color::Rgb(_, _, _)
-        ),
-        "Overflow truecolor should still produce an Rgb color (truncated)"
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Out-of-range truecolor should be ignored instead of truncated"
     );
-    assert_eq!(
-        term.current_attrs.foreground,
-        crate::types::Color::Rgb(44, 44, 44),
-        "300u16 as u8 == 44; each component should truncate to 44"
+}
+
+#[test]
+fn test_sgr_colon_truecolor_out_of_range_unchanged() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[38:2:300:0:0m");
+    assert!(
+        matches!(term.current_attrs.foreground, crate::types::Color::Default),
+        "Out-of-range colon-form truecolor should be ignored instead of truncated"
     );
 }
 

@@ -11,8 +11,8 @@ const GRAYSCALE_OFFSET: u8 = 8;
 
 /// Named ANSI colors (standard 16-color palette)
 ///
-/// `#[repr(u8)]` with explicit discriminants enables zero-cost `as u8` casts
-/// for FFI color encoding, replacing a 16-arm match with a single instruction.
+/// Explicit discriminants document the terminal palette indices.  Use
+/// [`NamedColor::index`] at FFI boundaries instead of casting the discriminant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum NamedColor {
@@ -120,6 +120,30 @@ impl Color {
 }
 
 impl NamedColor {
+    /// Return the 16-color palette index used by terminal protocols and FFI.
+    #[inline]
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        match self {
+            Self::Black => 0,
+            Self::Red => 1,
+            Self::Green => 2,
+            Self::Yellow => 3,
+            Self::Blue => 4,
+            Self::Magenta => 5,
+            Self::Cyan => 6,
+            Self::White => 7,
+            Self::BrightBlack => 8,
+            Self::BrightRed => 9,
+            Self::BrightGreen => 10,
+            Self::BrightYellow => 11,
+            Self::BrightBlue => 12,
+            Self::BrightMagenta => 13,
+            Self::BrightCyan => 14,
+            Self::BrightWhite => 15,
+        }
+    }
+
     /// Get RGB values for named color
     #[must_use]
     pub const fn to_rgb(&self) -> (u8, u8, u8) {

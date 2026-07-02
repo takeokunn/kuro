@@ -3,7 +3,36 @@
 //! This module contains the `consume_scroll_events` and `get_dirty_lines_with_faces`
 //! methods, which handle the scrollback viewport and synchronized-output logic.
 
-use super::session::TerminalSession;
+use crate::ffi::codec::{BinaryFrameResult, BinaryFrameU32, BinaryFrameU32Field};
+
+use super::session::{RowRenderCache, TerminalSession};
+
+struct DirtyRowEmission<T> {
+    value: T,
+    content_hash: u64,
+}
+
+struct HashedEncodedLineData {
+    data: crate::ffi::codec::EncodedLineData,
+    content_hash: u64,
+}
+
+pub(crate) struct BinaryDirtyFrame {
+    pub(crate) texts: Vec<String>,
+    pub(crate) bytes: Vec<u8>,
+}
+
+impl BinaryDirtyFrame {
+    #[inline]
+    fn empty() -> Self {
+        Self::new(Vec::new(), Vec::new())
+    }
+
+    #[inline]
+    fn new(texts: Vec<String>, bytes: Vec<u8>) -> Self {
+        Self { texts, bytes }
+    }
+}
 
 impl TerminalSession {
     fn ensure_row_hash_capacity(&mut self, rows: usize) {
@@ -27,27 +56,22 @@ impl TerminalSession {
         self.palette_epoch
     }
 
-    fn row_cache_is_current(
-        cached: Option<(u64, u64, u64)>,
-        line_version: u64,
-        epoch: u64,
-    ) -> bool {
+    fn row_cache_is_current(cached: Option<RowRenderCache>, line_version: u64, epoch: u64) -> bool {
         matches!(
             cached,
-            Some((stored_version, _, stored_epoch))
-                if stored_version == line_version && stored_epoch == epoch
+            Some(stored) if stored.line_version == line_version && stored.palette_epoch == epoch
         )
     }
 
-    fn row_cache_matches_hash(cached: Option<(u64, u64, u64)>, new_hash: u64, epoch: u64) -> bool {
+    fn row_cache_matches_hash(cached: Option<RowRenderCache>, new_hash: u64, epoch: u64) -> bool {
         matches!(
             cached,
-            Some((_, stored_hash, stored_epoch)) if stored_hash == new_hash && stored_epoch == epoch
+            Some(stored) if stored.content_hash == new_hash && stored.palette_epoch == epoch
         )
     }
 
     fn store_row_cache(&mut self, row: usize, line_version: u64, new_hash: u64, epoch: u64) {
-        self.row_hashes[row] = Some((line_version, new_hash, epoch));
+        self.row_hashes[row] = Some(RowRenderCache::new(line_version, new_hash, epoch));
     }
 }
 
@@ -83,7 +107,7 @@ impl TerminalSession {
         F: FnMut(&mut Self, usize),
     {
         self.core.screen.clear_scroll_dirty();
-        let rows = self.core.screen.rows() as usize;
+        let rows = usize::from(self.core.screen.rows());
         for row in 0..rows {
             visit_row(self, row);
         }
@@ -93,7 +117,7 @@ impl TerminalSession {
     where
         F: FnMut(&mut Self, usize) -> T,
     {
-        let mut result = Vec::with_capacity(self.core.screen.rows() as usize);
+        let mut result = Vec::with_capacity(usize::from(self.core.screen.rows()));
         self.for_each_scrollback_viewport_row(|this, row| {
             result.push(visit_row(this, row));
         });
@@ -107,20 +131,20 @@ impl TerminalSession {
             &mut Vec<u8>,
             &crate::grid::line::Line,
             usize,
-        ) -> Option<(T, u64)>,
+        ) -> Option<DirtyRowEmission<T>>,
     {
-        let rows = self.core.screen.rows() as usize;
+        let rows = usize::from(self.core.screen.rows());
         self.core.screen.clear_dirty();
         self.ensure_row_hash_capacity(rows);
 
         let mut result = Vec::with_capacity(rows);
         for row in 0..rows {
             if let Some(line) = self.core.screen.get_line(row) {
-                if let Some((value, hash)) =
+                if let Some(emission) =
                     emit_row(&mut self.encode_pool, &mut self.buf_scratch, line, row)
                 {
-                    self.store_row_cache(row, line.version, hash, epoch);
-                    result.push(value);
+                    self.store_row_cache(row, line.version, emission.content_hash, epoch);
+                    result.push(emission.value);
                 }
             }
         }
@@ -131,17 +155,15 @@ impl TerminalSession {
     fn encode_line_with_faces_and_hash(
         encode_pool: &mut crate::ffi::codec::EncodePool,
         line: &crate::grid::line::Line,
-    ) -> (
-        String,
-        Vec<(usize, usize, u32, u32, u64, u32)>,
-        Vec<usize>,
-        u64,
-    ) {
-        let (text, face_ranges, col_to_buf) =
+    ) -> HashedEncodedLineData {
+        let data =
             crate::ffi::codec::encode_line_with_pool(&line.cells, line.has_wide, encode_pool);
-        let hash =
-            crate::ffi::codec::compute_row_hash_from_encoded(&text, &face_ranges, &col_to_buf);
-        (text, face_ranges, col_to_buf, hash)
+        let content_hash = crate::ffi::codec::compute_row_hash_from_encoded(
+            &data.text,
+            &data.face_ranges,
+            &data.col_to_buf,
+        );
+        HashedEncodedLineData { data, content_hash }
     }
 
     fn encode_line_into_binary_frame_and_hash(
@@ -149,7 +171,7 @@ impl TerminalSession {
         buf_scratch: &mut Vec<u8>,
         line: &crate::grid::line::Line,
         row: usize,
-    ) -> (String, u64) {
+    ) -> BinaryFrameResult<crate::ffi::codec::HashedEncodedText> {
         crate::ffi::codec::encode_line_into_buf_and_hash(
             &line.cells,
             line.has_wide,
@@ -166,14 +188,14 @@ impl TerminalSession {
             &mut Vec<u8>,
             &crate::grid::line::Line,
             usize,
-            Option<(u64, u64, u64)>,
+            Option<RowRenderCache>,
             u64,
-        ) -> Option<(T, u64)>,
+        ) -> Option<DirtyRowEmission<T>>,
     {
         self.core
             .screen
             .take_dirty_lines_into(&mut self.dirty_scratch);
-        let screen_rows = self.core.screen.rows() as usize;
+        let screen_rows = usize::from(self.core.screen.rows());
         self.ensure_row_hash_capacity(screen_rows);
 
         let dirty_rows = self.dirty_scratch.clone();
@@ -187,7 +209,7 @@ impl TerminalSession {
                 }
 
                 let buf_snapshot = self.buf_scratch.len();
-                if let Some((value, new_hash)) = emit_row(
+                if let Some(emission) = emit_row(
                     &mut self.encode_pool,
                     &mut self.buf_scratch,
                     line,
@@ -195,13 +217,13 @@ impl TerminalSession {
                     cached,
                     epoch,
                 ) {
-                    if Self::row_cache_matches_hash(cached, new_hash, epoch) {
+                    if Self::row_cache_matches_hash(cached, emission.content_hash, epoch) {
                         self.buf_scratch.truncate(buf_snapshot);
                         continue;
                     }
 
-                    self.store_row_cache(row, line.version, new_hash, epoch);
-                    result.push(value);
+                    self.store_row_cache(row, line.version, emission.content_hash, epoch);
+                    result.push(emission.value);
                 } else {
                     self.buf_scratch.truncate(buf_snapshot);
                 }
@@ -209,6 +231,117 @@ impl TerminalSession {
         }
 
         result
+    }
+
+    fn try_collect_scrollback_viewport_rows<T, F>(
+        &mut self,
+        mut visit_row: F,
+    ) -> BinaryFrameResult<Vec<T>>
+    where
+        F: FnMut(&mut Self, usize) -> BinaryFrameResult<T>,
+    {
+        self.core.screen.clear_scroll_dirty();
+        let rows = usize::from(self.core.screen.rows());
+        let mut result = Vec::with_capacity(rows);
+        for row in 0..rows {
+            result.push(visit_row(self, row)?);
+        }
+        Ok(result)
+    }
+
+    fn try_collect_full_dirty_rows<T, F>(
+        &mut self,
+        epoch: u64,
+        mut emit_row: F,
+    ) -> BinaryFrameResult<Vec<T>>
+    where
+        F: FnMut(
+            &mut crate::ffi::codec::EncodePool,
+            &mut Vec<u8>,
+            &crate::grid::line::Line,
+            usize,
+        ) -> BinaryFrameResult<Option<DirtyRowEmission<T>>>,
+    {
+        let rows = usize::from(self.core.screen.rows());
+        self.core.screen.clear_dirty();
+        self.ensure_row_hash_capacity(rows);
+
+        let mut result = Vec::with_capacity(rows);
+        for row in 0..rows {
+            if let Some(line) = self.core.screen.get_line(row) {
+                if let Some(emission) =
+                    emit_row(&mut self.encode_pool, &mut self.buf_scratch, line, row)?
+                {
+                    self.store_row_cache(row, line.version, emission.content_hash, epoch);
+                    result.push(emission.value);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn try_collect_dirty_rows_with_cache<T, F>(
+        &mut self,
+        epoch: u64,
+        mut emit_row: F,
+    ) -> BinaryFrameResult<Vec<T>>
+    where
+        F: FnMut(
+            &mut crate::ffi::codec::EncodePool,
+            &mut Vec<u8>,
+            &crate::grid::line::Line,
+            usize,
+            Option<RowRenderCache>,
+            u64,
+        ) -> BinaryFrameResult<Option<DirtyRowEmission<T>>>,
+    {
+        self.core
+            .screen
+            .take_dirty_lines_into(&mut self.dirty_scratch);
+        let screen_rows = usize::from(self.core.screen.rows());
+        self.ensure_row_hash_capacity(screen_rows);
+
+        let dirty_rows = self.dirty_scratch.clone();
+        let mut result: Vec<T> = Vec::with_capacity(dirty_rows.len());
+        for row in dirty_rows {
+            if let Some(line) = self.core.screen.get_line(row) {
+                let cached = self.row_hashes[row];
+
+                if Self::row_cache_is_current(cached, line.version, epoch) {
+                    continue;
+                }
+
+                let buf_snapshot = self.buf_scratch.len();
+                match emit_row(
+                    &mut self.encode_pool,
+                    &mut self.buf_scratch,
+                    line,
+                    row,
+                    cached,
+                    epoch,
+                ) {
+                    Ok(Some(emission)) => {
+                        if Self::row_cache_matches_hash(cached, emission.content_hash, epoch) {
+                            self.buf_scratch.truncate(buf_snapshot);
+                            continue;
+                        }
+
+                        self.store_row_cache(row, line.version, emission.content_hash, epoch);
+                        result.push(emission.value);
+                    }
+                    Ok(None) => {
+                        self.buf_scratch.truncate(buf_snapshot);
+                    }
+                    Err(err) => {
+                        self.buf_scratch.truncate(buf_snapshot);
+                        return Err(err);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     fn begin_binary_dirty_frame(&mut self) -> usize {
@@ -221,58 +354,52 @@ impl TerminalSession {
         num_rows_offset
     }
 
-    fn finish_binary_dirty_frame(&mut self, num_rows_offset: usize) -> (Vec<String>, Vec<u8>) {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "number of dirty rows is bounded by terminal height (≤ 65535); fits u32"
-        )]
-        self.buf_scratch[num_rows_offset..num_rows_offset + 4]
-            .copy_from_slice(&(self.texts_scratch.len() as u32).to_le_bytes());
-        (
+    fn finish_binary_dirty_frame(
+        &mut self,
+        num_rows_offset: usize,
+    ) -> BinaryFrameResult<BinaryDirtyFrame> {
+        BinaryFrameU32::from_usize(self.texts_scratch.len(), BinaryFrameU32Field::TextCount)?
+            .copy_le(
+                &mut self.buf_scratch[num_rows_offset..num_rows_offset + BinaryFrameU32::WIDTH],
+            );
+        Ok(BinaryDirtyFrame::new(
             std::mem::take(&mut self.texts_scratch),
             std::mem::take(&mut self.buf_scratch),
-        )
+        ))
     }
 
     /// Collect dirty lines in the binary direct frame format.
     ///
     /// This reuses the session scratch buffers for both text rows and the
     /// serialized binary payload so callers can avoid per-frame heap churn.
-    pub fn get_dirty_lines_binary_direct(&mut self) -> (Vec<String>, Vec<u8>) {
+    pub(crate) fn get_dirty_lines_binary_direct(&mut self) -> BinaryFrameResult<BinaryDirtyFrame> {
         // Scrollback viewport path: when scroll_dirty, encode all scrollback rows.
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
-            // Reuse the same row-collection shape as the face-range path.
             let num_rows_offset = self.begin_binary_dirty_frame();
-            self.texts_scratch = self.collect_scrollback_viewport_rows(|this, row| {
+            self.texts_scratch = self.try_collect_scrollback_viewport_rows(|this, row| {
                 if let Some(line) = this.core.screen.get_scrollback_viewport_line(row) {
-                    let text = crate::ffi::codec::encode_line_into_buf(
+                    crate::ffi::codec::encode_line_into_buf(
                         &line.cells,
                         line.has_wide,
                         &mut this.encode_pool,
                         row,
                         &mut this.buf_scratch,
-                    );
-                    text
+                    )
                 } else {
-                    // Emit an empty row entry.
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "row index is a terminal row (≤ 65535); fits u32"
-                    )]
-                    this.buf_scratch
-                        .extend_from_slice(&(row as u32).to_le_bytes());
+                    BinaryFrameU32::from_usize(row, BinaryFrameU32Field::RowIndex)?
+                        .write_le(&mut this.buf_scratch);
                     this.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // num_face_ranges
                     this.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // text_byte_len = 0
                     this.buf_scratch.extend_from_slice(&0u32.to_le_bytes()); // col_to_buf_len
-                    String::new()
+                    Ok(String::new())
                 }
-            });
+            })?;
             return self.finish_binary_dirty_frame(num_rows_offset);
         }
 
         // Suppress live dirty lines when viewport is scrolled (but not scroll_dirty).
         if self.suppress_live_dirty_if_scrolled_or_sync() {
-            return (vec![], vec![]);
+            return Ok(BinaryDirtyFrame::empty());
         }
 
         let epoch = self.refresh_render_epoch();
@@ -284,34 +411,40 @@ impl TerminalSession {
 
         if self.core.screen.is_full_dirty() {
             self.texts_scratch =
-                self.collect_full_dirty_rows(epoch, |encode_pool, buf_scratch, line, row| {
-                    let (text, hash) = Self::encode_line_into_binary_frame_and_hash(
+                self.try_collect_full_dirty_rows(epoch, |encode_pool, buf_scratch, line, row| {
+                    let encoded = Self::encode_line_into_binary_frame_and_hash(
                         encode_pool,
                         buf_scratch,
                         line,
                         row,
-                    );
-                    Some((text, hash))
-                });
+                    )?;
+                    Ok(Some(DirtyRowEmission {
+                        value: encoded.text,
+                        content_hash: encoded.content_hash,
+                    }))
+                })?;
         } else {
             let epoch = self.palette_epoch;
-            let rows = self.collect_dirty_rows_with_cache(
+            let rows = self.try_collect_dirty_rows_with_cache(
                 epoch,
                 |encode_pool, buf_scratch, line, row, _cached, _epoch| {
-                    let (text, hash) = Self::encode_line_into_binary_frame_and_hash(
+                    let encoded = Self::encode_line_into_binary_frame_and_hash(
                         encode_pool,
                         buf_scratch,
                         line,
                         row,
-                    );
-                    Some((text, hash))
+                    )?;
+                    Ok(Some(DirtyRowEmission {
+                        value: encoded.text,
+                        content_hash: encoded.content_hash,
+                    }))
                 },
-            );
+            )?;
             self.texts_scratch.extend(rows);
         }
 
         if self.texts_scratch.is_empty() {
-            return (vec![], vec![]);
+            return Ok(BinaryDirtyFrame::empty());
         }
 
         self.finish_binary_dirty_frame(num_rows_offset)
@@ -326,21 +459,23 @@ impl TerminalSession {
     /// Returns a list where each element is `(line_no, text, face_ranges, col_to_buf)`:
     /// - `face_ranges`: `(start_buf, end_buf, fg_color, bg_color, flags)` in buffer offsets
     /// - `col_to_buf`: mapping from grid column index to buffer char offset
-    pub fn get_dirty_lines_with_faces(&mut self) -> Vec<crate::ffi::codec::EncodedLine> {
+    pub(crate) fn get_dirty_lines_with_faces(&mut self) -> Vec<crate::ffi::codec::EncodedLine> {
         // Scrollback viewport path: when scroll_dirty, return scrollback lines instead of live lines
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
             return self.collect_scrollback_viewport_rows(|this, row| {
                 match this.core.screen.get_scrollback_viewport_line(row) {
                     Some(line) => {
-                        let (text, face_ranges, col_to_buf) =
-                            crate::ffi::codec::encode_line_with_pool(
-                                &line.cells,
-                                line.has_wide,
-                                &mut this.encode_pool,
-                            );
-                        (row, text, face_ranges, col_to_buf)
+                        let data = crate::ffi::codec::encode_line_with_pool(
+                            &line.cells,
+                            line.has_wide,
+                            &mut this.encode_pool,
+                        );
+                        crate::ffi::codec::EncodedLine::new(row, data)
                     }
-                    None => (row, String::new(), vec![], vec![]),
+                    None => crate::ffi::codec::EncodedLine::new(
+                        row,
+                        crate::ffi::codec::EncodedLineData::empty(),
+                    ),
                 }
             });
         }
@@ -366,9 +501,11 @@ impl TerminalSession {
                 // full_dirty requires all rows — no version/hash-skip here.
                 // Row hashes are still updated so the subsequent partial-dirty
                 // frames can skip unchanged rows.
-                let (text, face_ranges, col_to_buf, hash) =
-                    Self::encode_line_with_faces_and_hash(encode_pool, line);
-                Some(((row, text, face_ranges, col_to_buf), hash))
+                let hashed = Self::encode_line_with_faces_and_hash(encode_pool, line);
+                Some(DirtyRowEmission {
+                    value: crate::ffi::codec::EncodedLine::new(row, hashed.data),
+                    content_hash: hashed.content_hash,
+                })
             });
         }
 
@@ -376,10 +513,41 @@ impl TerminalSession {
         self.collect_dirty_rows_with_cache(
             epoch,
             |encode_pool, _buf_scratch, line, row, _cached, _epoch| {
-                let (text, face_ranges, col_to_buf, hash) =
-                    Self::encode_line_with_faces_and_hash(encode_pool, line);
-                Some(((row, text, face_ranges, col_to_buf), hash))
+                let hashed = Self::encode_line_with_faces_and_hash(encode_pool, line);
+                Some(DirtyRowEmission {
+                    value: crate::ffi::codec::EncodedLine::new(row, hashed.data),
+                    content_hash: hashed.content_hash,
+                })
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ffi::codec::{BinaryFrameU32, BinaryFrameU32Field};
+
+    #[test]
+    fn binary_frame_u32_accepts_u32_max() {
+        let mut buf = Vec::new();
+        BinaryFrameU32::from_usize(
+            usize::try_from(u32::MAX).expect("u32::MAX fits usize"),
+            BinaryFrameU32Field::RowIndex,
+        )
+        .expect("u32::MAX is accepted")
+        .write_le(&mut buf);
+
+        assert_eq!(buf, u32::MAX.to_le_bytes());
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn binary_frame_u32_rejects_values_above_u32() {
+        let value = usize::try_from(u32::MAX).expect("u32::MAX fits usize") + 1;
+        let error = BinaryFrameU32::from_usize(value, BinaryFrameU32Field::RowIndex)
+            .expect_err("row index above u32 must be rejected");
+
+        assert_eq!(error.field, BinaryFrameU32Field::RowIndex);
+        assert_eq!(error.value, value);
     }
 }

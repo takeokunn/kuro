@@ -35,9 +35,29 @@ fn set_kitty_u32_param(slot: &mut Option<u32>, val: &[u8]) {
     *slot = parse_u32(val);
 }
 
+#[derive(Clone, Copy)]
+struct KittyQuietLevel(u8);
+
+impl KittyQuietLevel {
+    #[inline]
+    fn from_param(value: u32) -> Option<Self> {
+        let quiet = u8::try_from(value).ok()?;
+        (quiet <= 2).then_some(Self(quiet))
+    }
+}
+
+impl From<KittyQuietLevel> for u8 {
+    #[inline]
+    fn from(value: KittyQuietLevel) -> Self {
+        value.0
+    }
+}
+
 #[inline]
-fn set_kitty_u8_param(slot: &mut u8, val: &[u8]) {
-    *slot = parse_u32(val).unwrap_or(0) as u8;
+fn set_kitty_quiet_param(slot: &mut u8, val: &[u8]) {
+    if let Some(quiet) = parse_u32(val).and_then(KittyQuietLevel::from_param) {
+        *slot = quiet.into();
+    }
 }
 
 #[inline]
@@ -112,7 +132,7 @@ fn apply_kitty_control_param(params: &mut KittyParams, key: char, val: &[u8]) ->
             true
         }
         'q' => {
-            set_kitty_u8_param(&mut params.quiet, val);
+            set_kitty_quiet_param(&mut params.quiet, val);
             true
         }
         'X' => {
@@ -133,12 +153,9 @@ pub(super) fn apply_kitty_param(params: &mut KittyParams, kv: &[u8]) {
         return;
     };
 
-    if apply_kitty_char_param(params, key, val)
+    let _ = apply_kitty_char_param(params, key, val)
         || apply_kitty_u32_param(params, key, val)
-        || apply_kitty_control_param(params, key, val)
-    {
-        return;
-    }
+        || apply_kitty_control_param(params, key, val);
 }
 
 #[inline]

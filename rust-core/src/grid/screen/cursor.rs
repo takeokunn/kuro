@@ -6,6 +6,16 @@ use super::{
     Cell, CellWidth, Color, Cursor, DirtySet as _, Screen, SgrAttributes, UnicodeWidthChar,
 };
 
+#[inline]
+fn last_row_index(screen: &Screen) -> usize {
+    usize::from(screen.rows).saturating_sub(1)
+}
+
+#[inline]
+fn last_col_index(screen: &Screen) -> usize {
+    usize::from(screen.cols).saturating_sub(1)
+}
+
 impl Screen {
     /// Get reference to the active screen's cursor
     #[inline]
@@ -33,8 +43,8 @@ impl Screen {
     #[inline]
     pub fn move_cursor(&mut self, row: usize, col: usize) {
         self.with_active_screen_mut(|screen| {
-            screen.cursor.row = row.min(screen.rows as usize - 1);
-            screen.cursor.col = col.min(screen.cols as usize - 1);
+            screen.cursor.row = row.min(last_row_index(screen));
+            screen.cursor.col = col.min(last_col_index(screen));
             screen.cursor.pending_wrap = false;
         });
     }
@@ -44,8 +54,8 @@ impl Screen {
     pub fn move_cursor_by(&mut self, row_offset: i32, col_offset: i32) {
         self.with_active_screen_mut(|screen| {
             screen.cursor.move_by(col_offset, row_offset);
-            screen.cursor.row = screen.cursor.row.min(screen.rows as usize - 1);
-            screen.cursor.col = screen.cursor.col.min(screen.cols as usize - 1);
+            screen.cursor.row = screen.cursor.row.min(last_row_index(screen));
+            screen.cursor.col = screen.cursor.col.min(last_col_index(screen));
             screen.cursor.pending_wrap = false;
         });
     }
@@ -74,8 +84,13 @@ impl Screen {
     #[inline]
     pub fn tab(&mut self) {
         self.with_active_screen_mut(|screen| {
-            let tab_stop = (screen.cursor.col / 8 + 1) * 8;
-            screen.cursor.col = tab_stop.min(screen.cols as usize - 1);
+            let tab_stop = screen
+                .cursor
+                .col
+                .saturating_div(8)
+                .saturating_add(1)
+                .saturating_mul(8);
+            screen.cursor.col = tab_stop.min(last_col_index(screen));
             screen.cursor.pending_wrap = false;
         });
     }
@@ -91,8 +106,8 @@ impl Screen {
     #[inline]
     pub(super) fn line_feed_impl(&mut self, bg: Color, is_primary: bool) {
         self.cursor.pending_wrap = false;
-        let new_row = self.cursor.row + 1;
-        let rows = self.rows as usize;
+        let new_row = self.cursor.row.saturating_add(1);
+        let rows = usize::from(self.rows);
 
         // Cursor must be inside [top, bottom) to trigger a region scroll.
         let in_region = self.cursor.row >= self.scroll_region.top
@@ -101,7 +116,7 @@ impl Screen {
         if in_region && new_row >= self.scroll_region.bottom {
             self.scroll_up_impl(1, bg, is_primary);
         } else {
-            self.cursor.row = new_row.min(rows - 1);
+            self.cursor.row = new_row.min(rows.saturating_sub(1));
         }
     }
 
@@ -119,8 +134,9 @@ impl Screen {
     /// Called after placing a cell that may have pushed the cursor to or past the right margin.
     #[inline]
     fn clamp_cursor_col_with_pending_wrap(&mut self, auto_wrap: bool) {
-        if self.cursor.col >= self.cols as usize {
-            self.cursor.col = (self.cols as usize).saturating_sub(1);
+        let cols = usize::from(self.cols);
+        if self.cursor.col >= cols {
+            self.cursor.col = cols.saturating_sub(1);
             if auto_wrap {
                 self.cursor.pending_wrap = true;
             }
@@ -159,14 +175,18 @@ impl Screen {
         if let Some(line) = self.lines.get_mut(row) {
             line.update_cell_with(col, cell);
             self.dirty_set.insert(row);
-            if width > 1 && col + 1 < self.cols as usize {
-                line.update_cell_with(
-                    col + 1,
-                    Cell {
-                        width: CellWidth::Wide,
-                        ..Cell::default()
-                    },
-                );
+            if width > 1 {
+                if let Some(next_col) = col.checked_add(1) {
+                    if next_col < usize::from(self.cols) {
+                        line.update_cell_with(
+                            next_col,
+                            Cell {
+                                width: CellWidth::Wide,
+                                ..Cell::default()
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -174,7 +194,7 @@ impl Screen {
     /// Advance the cursor after printing and apply DECAWM clamping.
     #[inline]
     fn advance_print_cursor(&mut self, width: usize, auto_wrap: bool) {
-        self.cursor.col += width;
+        self.cursor.col = self.cursor.col.saturating_add(width);
         self.clamp_cursor_col_with_pending_wrap(auto_wrap);
     }
 
@@ -224,16 +244,24 @@ impl Screen {
             CellWidth::Half
         };
 
-        if col + width <= screen.cols as usize {
+        if col
+            .checked_add(width)
+            .is_some_and(|end_col| end_col <= usize::from(screen.cols))
+        {
             // Character fits on the current line.
-            screen.place_printed_cell(row, col, Cell::with_char_and_width(c, attrs, cell_width), width);
+            screen.place_printed_cell(
+                row,
+                col,
+                Cell::with_char_and_width(c, attrs, cell_width),
+                width,
+            );
             screen.advance_print_cursor(width, auto_wrap);
         } else {
             // Character doesn't fit (wide char at last column) — wrap to next line.
             if auto_wrap {
                 screen.wrap_to_next_line(attrs.background, is_primary);
             }
-            if width <= screen.cols as usize {
+            if width <= usize::from(screen.cols) {
                 let new_row = screen.cursor.row;
                 screen.place_printed_cell(
                     new_row,
@@ -263,7 +291,7 @@ impl Screen {
 
         // Pre-compute before borrowing self through active_screen_mut()
         let is_primary = !self.is_alternate_active;
-        let cols = self.cols as usize;
+        let cols = usize::from(self.cols);
 
         // Hoist active_screen_mut() outside the per-byte loop.
         // Previously called per byte, adding a branch + Option unwrap per iteration.
@@ -306,10 +334,9 @@ impl Screen {
                         || cell.extras.is_some()
                     {
                         if !grapheme_matches {
-                            // SAFETY: byte is guaranteed 0x20..=0x7E (printable ASCII),
-                            // which is always valid UTF-8.
                             let buf = [byte];
-                            let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+                            let s = std::str::from_utf8(&buf)
+                                .expect("ASCII print buffer must contain valid UTF-8");
                             cell.grapheme = CompactString::new(s);
                         }
                         cell.attrs = attrs;

@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-const WORD_BITS: usize = u64::BITS as usize;
+const WORD_BITS: usize = 64;
 
 /// A compact bit-set backed by `Vec<u64>`.
 #[derive(Debug, Clone)]
@@ -73,7 +73,10 @@ impl BitSet {
     /// Count the number of set bits.
     #[inline]
     pub(crate) fn count_ones(&self) -> usize {
-        self.words.iter().map(|w| w.count_ones() as usize).sum()
+        self.words
+            .iter()
+            .map(|w| usize::try_from(w.count_ones()).expect("u64 bit count fits usize"))
+            .sum()
     }
 
     /// Set all bits to `val`.
@@ -221,7 +224,7 @@ impl Iterator for OnesIter {
         if self.0 == 0 {
             return None;
         }
-        let bit = self.0.trailing_zeros() as usize;
+        let bit = usize::try_from(self.0.trailing_zeros()).expect("u64 bit offset fits usize");
         self.0 &= self.0 - 1; // clear lowest set bit
         Some(bit)
     }

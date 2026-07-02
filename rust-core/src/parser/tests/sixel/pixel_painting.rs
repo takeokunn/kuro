@@ -221,12 +221,12 @@ proptest! {
     }
 
     #[test]
-    // INVARIANT: color register RGB values are always clamped to 0-255
+    // INVARIANT: valid RGB percentages always produce RGB8 components
     fn prop_color_register_valid_after_rgb_definition(
         reg in 0u8..=15u8,
-        r in 0u32..=200u32,
-        g in 0u32..=200u32,
-        b in 0u32..=200u32,
+        r in 0u32..=100u32,
+        g in 0u32..=100u32,
+        b in 0u32..=100u32,
     ) {
         let mut d = SixelDecoder::new(0);
         let seq = format!("#{reg};2;{r};{g};{b}$");
@@ -234,8 +234,7 @@ proptest! {
             d.put(*byte);
         }
         if let Some(&[rv, gv, bv]) = d.color_map.get(&u16::from(reg)) {
-            // RGB values are (v.min(100) * 255 / 100); clamped result in [0,255]
-            let _ = (rv, gv, bv); // just verify no panic accessing them
+            let _ = (rv, gv, bv);
         }
     }
 

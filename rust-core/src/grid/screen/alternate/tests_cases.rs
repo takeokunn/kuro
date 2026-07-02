@@ -1,5 +1,5 @@
-use super::*;
 use super::tests_support::make_screen;
+use super::*;
 use crate::types::cell::SgrAttributes;
 use proptest::prelude::*;
 

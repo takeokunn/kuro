@@ -94,10 +94,7 @@ fn vt_osc7_cwd() {
 fn vt_osc8_hyperlink() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]8;;https://example.com\x07");
-    assert_eq!(
-        t.osc_data().hyperlink_uri(),
-        Some("https://example.com")
-    );
+    assert_eq!(t.osc_data().hyperlink_uri(), Some("https://example.com"));
     t.advance(b"\x1b]8;;\x07");
     assert!(t.osc_data().hyperlink_uri().is_none());
 }

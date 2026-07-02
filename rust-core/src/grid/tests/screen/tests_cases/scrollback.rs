@@ -43,4 +43,3 @@ fn test_get_scrollback_lines_zero_is_empty() {
 
     assert!(lines.is_empty());
 }
-

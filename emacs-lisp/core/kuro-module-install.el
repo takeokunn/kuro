@@ -145,19 +145,40 @@ expected blank-line separator."
     (unless (kuro-module--verify-sha256 tmp-file expected-hash)
       (error "Kuro: SHA256 mismatch for %s (expected %s)" url expected-hash))))
 
+(defun kuro-module--archive-members (tar-bin tmp-file)
+  "Return archive member names listed by TAR-BIN for TMP-FILE."
+  (with-temp-buffer
+    (let ((rc (call-process tar-bin nil t nil "-tzf" tmp-file)))
+      (unless (zerop rc)
+        (error "Kuro: tar listing failed (exit %d)" rc))
+      (split-string (buffer-string) "\n" t))))
+
+(defun kuro-module--validate-release-archive (tar-bin tmp-file)
+  "Signal unless TMP-FILE contains exactly the expected shared library."
+  (let ((members (kuro-module--archive-members tar-bin tmp-file))
+        (expected (kuro-module--shared-library-name)))
+    (unless (equal members (list expected))
+      (error "Kuro: release archive must contain exactly %s, got %S"
+             expected members))))
+
 (defun kuro-module--install-release-archive (tar-bin tmp-file target-dir)
   "Extract TMP-FILE with TAR-BIN into TARGET-DIR and return the installed path."
-  (let ((rc (call-process tar-bin nil "*kuro-module-download*" t
-                          "-xzf" tmp-file "-C" target-dir)))
-    (delete-file tmp-file)
-    (unless (zerop rc)
-      (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))
-    (let ((installed (kuro-module--installed-module-path target-dir)))
-      (unless (file-exists-p installed)
-        (error "Kuro: extracted archive does not contain %s"
-               (kuro-module--shared-library-name)))
-      (message "Kuro: installed prebuilt module at %s" installed)
-      installed)))
+  (unwind-protect
+      (progn
+        (kuro-module--validate-release-archive tar-bin tmp-file)
+        (let ((rc (call-process tar-bin nil "*kuro-module-download*" t
+                                "-xzf" tmp-file "-C" target-dir
+                                (kuro-module--shared-library-name))))
+          (unless (zerop rc)
+            (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))
+          (let ((installed (kuro-module--installed-module-path target-dir)))
+            (unless (file-exists-p installed)
+              (error "Kuro: extracted archive does not contain %s"
+                     (kuro-module--shared-library-name)))
+            (message "Kuro: installed prebuilt module at %s" installed)
+            installed)))
+    (when (file-exists-p tmp-file)
+      (delete-file tmp-file))))
 
 ;;;###autoload
 (defun kuro-module-download (&optional version)

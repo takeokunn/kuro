@@ -7,8 +7,8 @@
 //! - Simplified testing through trait mocking
 //! - Future-proofing for alternative FFI implementations
 
-pub mod global;
 pub mod dirty;
+pub mod global;
 pub mod session;
 
 #[cfg(test)]

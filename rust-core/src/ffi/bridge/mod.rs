@@ -12,14 +12,6 @@ use crate::error::KuroError;
 macro_rules! define_drain_session_vec_to_lisp {
     ($(#[$attr:meta])* $fn_name:ident, $label:expr, $take:expr, |$env:ident, $item:pat_param| $body:block) => {
         $(#[$attr])*
-        #[expect(
-            clippy::cast_possible_wrap,
-            reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
-        )]
-        #[expect(
-            clippy::similar_names,
-            reason = "cw_val/ch_val are intentional abbreviations for cell-width and cell-height; renaming would reduce clarity"
-        )]
         #[defun]
         fn $fn_name(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
             let values = $crate::ffi::bridge::query_session_data_or_default_mut_with_panic(
@@ -37,14 +29,6 @@ macro_rules! define_drain_session_vec_to_lisp {
     };
     ($(#[$attr:meta])* $fn_name:ident, $take:expr, |$env:ident, $item:pat_param| $body:block) => {
         $(#[$attr])*
-        #[expect(
-            clippy::cast_possible_wrap,
-            reason = "row/col are terminal dimensions (≤ 65535); usize→i64 never wraps"
-        )]
-        #[expect(
-            clippy::similar_names,
-            reason = "cw_val/ch_val are intentional abbreviations for cell-width and cell-height; renaming would reduce clarity"
-        )]
         #[defun]
         fn $fn_name(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
             let values = $crate::ffi::bridge::query_session_data_or_default_mut(
@@ -66,6 +50,16 @@ mod queries;
 mod render;
 
 pub use emacs_impl::EmacsModuleFFI;
+
+#[inline]
+pub(crate) fn usize_to_lisp_i64(value: usize, field: &'static str) -> i64 {
+    i64::try_from(value).expect(field)
+}
+
+#[inline]
+pub(crate) fn u64_to_lisp_i64(value: u64, field: &'static str) -> i64 {
+    i64::try_from(value).expect(field)
+}
 
 macro_rules! define_session_query_opt {
     ($(#[$doc:meta])* $fn_name:ident, $query:ident, |$session:ident| $body:block) => {
@@ -349,9 +343,9 @@ macro_rules! define_session_data_query_mut {
     };
 }
 
-pub(super) use define_session_data_query_or_false;
 pub(super) use define_session_data_query;
 pub(super) use define_session_data_query_mut;
+pub(super) use define_session_data_query_or_false;
 pub(super) use define_session_query_bool;
 pub(super) use define_session_query_default;
 pub(super) use define_session_query_opt;
@@ -449,7 +443,7 @@ where
             false.into_lisp(env)
         }
         SessionDataOutcome::Panic => {
-            let _ = env.message(&format!("kuro: panic in {label}"));
+            let _ = env.message(format!("kuro: panic in {label}"));
             false.into_lisp(env)
         }
     }

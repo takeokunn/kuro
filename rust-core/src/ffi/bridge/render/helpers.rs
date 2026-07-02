@@ -4,7 +4,7 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use super::{build_emacs_list_from_rev, build_emacs_list_from_values};
 use crate::error::KuroError;
-use crate::ffi::bridge::query_session_data_or_error_mut;
+use crate::ffi::bridge::{query_session_data_or_error_mut, u64_to_lisp_i64, usize_to_lisp_i64};
 
 #[inline]
 fn poll_session_data_after_output<T, F, M>(
@@ -47,7 +47,10 @@ pub(super) fn poll_binary_direct(
         session_id,
         context,
         || (Vec::new(), Vec::new()),
-        |session| Ok(session.get_dirty_lines_binary_direct()),
+        |session| {
+            let frame = session.get_dirty_lines_binary_direct()?;
+            Ok((frame.texts, frame.bytes))
+        },
     )
 }
 
@@ -85,14 +88,15 @@ where
 #[inline]
 fn build_emacs_face_range<'e>(
     env: &'e Env,
-    (start_buf, end_buf, fg, bg, flags, ul_color): (usize, usize, u32, u32, u64, u32),
+    range: crate::ffi::codec::FaceRange,
 ) -> EmacsResult<Value<'e>> {
-    let start_val = (start_buf as i64).into_lisp(env)?;
-    let end_val = (end_buf as i64).into_lisp(env)?;
-    let fg_val = i64::from(fg).into_lisp(env)?;
-    let bg_val = i64::from(bg).into_lisp(env)?;
-    let flags_val = (flags as i64).into_lisp(env)?;
-    let ul_color_val = i64::from(ul_color).into_lisp(env)?;
+    let start_val =
+        usize_to_lisp_i64(range.start_buf, "face range start must fit i64").into_lisp(env)?;
+    let end_val = usize_to_lisp_i64(range.end_buf, "face range end must fit i64").into_lisp(env)?;
+    let fg_val = i64::from(range.fg).into_lisp(env)?;
+    let bg_val = i64::from(range.bg).into_lisp(env)?;
+    let flags_val = u64_to_lisp_i64(range.flags, "face range flags must fit i64").into_lisp(env)?;
+    let ul_color_val = i64::from(range.underline_color).into_lisp(env)?;
 
     build_emacs_list_from_values(
         env,
@@ -103,19 +107,21 @@ fn build_emacs_face_range<'e>(
 #[inline]
 pub(super) fn build_emacs_poll_updates_with_faces_line<'e>(
     env: &'e Env,
-    (line_no, text, face_ranges, col_to_buf): crate::ffi::codec::EncodedLine,
+    line: crate::ffi::codec::EncodedLine,
 ) -> EmacsResult<Value<'e>> {
-    let line_no_val = (line_no as i64).into_lisp(env)?;
-    let text_val = text.into_lisp(env)?;
+    let crate::ffi::codec::EncodedLine { row, data } = line;
+    let line_no_val = usize_to_lisp_i64(row, "encoded line row must fit i64").into_lisp(env)?;
+    let text_val = data.text.into_lisp(env)?;
 
-    let face_list = build_emacs_list_from_rev(env, face_ranges, build_emacs_face_range)?;
+    let face_list = build_emacs_list_from_rev(env, data.face_ranges, build_emacs_face_range)?;
 
+    let col_to_buf_len = data.col_to_buf.len();
     let col_to_buf_vec = build_emacs_vector_from_iter(
         env,
-        col_to_buf.len(),
+        col_to_buf_len,
         false.into_lisp(env)?,
-        col_to_buf,
-        |env, offset| (offset as i64).into_lisp(env),
+        data.col_to_buf,
+        |env, offset| usize_to_lisp_i64(offset, "column byte offset must fit i64").into_lisp(env),
     )?;
 
     let line_pair = build_emacs_list_from_values(env, [line_no_val, text_val])?;

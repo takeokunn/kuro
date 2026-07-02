@@ -3,8 +3,18 @@ use super::*;
 // === Modern Terminal Features (continued) ===
 
 // DEC private mode toggles: `vt_dec_toggle!` defined in vt_compliance.rs parent.
-vt_dec_toggle!(vt_focus_events,        b"\x1b[?1004h", b"\x1b[?1004l", focus_events);
-vt_dec_toggle!(vt_synchronized_output, b"\x1b[?2026h", b"\x1b[?2026l", synchronized_output);
+vt_dec_toggle!(
+    vt_focus_events,
+    b"\x1b[?1004h",
+    b"\x1b[?1004l",
+    focus_events
+);
+vt_dec_toggle!(
+    vt_synchronized_output,
+    b"\x1b[?2026h",
+    b"\x1b[?2026l",
+    synchronized_output
+);
 
 /// Verify that the synchronized output mode state transitions work correctly.
 /// The mode should be set when ?2026h is sent and cleared when ?2026l is sent.
@@ -49,7 +59,7 @@ fn vt_synchronized_output_state_transitions() {
     );
 }
 
-vt_dec_toggle!(vt_decom_origin_mode,   b"\x1b[?6h",    b"\x1b[?6l",    origin_mode);
+vt_dec_toggle!(vt_decom_origin_mode, b"\x1b[?6h", b"\x1b[?6l", origin_mode);
 
 #[test]
 fn vt_underline_styles() {
@@ -129,7 +139,7 @@ fn vt_ri_reverse_index_scrolls_at_top() {
     // Write 'X' at row 0
     t.advance(b"X");
     t.advance(b"\x1b[1;1H"); // cursor to row 0
-    // ESC M: should scroll down (insert blank at top, X goes to row 1)
+                             // ESC M: should scroll down (insert blank at top, X goes to row 1)
     t.advance(b"\x1bM");
     assert_eq!(t.cursor_row(), 0, "cursor stays at scroll top after ESC M");
     let cell = t.get_cell(1, 0).unwrap();
@@ -186,7 +196,7 @@ fn vt_scroll_region_restricts_scrolling() {
     // Move cursor to bottom of scroll region (row 10) and send LF to scroll
     t.advance(b"\x1b[11;1H");
     t.advance(b"\x0a"); // LF - should scroll within region
-    // TOP at row 0 must be unchanged
+                        // TOP at row 0 must be unchanged
     let top_cell = t.get_cell(0, 0).unwrap();
     assert_eq!(
         top_cell.char(),
@@ -292,7 +302,7 @@ fn vt_il_dl_insert_delete_lines() {
     // Move to row 1 and insert 1 line
     t.advance(b"\x1b[2;1H");
     t.advance(b"\x1b[1L"); // IL 1
-    // Line1 should now be at row 2 (0-indexed)
+                           // Line1 should now be at row 2 (0-indexed)
     let cell = t.get_cell(2, 0).unwrap();
     assert_eq!(cell.char(), 'L', "IL should push existing lines down");
     // Delete the inserted blank line
@@ -338,7 +348,10 @@ fn vt_rm4_irm_reset_does_not_panic() {
 fn vt_xtwinops_18_reports_text_area_chars() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[18t");
-    assert_eq!(t.pending_responses().to_vec(), vec![b"\x1b[8;24;80t".to_vec()]);
+    assert_eq!(
+        t.pending_responses().to_vec(),
+        vec![b"\x1b[8;24;80t".to_vec()]
+    );
 }
 
 /// CSI 19 t reports screen size in characters: CSI 9 ; rows ; cols t.
@@ -346,7 +359,10 @@ fn vt_xtwinops_18_reports_text_area_chars() {
 fn vt_xtwinops_19_reports_screen_chars() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[19t");
-    assert_eq!(t.pending_responses().to_vec(), vec![b"\x1b[9;24;80t".to_vec()]);
+    assert_eq!(
+        t.pending_responses().to_vec(),
+        vec![b"\x1b[9;24;80t".to_vec()]
+    );
 }
 
 /// CSI 14 t reports text-area size in pixels; a cell-based core has no pixel
@@ -356,7 +372,10 @@ fn vt_xtwinops_19_reports_screen_chars() {
 fn vt_xtwinops_14_reports_pixels_zero() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[14t");
-    assert_eq!(t.pending_responses().to_vec(), vec![b"\x1b[4;0;0t".to_vec()]);
+    assert_eq!(
+        t.pending_responses().to_vec(),
+        vec![b"\x1b[4;0;0t".to_vec()]
+    );
 }
 
 /// CSI 18 t reflects the current size after a resize.

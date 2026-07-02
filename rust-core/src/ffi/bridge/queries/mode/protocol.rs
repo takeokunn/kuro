@@ -3,9 +3,7 @@
 use emacs::defun;
 use emacs::{Env, Result as EmacsResult, Value};
 
-use super::super::super::{
-    define_session_query_default, query_session, query_session_mut,
-};
+use super::super::super::{define_session_query_default, query_session, query_session_mut};
 
 define_session_query_default!(
     /// Get bracketed paste mode state (t if active, nil if not)

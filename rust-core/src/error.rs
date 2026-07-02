@@ -91,6 +91,12 @@ impl From<&str> for KuroError {
     }
 }
 
+impl From<crate::ffi::codec::BinaryFrameU32Overflow> for KuroError {
+    fn from(error: crate::ffi::codec::BinaryFrameU32Overflow) -> Self {
+        crate::ffi::error::ffi_error(&error.to_string())
+    }
+}
+
 #[cfg(test)]
 #[path = "error/tests.rs"]
 mod tests;

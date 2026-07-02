@@ -367,7 +367,6 @@ fn test_decawm_on_restores_wrap() {
 }
 
 /// CUB (CSI n D) moves the cursor left by n columns, clamping at column 0.
-
 #[path = "include/integration_sequences_part1b.rs"]
 mod part1b;
 

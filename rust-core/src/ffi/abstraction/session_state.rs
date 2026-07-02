@@ -108,7 +108,7 @@ impl TerminalSession {
     ///
     /// Returns `None` on non-Unix platforms or when no PTY is attached.
     #[must_use]
-    pub const fn pid(&self) -> Option<u32> {
+    pub fn pid(&self) -> Option<u32> {
         #[cfg(unix)]
         if let Some(pty) = &self.pty {
             return Some(pty.pid());

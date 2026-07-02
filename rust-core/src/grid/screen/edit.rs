@@ -45,7 +45,7 @@ impl Screen {
                 // Insert a blank line at the cursor row (shifts existing lines down)
                 screen
                     .lines
-                    .insert(cursor_row, Line::new(screen.cols as usize));
+                    .insert(cursor_row, Line::new(usize::from(screen.cols)));
             }
 
             // All rows from cursor to bottom of scroll region are now dirty
@@ -82,7 +82,7 @@ impl Screen {
                 // Insert a blank line at the bottom of the scroll region
                 screen
                     .lines
-                    .insert(bottom - 1, Line::new(screen.cols as usize));
+                    .insert(bottom - 1, Line::new(usize::from(screen.cols)));
             }
 
             // All rows from cursor to bottom of scroll region are now dirty
@@ -99,7 +99,7 @@ impl Screen {
         self.with_active_screen_mut(|screen| {
             let cursor_row = screen.cursor.row;
             let cursor_col = screen.cursor.col;
-            let cols = screen.cols as usize;
+            let cols = usize::from(screen.cols);
 
             // Clamp to columns available from cursor to right margin
             let count = count.min(cols.saturating_sub(cursor_col));
@@ -141,7 +141,7 @@ impl Screen {
         self.with_active_screen_mut(|screen| {
             let cursor_row = screen.cursor.row;
             let cursor_col = screen.cursor.col;
-            let cols = screen.cols as usize;
+            let cols = usize::from(screen.cols);
 
             // Clamp to columns available from cursor to right margin
             let count = count.min(cols.saturating_sub(cursor_col));
@@ -157,7 +157,7 @@ impl Screen {
                 }
                 // 2. If end of range ends on a Full cell, blank its Wide partner
                 //    (the Wide placeholder would shift left and become orphaned).
-                let drain_end = (cursor_col + count).min(cols);
+                let drain_end = cursor_col.saturating_add(count).min(cols);
                 if drain_end < cols && line.cells[drain_end - 1].width == CellWidth::Full {
                     line.cells[drain_end] = Cell::default();
                 }
@@ -179,9 +179,9 @@ impl Screen {
         self.with_active_screen_mut(|screen| {
             let cursor_row = screen.cursor.row;
             let cursor_col = screen.cursor.col;
-            let cols = screen.cols as usize;
+            let cols = usize::from(screen.cols);
 
-            let end = (cursor_col + count).min(cols);
+            let end = cursor_col.saturating_add(count).min(cols);
             if cursor_col >= end {
                 return;
             }
@@ -189,11 +189,12 @@ impl Screen {
             if let Some(line) = screen.lines.get_mut(cursor_row) {
                 // Wide pair safety: extend erase range to include orphaned pair halves.
                 // 1. If start of range is a Wide placeholder, also erase its Full partner.
-                let erase_start = if cursor_col > 0 && line.cells[cursor_col].width == CellWidth::Wide {
-                    cursor_col - 1
-                } else {
-                    cursor_col
-                };
+                let erase_start =
+                    if cursor_col > 0 && line.cells[cursor_col].width == CellWidth::Wide {
+                        cursor_col - 1
+                    } else {
+                        cursor_col
+                    };
                 // 2. If end of range ends on a Full cell, also erase its Wide partner.
                 let erase_end = if end < cols && line.cells[end - 1].width == CellWidth::Full {
                     end + 1

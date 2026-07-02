@@ -14,7 +14,7 @@ pub(crate) fn clean_screen() -> Screen {
 }
 
 pub(crate) fn all_rows(rows: u16) -> Vec<usize> {
-    (0..rows as usize).collect()
+    (0..usize::from(rows)).collect()
 }
 
 pub(crate) fn take_after(screen: &mut Screen) -> Vec<usize> {

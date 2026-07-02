@@ -37,18 +37,26 @@ impl Cursor {
         self.row = row;
     }
 
+    #[inline]
+    fn offset_magnitude(offset: i32) -> usize {
+        usize::try_from(offset.unsigned_abs()).expect("cursor offset magnitude must fit usize")
+    }
+
     /// Move cursor relative to current position
-    pub const fn move_by(&mut self, dx: i32, dy: i32) {
+    pub fn move_by(&mut self, dx: i32, dy: i32) {
+        let dx_magnitude = Self::offset_magnitude(dx);
+        let dy_magnitude = Self::offset_magnitude(dy);
+
         let new_col = if dx >= 0 {
-            self.col.saturating_add(dx.unsigned_abs() as usize)
+            self.col.saturating_add(dx_magnitude)
         } else {
-            self.col.saturating_sub(dx.unsigned_abs() as usize)
+            self.col.saturating_sub(dx_magnitude)
         };
 
         let new_row = if dy >= 0 {
-            self.row.saturating_add(dy.unsigned_abs() as usize)
+            self.row.saturating_add(dy_magnitude)
         } else {
-            self.row.saturating_sub(dy.unsigned_abs() as usize)
+            self.row.saturating_sub(dy_magnitude)
         };
 
         self.col = new_col;

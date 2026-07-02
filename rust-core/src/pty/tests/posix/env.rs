@@ -29,11 +29,12 @@ static ENV_FORK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 ///   - The parent polls `waitpid(WNOHANG)` with a timeout, escalating to SIGKILL.
 ///   - The child uses `libc::_exit()` (not `std::process::exit`) to skip atexit
 ///     handlers that may also deadlock.
-#[cfg(unix)]
+///
 /// Returns `Some(true/false)` with the check result, or `None` when the
 /// child process timed out (common on WSL2 where `fork()` in a
 /// multi-threaded process deadlocks on Rust's internal env `RwLock`).
 /// Callers should skip the test rather than fail when `None` is returned.
+#[cfg(unix)]
 fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> Option<bool> {
     use std::os::unix::io::FromRawFd as _;
     let mut fds = [0i32; 2];

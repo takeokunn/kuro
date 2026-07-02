@@ -101,7 +101,7 @@ impl Screen {
                 Self::drain_dirty_state(
                     &mut alt.full_dirty,
                     &mut alt.dirty_set,
-                    alt.rows as usize,
+                    usize::from(alt.rows),
                     &mut emit,
                 );
                 return;
@@ -112,7 +112,7 @@ impl Screen {
         Self::drain_dirty_state(
             &mut self.full_dirty,
             &mut self.dirty_set,
-            self.rows as usize,
+            usize::from(self.rows),
             &mut emit,
         );
     }

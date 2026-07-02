@@ -113,6 +113,55 @@ fn write_temp_shell_rcfile(prefix: &str, filename: &str, content: String) -> Opt
     }
 }
 
+#[inline]
+fn shell_quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for ch in value.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+#[inline]
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+#[inline]
+fn build_bash_rcfile_content(home: &str, script: &Path) -> String {
+    let mut content = String::new();
+    if !home.is_empty() {
+        let user_bashrc = PathBuf::from(home).join(".bashrc");
+        let quoted_user_bashrc = shell_quote_path(&user_bashrc);
+        content.push_str(&format!(
+            "[ -f {quoted_user_bashrc} ] && source {quoted_user_bashrc}\n"
+        ));
+    }
+    content.push_str(&format!("source {}\n", shell_quote_path(script)));
+    content
+}
+
+#[inline]
+fn build_zsh_rcfile_content(original_zdotdir: &str, script: &Path) -> String {
+    let mut content = String::new();
+    if !original_zdotdir.is_empty() {
+        let original_zshrc = PathBuf::from(original_zdotdir).join(".zshrc");
+        let quoted_original_zshrc = shell_quote_path(&original_zshrc);
+        let quoted_original_zdotdir = shell_quote(original_zdotdir);
+        content.push_str(&format!(
+            "[ -f {quoted_original_zshrc} ] && ZDOTDIR={quoted_original_zdotdir} source {quoted_original_zshrc}\n"
+        ));
+    }
+    content.push_str(&format!("source {}\n", shell_quote_path(script)));
+    content
+}
+
 /// Create a temporary bashrc that sources `~/.bashrc` then kuro integration.
 ///
 /// Uses `KURO_BASH_RCFILE` env var to pass the path to the temporary bashrc
@@ -125,14 +174,8 @@ fn setup_bash_integration(integration_dir: &str) {
         return;
     }
     let home = std::env::var("HOME").unwrap_or_default();
-    let bashrc_content = format!(
-        "[ -f \"{home}/.bashrc\" ] && source \"{home}/.bashrc\"\n\
-         source \"{}\"\n",
-        script.display()
-    );
-    if let Some(bashrc_path) =
-        write_temp_shell_rcfile("kuro-bash", ".bashrc", bashrc_content)
-    {
+    let bashrc_content = build_bash_rcfile_content(&home, &script);
+    if let Some(bashrc_path) = write_temp_shell_rcfile("kuro-bash", ".bashrc", bashrc_content) {
         // Signal exec_in_child to pass --rcfile instead of overriding HOME.
         std::env::set_var("KURO_BASH_RCFILE", bashrc_path);
     }
@@ -150,11 +193,7 @@ fn setup_zsh_integration(integration_dir: &str) {
         .or_else(|| std::env::var("HOME").ok())
         .unwrap_or_default();
 
-    let zshrc_content = format!(
-        "[ -f \"{original_zdotdir}/.zshrc\" ] && ZDOTDIR=\"{original_zdotdir}\" source \"{original_zdotdir}/.zshrc\"\n\
-         source \"{}\"\n",
-        script.display()
-    );
+    let zshrc_content = build_zsh_rcfile_content(&original_zdotdir, &script);
     if let Some(zshrc_path) = write_temp_shell_rcfile("kuro-zsh", ".zshrc", zshrc_content) {
         let zshdir = zshrc_path
             .parent()
@@ -375,4 +414,53 @@ pub(super) fn exec_in_child(ctx: ChildExecContext<'_>) -> Result<()> {
 
     // execv succeeded — process image was replaced; this line is unreachable.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shell_quote_escapes_single_quotes_without_enabling_expansion() {
+        assert_eq!(
+            shell_quote("a'$(touch hacked)`id`"),
+            "'a'\\''$(touch hacked)`id`'"
+        );
+    }
+
+    #[test]
+    fn test_build_bash_rcfile_content_shell_quotes_paths() {
+        let content = build_bash_rcfile_content(
+            "/tmp/home'$(touch hacked)",
+            Path::new("/tmp/integration`touch hacked`/kuro-shell.bash"),
+        );
+        assert_eq!(
+            content,
+            "[ -f '/tmp/home'\\''$(touch hacked)/.bashrc' ] && source '/tmp/home'\\''$(touch hacked)/.bashrc'\nsource '/tmp/integration`touch hacked`/kuro-shell.bash'\n"
+        );
+    }
+
+    #[test]
+    fn test_build_zsh_rcfile_content_shell_quotes_paths() {
+        let content = build_zsh_rcfile_content(
+            "/tmp/zdot'$(touch hacked)",
+            Path::new("/tmp/integration`touch hacked`/kuro-shell.zsh"),
+        );
+        assert_eq!(
+            content,
+            "[ -f '/tmp/zdot'\\''$(touch hacked)/.zshrc' ] && ZDOTDIR='/tmp/zdot'\\''$(touch hacked)' source '/tmp/zdot'\\''$(touch hacked)/.zshrc'\nsource '/tmp/integration`touch hacked`/kuro-shell.zsh'\n"
+        );
+    }
+
+    #[test]
+    fn test_shell_rcfile_content_skips_empty_original_startup_dir() {
+        assert_eq!(
+            build_bash_rcfile_content("", Path::new("/tmp/kuro-shell.bash")),
+            "source '/tmp/kuro-shell.bash'\n"
+        );
+        assert_eq!(
+            build_zsh_rcfile_content("", Path::new("/tmp/kuro-shell.zsh")),
+            "source '/tmp/kuro-shell.zsh'\n"
+        );
+    }
 }

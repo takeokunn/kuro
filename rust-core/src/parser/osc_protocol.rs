@@ -20,10 +20,6 @@ pub(super) fn encode_color_spec(rgb: [u8; 3]) -> String {
 ///
 /// Supports both xterm-style `rgb:RR/GG/BB` (16-bit per channel, upper 8 bits used)
 /// and CSS-style `#RRGGBB` (8-bit per channel).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "2-digit hex colors are 0x00..=0xFF; the else branch is only reached when digits ≤ 2, so v fits in u8"
-)]
 pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("rgb:") {
@@ -35,18 +31,10 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
         let r = u16::from_str_radix(parts[0], 16).ok()?;
         let g = u16::from_str_radix(parts[1], 16).ok()?;
         let b = u16::from_str_radix(parts[2], 16).ok()?;
-        // Normalize to 8-bit (take upper 8 bits if 4-digit, else direct if 2-digit)
-        let normalize = |v: u16, digits: usize| -> u8 {
-            if digits > 2 {
-                (v >> 8) as u8
-            } else {
-                v as u8
-            }
-        };
         Some([
-            normalize(r, parts[0].len()),
-            normalize(g, parts[1].len()),
-            normalize(b, parts[2].len()),
+            normalize_hex_channel(r, parts[0].len())?,
+            normalize_hex_channel(g, parts[1].len())?,
+            normalize_hex_channel(b, parts[2].len())?,
         ])
     } else if let Some(hex) = s.strip_prefix('#') {
         if hex.len() == 6 {
@@ -59,6 +47,14 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
         }
     } else {
         None
+    }
+}
+
+fn normalize_hex_channel(value: u16, digits: usize) -> Option<u8> {
+    match digits {
+        1 | 2 => u8::try_from(value).ok(),
+        3 | 4 => u8::try_from(value >> 8).ok(),
+        _ => None,
     }
 }
 

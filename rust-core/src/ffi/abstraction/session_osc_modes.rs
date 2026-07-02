@@ -12,17 +12,18 @@ impl TerminalSession {
     ///
     /// Returns a Vec of (index, R, G, B) for each overridden palette entry.
     #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "palette index is enumerate() over a 256-element array; i ≤ 255 always fits in u8"
-    )]
     pub fn get_palette_updates(&self) -> Vec<(u8, u8, u8, u8)> {
         self.core
             .osc_data
             .palette
             .iter()
             .enumerate()
-            .filter_map(|(i, entry)| entry.map(|[r, g, b]| (i as u8, r, g, b)))
+            .filter_map(|(i, entry)| {
+                entry.map(|[r, g, b]| {
+                    let index = u8::try_from(i).expect("OSC palette table index fits in u8");
+                    (index, r, g, b)
+                })
+            })
             .collect()
     }
 
@@ -127,7 +128,7 @@ impl TerminalSession {
     /// the convention used by `encode_hyperlink_ranges`).
     #[must_use]
     pub fn get_hyperlink_ranges(&self) -> Vec<(usize, usize, usize, String)> {
-        let rows = self.core.screen.rows() as usize;
+        let rows = usize::from(self.core.screen.rows());
         let mut result = Vec::new();
         for row in 0..rows {
             if let Some(line) = self.core.screen.get_line(row) {

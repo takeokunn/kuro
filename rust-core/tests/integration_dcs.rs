@@ -321,7 +321,6 @@ fn kitty_query_known_image_produces_ok_response() {
 
 /// A transmit with `q=2` (suppress all responses) must store the image without
 /// emitting any terminal response.
-
 #[path = "include/integration_dcs_part2.rs"]
 mod part2;
 

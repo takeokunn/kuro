@@ -228,8 +228,7 @@ fn handle_kitty_transmit(
     let _ = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
 }
 
-fn handle_kitty_transmit_and_display(
-    core: &mut TerminalCore,
+struct KittyTransmitDisplay {
     image_id: Option<u32>,
     pixels: Vec<u8>,
     format: crate::parser::kitty::ImageFormat,
@@ -238,9 +237,24 @@ fn handle_kitty_transmit_and_display(
     columns: Option<u32>,
     rows: Option<u32>,
     placement_id: Option<u32>,
-) {
-    let actual_id = store_kitty_image(core, image_id, pixels, format, pixel_width, pixel_height);
-    add_kitty_image_placement(core, actual_id, placement_id, columns, rows);
+}
+
+fn handle_kitty_transmit_and_display(core: &mut TerminalCore, command: KittyTransmitDisplay) {
+    let actual_id = store_kitty_image(
+        core,
+        command.image_id,
+        command.pixels,
+        command.format,
+        command.pixel_width,
+        command.pixel_height,
+    );
+    add_kitty_image_placement(
+        core,
+        actual_id,
+        command.placement_id,
+        command.columns,
+        command.rows,
+    );
 }
 
 fn handle_kitty_place(
@@ -320,14 +334,16 @@ pub(crate) fn dispatch_kitty_apc(core: &mut TerminalCore, payload: &[u8]) {
         } => {
             handle_kitty_transmit_and_display(
                 core,
-                image_id,
-                pixels,
-                format,
-                pixel_width,
-                pixel_height,
-                columns,
-                rows,
-                placement_id,
+                KittyTransmitDisplay {
+                    image_id,
+                    pixels,
+                    format,
+                    pixel_width,
+                    pixel_height,
+                    columns,
+                    rows,
+                    placement_id,
+                },
             );
         }
         KittyCommand::Place {

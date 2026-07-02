@@ -6,22 +6,23 @@ use super::*;
 
 #[test]
 fn test_encode_line_empty() {
-    let (text, ranges, col_to_buf) = encode_line(&[]);
-    assert_eq!(text, "");
-    assert!(ranges.is_empty());
-    assert!(col_to_buf.is_empty());
+    let encoded = encode_line(&[]);
+    assert_eq!(encoded.text, "");
+    assert!(encoded.face_ranges.is_empty());
+    assert!(encoded.col_to_buf.is_empty());
 }
 
 #[test]
 fn test_encode_line_single_cell() {
     let cell = Cell::new('A');
-    let (text, ranges, col_to_buf) = encode_line(&[cell]);
-    assert_eq!(text, "A");
+    let encoded = encode_line(&[cell]);
+    let ranges = &encoded.face_ranges;
+    assert_eq!(encoded.text, "A");
     assert_eq!(ranges.len(), 1);
     assert_face_range!(ranges, 0: buf 0, 1, fg 0xFF00_0000u32, bg 0xFF00_0000u32, flags 0u64);
     // ASCII fast path: col_to_buf is empty (identity mapping; Emacs uses col directly)
     assert!(
-        col_to_buf.is_empty(),
+        encoded.col_to_buf.is_empty(),
         "ASCII line must return empty col_to_buf (identity fast path)"
     );
 }
@@ -35,7 +36,7 @@ fn test_encode_line_single_cell() {
 #[test]
 fn test_encode_line_trailing_spaces_preserved() {
     let cells: Vec<Cell> = vec![Cell::new('A'), Cell::new(' '), Cell::new(' ')];
-    let (text, _, _) = encode_line(&cells);
+    let text = encode_line(&cells).text;
     assert_eq!(
         text, "A  ",
         "trailing spaces must be preserved so cursor can land on them"
@@ -47,7 +48,7 @@ fn test_encode_line_all_spaces_preserved() {
     // A completely blank line (all spaces) must not become an empty string.
     // The Emacs cursor may be placed on any column of such a line.
     let cells: Vec<Cell> = vec![Cell::new(' '); 5];
-    let (text, _, _) = encode_line(&cells);
+    let text = encode_line(&cells).text;
     assert_eq!(
         text, "     ",
         "an all-space line must not be collapsed to empty string"
@@ -75,19 +76,25 @@ fn test_encode_line_coverage_invariant() {
         Cell::with_attrs('B', a2),
         Cell::with_attrs('C', a3),
     ];
-    let (_, ranges, _) = encode_line(&cells);
+    let encoded = encode_line(&cells);
+    let ranges = &encoded.face_ranges;
 
     // First range must start at 0
-    assert_eq!(ranges[0].0, 0);
+    assert_eq!(ranges[0].start_buf, 0);
     // Last range must end at buf_offset count (= cells.len() for ASCII-only)
-    assert_eq!(ranges.last().unwrap().1, 3);
+    assert_eq!(ranges.last().unwrap().end_buf, 3);
     // Consecutive ranges must be contiguous
     for w in ranges.windows(2) {
-        assert_eq!(w[0].1, w[1].0, "ranges must be contiguous");
+        assert_eq!(w[0].end_buf, w[1].start_buf, "ranges must be contiguous");
     }
     // Each range must be non-empty
-    for (s, e, _, _, _, _) in &ranges {
-        assert!(s < e, "empty range found: start={s}, end={e}");
+    for range in ranges {
+        assert!(
+            range.start_buf < range.end_buf,
+            "empty range found: start={}, end={}",
+            range.start_buf,
+            range.end_buf
+        );
     }
 }
 
@@ -100,7 +107,8 @@ fn test_encode_line_three_distinct_attrs_face_ranges() {
         Cell::with_attrs('B', attrs_flags!(SgrFlags::ITALIC)),
         Cell::with_attrs('C', attrs_flags!(SgrFlags::DIM)),
     ];
-    let (_, ranges, _) = encode_line(&cells);
+    let encoded = encode_line(&cells);
+    let ranges = &encoded.face_ranges;
     assert_eq!(
         ranges.len(),
         3,
@@ -123,8 +131,8 @@ fn test_encode_line_wide_chars_no_placeholder_space() {
     // Simulate what screen.rs does for CJK: テ at col0 + placeholder at col1
     let mut wide_cell = Cell::new('テ');
     wide_cell.width = CellWidth::Half; // main cell is Half (it's the glyph cell)
-    // Actually the main cell width is set by unicode_width, not CellWidth::Wide.
-    // The placeholder is the second cell with CellWidth::Wide and grapheme=" ".
+                                       // Actually the main cell width is set by unicode_width, not CellWidth::Wide.
+                                       // The placeholder is the second cell with CellWidth::Wide and grapheme=" ".
     let placeholder = Cell {
         width: CellWidth::Wide,
         grapheme: CompactString::new(" "),
@@ -132,17 +140,17 @@ fn test_encode_line_wide_chars_no_placeholder_space() {
     };
 
     let cells = vec![wide_cell, placeholder];
-    let (text, _, col_to_buf) = encode_line(&cells);
+    let encoded = encode_line(&cells);
 
     // text must be just "テ", no extra space
     assert_eq!(
-        text, "テ",
+        encoded.text, "テ",
         "wide placeholder must not appear in buffer text"
     );
     // col 0 → buf offset 0, col 1 (placeholder) → buf offset 0 (same)
-    assert_eq!(col_to_buf[0], 0, "col 0 maps to buf offset 0");
+    assert_eq!(encoded.col_to_buf[0], 0, "col 0 maps to buf offset 0");
     assert_eq!(
-        col_to_buf[1], 0,
+        encoded.col_to_buf[1], 0,
         "placeholder col maps to same buf offset as wide char"
     );
 }
@@ -152,7 +160,7 @@ fn test_encode_line_col_to_buf_ascii() {
     // ASCII fast path: col_to_buf is EMPTY because col == buf_offset always.
     // The Emacs side falls back to col when the vector is shorter than col.
     let cells: Vec<Cell> = "Hello".chars().map(Cell::new).collect();
-    let (_, _, col_to_buf) = encode_line(&cells);
+    let col_to_buf = encode_line(&cells).col_to_buf;
     assert!(
         col_to_buf.is_empty(),
         "pure ASCII must use identity fast path (empty col_to_buf)"
@@ -168,16 +176,17 @@ fn test_encode_line_adjacent_identical_attrs_merged() {
     // Two adjacent cells with identical (default) attributes must produce a
     // single face range covering both buffer positions, not two ranges.
     let cells = vec![Cell::new('A'), Cell::new('B')];
-    let (text, ranges, _) = encode_line(&cells);
-    assert_eq!(text, "AB");
+    let encoded = encode_line(&cells);
+    let ranges = &encoded.face_ranges;
+    assert_eq!(encoded.text, "AB");
     assert_eq!(
         ranges.len(),
         1,
         "identical adjacent attrs must be merged into one face range"
     );
-    let (start, end, _, _, _, _) = ranges[0];
-    assert_eq!(start, 0);
-    assert_eq!(end, 2);
+    let range = ranges[0];
+    assert_eq!(range.start_buf, 0);
+    assert_eq!(range.end_buf, 2);
 }
 
 #[test]
@@ -199,10 +208,11 @@ fn test_encode_line_combining_char_buf_offset() {
     let plain_cell = Cell::new('X');
 
     let cells = vec![combining_cell, plain_cell];
-    let (text, ranges, _) = encode_line(&cells);
+    let encoded = encode_line(&cells);
+    let ranges = &encoded.face_ranges;
 
     // The text must contain the full grapheme cluster followed by 'X'.
-    assert_eq!(text, "e\u{0301}X");
+    assert_eq!(encoded.text, "e\u{0301}X");
 
     // The second range (for 'X') must start at buf_offset 2, proving that the
     // combining-char cell advanced the offset by 2, not 1.
@@ -212,9 +222,12 @@ fn test_encode_line_combining_char_buf_offset() {
         "same default attrs: both cells collapse into one range"
     );
     // With identical attrs the single range covers [0, 3) — base(2) + X(1).
-    let (start, end, _, _, _, _) = ranges[0];
-    assert_eq!(start, 0);
-    assert_eq!(end, 3, "buf_offset after combining cell must be 2 + 1 = 3");
+    let range = ranges[0];
+    assert_eq!(range.start_buf, 0);
+    assert_eq!(
+        range.end_buf, 3,
+        "buf_offset after combining cell must be 2 + 1 = 3"
+    );
 }
 
 // -------------------------------------------------------------------------
@@ -234,18 +247,21 @@ fn test_encode_line_wide_char_at_last_column() {
         ..Default::default()
     };
     let cells = vec![plain_cell, placeholder];
-    let (text, _, col_to_buf) = encode_line(&cells);
+    let encoded = encode_line(&cells);
 
     // The placeholder at col 1 must not contribute to the text.
-    assert_eq!(text, "A", "wide placeholder at last column must be skipped");
+    assert_eq!(
+        encoded.text, "A",
+        "wide placeholder at last column must be skipped"
+    );
     // col_to_buf must be non-empty because the placeholder is present.
     assert!(
-        !col_to_buf.is_empty(),
+        !encoded.col_to_buf.is_empty(),
         "wide placeholder at last column must produce non-empty col_to_buf"
     );
     // col_to_buf[1] (the placeholder) must map to the same buf offset as col 0.
     assert_eq!(
-        col_to_buf[1], col_to_buf[0],
+        encoded.col_to_buf[1], encoded.col_to_buf[0],
         "wide placeholder col_to_buf entry must equal its predecessor"
     );
 }
@@ -257,16 +273,17 @@ fn test_encode_line_wide_char_at_last_column() {
 fn test_encode_line_first_cell_face_range_always_emitted() {
     // A single cell with default attributes: the face range must cover [0, 1).
     let cell = Cell::new('Z');
-    let (_, ranges, _) = encode_line(&[cell]);
+    let encoded = encode_line(&[cell]);
+    let ranges = &encoded.face_ranges;
     assert_eq!(
         ranges.len(),
         1,
         "single cell must produce exactly one face range"
     );
-    let (start, end, _, _, _, _) = ranges[0];
-    assert_eq!(start, 0, "face range must start at buf_offset 0");
+    let range = ranges[0];
+    assert_eq!(range.start_buf, 0, "face range must start at buf_offset 0");
     assert_eq!(
-        end, 1,
+        range.end_buf, 1,
         "face range must end at buf_offset 1 for a 1-char cell"
     );
 }
@@ -286,16 +303,17 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
         ..Default::default()
     };
     let cells = vec![plain_cell, combining_cell];
-    let (text, ranges, _) = encode_line(&cells);
+    let encoded = encode_line(&cells);
+    let ranges = &encoded.face_ranges;
 
-    assert_eq!(text, "Ae\u{0301}");
+    assert_eq!(encoded.text, "Ae\u{0301}");
     // Both cells have default attrs → one merged range.
     assert_eq!(ranges.len(), 1, "identical attrs must merge into one range");
-    let (start, end, _, _, _, _) = ranges[0];
-    assert_eq!(start, 0, "range must start at 0");
+    let range = ranges[0];
+    assert_eq!(range.start_buf, 0, "range must start at 0");
     // 'A' contributes 1, "e\u{0301}" contributes 2 scalars → end = 3
     assert_eq!(
-        end, 3,
+        range.end_buf, 3,
         "combining-char grapheme at end must advance buf_offset by its scalar count"
     );
 }
@@ -304,14 +322,14 @@ fn test_encode_line_combining_char_at_last_position_face_range_end() {
 // encode_line_with_pool tests
 // -------------------------------------------------------------------------
 
-/// Empty slice → all-empty tuple; pool is not mutated in a visible way.
+/// Empty slice produces all-empty encoded data; pool is not mutated in a visible way.
 #[test]
 fn test_encode_line_with_pool_empty() {
     let mut pool = EncodePool::new();
-    let (text, ranges, ctb) = encode_line_with_pool(&[], false, &mut pool);
-    assert_eq!(text, "");
-    assert!(ranges.is_empty());
-    assert!(ctb.is_empty());
+    let encoded = encode_line_with_pool(&[], false, &mut pool);
+    assert_eq!(encoded.text, "");
+    assert!(encoded.face_ranges.is_empty());
+    assert!(encoded.col_to_buf.is_empty());
 }
 
 /// Non-empty slice → same output as `encode_line` (which is a thin wrapper).
@@ -319,11 +337,20 @@ fn test_encode_line_with_pool_empty() {
 fn test_encode_line_with_pool_single_cell_matches_encode_line() {
     let cell = Cell::new('Q');
     let mut pool = EncodePool::new();
-    let (text_pool, ranges_pool, ctb_pool) = encode_line_with_pool(&[cell.clone()], false, &mut pool);
-    let (text_line, ranges_line, ctb_line) = encode_line(&[cell]);
-    assert_eq!(text_pool, text_line, "text must match encode_line");
-    assert_eq!(ranges_pool, ranges_line, "face ranges must match encode_line");
-    assert_eq!(ctb_pool, ctb_line, "col_to_buf must match encode_line");
+    let encoded_pool = encode_line_with_pool(std::slice::from_ref(&cell), false, &mut pool);
+    let encoded_line = encode_line(&[cell]);
+    assert_eq!(
+        encoded_pool.text, encoded_line.text,
+        "text must match encode_line"
+    );
+    assert_eq!(
+        encoded_pool.face_ranges, encoded_line.face_ranges,
+        "face ranges must match encode_line"
+    );
+    assert_eq!(
+        encoded_pool.col_to_buf, encoded_line.col_to_buf,
+        "col_to_buf must match encode_line"
+    );
 }
 
 /// After `encode_line_with_pool`, calling it again on a different cell reuses
@@ -333,9 +360,9 @@ fn test_encode_line_with_pool_reuse_clears_state() {
     let mut pool = EncodePool::new();
     let _ = encode_line_with_pool(&[Cell::new('X'), Cell::new('Y')], false, &mut pool);
     // Second call: a single-cell line must not contain 'X' or 'Y' from the prior call.
-    let (text, ranges, _) = encode_line_with_pool(&[Cell::new('Z')], false, &mut pool);
-    assert_eq!(text, "Z", "pool must be cleared between calls");
-    assert_eq!(ranges.len(), 1, "only one face range for 'Z'");
+    let encoded = encode_line_with_pool(&[Cell::new('Z')], false, &mut pool);
+    assert_eq!(encoded.text, "Z", "pool must be cleared between calls");
+    assert_eq!(encoded.face_ranges.len(), 1, "only one face range for 'Z'");
 }
 
 // -------------------------------------------------------------------------
@@ -347,11 +374,16 @@ fn test_encode_line_with_pool_reuse_clears_state() {
 fn test_encode_line_into_buf_empty_cells_writes_16_byte_row() {
     let mut pool = EncodePool::new();
     let mut buf: Vec<u8> = Vec::new();
-    let text = encode_line_into_buf(&[], false, &mut pool, 7, &mut buf);
+    let text = encode_line_into_buf(&[], false, &mut pool, 7, &mut buf)
+        .expect("empty line binary row should fit u32 fields");
     assert_eq!(text, "", "empty cells must return empty string");
     // 16-byte layout: [row_index=7: u32][num_face_ranges=0: u32][text_byte_len=0: u32][col_to_buf_len=0: u32]
     assert_eq!(buf.len(), 16, "empty cells must produce exactly 16 bytes");
-    assert_eq!(read_u32_le(&buf, 0), 7, "row_index must be encoded at offset 0");
+    assert_eq!(
+        read_u32_le(&buf, 0),
+        7,
+        "row_index must be encoded at offset 0"
+    );
     assert_eq!(read_u32_le(&buf, 4), 0, "num_face_ranges must be 0");
     assert_eq!(read_u32_le(&buf, 8), 0, "text_byte_len must be 0");
     assert_eq!(read_u32_le(&buf, 12), 0, "col_to_buf_len must be 0");
@@ -363,7 +395,8 @@ fn test_encode_line_into_buf_single_cell_serialises_correctly() {
     let mut pool = EncodePool::new();
     let mut buf: Vec<u8> = Vec::new();
     let cell = Cell::new('H');
-    let text = encode_line_into_buf(&[cell], false, &mut pool, 2, &mut buf);
+    let text = encode_line_into_buf(&[cell], false, &mut pool, 2, &mut buf)
+        .expect("single-cell binary row should fit u32 fields");
     assert_eq!(text, "H", "text must be returned separately");
     // Layout: [row_index=2: u32][num_face_ranges=1: u32][text_byte_len=0: u32]
     //         [28-byte face range][col_to_buf_len=0: u32]
@@ -374,8 +407,16 @@ fn test_encode_line_into_buf_single_cell_serialises_correctly() {
     assert_eq!(read_u32_le(&buf, 8), 0, "text_byte_len must always be 0");
     // The face range starts at buf[12]: start_buf=0, end_buf=1 for 'H'.
     assert_eq!(read_u32_le(&buf, 12), 0, "face range start_buf must be 0");
-    assert_eq!(read_u32_le(&buf, 16), 1, "face range end_buf must be 1 for single char");
+    assert_eq!(
+        read_u32_le(&buf, 16),
+        1,
+        "face range end_buf must be 1 for single char"
+    );
     // col_to_buf_len at the end: 0 (pure ASCII identity mapping)
     let col_to_buf_len_offset = 12 + 28;
-    assert_eq!(read_u32_le(&buf, col_to_buf_len_offset), 0, "col_to_buf_len must be 0 for ASCII");
+    assert_eq!(
+        read_u32_le(&buf, col_to_buf_len_offset),
+        0,
+        "col_to_buf_len must be 0 for ASCII"
+    );
 }

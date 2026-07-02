@@ -66,6 +66,10 @@
 (kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-exact-four-bytes  [42 0 0 0]                              0 42)
 (kuro-binary-decoder-test--def-read-u32-le kuro-binary-decoder-read-u32-le-mid-vector-offset [0 0 0 0 #x78 #x56 #x34 #x12 0 0 0 0] 4 #x12345678)
 
+(ert-deftest kuro-binary-decoder-read-u32-le-errors-on-short-vector ()
+  "`kuro--read-u32-le' rejects truncated input instead of relying on `aref'."
+  (should-error (kuro--read-u32-le [1 2 3] 0)))
+
 (ert-deftest kuro-binary-decoder-test--all-read-u32-le-correct ()
   "All kuro-binary-decoder-test--read-u32-le-table entries decode correctly."
   (dolist (entry kuro-binary-decoder-test--read-u32-le-table)
@@ -104,6 +108,10 @@
       (should (= (aref face-list 1) end))     ; end_buf at base 1
       (should (= new-pos 24)))))
 
+(ert-deftest kuro-binary-decoder-decode-face-ranges-errors-before-huge-allocation ()
+  "`kuro--decode-face-ranges' validates byte budget before allocating output."
+  (should-error (kuro--decode-face-ranges [] 0 #xffffffff t)))
+
 (ert-deftest kuro-binary-decoder-decode-col-to-buf-empty ()
   "kuro--decode-col-to-buf with length 0 returns empty vector, sets kuro--decode-pos."
   (let ((v (kuro-binary-decoder-test--make-vec 0 0 0 0)))  ; ctb-len = 0
@@ -127,6 +135,10 @@
       (should (= (aref col-to-buf 1) 20))
       (should (= new-pos 12)))))
 
+(ert-deftest kuro-binary-decoder-decode-col-to-buf-errors-before-huge-allocation ()
+  "`kuro--decode-col-to-buf' validates byte budget before allocating output."
+  (let ((v (apply #'vector (kuro-binary-decoder-test--make-u32-le #xffffffff))))
+    (should-error (kuro--decode-col-to-buf v 0))))
 
 ;;; Group 9: kuro--decode-face-ranges — additional cases
 
@@ -250,6 +262,45 @@ Each row has 0 face ranges, text_byte_len=0, and no col-to-buf entries."
                                      (kuro-binary-decoder-test--make-u32-le 0))))
          (result (kuro--decode-binary-updates-with-strings (vector) empty-frame)))
     (should (null result))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-errors-on-short-header ()
+  "`kuro--decode-binary-updates-with-strings' rejects truncated frame headers."
+  (should-error (kuro--decode-binary-updates-with-strings (vector) [2 0 0])))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-errors-on-short-row-minimum-payload ()
+  "`kuro--decode-binary-updates-with-strings' rejects row counts before allocating result."
+  (let ((vec (apply #'vector
+                    (append
+                     (kuro-binary-decoder-test--make-u32-le 2)
+                     (kuro-binary-decoder-test--make-u32-le 1)))))
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-errors-on-text-vector-count-mismatch ()
+  "`kuro--decode-binary-updates-with-strings' requires exact text vector cardinality."
+  (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
+    (should-error (kuro--decode-binary-updates-with-strings (vector) vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-errors-on-nonzero-text-byte-len ()
+  "`kuro--decode-binary-updates-with-strings' requires text_byte_len=0."
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 0)
+           (kuro-binary-decoder-test--make-u32-le 1)
+           (kuro-binary-decoder-test--make-u32-le 0)))
+         (vec (apply #'vector frame-bytes)))
+    (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-errors-on-trailing-bytes ()
+  "`kuro--decode-binary-updates-with-strings' rejects bytes after the final row."
+  (let ((vec (apply #'vector
+                    (append
+                     (kuro-binary-decoder-test--make-u32-le 2)
+                     (kuro-binary-decoder-test--make-u32-le 0)
+                     '(0)))))
+    (should-error (kuro--decode-binary-updates-with-strings (vector) vec))))
 
 (ert-deftest kuro-binary-decoder-decode-with-strings-returns-one-row ()
   "kuro--decode-binary-updates-with-strings returns one entry for a 1-row frame."

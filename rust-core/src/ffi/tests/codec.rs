@@ -20,14 +20,37 @@ fn read_u64_le(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
-/// Tuple type for a single binary-encoded screen row:
-/// `(row_index, text, face_ranges, col_to_buf)`.
-type ScreenLine = (
-    usize,
-    String,
-    Vec<(usize, usize, u32, u32, u64, u32)>,
-    Vec<usize>,
-);
+#[inline]
+fn face_range(
+    start_buf: usize,
+    end_buf: usize,
+    fg: u32,
+    bg: u32,
+    flags: u64,
+    underline_color: u32,
+) -> FaceRange {
+    FaceRange::new(start_buf, end_buf, fg, bg, flags, underline_color)
+}
+
+#[inline]
+fn encoded_line(
+    row: usize,
+    text: impl Into<String>,
+    face_ranges: Vec<FaceRange>,
+    col_to_buf: Vec<usize>,
+) -> EncodedLine {
+    EncodedLine::from_parts(row, text.into(), face_ranges, col_to_buf)
+}
+
+#[inline]
+fn encode_screen_binary_ok(lines: &[EncodedLine]) -> Vec<u8> {
+    encode_screen_binary(lines).expect("binary frame encoding should fit u32 fields")
+}
+
+#[inline]
+fn test_usize_to_u32(value: usize, context: &str) -> u32 {
+    u32::try_from(value).expect(context)
+}
 
 /// Return the byte length of one encoded row payload.
 #[inline]
@@ -70,12 +93,12 @@ macro_rules! attrs_underline {
 /// Usage: `assert_face_range!(ranges, 0: buf 0, 5, fg 0xFF000000, bg 0x00000000, flags 0x01)`
 macro_rules! assert_face_range {
     ($ranges:expr, $idx:literal: buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr) => {{
-        let (start, end, fg, bg, flags, _ul_color) = $ranges[$idx];
-        assert_eq!(start, $s, "face_range[{}] start_buf", $idx);
-        assert_eq!(end, $e, "face_range[{}] end_buf", $idx);
-        assert_eq!(fg, $fg, "face_range[{}] fg", $idx);
-        assert_eq!(bg, $bg, "face_range[{}] bg", $idx);
-        assert_eq!(flags, $f, "face_range[{}] flags", $idx);
+        let range = $ranges[$idx];
+        assert_eq!(range.start_buf, $s, "face_range[{}] start_buf", $idx);
+        assert_eq!(range.end_buf, $e, "face_range[{}] end_buf", $idx);
+        assert_eq!(range.fg, $fg, "face_range[{}] fg", $idx);
+        assert_eq!(range.bg, $bg, "face_range[{}] bg", $idx);
+        assert_eq!(range.flags, $f, "face_range[{}] flags", $idx);
     }};
 }
 
@@ -84,10 +107,14 @@ macro_rules! assert_face_range {
 /// Usage: `assert_binary_face!(result, BASE, buf 0, 5, fg 0xFF000000, bg 0x00, flags 0x01)`
 macro_rules! assert_binary_face {
     ($buf:expr, $base:expr, buf $s:expr, $e:expr, fg $fg:expr, bg $bg:expr, flags $f:expr, ul $ul:expr) => {{
-        assert_eq!(read_u32_le($buf, $base), $s as u32, "binary face start_buf");
+        assert_eq!(
+            read_u32_le($buf, $base),
+            test_usize_to_u32($s, "binary face start_buf test value fits u32"),
+            "binary face start_buf"
+        );
         assert_eq!(
             read_u32_le($buf, $base + 4),
-            $e as u32,
+            test_usize_to_u32($e, "binary face end_buf test value fits u32"),
             "binary face end_buf"
         );
         assert_eq!(read_u32_le($buf, $base + 8), $fg, "binary face fg");
@@ -101,7 +128,11 @@ macro_rules! assert_binary_face {
 macro_rules! assert_binary_header {
     ($buf:expr, rows $rows:expr) => {{
         assert_eq!(read_u32_le($buf, 0), 2, "format_version must be 2");
-        assert_eq!(read_u32_le($buf, 4), $rows as u32, "num_rows must match");
+        assert_eq!(
+            read_u32_le($buf, 4),
+            test_usize_to_u32($rows, "num_rows test value fits u32"),
+            "num_rows must match"
+        );
     }};
 }
 
@@ -111,19 +142,35 @@ macro_rules! assert_binary_header {
 macro_rules! assert_binary_row {
     ($buf:expr, $base:expr, row $row:expr, text $text:expr, faces $faces:expr, ctb [$($ctb:expr),* $(,)?]) => {{
         let text = $text.as_bytes();
-        let ctb = &[$($ctb as u32),*];
-        let faces = $faces as usize;
+        let ctb = &[$(test_usize_to_u32($ctb, "col_to_buf test value fits u32")),*];
+        let faces: usize = $faces;
         let ctb_base = $base + 12 + text.len() + (28 * faces);
 
-        assert_eq!(read_u32_le($buf, $base), $row as u32, "row_index");
-        assert_eq!(read_u32_le($buf, $base + 4), faces as u32, "num_face_ranges");
-        assert_eq!(read_u32_le($buf, $base + 8), text.len() as u32, "text_byte_len");
+        assert_eq!(
+            read_u32_le($buf, $base),
+            test_usize_to_u32($row, "row index test value fits u32"),
+            "row_index"
+        );
+        assert_eq!(
+            read_u32_le($buf, $base + 4),
+            test_usize_to_u32(faces, "face count test value fits u32"),
+            "num_face_ranges"
+        );
+        assert_eq!(
+            read_u32_le($buf, $base + 8),
+            test_usize_to_u32(text.len(), "text length test value fits u32"),
+            "text_byte_len"
+        );
         assert_eq!(
             &$buf[$base + 12..$base + 12 + text.len()],
             text,
             "text bytes"
         );
-        assert_eq!(read_u32_le($buf, ctb_base), ctb.len() as u32, "col_to_buf_len");
+        assert_eq!(
+            read_u32_le($buf, ctb_base),
+            test_usize_to_u32(ctb.len(), "col_to_buf length test value fits u32"),
+            "col_to_buf_len"
+        );
         for (i, expected) in ctb.iter().copied().enumerate() {
             assert_eq!(
                 read_u32_le($buf, ctb_base + 4 + (4 * i)),
@@ -195,18 +242,18 @@ macro_rules! test_encode_attrs {
     };
 }
 
-#[path = "codec/color.rs"]
-mod color;
 #[path = "codec/attrs.rs"]
 mod attrs;
-#[path = "codec/line.rs"]
-mod line;
 #[path = "codec/binary.rs"]
 mod binary;
 #[path = "codec/binary_faces.rs"]
 mod binary_faces;
+#[path = "codec/color.rs"]
+mod color;
 #[path = "codec/hyperlink.rs"]
 mod hyperlink;
+#[path = "codec/line.rs"]
+mod line;
 #[path = "codec/properties.rs"]
 mod properties;
 #[path = "codec/property_edges.rs"]

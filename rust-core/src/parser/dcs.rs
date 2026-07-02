@@ -47,7 +47,12 @@ pub fn dcs_hook(
         (b"$", 't') => {
             // DECTABSR: DCS 2 $ t ST — request tab stop report.
             // Only respond when the first parameter is 2 (tab stop request).
-            let p0 = params.iter().next().and_then(|g| g.first()).copied().unwrap_or(0);
+            let p0 = params
+                .iter()
+                .next()
+                .and_then(|g| g.first())
+                .copied()
+                .unwrap_or(0);
             if p0 == 2 {
                 core.meta.dcs_state = DcsState::Dectabsr;
             }
@@ -348,8 +353,11 @@ fn sixel_cell_dimensions(width: u32, height: u32) -> (u32, u32) {
 
 fn advance_cursor_after_sixel(core: &mut TerminalCore, cell_h: u32) {
     let cursor = *core.screen.cursor();
-    let max_row = (core.screen.rows() as usize).saturating_sub(1);
-    let new_row = cursor.row.saturating_add(cell_h as usize).min(max_row);
+    let Ok(cell_h) = usize::try_from(cell_h) else {
+        return;
+    };
+    let max_row = usize::from(core.screen.rows()).saturating_sub(1);
+    let new_row = cursor.row.saturating_add(cell_h).min(max_row);
     core.screen.move_cursor(new_row, 0);
 }
 

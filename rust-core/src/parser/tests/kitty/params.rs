@@ -23,6 +23,30 @@ test_kitty_params_case!(
     check = |result: KittyParams| assert_eq!(result.quiet, 2, "q=2 must be parsed correctly"),
 );
 
+test_kitty_params_case!(
+    test_parse_params_quiet_out_of_range_ignored,
+    params = b"q=999",
+    check = |result: KittyParams| assert_eq!(result.quiet, 0),
+);
+
+test_kitty_params_case!(
+    test_parse_params_quiet_invalid_after_valid_keeps_valid_value,
+    params = b"q=2,q=999",
+    check = |result: KittyParams| assert_eq!(result.quiet, 2),
+);
+
+test_kitty_params_case!(
+    test_parse_params_quiet_valid_after_invalid_sets_valid_value,
+    params = b"q=999,q=1",
+    check = |result: KittyParams| assert_eq!(result.quiet, 1),
+);
+
+test_kitty_params_case!(
+    test_parse_params_quiet_non_numeric_after_valid_keeps_valid_value,
+    params = b"q=2,q=nope",
+    check = |result: KittyParams| assert_eq!(result.quiet, 2),
+);
+
 // ── X/Y pixel offset parsing ──────────────────────────────────────────────────
 
 test_kitty_params_case!(

@@ -203,7 +203,11 @@ fn test_dectabsr_reports_default_tab_stops() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1bP2$t\x1b\\");
     let responses = dcs_response_texts(&term);
-    assert_eq!(responses.len(), 1, "DECTABSR must produce exactly one response");
+    assert_eq!(
+        responses.len(),
+        1,
+        "DECTABSR must produce exactly one response"
+    );
     let resp = responses[0];
     assert!(
         resp.starts_with("\x1bP2;0$u"),

@@ -294,8 +294,8 @@ mod tests {
             fn prop_terminal_meta_response_count(count in 0usize..=16usize) {
                 let mut m = TerminalMeta::default();
                 for i in 0..count {
-                    #[expect(clippy::cast_possible_truncation, reason = "i is 0..=16; always fits in u8")]
-                    m.pending_responses.push(vec![i as u8]);
+                    let byte = u8::try_from(i).expect("test index fits in u8");
+                    m.pending_responses.push(vec![byte]);
                 }
                 prop_assert_eq!(m.pending_responses.len(), count);
             }

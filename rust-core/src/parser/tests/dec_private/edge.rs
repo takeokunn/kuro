@@ -379,7 +379,7 @@ fn test_deccolm_set_clears_screen() {
     term.advance(b"\x1b[?40h");
     term.advance(b"hello"); // write some content
     term.advance(b"\x1b[?3h"); // DECCOLM — must clear
-    // All cells in the first row must be blank (space) after the clear.
+                               // All cells in the first row must be blank (space) after the clear.
     let line = term.screen.get_line(0).expect("row 0 must exist");
     let non_blank = line.cells.iter().any(|c| c.char() != ' ');
     assert!(!non_blank, "DECCOLM set must erase all screen content");

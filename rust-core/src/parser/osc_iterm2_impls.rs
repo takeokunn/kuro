@@ -138,7 +138,10 @@ pub(crate) fn handle_osc_1337(core: &mut TerminalCore, params: &[&[u8]]) {
         core.kitty.pending_image_notifications.push(notif);
     }
     // Advance cursor past the image
-    let max_row = (core.screen.rows() as usize).saturating_sub(1);
-    let new_row = cursor.row.saturating_add(rows as usize).min(max_row);
+    let Ok(rows) = usize::try_from(rows) else {
+        return;
+    };
+    let max_row = usize::from(core.screen.rows()).saturating_sub(1);
+    let new_row = cursor.row.saturating_add(rows).min(max_row);
     core.screen.move_cursor(new_row, 0);
 }

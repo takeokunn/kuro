@@ -1,5 +1,5 @@
-use super::*;
 use super::super::make_term;
+use super::*;
 
 #[test]
 fn test_resize_updates_tab_stops() {

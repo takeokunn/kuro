@@ -66,12 +66,25 @@ calls/sec in the hot decode path.")
 
 ;;; Low-level byte readers
 
+(defun kuro--binary-decoder-error (format-string &rest args)
+  "Signal a malformed binary frame error using FORMAT-STRING and ARGS."
+  (apply #'error (concat "Kuro: malformed binary frame: " format-string) args))
+
+(defsubst kuro--require-bytes (vec offset byte-count context)
+  "Require BYTE-COUNT bytes from VEC at OFFSET for CONTEXT."
+  (let ((end (+ offset byte-count)))
+    (when (or (< offset 0) (< byte-count 0) (> end (length vec)))
+      (kuro--binary-decoder-error
+       "%s requires %d byte(s) at offset %d, frame length %d"
+       context byte-count offset (length vec)))))
+
 (defsubst kuro--read-u32-le (vec offset)
   "Read a u32 little-endian integer from VEC at byte OFFSET.
 VEC must be an Emacs vector of integer byte values (0–255).
 Returns a non-negative integer.
 Chained `1+' avoids three generic `+' bytecodes; at 1,440 calls/frame this
 saves ~4,320 add operations per frame vs the `(+ offset N)' form."
+  (kuro--require-bytes vec offset 4 "u32")
   (let* ((o1 (1+ offset))
          (o2 (1+ o1))
          (o3 (1+ o2)))
@@ -105,9 +118,11 @@ values in 0..=0xBFF (9 SGR flag bits + 3 underline-style bits — 12 bits
 total).  The upper 4 bytes on the wire are always 0x00000000.  Reading only
 the low u32 avoids the `(ash high-word 32)' bignum allocation that
 `kuro--read-u64-le' would otherwise incur on every face range decoded."
+  (let ((required-bytes (* num-face-ranges (if v2-p 28 24))))
+    (kuro--require-bytes vec pos required-bytes "face ranges"))
   (if (zerop num-face-ranges)
-      ;; Zero-range fast exit: nil preserves backward compatibility with callers
-      ;; that guard on (null face-list).  No allocation needed.
+      ;; Zero-range fast exit: nil is the canonical no-face-ranges value.
+      ;; No allocation needed.
       (progn (setq kuro--decode-pos pos) nil)
     (let ((result (make-vector (* 6 num-face-ranges) 0))
           (base 0)
@@ -130,8 +145,10 @@ Returns the VECTOR directly (empty vector when length is zero; no CJK
 wide characters on this row).  Sets `kuro--decode-pos' to the byte offset
 immediately after the decoded section — eliminates the (VECTOR . NEW-POS)
 cons cell allocation at ~3,600 calls/sec in the hot decode path."
+  (kuro--require-bytes vec pos 4 "col-to-buf length")
   (let* ((ctb-len (kuro--read-u32-le vec pos))
          (pos (+ pos 4)))
+    (kuro--require-bytes vec pos (* ctb-len 4) "col-to-buf entries")
     (if (zerop ctb-len)
         (progn (setq kuro--decode-pos pos) [])
       (let ((v (make-vector ctb-len 0))
@@ -156,24 +173,38 @@ Inlines the text acquisition step (was `funcall text-fn') to eliminate
 one closure dispatch per dirty row — allows the bytecode compiler to inline
 the direct `aref text-strings idx' without going through an indirect call.
 At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
+  (unless (vectorp text-strings)
+    (kuro--binary-decoder-error "text-strings must be a vector"))
+  (kuro--require-bytes vec 0 8 "frame header")
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
                 (= format-version kuro--binary-format-version-v2))
       (error "Kuro: unsupported binary format version %d" format-version))
     (let* ((num-rows         (kuro--read-u32-le vec 4))
            (pos              8)
-           (face-ranges-v2-p (>= format-version 2))
-           ;; Pre-allocate result vector (same pattern as kuro--decode-binary-frame-rows).
-           ;; Return nil for 0-row frames (not []) so (when updates ...) callers skip correctly.
-           (result           (when (> num-rows 0) (make-vector num-rows nil))))
+           (face-ranges-v2-p (>= format-version 2)))
+      (unless (= (length text-strings) num-rows)
+        (kuro--binary-decoder-error
+         "text-strings length %d does not match row count %d"
+         (length text-strings) num-rows))
+      ;; Each row has at least a 12-byte row header and a 4-byte
+      ;; col-to-buf length. Validate this lower bound before allocating the
+      ;; result vector so hostile row counts cannot force huge allocations.
+      (kuro--require-bytes vec pos (* num-rows 16) "row minimum payload")
       ;; `while' with explicit counter produces tighter bytecode than `dotimes'
       ;; (consistent with kuro--apply-dirty-lines, kuro--decode-face-ranges, etc.)
-      (let ((i 0))
+      (let ((result (when (> num-rows 0) (make-vector num-rows nil)))
+            (i 0))
         (while (< i num-rows)
+          (kuro--require-bytes vec pos 12 "row header")
           (let* ((pos4            (+ pos 4))
                  (row-index       (kuro--read-u32-le vec pos))
-                 (num-face-ranges (kuro--read-u32-le vec pos4)))
-            ;; text_byte_len is always 0 in the with-strings frame; skip that u32.
+                 (num-face-ranges (kuro--read-u32-le vec pos4))
+                 (text-byte-len   (kuro--read-u32-le vec (+ pos4 4))))
+            (unless (zerop text-byte-len)
+              (kuro--binary-decoder-error
+               "with-strings row %d has non-zero text_byte_len %d"
+               i text-byte-len))
             (setq pos (+ pos4 8))
             ;; Inline text acquisition: direct aref instead of (funcall text-fn ...).
             ;; kuro--decode-face-ranges and kuro--decode-col-to-buf return the primary
@@ -185,8 +216,12 @@ At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
                    (p3        kuro--decode-pos))
               (setq pos p3)
               (aset result i (vector row-index text face-list col-to-buf))))
-          (setq i (1+ i))))
-      result)))
+          (setq i (1+ i)))
+        (unless (= pos (length vec))
+          (kuro--binary-decoder-error
+           "trailing %d byte(s) after %d row(s)"
+           (- (length vec) pos) num-rows))
+        result))))
 
 (defun kuro--poll-updates-binary-optimised (session-id)
   "Poll dirty lines for SESSION-ID using the text-string-optimised FFI path.

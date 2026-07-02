@@ -4,9 +4,9 @@ use emacs::defun;
 use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 
 use super::{
-    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_or_false,
-    define_session_data_query_mut, define_session_query_default, define_session_query_opt,
-    query_session, query_session_opt,
+    build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_mut,
+    define_session_data_query_or_false, define_session_query_default, define_session_query_opt,
+    query_session, query_session_opt, u64_to_lisp_i64, usize_to_lisp_i64,
 };
 
 define_session_query_opt!(
@@ -81,10 +81,6 @@ define_drain_session_vec_to_lisp!(
 //
 // See: <https://gitlab.freedesktop.org/Per_Bothner/specifications/-/blob/master/proposals/semantic-prompts.md>
 define_drain_session_vec_to_lisp!(
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "row/col are terminal dimensions (≤ 65535) and duration_ms is shell-supplied (≤ u64::MAX); usize/u64→i64 may wrap on adversarial input but is acceptable for a display-side hint"
-    )]
     kuro_core_poll_prompt_marks,
     "poll_prompt_marks",
     super::super::abstraction::session::TerminalSession::take_prompt_marks,
@@ -96,8 +92,10 @@ define_drain_session_vec_to_lisp!(
             crate::types::osc::PromptMark::CommandEnd => "command-end",
         };
         let mark_val = mark_str.into_lisp(env)?;
-        let row_val = (event.row as i64).into_lisp(env)?;
-        let col_val = (event.col as i64).into_lisp(env)?;
+        let row_val =
+            usize_to_lisp_i64(event.row, "prompt mark row must fit i64").into_lisp(env)?;
+        let col_val =
+            usize_to_lisp_i64(event.col, "prompt mark column must fit i64").into_lisp(env)?;
         let exit_val = match event.exit_code {
             Some(code) => i64::from(code).into_lisp(env)?,
             None => false.into_lisp(env)?,
@@ -107,7 +105,7 @@ define_drain_session_vec_to_lisp!(
             None => false.into_lisp(env)?,
         };
         let duration_val = match event.duration_ms {
-            Some(ms) => (ms as i64).into_lisp(env)?,
+            Some(ms) => u64_to_lisp_i64(ms, "prompt mark duration must fit i64").into_lisp(env)?,
             None => false.into_lisp(env)?,
         };
         let err_val = match event.err_path {
@@ -115,10 +113,18 @@ define_drain_session_vec_to_lisp!(
             None => false.into_lisp(env)?,
         };
 
-        Ok(build_emacs_list_from_values(
+        build_emacs_list_from_values(
             env,
-            [mark_val, row_val, col_val, exit_val, aid_val, duration_val, err_val],
-        )?)
+            [
+                mark_val,
+                row_val,
+                col_val,
+                exit_val,
+                aid_val,
+                duration_val,
+                err_val,
+            ],
+        )
     }
 );
 
@@ -128,7 +134,7 @@ define_drain_session_vec_to_lisp!(
     kuro_core_poll_eval_commands,
     "poll_eval_commands",
     super::super::abstraction::session::TerminalSession::take_eval_commands,
-    |env, cmd| { Ok(cmd.into_lisp(env)?) }
+    |env, cmd| { cmd.into_lisp(env) }
 );
 
 define_session_query_opt!(
@@ -185,28 +191,25 @@ define_session_data_query_or_false!(
 );
 
 define_session_data_query_or_false!(
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "row/start/end are terminal dimensions (≤ 65535); usize→i64 never wraps"
-    )]
     /// Poll hyperlink ranges for all visible terminal rows.
     ///
     /// Returns a flat list of `(ROW START END URI)` entries, one per hyperlink
     /// range per row.  `START` and `END` are buffer character offsets.
     /// Rows without hyperlinks are omitted.
     kuro_core_poll_hyperlink_ranges,
-        "poll_hyperlink_ranges",
-        |session| session.get_hyperlink_ranges(),
-        |kuro_env, ranges| {
-            build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, uri)| {
-                let row_val = (row as i64).into_lisp(env)?;
-                let start_val = (start as i64).into_lisp(env)?;
-                let end_val = (end as i64).into_lisp(env)?;
-                let uri_val = uri.into_lisp(env)?;
+    "poll_hyperlink_ranges",
+    |session| session.get_hyperlink_ranges(),
+    |kuro_env, ranges| {
+        build_emacs_list_from_rev(kuro_env, ranges, |env, (row, start, end, uri)| {
+            let row_val = usize_to_lisp_i64(row, "hyperlink row must fit i64").into_lisp(env)?;
+            let start_val =
+                usize_to_lisp_i64(start, "hyperlink start must fit i64").into_lisp(env)?;
+            let end_val = usize_to_lisp_i64(end, "hyperlink end must fit i64").into_lisp(env)?;
+            let uri_val = uri.into_lisp(env)?;
 
-                build_emacs_list_from_values(env, [row_val, start_val, end_val, uri_val])
-            })
-        }
+            build_emacs_list_from_values(env, [row_val, start_val, end_val, uri_val])
+        })
+    }
 );
 
 define_session_data_query_mut!(

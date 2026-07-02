@@ -105,13 +105,13 @@ impl Default for GraphicsStore {
 impl GraphicsStore {
     const MAX_BYTES: usize = 256 * 1024 * 1024; // 256 MB
 
-    fn rewrite_placements<F>(&mut self, mut f: F)
+    fn rewrite_placements<F>(&mut self, f: F)
     where
         F: FnMut(ImagePlacement) -> Option<ImagePlacement>,
     {
         self.placements = std::mem::take(&mut self.placements)
             .into_iter()
-            .filter_map(|placement| f(placement))
+            .filter_map(f)
             .collect();
     }
 

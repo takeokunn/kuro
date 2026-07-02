@@ -3,11 +3,29 @@ use crate::parser;
 use crate::TerminalCore;
 
 macro_rules! dispatch_if_handled {
-    ($call:expr, $ret:expr) => {
+    ($call:expr) => {
         if $call {
-            return $ret;
+            return;
         }
     };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModifyOtherKeysLevel(u8);
+
+impl ModifyOtherKeysLevel {
+    fn from_param(value: u16) -> Option<Self> {
+        match value {
+            0..=2 => u8::try_from(value).ok().map(Self),
+            _ => None,
+        }
+    }
+}
+
+impl From<ModifyOtherKeysLevel> for u8 {
+    fn from(level: ModifyOtherKeysLevel) -> Self {
+        level.0
+    }
 }
 
 #[inline]
@@ -32,7 +50,9 @@ fn handle_csi_modify_other_keys(tc: &mut TerminalCore, params: &vte::Params) {
     let key_type = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
     let value = iter.next().and_then(|p| p.first()).copied().unwrap_or(0);
     if key_type == 4 {
-        tc.dec_modes.modify_other_keys = value.min(2) as u8;
+        if let Some(level) = ModifyOtherKeysLevel::from_param(value) {
+            tc.dec_modes.modify_other_keys = u8::from(level);
+        }
     }
 }
 
@@ -442,27 +462,30 @@ fn handle_csi_standard_dispatch(
     c: char,
 ) {
     // Handle standard CSI sequences.
-    dispatch_if_handled!(
-        handle_csi_standard_status_dispatch(tc, params, intermediates, c),
-        ()
-    );
-    dispatch_if_handled!(handle_csi_standard_sgr_dispatch(tc, params, c), ());
-    dispatch_if_handled!(
-        handle_csi_standard_spacing_dispatch(tc, params, intermediates, c),
-        ()
-    );
-    dispatch_if_handled!(handle_csi_standard_cursor_dispatch(tc, params, c), ());
+    dispatch_if_handled!(handle_csi_standard_status_dispatch(
+        tc,
+        params,
+        intermediates,
+        c
+    ));
+    dispatch_if_handled!(handle_csi_standard_sgr_dispatch(tc, params, c));
+    dispatch_if_handled!(handle_csi_standard_spacing_dispatch(
+        tc,
+        params,
+        intermediates,
+        c
+    ));
+    dispatch_if_handled!(handle_csi_standard_cursor_dispatch(tc, params, c));
     // Palette stack opcodes use the `#` intermediate and share command letters
     // with insert/delete. Dispatch them first so `CSI #P/#Q/#R` is not
     // consumed by the plain edit path.
-    dispatch_if_handled!(
-        handle_csi_standard_palette_dispatch(tc, intermediates, c),
-        ()
-    );
-    dispatch_if_handled!(
-        handle_csi_standard_edit_dispatch(tc, params, intermediates, c),
-        ()
-    );
+    dispatch_if_handled!(handle_csi_standard_palette_dispatch(tc, intermediates, c));
+    dispatch_if_handled!(handle_csi_standard_edit_dispatch(
+        tc,
+        params,
+        intermediates,
+        c
+    ));
 
     // Unknown/unhandled CSI sequences are silently ignored
 }

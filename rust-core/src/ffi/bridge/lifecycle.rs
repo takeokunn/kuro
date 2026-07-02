@@ -3,6 +3,7 @@
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, catch_panic,
     define_session_query_bool, define_session_query_default, query_session, query_session_mut,
+    u64_to_lisp_i64,
 };
 use crate::ffi::abstraction::{
     attach_session, detach_session, init_session, list_sessions, shutdown_session,
@@ -49,7 +50,7 @@ fn build_session_list_entry<'e>(
     is_detached: bool,
     is_alive: bool,
 ) -> EmacsResult<Value<'e>> {
-    let id_val = (id as i64).into_lisp(env)?;
+    let id_val = u64_to_lisp_i64(id, "session id must fit i64").into_lisp(env)?;
     let cmd_val = command.into_lisp(env)?;
     let detached_val = is_detached.into_lisp(env)?;
     let alive_val = is_alive.into_lisp(env)?;
@@ -68,10 +69,6 @@ fn build_session_list_entry<'e>(
 /// programs (vim, htop, …) that start before the resize is processed will render
 /// using the stale 24×80 geometry and never re-draw correctly.
 // `#[defun]` requires owned String for Emacs string arguments — &str is not supported.
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "session_id is a monotonically increasing counter starting at 1; will never reach i64::MAX in practice"
-)]
 #[defun]
 fn kuro_core_init<'e>(
     env: &'e Env,
@@ -83,7 +80,7 @@ fn kuro_core_init<'e>(
     let args = collect_shell_args(env, shell_args)?;
     catch_panic(env, move || {
         let session_id = init_session(&command, &args, rows, cols)?;
-        Ok(session_id as i64)
+        Ok(u64_to_lisp_i64(session_id, "new session id must fit i64"))
     })
 }
 
@@ -145,10 +142,6 @@ define_session_query_default!(
 /// Returns a proper list where each element is `(SESSION-ID COMMAND DETACHED-P ALIVE-P)`.
 /// SESSION-ID is an integer, COMMAND is a string, DETACHED-P and ALIVE-P are booleans.
 #[defun]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "session IDs are small monotonically increasing counters; will never reach i64::MAX"
-)]
 fn kuro_core_list_sessions(env: &Env) -> EmacsResult<Value<'_>> {
     let sessions = list_sessions();
     build_emacs_list_from_rev(

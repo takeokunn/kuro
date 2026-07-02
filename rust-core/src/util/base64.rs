@@ -1,18 +1,23 @@
 //! Self-contained RFC 4648 base64 encode/decode (standard alphabet, with padding).
 
+use std::sync::LazyLock;
+
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const INVALID: u8 = 0xFF;
 const PAD: u8 = b'=';
-const DECODE_TABLE: [u8; 256] = build_decode_table();
+static DECODE_TABLE: LazyLock<[u8; 256]> = LazyLock::new(build_decode_table);
 
-const fn build_decode_table() -> [u8; 256] {
+fn build_decode_table() -> [u8; 256] {
     let mut table = [INVALID; 256];
-    let mut i = 0;
-    while i < ALPHABET.len() {
-        table[ALPHABET[i] as usize] = i as u8;
-        i += 1;
+    for (i, &symbol) in ALPHABET.iter().enumerate() {
+        table[usize::from(symbol)] = u8::try_from(i).expect("base64 alphabet index fits u8");
     }
     table
+}
+
+#[inline]
+fn alphabet_symbol(index: u8) -> u8 {
+    ALPHABET[usize::from(index)]
 }
 
 /// Encode `input` to base64 (standard alphabet, `=` padding).
@@ -26,21 +31,20 @@ pub(crate) fn encode(input: &[u8]) -> String {
         let b0 = chunk[0];
         let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
         let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
-        out.push(ALPHABET[((b0 >> 2) & 0x3F) as usize]);
-        out.push(ALPHABET[(((b0 & 0x3) << 4) | (b1 >> 4)) as usize]);
+        out.push(alphabet_symbol((b0 >> 2) & 0x3F));
+        out.push(alphabet_symbol(((b0 & 0x3) << 4) | (b1 >> 4)));
         out.push(if chunk.len() > 1 {
-            ALPHABET[(((b1 & 0xF) << 2) | (b2 >> 6)) as usize]
+            alphabet_symbol(((b1 & 0xF) << 2) | (b2 >> 6))
         } else {
             b'='
         });
         out.push(if chunk.len() > 2 {
-            ALPHABET[(b2 & 0x3F) as usize]
+            alphabet_symbol(b2 & 0x3F)
         } else {
             b'='
         });
     }
-    // SAFETY: ALPHABET contains only ASCII bytes; b'=' is ASCII.
-    unsafe { String::from_utf8_unchecked(out) }
+    String::from_utf8(out).expect("base64 encoder output must be valid ASCII")
 }
 
 /// Decode base64 (standard alphabet, `=` padding). Returns `Err` on invalid input.
@@ -104,7 +108,7 @@ fn decode_quartet(chunk: &[u8], out: &mut Vec<u8>) -> Result<(), DecodeError> {
 }
 
 fn decode_required(byte: u8) -> Result<u8, DecodeError> {
-    let value = DECODE_TABLE[byte as usize];
+    let value = DECODE_TABLE[usize::from(byte)];
     if value == INVALID {
         Err(DecodeError)
     } else {

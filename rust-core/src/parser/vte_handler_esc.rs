@@ -58,8 +58,8 @@ pub(super) fn handle_esc_dispatch(term: &mut TerminalCore, intermediates: &[u8],
         // DECALN — Screen Alignment Pattern (ESC # 8)
         // Fills every cell with 'E' using default SGR attributes and homes the cursor.
         (b"#", b'8') => {
-            let rows = term.screen.rows() as usize;
-            let cols = term.screen.cols() as usize;
+            let rows = usize::from(term.screen.rows());
+            let cols = usize::from(term.screen.cols());
             let default_attrs = crate::types::cell::SgrAttributes::default();
             for row in 0..rows {
                 term.screen.move_cursor(row, 0);

@@ -33,13 +33,12 @@ fn test_encode_line_faces_three_ascii_cells_text() {
         Cell::with_char_and_width('B', SgrAttributes::default(), CellWidth::Half),
         Cell::with_char_and_width('C', SgrAttributes::default(), CellWidth::Half),
     ];
-    let (row, text, face_ranges, col_to_buf) =
-        crate::ffi::abstraction::session::TerminalSession::encode_line_faces(3, &cells);
+    let encoded = crate::ffi::abstraction::session::TerminalSession::encode_line_faces(3, &cells);
 
-    assert_eq!(row, 3);
-    assert_eq!(text, "ABC");
-    assert!(!face_ranges.is_empty());
-    assert!(col_to_buf.is_empty());
+    assert_eq!(encoded.row, 3);
+    assert_eq!(encoded.data.text, "ABC");
+    assert!(!encoded.data.face_ranges.is_empty());
+    assert!(encoded.data.col_to_buf.is_empty());
 }
 
 #[test]
@@ -61,11 +60,10 @@ fn test_encode_line_faces_last_row_index_preserved() {
         SgrAttributes::default(),
         CellWidth::Half,
     )];
-    let (row, text, _, _) =
-        crate::ffi::abstraction::session::TerminalSession::encode_line_faces(23, &cells);
+    let encoded = crate::ffi::abstraction::session::TerminalSession::encode_line_faces(23, &cells);
 
-    assert_eq!(row, 23);
-    assert_eq!(text, "Z");
+    assert_eq!(encoded.row, 23);
+    assert_eq!(encoded.data.text, "Z");
 }
 
 #[test]

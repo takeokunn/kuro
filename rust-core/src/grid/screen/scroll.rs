@@ -9,14 +9,14 @@ use super::{Color, Line, Screen, ScrollRegion};
 #[inline]
 fn push_to_scrollback(screen: &mut Screen, line: Line) {
     screen.scrollback_buffer.push_back(line);
-    screen.scrollback_line_count += 1;
+    screen.scrollback_line_count = screen.scrollback_buffer.len();
     while screen.scrollback_line_count > screen.scrollback_max_lines {
         if screen.scrollback_buffer.pop_front().is_none() {
-            screen.scrollback_line_count = screen.scrollback_buffer.len();
             break;
         }
-        screen.scrollback_line_count -= 1;
+        screen.scrollback_line_count = screen.scrollback_buffer.len();
     }
+    screen.scrollback_line_count = screen.scrollback_buffer.len();
 }
 
 impl Screen {
@@ -34,15 +34,15 @@ impl Screen {
 
     #[inline]
     fn clamp_cursor_row_to_rows(&mut self) {
-        let rows = self.rows as usize;
+        let rows = usize::from(self.rows);
         if self.cursor.row >= rows {
             self.cursor.row = rows.saturating_sub(1);
         }
     }
 
     fn scroll_up_full_screen(&mut self, n: usize, bg: Color) {
-        let rows = self.rows as usize;
-        let cols = self.cols as usize;
+        let rows = usize::from(self.rows);
+        let cols = usize::from(self.cols);
         let n_actual = n.min(rows);
 
         // Swap each evicted line with a fresh blank, saving the original
@@ -86,7 +86,7 @@ impl Screen {
     fn scroll_up_partial_region(&mut self, n: usize, bg: Color, is_primary: bool) {
         let top = self.scroll_region.top;
         let bottom = self.scroll_region.bottom;
-        let cols = self.cols as usize;
+        let cols = usize::from(self.cols);
 
         // Partial-region scroll: fall back to remove+insert.
         // Each iteration is O(min(top, len-top)) for both remove and
@@ -114,7 +114,7 @@ impl Screen {
     }
 
     fn scroll_down_full_screen(&mut self, n: usize, bg: Color) {
-        let rows = self.rows as usize;
+        let rows = usize::from(self.rows);
         let n_actual = n.min(rows);
         self.lines.rotate_right(n_actual);
 
@@ -140,7 +140,7 @@ impl Screen {
     fn scroll_down_partial_region(&mut self, n: usize, bg: Color, rows: usize) {
         let top = self.scroll_region.top;
         let bottom = self.scroll_region.bottom;
-        let cols = self.cols as usize;
+        let cols = usize::from(self.cols);
 
         // Partial-region scroll: fall back to remove+insert.
         for _ in 0..n {
@@ -162,7 +162,7 @@ impl Screen {
     pub(super) fn scroll_up_impl(&mut self, n: usize, bg: Color, is_primary: bool) {
         let top = self.scroll_region.top;
         let bottom = self.scroll_region.bottom;
-        let rows = self.rows as usize;
+        let rows = usize::from(self.rows);
 
         // Full-screen scroll fast path: top==0, bottom==rows, primary screen.
         // VecDeque::rotate_left(n) shifts all logical rows in O(n) pointer ops
@@ -189,7 +189,7 @@ impl Screen {
     pub(super) fn scroll_down_impl(&mut self, n: usize, bg: Color, is_primary: bool) {
         let top = self.scroll_region.top;
         let bottom = self.scroll_region.bottom;
-        let rows = self.rows as usize;
+        let rows = usize::from(self.rows);
 
         // Full-screen scroll-down fast path (mirrors scroll_up rotation, but
         // does not save evicted lines to scrollback — lines scrolled off the

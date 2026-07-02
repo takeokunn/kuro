@@ -6,6 +6,7 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_query_default,
     query_session, query_session_data_or_default_mut_with_panic, query_session_mut,
+    usize_to_lisp_i64,
 };
 use crate::error::KuroError;
 
@@ -47,16 +48,13 @@ fn emit_error<'e>(env: &'e Env, e: &KuroError) -> EmacsResult<Value<'e>> {
 
 define_poll_updates_handler!(
     /// Poll for terminal updates and return dirty lines
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no is a terminal row index (≤ 65535); usize→i64 never wraps"
-    )]
     kuro_core_poll_updates,
     "panic in poll_updates",
     poll_dirty_lines,
     |env, dirty_lines| {
         build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
-            let line_no_val = (line_no as i64).into_lisp(env)?;
+            let line_no_val =
+                usize_to_lisp_i64(line_no, "dirty line row index must fit i64").into_lisp(env)?;
             let text_val = text.into_lisp(env)?;
             build_emacs_list_from_values(env, [line_no_val, text_val])
         })
@@ -80,10 +78,6 @@ define_poll_updates_handler!(
     /// dirty set — they will surface as dirty lines in the *next* render cycle.
     /// This is correct behaviour: the worst-case additional latency is bounded
     /// to `1 / frame_rate` (typically ≤ 16 ms at 60 fps), which is imperceptible.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_with_faces,
     "panic in poll_updates_with_faces",
     poll_encoded_lines,
@@ -104,10 +98,6 @@ define_poll_updates_handler!(
     /// produces, at the cost of a slightly more complex Elisp decoder.
     ///
     /// Returns `nil` (`false`) when no dirty lines are present.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_binary,
     "panic in poll_updates_binary",
     poll_encoded_lines,
@@ -115,7 +105,10 @@ define_poll_updates_handler!(
         if lines.is_empty() {
             return false.into_lisp(env);
         }
-        let bytes = crate::ffi::codec::encode_screen_binary(&lines);
+        let bytes = match crate::ffi::codec::encode_screen_binary(&lines) {
+            Ok(bytes) => bytes,
+            Err(error) => return emit_error(env, &KuroError::from(error)),
+        };
         build_emacs_vector_from_iter(
             env,
             bytes.len(),
@@ -149,10 +142,6 @@ define_poll_updates_handler!(
     ///   strings are provided via `TEXT-STRINGS` instead).
     ///
     /// Returns `nil` (`false`) when no dirty lines are present.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "line_no/start_buf/end_buf/offset are terminal indices (≤ 65535); flags is a u64 bitmask (≤ 0x1FF); all fit in i64"
-    )]
     kuro_core_poll_updates_binary_with_strings,
     "panic in poll_updates_binary_with_strings",
     poll_binary_direct,

@@ -329,14 +329,15 @@ fn test_xtmodkeys_type4_value0_disables() {
     );
 }
 
-/// XTMODKEYS with a value > 2 is clamped to 2 (value.min(2)).
+/// XTMODKEYS with a value > 2 is invalid and must not change state.
 #[test]
-fn test_xtmodkeys_type4_value_clamped_to_2() {
+fn test_xtmodkeys_type4_invalid_value_is_noop() {
     let mut term = crate::TerminalCore::new(24, 80);
+    term.dec_modes.modify_other_keys = 1;
     term.advance(b"\x1b[>4;99m");
     assert_eq!(
-        term.dec_modes.modify_other_keys, 2,
-        "XTMODKEYS value > 2 must be clamped to 2"
+        term.dec_modes.modify_other_keys, 1,
+        "XTMODKEYS value > 2 must not change modify_other_keys"
     );
 }
 

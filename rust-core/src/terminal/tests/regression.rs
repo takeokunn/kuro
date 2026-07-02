@@ -83,7 +83,7 @@ fn test_encode_line_preserves_trailing_spaces_for_cursor() {
     assert_eq!(cursor_col, 2);
 
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let text = encode_line(&line.cells).text;
 
     // The encoded text must be at least cursor_col characters long so that
     // `(+ line-start cursor_col)` never exceeds `line-end-position`.
@@ -105,7 +105,7 @@ fn test_encode_line_preserves_trailing_spaces_for_cursor() {
 fn test_blank_line_is_not_empty_after_encode() {
     let term = super::make_term();
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let text = encode_line(&line.cells).text;
     // A blank 80-column line: encoded text must be 80 spaces, not "".
     assert_eq!(
         text.len(),
@@ -176,7 +176,7 @@ fn test_internal_spaces_preserved() {
         "space at col 3 in 'foo   bar' must be stored in the grid"
     );
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let text = encode_line(&line.cells).text;
     assert!(
         text.starts_with("foo   bar"),
         "encoded text must start with 'foo   bar' (spaces preserved), got: {:?}",

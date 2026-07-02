@@ -53,24 +53,18 @@ test_osc_default_colors_query_unset!(
 
 // ── New edge-case tests ────────────────────────────────────────────────────────
 
-/// `parse_color_spec` with 1-digit channels treats them as ≤2-digit (value used directly).
-///
-/// The `normalize` function uses `digits > 2` to decide between 4-digit (shift-right-8)
-/// and short-form (direct) modes, so "f" → `u16 = 15` → `15 as u8`.
+/// `parse_color_spec` with 1-digit channels treats them as short-form values.
 #[test]
 fn test_parse_color_spec_rgb_single_digit_channel_direct_value() {
-    // 1-digit channels: digits ≤ 2, so value is used directly without shifting.
     // "f" = 0x0F = 15, "8" = 8, "0" = 0
     assert_eq!(parse_color_spec("rgb:f/8/0"), Some([15, 8, 0]));
 }
 
 /// `parse_color_spec` with 3-digit channels treats them as >2-digit (upper 8 bits used).
 ///
-/// The `normalize` function uses `digits > 2`, so 3-digit "fff" → `u16 = 0x0FFF` →
-/// `(0x0FFF >> 8) as u8 = 0x0F = 15`.
+/// 3-digit "fff" → `u16 = 0x0FFF` → upper byte `0x0F = 15`.
 #[test]
 fn test_parse_color_spec_rgb_3digit_channel_uses_upper_byte() {
-    // 3-digit channels: digits > 2, so upper 8 bits are taken.
     // "fff" = 0x0FFF → 0x0FFF >> 8 = 0x0F = 15; "000" → 0
     assert_eq!(parse_color_spec("rgb:fff/000/000"), Some([15, 0, 0]));
 }

@@ -11,9 +11,15 @@ use super::abstraction::{
     emacs_env, emacs_value, init_session, shutdown_session, with_session, with_session_readonly,
     KuroFFI,
 };
+use super::boundary::{FfiScrollbackMaxLines, FfiScrollbackQueryLimit, FfiWindowSize};
 
 /// Legacy session ID used by the `RawFFI` trait implementation.
 const LEGACY_SESSION_ID: u64 = 0;
+
+#[inline]
+fn legacy_usize_to_i64(value: usize) -> i64 {
+    i64::try_from(value).expect("dirty line row index must fit i64")
+}
 
 /// Raw C types from Emacs module API
 #[repr(C)]
@@ -44,12 +50,12 @@ pub struct RawFFI;
 
 impl KuroFFI for RawFFI {
     fn init(env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        // Convert i64 to u16 — KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX
-        let rows = Self::window_dim(rows);
-        let cols = Self::window_dim(cols);
+        let Some(size) = FfiWindowSize::parse(rows, cols) else {
+            return Self::make_bool(env, false);
+        };
 
         // Initialize session
-        match init_session(command, &[], rows, cols) {
+        match init_session(command, &[], size.rows(), size.cols()) {
             Ok(_) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
@@ -64,7 +70,7 @@ impl KuroFFI for RawFFI {
             |_| Self::make_nil(env),
             |dirty_lines| {
                 Self::build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
-                    let line_no_val = Self::make_integer(env, line_no as i64);
+                    let line_no_val = Self::make_integer(env, legacy_usize_to_i64(line_no));
                     let text_val = Self::make_string(env, &text);
                     Self::cons(env, line_no_val, text_val)
                 })
@@ -85,11 +91,12 @@ impl KuroFFI for RawFFI {
     }
 
     fn resize(env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
-        let rows = Self::window_dim(rows);
-        let cols = Self::window_dim(cols);
+        let Some(size) = FfiWindowSize::parse(rows, cols) else {
+            return Self::make_bool(env, false);
+        };
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
-            session.resize(rows, cols)?;
+            session.resize(size.rows(), size.cols())?;
             Ok(())
         });
 
@@ -119,8 +126,12 @@ impl KuroFFI for RawFFI {
     }
 
     fn get_scrollback(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
+        let Some(limit) = FfiScrollbackQueryLimit::parse(max_lines) else {
+            return Self::make_nil(env);
+        };
+
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
-            Ok(session.get_scrollback(max_lines as usize))
+            Ok(session.get_scrollback(limit.get()))
         });
         result.map_or_else(
             |_| Self::make_nil(env),
@@ -146,14 +157,13 @@ impl KuroFFI for RawFFI {
         }
     }
 
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "KuroFFI trait requires i64; caller passes non-negative scrollback limit"
-    )]
     fn set_scrollback_max_lines(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
+        let Some(max_lines) = FfiScrollbackMaxLines::parse(max_lines) else {
+            return Self::make_bool(env, false);
+        };
+
         let result = with_session(LEGACY_SESSION_ID, |session| {
-            session.set_scrollback_max_lines(max_lines as usize);
+            session.set_scrollback_max_lines(max_lines.get());
             Ok(())
         });
 
@@ -165,6 +175,11 @@ impl KuroFFI for RawFFI {
 }
 
 impl RawFFI {
+    /// Return an opaque non-nil test value without encoding data into a pointer.
+    const fn make_non_nil_value() -> *mut emacs_value {
+        std::ptr::dangling_mut::<emacs_value>()
+    }
+
     /// Create a nil value
     const fn make_nil(_env: *mut emacs_env) -> *mut emacs_value {
         // In a real implementation, this would call emacs_make_nil or equivalent
@@ -179,59 +194,32 @@ impl RawFFI {
         if value {
             // Return a non-null pointer for t (this is a placeholder)
             // In real code, this would be env.intern("t")
-            std::ptr::dangling_mut::<emacs_value>()
+            Self::make_non_nil_value()
         } else {
             std::ptr::null_mut()
         }
     }
 
     /// Create an integer value
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "placeholder: encodes i64 as pointer offset; test double only — never called in production"
-    )]
-    const fn make_integer(_env: *mut emacs_env, value: i64) -> *mut emacs_value {
+    const fn make_integer(_env: *mut emacs_env, _value: i64) -> *mut emacs_value {
         // In a real implementation, this would call env.make_integer(value)
-        // For now, return a pointer with the value encoded (placeholder)
-        (value as usize + 0x1000) as *mut emacs_value
+        Self::make_non_nil_value()
     }
 
     /// Create a string value
-#[expect(
-    clippy::as_ptr_cast_mut,
-    reason = "test double stub: &str has no as_mut_ptr(); *mut emacs_value is an opaque pointer type"
-)]
-const fn make_string(_env: *mut emacs_env, s: &str) -> *mut emacs_value {
-    // In a real implementation, this would call env.make_string(s)
-    // For now, return a pointer to the string (placeholder)
-    s.as_ptr() as *mut emacs_value
-}
+    const fn make_string(_env: *mut emacs_env, _s: &str) -> *mut emacs_value {
+        // In a real implementation, this would call env.make_string(s)
+        Self::make_non_nil_value()
+    }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX"
-)]
-fn window_dim(value: i64) -> u16 {
-    value as u16
-}
-
-/// Create a cons cell (pair)
-#[expect(
-    clippy::similar_names,
-    reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent"
-)]
+    /// Create a cons cell (pair)
     fn cons(
         _env: *mut emacs_env,
-        car: *mut emacs_value,
-        cdr: *mut emacs_value,
+        _car: *mut emacs_value,
+        _cdr: *mut emacs_value,
     ) -> *mut emacs_value {
         // In a real implementation, this would call env.cons(car, cdr)
-        // For now, return a pointer with the pair encoded (placeholder)
-        let car_val = car as usize;
-        let cdr_val = cdr as usize;
-        ((car_val << 32) | cdr_val) as *mut emacs_value
+        Self::make_non_nil_value()
     }
 
     fn build_emacs_list_from_rev<T, I, F>(
@@ -338,7 +326,6 @@ fn window_dim(value: i64) -> u16 {
 ///     pub fn cdr(env: *mut emacs_env, cons_cell: *mut emacs_value) -> *mut emacs_value;
 /// }
 /// ```
-
 #[cfg(test)]
 #[path = "fallback_tests.rs"]
 mod tests;

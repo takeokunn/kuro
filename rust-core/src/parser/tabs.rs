@@ -129,13 +129,25 @@ impl TabStops {
     }
 }
 
+fn positive_param_or_one(params: &vte::Params) -> usize {
+    usize::from(
+        params
+            .iter()
+            .next()
+            .and_then(|p| p.iter().next())
+            .copied()
+            .unwrap_or(1)
+            .max(1),
+    )
+}
+
 /// Handle horizontal tab (HT - 0x09)
 ///
 /// Move cursor to the next tab stop.
 pub fn handle_ht(screen: &mut crate::grid::Screen, tabs: &TabStops) {
     let current_col = screen.cursor().col;
     let next_stop = tabs.next_stop(current_col + 1); // +1 to move forward
-    screen.cursor_mut().col = next_stop.min(screen.cols() as usize - 1);
+    screen.cursor_mut().col = next_stop.min(usize::from(screen.cols()).saturating_sub(1));
 }
 
 /// Handle horizontal tab set (HTS - ESC H)
@@ -176,19 +188,14 @@ pub fn handle_tbc(screen: &crate::grid::Screen, tabs: &mut TabStops, params: &vt
 /// Move cursor forward to the Ps-th tab stop (default 1).
 /// Stops at the right margin if there are fewer tab stops remaining.
 pub fn handle_cht(screen: &mut crate::grid::Screen, tabs: &TabStops, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1) as usize;
-    let cols = screen.cols() as usize;
+    let n = positive_param_or_one(params);
+    let cols = usize::from(screen.cols());
+    let right_margin = cols.saturating_sub(1);
     let mut col = screen.cursor().col;
     for _ in 0..n {
         let next = tabs.next_stop(col + 1);
         if next >= cols {
-            col = cols - 1;
+            col = right_margin;
             break;
         }
         col = next;
@@ -201,13 +208,7 @@ pub fn handle_cht(screen: &mut crate::grid::Screen, tabs: &TabStops, params: &vt
 /// Move cursor backward to the Ps-th tab stop to the left (default 1).
 /// Stops at column 0 if there are fewer tab stops to the left.
 pub fn handle_cbt(screen: &mut crate::grid::Screen, tabs: &TabStops, params: &vte::Params) {
-    let n = params
-        .iter()
-        .next()
-        .and_then(|p| p.iter().next())
-        .copied()
-        .unwrap_or(1)
-        .max(1) as usize;
+    let n = positive_param_or_one(params);
     let mut col = screen.cursor().col;
     for _ in 0..n {
         if col == 0 {

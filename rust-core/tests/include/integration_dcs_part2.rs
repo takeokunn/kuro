@@ -332,4 +332,3 @@ fn decrqss_unknown_setting_reports_invalid() {
         vec![b"\x1bP0$r\x1b\\".to_vec()]
     );
 }
-

@@ -1,6 +1,6 @@
+use super::super::TerminalSession;
 use super::tests_support::arb_cell;
 use crate::ffi::abstraction::tests_unit::make_session;
-use super::super::TerminalSession;
 use crate::types::cell::CellWidth;
 use proptest::prelude::*;
 
@@ -23,7 +23,8 @@ proptest! {
     fn prop_encode_line_faces_coverage_invariant(
         cells in proptest::collection::vec(arb_cell(), 1..=80usize),
     ) {
-        let (_row, _text, face_ranges, _col_to_buf) = TerminalSession::encode_line_faces(0, &cells);
+        let encoded = TerminalSession::encode_line_faces(0, &cells);
+        let face_ranges = &encoded.data.face_ranges;
 
         let non_placeholder_count = cells.iter().filter(|c| {
             !(c.width == CellWidth::Wide && c.grapheme.as_str() == " ")
@@ -34,22 +35,22 @@ proptest! {
         }
 
         if !face_ranges.is_empty() {
-            prop_assert_eq!(face_ranges[0].0, 0,
-                "First range must start at 0, got {}", face_ranges[0].0);
+            prop_assert_eq!(face_ranges[0].start_buf, 0,
+                "First range must start at 0, got {}", face_ranges[0].start_buf);
 
             let last = face_ranges.last().unwrap();
-            prop_assert_eq!(last.1, non_placeholder_count,
-                "Last range must end at {}, got {}", non_placeholder_count, last.1);
+            prop_assert_eq!(last.end_buf, non_placeholder_count,
+                "Last range must end at {}, got {}", non_placeholder_count, last.end_buf);
 
             for window in face_ranges.windows(2) {
-                prop_assert_eq!(window[0].1, window[1].0,
+                prop_assert_eq!(window[0].end_buf, window[1].start_buf,
                     "Gap/overlap between ranges: first ends at {}, next starts at {}",
-                    window[0].1, window[1].0);
+                    window[0].end_buf, window[1].start_buf);
             }
 
-            for (start, end, _, _, _, _) in &face_ranges {
-                prop_assert!(start < end,
-                    "Empty range found: start={}, end={}", start, end);
+            for range in face_ranges {
+                prop_assert!(range.start_buf < range.end_buf,
+                    "Empty range found: start={}, end={}", range.start_buf, range.end_buf);
             }
         }
     }
@@ -66,22 +67,27 @@ fn test_integration_bold_rgb_fg() {
     let results = session.get_dirty_lines_with_faces();
 
     assert!(!results.is_empty(), "Expected dirty lines after advancing");
-    let (_row, text, face_ranges, _col_to_buf) = &results[0];
+    let line = &results[0];
+    let text = &line.data.text;
+    let face_ranges = &line.data.face_ranges;
     assert_eq!(text.trim_end(), "X");
     assert!(!face_ranges.is_empty());
 
-    let (start, end, fg, bg, flags, _ul_color) = face_ranges[0];
-    assert_eq!(start, 0);
-    assert_eq!(end, 1);
+    let range = face_ranges[0];
+    assert_eq!(range.start_buf, 0);
+    assert_eq!(range.end_buf, 1);
     assert_eq!(
-        fg, 0x00FF_0080u32,
+        range.fg, 0x00FF_0080u32,
         "fg should be Rgb(255,0,128) = 0x00FF0080"
     );
     assert_eq!(
-        bg, 0xFF00_0000u32,
+        range.bg, 0xFF00_0000u32,
         "bg should be Default sentinel = 0xFF00_0000"
     );
-    assert_eq!(flags, 0x01u64, "flags should have bold bit set (0x01)");
+    assert_eq!(
+        range.flags, 0x01u64,
+        "flags should have bold bit set (0x01)"
+    );
 }
 
 #[test]
@@ -91,14 +97,19 @@ fn test_integration_named_color_red() {
     let results = session.get_dirty_lines_with_faces();
 
     assert!(!results.is_empty());
-    let (_row, text, face_ranges, _col_to_buf) = &results[0];
+    let line = &results[0];
+    let text = &line.data.text;
+    let face_ranges = &line.data.face_ranges;
     assert!(text.contains('A'));
     assert!(!face_ranges.is_empty());
 
-    let (start, end, fg, _bg, _flags, _ul_color) = face_ranges[0];
-    assert_eq!(start, 0);
-    assert_eq!(end, 1);
-    assert_eq!(fg, 0x8000_0001u32, "Named(Red) should encode as 0x80000001");
+    let range = face_ranges[0];
+    assert_eq!(range.start_buf, 0);
+    assert_eq!(range.end_buf, 1);
+    assert_eq!(
+        range.fg, 0x8000_0001u32,
+        "Named(Red) should encode as 0x80000001"
+    );
 }
 
 #[test]
@@ -108,13 +119,14 @@ fn test_integration_indexed_color() {
     let results = session.get_dirty_lines_with_faces();
 
     assert!(!results.is_empty());
-    let (_row, text, face_ranges, _col_to_buf) = &results[0];
+    let line = &results[0];
+    let text = &line.data.text;
+    let face_ranges = &line.data.face_ranges;
     assert!(text.contains('B'));
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, _, _, _) = face_ranges[0];
     assert_eq!(
-        fg, 0x4000_002Au32,
+        face_ranges[0].fg, 0x4000_002Au32,
         "Indexed(42) should encode as 0x4000002A"
     );
 }
@@ -126,13 +138,13 @@ fn test_integration_true_black_vs_default() {
     let results = session.get_dirty_lines_with_faces();
 
     assert!(!results.is_empty());
-    let (_row, _text, face_ranges, _col_to_buf) = &results[0];
+    let face_ranges = &results[0].data.face_ranges;
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, bg, _, _) = face_ranges[0];
-    assert_eq!(fg, 0u32, "Rgb(0,0,0) must encode as 0 (true black)");
+    let range = face_ranges[0];
+    assert_eq!(range.fg, 0u32, "Rgb(0,0,0) must encode as 0 (true black)");
     assert_eq!(
-        bg, 0xFF00_0000u32,
+        range.bg, 0xFF00_0000u32,
         "Default bg should encode as 0xFF00_0000"
     );
 }
@@ -144,17 +156,17 @@ fn test_integration_default_color_sentinel() {
     let results = session.get_dirty_lines_with_faces();
 
     assert!(!results.is_empty());
-    let (_row, _text, face_ranges, _col_to_buf) = &results[0];
+    let face_ranges = &results[0].data.face_ranges;
     assert!(!face_ranges.is_empty());
 
-    let (_, _, fg, bg, flags, _ul_color) = face_ranges[0];
+    let range = face_ranges[0];
     assert_eq!(
-        fg, 0xFF00_0000u32,
+        range.fg, 0xFF00_0000u32,
         "Default fg should be 0xFF00_0000 sentinel"
     );
     assert_eq!(
-        bg, 0xFF00_0000u32,
+        range.bg, 0xFF00_0000u32,
         "Default bg should be 0xFF00_0000 sentinel"
     );
-    assert_eq!(flags, 0u64, "No attributes set");
+    assert_eq!(range.flags, 0u64, "No attributes set");
 }

@@ -11,9 +11,9 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
     let bg: u32 = 0xFF00_0000;
     let flags: u64 = 0x0000_0001; // bold
     let ul_color: u32 = 0xFF00_0000; // Color::Default sentinel
-    let face_ranges = vec![(0usize, 3usize, fg, bg, flags, ul_color)];
-    let lines: &[EncodedLine] = &[(0usize, String::from("ABC"), face_ranges, vec![])];
-    let result = encode_screen_binary(lines);
+    let face_ranges = vec![face_range(0, 3, fg, bg, flags, ul_color)];
+    let lines = vec![encoded_line(0, "ABC", face_ranges, vec![])];
+    let result = encode_screen_binary_ok(&lines);
 
     // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
     assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags, ul ul_color);
@@ -23,10 +23,10 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
 #[test]
 fn encode_screen_binary_two_rows_row_indices_in_order() {
     let lines: Vec<EncodedLine> = vec![
-        (7usize, String::from("X"), vec![], vec![]),
-        (15usize, String::from("Y"), vec![], vec![]),
+        encoded_line(7, "X", vec![], vec![]),
+        encoded_line(15, "Y", vec![], vec![]),
     ];
-    let result = encode_screen_binary(&lines);
+    let result = encode_screen_binary_ok(&lines);
     // format_version at offset 0, num_rows at offset 4
     assert_binary_header!(&result, rows 2);
     // First row header at offset 8: row_index = 7
@@ -224,8 +224,8 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
     let text = String::from("テ");
     let text_len = text.len(); // 3 bytes
     let col_to_buf = vec![0usize, 0usize];
-    let lines: &[EncodedLine] = &[(0usize, text, vec![], col_to_buf)];
-    let result = encode_screen_binary(lines);
+    let lines = vec![encoded_line(0, text, vec![], col_to_buf)];
+    let result = encode_screen_binary_ok(&lines);
 
     // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
     assert_eq!(result.len(), 35);
@@ -260,11 +260,11 @@ fn encode_screen_binary_two_face_ranges_same_row() {
     let flags2: u64 = 0x0000_0004; // italic
     let ul2: u32 = 0x00FF_0000; // Rgb red as underline color
     let face_ranges = vec![
-        (0usize, 2usize, fg1, bg1, flags1, ul1),
-        (2usize, 4usize, fg2, bg2, flags2, ul2),
+        face_range(0, 2, fg1, bg1, flags1, ul1),
+        face_range(2, 4, fg2, bg2, flags2, ul2),
     ];
-    let lines: &[EncodedLine] = &[(0usize, String::from("ABCD"), face_ranges, vec![])];
-    let result = encode_screen_binary(lines);
+    let lines = vec![encoded_line(0, "ABCD", face_ranges, vec![])];
+    let result = encode_screen_binary_ok(&lines);
 
     // num_face_ranges header (at byte 12 = header[8]+row_idx[4]) must be 2.
     assert_eq!(read_u32_le(&result, 12), 2, "num_face_ranges must be 2");

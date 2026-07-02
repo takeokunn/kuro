@@ -178,11 +178,10 @@
   :expected-result kuro-e2e--expected-result
   (kuro-e2e--with-terminal
    (let ((sid kuro--session-id))
-     ;; CSI ? 2004 h = enable bracketed paste; CSI ? 2004 l = disable
-     (kuro--send-key "\033[?2004h")
-     (kuro--send-key "\033[?2004l")
-     ;; Output after toggling must still be clean.
-     (kuro--send-key "echo KURO_AFTER_PASTE_TOGGLE\r")
+     ;; Emit CSI ? 2004 h/l from the shell output side. `kuro--send-key'
+     ;; feeds PTY input, so the escape sequence must be printed by the shell.
+     (kuro--send-key
+      "printf '\\033[?2004h\\033[?2004l'; echo KURO_AFTER_PASTE_TOGGLE\r")
      (should (kuro-e2e--wait-for-output sid "KURO_AFTER_PASTE_TOGGLE")))))
 
 (ert-deftest kuro-e2e-bracketed-paste-content ()

@@ -86,5 +86,35 @@ write-only allows the terminal to WRITE to Emacs, not READ from Emacs."
         (should-not sent)))))
 
 
+;;; Group S: control-character sanitization of untrusted terminal payloads
+
+(ert-deftest kuro-poll-modes-clipboard-sanitize-strips-injection-chars ()
+  "kuro--clipboard-sanitize removes ESC, CR, BEL, and other C0/DEL bytes."
+  (should (equal (kuro--clipboard-sanitize "a\e[31mb\a\rc\x7f")
+                 "a[31mbc")))
+
+(ert-deftest kuro-poll-modes-clipboard-sanitize-keeps-tab-and-newline ()
+  "kuro--clipboard-sanitize preserves TAB and LF so multi-line text survives."
+  (should (equal (kuro--clipboard-sanitize "line1\n\tline2\n") "line1\n\tline2\n")))
+
+(ert-deftest kuro-poll-modes-clipboard-set-selection-sanitizes ()
+  "kuro--clipboard-set-selection sanitizes text before placing it on the ring."
+  (kuro-poll-test--with-buffer
+    (let (captured)
+      (cl-letf (((symbol-function 'kill-new)
+                 (lambda (text) (setq captured text))))
+        (kuro--clipboard-set-selection "rm -rf ~\recho pwned\e" "clipboard")
+        (should (equal captured "rm -rf ~echo pwned"))))))
+
+;;; Group T: control/bidi sanitization of untrusted notification text
+
+(ert-deftest kuro-poll-modes-notification-sanitize-strips-control-and-bidi ()
+  "kuro--sanitize-notification-text removes control and bidi-override chars."
+  (should (equal (kuro--sanitize-notification-text "A\x1b\nB\u202eC") "ABC")))
+
+(ert-deftest kuro-poll-modes-notification-sanitize-nil-passthrough ()
+  "kuro--sanitize-notification-text returns nil unchanged for nil input."
+  (should (null (kuro--sanitize-notification-text nil))))
+
 (provide 'kuro-poll-modes-clipboard-test)
 ;;; kuro-poll-modes-clipboard-test.el ends here

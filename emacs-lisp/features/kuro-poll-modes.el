@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -143,6 +143,20 @@ key is ignored."
       (when button
         (kuro--notify-action-response session-id id button nil)))))
 
+(defconst kuro--notification-sanitize-regexp
+  "[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200f]"
+  "Control and bidi-override characters stripped from OSC notifications.
+Terminal output is untrusted; stripping ASCII control characters
+\(U+0000-U+001F, U+007F) and Unicode bidirectional overrides
+\(U+202A-U+202E, U+2066-U+2069, U+200F) prevents notification and
+echo-area spoofing via crafted OSC 9/777/99 titles and bodies.")
+
+(defun kuro--sanitize-notification-text (text)
+  "Return TEXT with control and bidi-override characters removed, or nil.
+TEXT may be nil, in which case nil is returned unchanged."
+  (and text
+       (replace-regexp-in-string kuro--notification-sanitize-regexp "" text)))
+
 (defun kuro--default-notify (title body &optional id report)
   "Show a terminal desktop notification with TITLE and BODY.
 Prefers `notifications-notify' (D-Bus) when available; otherwise falls back
@@ -154,6 +168,8 @@ sends an OSC 99 report back to the terminal application via the Rust core, so
 the application learns the notification was activated.  When D-Bus is
 unavailable this gracefully degrades to a plain echo-area message (no action
 round-trip is possible without a clickable notification)."
+  (setq title (kuro--sanitize-notification-text title)
+        body (kuro--sanitize-notification-text body))
   (or (and (require 'notifications nil t)
            (fboundp 'notifications-notify)
            (ignore-errors
@@ -372,15 +388,29 @@ image tiles.  Skips the work entirely when no placeholders are present."
    ((or (equal target "primary") (equal target "select")) 'primary)
    (t nil)))
 
+(defconst kuro--clipboard-sanitize-regexp
+  "[\x00-\x08\x0b-\x1f\x7f]"
+  "Control characters stripped from OSC 52 clipboard payloads.
+Keeps TAB and LF so multi-line and tabbed clipboard text survives, but
+removes ESC, CR, BEL, and other C0/DEL bytes.  Terminal output is
+untrusted; those bytes enable paste-injection of escape sequences or
+commands when the clipboard is later yanked into another terminal.")
+
+(defun kuro--clipboard-sanitize (text)
+  "Return TEXT with paste-injection-prone control characters removed."
+  (replace-regexp-in-string kuro--clipboard-sanitize-regexp "" text))
+
 (defun kuro--clipboard-set-selection (text target)
   "Place TEXT on the Emacs selection chosen by TARGET.
-TARGET must be \"clipboard\", \"primary\", or \"select\"."
-  (pcase (kuro--clipboard-target-kind target)
-    ('clipboard
-     (kill-new text))
-    ('primary
-     (gui-set-selection 'PRIMARY text))
-    (_ nil)))
+TARGET must be \"clipboard\", \"primary\", or \"select\".
+TEXT is sanitized of dangerous control characters before being stored."
+  (let ((text (kuro--clipboard-sanitize text)))
+    (pcase (kuro--clipboard-target-kind target)
+      ('clipboard
+       (kill-new text))
+      ('primary
+       (gui-set-selection 'PRIMARY text))
+      (_ nil))))
 
 (defun kuro--clipboard-write (text target)
   "Place TEXT on the Emacs selection chosen by TARGET per `kuro-clipboard-policy'.
@@ -393,9 +423,11 @@ Under `deny' or any other value: does nothing."
        (kuro--clipboard-set-selection text target)
        (message "Kuro: clipboard updated from terminal"))
       ('prompt
+       ;; Report the sanitized length so the prompt reflects what is actually
+       ;; stored (`kuro--clipboard-set-selection' re-sanitizes idempotently).
        (when (yes-or-no-p
               (format "Kuro: terminal wants to set clipboard (%d chars).  Allow? "
-                      (length text)))
+                      (length (kuro--clipboard-sanitize text))))
          (kuro--clipboard-set-selection text target))))))
 
 (defun kuro--clipboard-query (target)

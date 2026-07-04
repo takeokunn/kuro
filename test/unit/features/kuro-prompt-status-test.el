@@ -213,6 +213,21 @@
     (should (stringp s))
     (should (string-match-p "err=/tmp/build\\.log" s))))
 
+(ert-deftest kuro-prompt-status--format-extras-sanitizes-control-and-bidi ()
+  "aid/err-path from untrusted OSC 133 marks are stripped of control+bidi chars.
+Prevents prompt-line reordering and spoofing via crafted D-mark fields."
+  (let ((s (kuro--format-prompt-extras "a\e[31m‮b" nil "/tmp/\r\afake")))
+    (should (stringp s))
+    ;; The ESC, CR, BEL control bytes and the RTL override (U+202E) are stripped,
+    ;; while the printable residue (e.g. "[31m") is preserved verbatim.
+    (should (string-match-p "aid=a\\[31mb" s))
+    (should (string-match-p "err=/tmp/fake" s))
+    (should-not (string-match-p "[\x00-\x1f\x7f‮]" s))))
+
+(ert-deftest kuro-prompt-status--sanitize-prompt-extra-nil-passthrough ()
+  "kuro--sanitize-prompt-extra returns nil unchanged for nil input."
+  (should (null (kuro--sanitize-prompt-extra nil))))
+
 (ert-deftest kuro-prompt-status--format-duration-sub-second ()
   "Duration <1000ms renders as \"Nms\"."
   (should (equal (kuro--format-prompt-duration 250) "250ms")))

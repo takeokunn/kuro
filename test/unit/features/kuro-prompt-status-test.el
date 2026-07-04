@@ -228,6 +228,12 @@ Prevents prompt-line reordering and spoofing via crafted D-mark fields."
   "kuro--sanitize-prompt-extra returns nil unchanged for nil input."
   (should (null (kuro--sanitize-prompt-extra nil))))
 
+(ert-deftest kuro-prompt-status--sanitize-prompt-extra-strips-alm-and-lrm ()
+  "kuro--sanitize-prompt-extra also strips ALM (U+061C) and LRM (U+200E).
+Regression: these bidi-control characters are in the same spoofing family as
+the override/isolate characters already covered, but were missed initially."
+  (should (equal (kuro--sanitize-prompt-extra "a؜b‎c") "abc")))
+
 (ert-deftest kuro-prompt-status--format-duration-sub-second ()
   "Duration <1000ms renders as \"Nms\"."
   (should (equal (kuro--format-prompt-duration 250) "250ms")))

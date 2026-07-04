@@ -208,7 +208,9 @@ subprocess (git, less, python, ssh, ...) reads it."
                   "RUBYOPT" "LUA_PATH" "R_PROFILE"
                   ;; config-dir, terminfo, resolver, ssh askpass redirection.
                   "XDG_CONFIG_HOME" "TERMINFO" "TERMCAP" "SSH_ASKPASS"
-                  "HOSTALIASES" "RES_OPTIONS"))
+                  "HOSTALIASES" "RES_OPTIONS"
+                  ;; glibc dynamic-loader tunables (CVE-2023-4911).
+                  "GLIBC_TUNABLES"))
     (should-not
      (kuro--eval-command-allowed-p (format "setenv %s value" name)))))
 

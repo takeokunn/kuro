@@ -116,5 +116,11 @@ write-only allows the terminal to WRITE to Emacs, not READ from Emacs."
   "kuro--sanitize-notification-text returns nil unchanged for nil input."
   (should (null (kuro--sanitize-notification-text nil))))
 
+(ert-deftest kuro-poll-modes-notification-sanitize-strips-alm-and-lrm ()
+  "kuro--sanitize-notification-text also strips ALM (U+061C) and LRM (U+200E).
+Regression: these bidi-control characters are in the same spoofing family as
+the override/isolate characters already covered, but were missed initially."
+  (should (equal (kuro--sanitize-notification-text "A؜B‎C") "ABC")))
+
 (provide 'kuro-poll-modes-clipboard-test)
 ;;; kuro-poll-modes-clipboard-test.el ends here

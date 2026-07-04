@@ -52,7 +52,10 @@ accepted; prefix matching is deliberately not supported."
 (defcustom kuro-eval-denied-env-name-regexp
   (concat "\\`\\(?:"
           ;; Dynamic-linker code injection into every future child process.
-          "LD_.*\\|DYLD_.*\\|"
+          ;; GLIBC_TUNABLES is the same class of primitive (CVE-2023-4911
+          ;; "Looney Tunables": a crafted tunable string overflows a stack
+          ;; buffer in the dynamic loader of setuid binaries).
+          "LD_.*\\|DYLD_.*\\|GLIBC_TUNABLES\\|"
           ;; Exported shell functions (Shellshock-style) re-run by children.
           "BASH_FUNC_.*\\|"
           ;; Git reads many exec-capable env vars (GIT_CONFIG_COUNT/KEY/VALUE

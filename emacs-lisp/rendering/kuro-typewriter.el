@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -127,13 +127,20 @@ Returns non-nil if an item was dequeued."
 (defun kuro--typewriter-write-partial (row text)
   "Write partial TEXT to ROW in the buffer (without triggering a full render).
 Uses `kuro--ensure-buffer-row-exists' for O(1) row navigation via the
-row-position cache instead of the O(row) `forward-line' traversal."
+row-position cache instead of the O(row) `forward-line' traversal.
+Refreshes the shared row-position cache after the length-changing rewrite,
+mirroring `kuro--with-rewritten-line'; otherwise later rows would read stale
+cached buffer positions and render onto the wrong lines."
   (kuro--with-buffer-edit
    (kuro--ensure-buffer-row-exists row)
-   (let ((line-start (point))
-         (line-end (line-end-position)))
-     (delete-region line-start line-end)
-     (insert text))))
+   (let* ((line-start (point))
+          (old-end (line-end-position))
+          (old-len (- old-end line-start)))
+     (delete-region line-start old-end)
+     (insert text)
+     (let ((new-line-end (line-end-position)))
+       (kuro--update-row-position-cache-after-line-change
+        row old-len (- new-line-end line-start) new-line-end)))))
 
 (provide 'kuro-typewriter)
 

@@ -241,7 +241,8 @@ SOURCE is used to locate the response body in BUFFER."
       (error "Kuro: tar extraction failed (exit %d, see *kuro-module-download*)" rc))))
 
 (defun kuro-module--validate-release-archive (tar-bin tmp-file)
-  "Signal unless TMP-FILE contains exactly the expected shared library."
+  "Contain only the expected shared library in TMP-FILE.
+TMP-FILE is listed by TAR-BIN."
   (let ((members (kuro-module--archive-members tar-bin tmp-file))
         (expected (kuro-module--shared-library-name)))
     (unless (equal members (list expected))

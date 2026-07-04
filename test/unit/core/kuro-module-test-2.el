@@ -127,9 +127,18 @@ tar arguments for extraction calls."
   (lambda (_program _infile destination _display &rest args)
     (cond
      ((equal (car args) "-tzf")
-      (when (eq destination t)
+      (cond
+       ((bufferp destination)
+        (with-current-buffer destination
+          (dolist (member members)
+            (insert member "\n"))))
+       ((stringp destination)
+        (with-temp-file destination
+          (dolist (member members)
+            (insert member "\n"))))
+       ((eq destination t)
         (dolist (member members)
-          (insert member "\n")))
+          (princ (concat member "\n")))))
       0)
      ((equal (car args) "-xzf")
       (when extract-callback
@@ -215,15 +224,22 @@ tar arguments for extraction calls."
                   0
                   (lambda (args)
                     (setq extract-args args)
-                    (with-temp-file installed
-                      (insert "binary")))))
+                    (let ((destination (nth 3 args))
+                          (member (car (last args))))
+                      (with-temp-file (expand-file-name member destination)
+                        (insert "binary"))))))
                 ((symbol-function 'message) #'ignore))
         (should (equal (kuro-module--install-release-archive
                         "/usr/bin/tar" tmp-tar tmpdir)
                        installed))
-        (should (equal extract-args
-                       (list "-xzf" tmp-tar "-C" tmpdir
-                             "libkuro_core.so")))
+        ;; Extraction lands in an isolated temp dir (symlink-safety staging
+        ;; area), not directly in TARGET-DIR, so only the fixed positions of
+        ;; extract-args are asserted here.
+        (should (equal (list (nth 0 extract-args) (nth 1 extract-args)
+                              (nth 2 extract-args) (nth 4 extract-args))
+                       (list "-xzf" tmp-tar "-C" "libkuro_core.so")))
+        (should (string-prefix-p "kuro-module-extract-"
+                                 (file-name-nondirectory (nth 3 extract-args))))
         (should-not (file-exists-p tmp-tar))))))
 
 (ert-deftest kuro-module-test--install-release-archive-deletes-invalid-archive ()

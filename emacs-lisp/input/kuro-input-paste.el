@@ -51,14 +51,14 @@ This is a bitmask integer:
             (list 'kuro--paste-prefix-argument-p arg)))))
 
 (defun kuro--paste-yank-index (arg)
-  "Return the zero-based kill-ring index for `kuro--yank' ARG."
+  "Return the zero-based `kill-ring' index for `kuro--yank' ARG."
   (let ((value (kuro--paste-prefix-numeric-value arg 1)))
     (unless (> value 0)
       (user-error "Yank argument must be a positive integer"))
     (1- value)))
 
 (defun kuro--paste-yank-pop-index (arg)
-  "Return the kill-ring rotation count for `kuro--yank-pop' ARG."
+  "Return the `kill-ring' rotation count for `kuro--yank-pop' ARG."
   (kuro--paste-prefix-numeric-value arg 1))
 
 (defun kuro--send-paste-or-raw (text)

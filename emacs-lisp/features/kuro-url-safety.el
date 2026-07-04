@@ -81,7 +81,7 @@
        (string-match-p "\\`[0-9A-Fa-f]\\{1,4\\}\\'" group)))
 
 (defun kuro--terminal-web-url-ipv6-split-side (side)
-  "Split one side of an IPv6 address around colons."
+  "Split SIDE of an IPv6 address around colons."
   (if (string= side "")
       nil
     (split-string side ":" nil)))

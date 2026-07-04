@@ -157,12 +157,8 @@ pub(crate) fn encode_line_into_buf_and_hash(
     buf: &mut Vec<u8>,
 ) -> BinaryFrameResult<HashedEncodedText> {
     let text = encode_line_into_buf(cells, has_wide, pool, row_index, buf)?;
-    let content_hash = compute_row_hash_from_encoded(
-        &text,
-        &pool.face_ranges,
-        &pool.col_to_buf,
-        &pool.text_sizes,
-    );
+    let content_hash =
+        compute_row_hash_from_encoded(&text, &pool.face_ranges, &pool.col_to_buf, &pool.text_sizes);
     Ok(HashedEncodedText::new(text, content_hash))
 }
 

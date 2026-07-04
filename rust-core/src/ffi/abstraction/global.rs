@@ -18,10 +18,11 @@ use std::sync::{LazyLock, Mutex};
 pub static TERMINAL_SESSIONS: LazyLock<Mutex<HashMap<u64, TerminalSession>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Auto-incrementing session ID counter.  The first session receives ID 0,
-/// preserving backward compatibility with Elisp callers that test
-/// `(not (null result))` — any non-negative integer is truthy in Elisp.
-static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+/// Auto-incrementing session ID counter.  The first session receives ID 1.
+///
+/// Elisp uses `0` as the "no session" sentinel for buffer-local state, so real
+/// session IDs must remain positive.
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Lock `TERMINAL_SESSIONS` and map mutex-poison errors to `KuroError::State`.
 macro_rules! lock_terminals {
@@ -34,7 +35,7 @@ macro_rules! lock_terminals {
 
 /// Initialize a new terminal session and return its unique session ID.
 ///
-/// The first call returns `0`; subsequent calls return incrementing values.
+/// The first call returns `1`; subsequent calls return incrementing values.
 ///
 /// # Errors
 /// Returns `Err` if the PTY process fails to spawn.

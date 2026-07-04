@@ -7,8 +7,8 @@
 ;; ERT tests for kuro-bookmark.el — bookmark integration for Kuro terminals.
 ;;
 ;; Groups:
-;;   Group 1: kuro-bookmark-make-record (alist structure, keys, defaults)
-;;   Group 2: kuro-bookmark-jump (delegates to kuro-create)
+;;   Group 1: kuro-bookmark-make-record (safe alist structure and defaults)
+;;   Group 2: kuro-bookmark-jump (safe restore boundary)
 ;;   Group 3: kuro--setup-bookmark (sets bookmark-make-record-function)
 
 ;;; Code:
@@ -89,11 +89,12 @@
     (let ((record (kuro-bookmark-make-record)))
       (should (eq (alist-get 'handler (cdr record)) 'kuro-bookmark-jump)))))
 
-(ert-deftest kuro-bookmark--make-record-has-shell ()
-  "Bookmark record includes the shell key."
+(ert-deftest kuro-bookmark--make-record-omits-shell ()
+  "Bookmark record never includes an executable shell command."
   (with-temp-buffer
+    (setq-local kuro--shell-command "/bin/zsh")
     (let ((record (kuro-bookmark-make-record)))
-      (should (assq 'shell (cdr record))))))
+      (should-not (assq 'shell (cdr record))))))
 
 (ert-deftest kuro-bookmark--make-record-has-directory ()
   "Bookmark record includes the directory key."
@@ -107,27 +108,13 @@
     (let ((record (kuro-bookmark-make-record)))
       (should (assq 'buffer-name (cdr record))))))
 
-(ert-deftest kuro-bookmark--make-record-uses-shell-command-when-set ()
-  "When kuro--shell-command is set, the record uses it for the shell key."
-  (with-temp-buffer
-    (setq-local kuro--shell-command "/bin/zsh")
-    (let ((record (kuro-bookmark-make-record)))
-      (should (equal (alist-get 'shell (cdr record)) "/bin/zsh")))))
-
-(ert-deftest kuro-bookmark--make-record-falls-back-to-kuro-shell ()
-  "When kuro--shell-command is nil, the record uses kuro-shell."
-  (with-temp-buffer
-    (setq-local kuro--shell-command nil)
-    (let ((kuro-shell "/bin/fish"))
-      (let ((record (kuro-bookmark-make-record)))
-        (should (equal (alist-get 'shell (cdr record)) "/bin/fish"))))))
-
 (ert-deftest kuro-bookmark--make-record-directory-defaults-to-home ()
-  "When default-directory is nil, directory defaults to \"~\"."
+  "When default-directory is nil, directory defaults to the local home directory."
   (with-temp-buffer
     (let ((default-directory nil))
       (let ((record (kuro-bookmark-make-record)))
-        (should (equal (alist-get 'directory (cdr record)) "~"))))))
+        (should (equal (alist-get 'directory (cdr record))
+                       (expand-file-name "~/")))))))
 
 (ert-deftest kuro-bookmark--make-record-uses-default-directory ()
   "Bookmark record uses default-directory when set."
@@ -144,37 +131,57 @@
         (should (string-match-p "/tmp/" (car record)))
         (should (string-prefix-p "kuro: " (car record)))))))
 
+(ert-deftest kuro-bookmark--make-record-rejects-remote-directory ()
+  "Bookmark records never persist remote default-directory values."
+  (with-temp-buffer
+    (let ((default-directory "/ssh:example.invalid:/tmp/"))
+      (let ((record (kuro-bookmark-make-record)))
+        (should (equal (alist-get 'directory (cdr record))
+                       (expand-file-name "~/")))))))
+
+(ert-deftest kuro-bookmark--make-record-rejects-control-character-directory ()
+  "Bookmark records never persist directory names containing control chars."
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_directory) t)))
+      (let ((default-directory "/tmp/bad\nname/"))
+        (let ((record (kuro-bookmark-make-record)))
+          (should (equal (alist-get 'directory (cdr record))
+                         (expand-file-name "~/"))))))))
+
 ;;; ── Group 2: kuro-bookmark-jump ────────────────────────────────────────────────
 
 (ert-deftest kuro-bookmark--jump-calls-kuro-create ()
-  "kuro-bookmark-jump calls kuro-create with the saved shell and buffer-name."
+  "kuro-bookmark-jump calls kuro-create with default command and buffer-name."
   (let ((create-args nil))
     (cl-letf (((symbol-function 'kuro-create)
                (lambda (cmd buf) (setq create-args (list cmd buf)))))
       (let ((bookmark '("kuro: /tmp/"
                          (handler . kuro-bookmark-jump)
-                         (shell . "/bin/bash")
+                         (shell . "touch /tmp/kuro-bookmark-pwned")
                          (directory . "/tmp/")
                          (buffer-name . "*kuro-test*"))))
         (kuro-bookmark-jump bookmark)
-        (should (equal (car create-args) "/bin/bash"))
+        (should (null (car create-args)))
         (should (equal (cadr create-args) "*kuro-test*"))))))
 
 (ert-deftest kuro-bookmark--jump-sets-default-directory ()
   "kuro-bookmark-jump binds default-directory to the saved directory."
-  (let ((captured-dir nil))
-    (cl-letf (((symbol-function 'kuro-create)
-               (lambda (_cmd _buf) (setq captured-dir default-directory))))
-      (let ((bookmark '("kuro: /home/user/"
-                         (handler . kuro-bookmark-jump)
-                         (shell . "/bin/sh")
-                         (directory . "/home/user/")
-                         (buffer-name . "*kuro*"))))
-        (kuro-bookmark-jump bookmark)
-        (should (equal captured-dir "/home/user/"))))))
+  (let ((captured-dir nil)
+        (dir (make-temp-file "kuro-bookmark-dir-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kuro-create)
+                   (lambda (_cmd _buf) (setq captured-dir default-directory))))
+          (let ((bookmark `("kuro: temp"
+                            (handler . kuro-bookmark-jump)
+                            (shell . "/bin/sh")
+                            (directory . ,dir)
+                            (buffer-name . "*kuro*"))))
+            (kuro-bookmark-jump bookmark)
+            (should (equal captured-dir (file-name-as-directory dir)))))
+      (delete-directory dir))))
 
 (ert-deftest kuro-bookmark--jump-nil-directory-defaults-to-home ()
-  "kuro-bookmark-jump uses \"~\" when the saved directory is nil."
+  "kuro-bookmark-jump uses the local home directory when saved directory is nil."
   (let ((captured-dir nil))
     (cl-letf (((symbol-function 'kuro-create)
                (lambda (_cmd _buf) (setq captured-dir default-directory))))
@@ -184,7 +191,34 @@
                          (directory . nil)
                          (buffer-name . "*kuro*"))))
         (kuro-bookmark-jump bookmark)
-        (should (equal captured-dir "~"))))))
+        (should (equal captured-dir (expand-file-name "~/")))))))
+
+(ert-deftest kuro-bookmark--jump-remote-directory-defaults-to-home ()
+  "kuro-bookmark-jump refuses remote directories from bookmark records."
+  (let ((captured-dir nil))
+    (cl-letf (((symbol-function 'kuro-create)
+               (lambda (_cmd _buf) (setq captured-dir default-directory))))
+      (let ((bookmark '("kuro: remote"
+                         (handler . kuro-bookmark-jump)
+                         (shell . "/bin/sh")
+                         (directory . "/ssh:example.invalid:/tmp/")
+                         (buffer-name . "*kuro*"))))
+        (kuro-bookmark-jump bookmark)
+        (should (equal captured-dir (expand-file-name "~/")))))))
+
+(ert-deftest kuro-bookmark--jump-control-character-directory-defaults-to-home ()
+  "kuro-bookmark-jump refuses directories containing control characters."
+  (let ((captured-dir nil))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_directory) t))
+              ((symbol-function 'kuro-create)
+               (lambda (_cmd _buf) (setq captured-dir default-directory))))
+      (let ((bookmark '("kuro: bad"
+                         (handler . kuro-bookmark-jump)
+                         (shell . "/bin/sh")
+                         (directory . "/tmp/bad\nname/")
+                         (buffer-name . "*kuro*"))))
+        (kuro-bookmark-jump bookmark)
+        (should (equal captured-dir (expand-file-name "~/")))))))
 
 (ert-deftest kuro-bookmark--jump-nil-buffer-name-generates-new ()
   "kuro-bookmark-jump generates a new buffer name when saved name is nil."
@@ -198,6 +232,21 @@
                          (buffer-name . nil))))
         (kuro-bookmark-jump bookmark)
         (should (stringp create-buf))
+        (should (string-match-p "\\*kuro\\*" create-buf))))))
+
+(ert-deftest kuro-bookmark--jump-control-character-buffer-name-generates-new ()
+  "kuro-bookmark-jump refuses saved buffer names containing control characters."
+  (let ((create-buf nil))
+    (cl-letf (((symbol-function 'kuro-create)
+               (lambda (_cmd buf) (setq create-buf buf))))
+      (let ((bookmark '("kuro: /tmp/"
+                         (handler . kuro-bookmark-jump)
+                         (shell . "/bin/sh")
+                         (directory . "/tmp/")
+                         (buffer-name . "*kuro\nbad*"))))
+        (kuro-bookmark-jump bookmark)
+        (should (stringp create-buf))
+        (should-not (equal create-buf "*kuro\nbad*"))
         (should (string-match-p "\\*kuro\\*" create-buf))))))
 
 ;;; ── Group 3: kuro--setup-bookmark ──────────────────────────────────────────────

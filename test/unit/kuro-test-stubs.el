@@ -40,6 +40,10 @@
                kuro-core-is-process-alive
                kuro-core-poll-clipboard-actions
                kuro-core-poll-image-notifications
+               kuro-core-poll-placeholder-placements
+               kuro-core-get-progress
+               kuro-core-poll-user-vars
+               kuro-core-get-remote-host
                kuro-core-poll-prompt-marks
                kuro-core-scroll-up
                kuro-core-scroll-down
@@ -50,6 +54,8 @@
                kuro-core-attach
                kuro-core-list-sessions
                kuro-core-poll-eval-commands
+               kuro-core-poll-hyperlink-ranges
+               kuro-core-poll-text-size-ranges
                kuro-core-get-cwd-host
                kuro-core-get-mouse-tracking-mode
                kuro-core-is-alt-screen-active

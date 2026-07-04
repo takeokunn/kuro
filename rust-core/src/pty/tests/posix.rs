@@ -1,21 +1,77 @@
 use super::*;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::Path;
+
+const TEST_SHELL_NAMES: &[&str] = &["sh", "bash", "zsh", "fish"];
+
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .metadata()
+            .map(|meta| meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+}
+
+fn optional_shell_path(name: &str) -> Option<String> {
+    let common_candidates = [
+        format!("/bin/{name}"),
+        format!("/usr/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("/opt/homebrew/bin/{name}"),
+    ];
+
+    common_candidates
+        .into_iter()
+        .find(|candidate| is_executable_file(Path::new(candidate.as_str())))
+        .or_else(|| {
+            std::env::var("SHELL").ok().filter(|shell| {
+                let path = Path::new(shell);
+                path.is_absolute()
+                    && is_executable_file(path)
+                    && path.file_name().and_then(|n| n.to_str()) == Some(name)
+            })
+        })
+        .or_else(|| {
+            std::env::var_os("PATH").and_then(|paths| {
+                std::env::split_paths(&paths).find_map(|dir| {
+                    let path = dir.join(name);
+                    if is_executable_file(&path) {
+                        Some(path.to_string_lossy().into_owned())
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
+}
+
+fn required_test_shell_path() -> String {
+    TEST_SHELL_NAMES
+        .iter()
+        .find_map(|name| optional_shell_path(name))
+        .expect("absolute path to sh, bash, zsh, or fish is required for POSIX PTY tests")
+}
 
 #[test]
 fn test_validate_allowed_shells() {
-    assert!(Pty::validate_shell("sh").is_ok());
-    if super::Pty::find_in_path("bash").is_some() {
-        assert!(Pty::validate_shell("bash").is_ok());
-    }
-    if super::Pty::find_in_path("zsh").is_some() {
-        assert!(Pty::validate_shell("zsh").is_ok());
-    }
-    if super::Pty::find_in_path("fish").is_some() {
-        assert!(Pty::validate_shell("fish").is_ok());
+    for shell_name in TEST_SHELL_NAMES {
+        if let Some(path) = optional_shell_path(shell_name) {
+            let result = Pty::validate_shell(&path);
+            assert!(
+                result.is_ok(),
+                "absolute {shell_name} path should be accepted: {path}. Error: {:?}",
+                result.err()
+            );
+        }
     }
 }
 
 #[test]
 fn test_validate_rejected_shell() {
+    assert!(Pty::validate_shell("sh").is_err());
+    assert!(Pty::validate_shell("bash").is_err());
+    assert!(Pty::validate_shell("zsh").is_err());
+    assert!(Pty::validate_shell("fish").is_err());
     assert!(Pty::validate_shell(" malicious_command").is_err());
     assert!(Pty::validate_shell("rm").is_err());
     assert!(Pty::validate_shell("cat").is_err());
@@ -23,7 +79,8 @@ fn test_validate_rejected_shell() {
 
 #[test]
 fn test_pty_spawn() {
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(pty.is_ok());
 
     let mut pty = pty.unwrap();
@@ -31,8 +88,24 @@ fn test_pty_spawn() {
 }
 
 #[test]
+fn test_drop_kills_long_running_child_without_hanging() {
+    let start = std::time::Instant::now();
+    {
+        let shell = required_test_shell_path();
+        let mut pty = Pty::spawn(&shell, &[], 24, 80).unwrap();
+        pty.write(b"sleep 60\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "dropping a PTY with a long-running foreground child must be bounded"
+    );
+}
+
+#[test]
 fn test_validate_shell_empty_string_rejected() {
-    // An empty string should fail because `which` cannot resolve it
+    // An empty string is not an absolute path and must never be resolved via PATH.
     let result = Pty::validate_shell("");
     assert!(result.is_err(), "empty string should be rejected");
 }
@@ -40,8 +113,8 @@ fn test_validate_shell_empty_string_rejected() {
 #[test]
 fn test_validate_shell_absolute_path_bash() {
     let bash_path = std::path::Path::new("/bin/bash");
-    if bash_path.exists() {
-        // An absolute path to bash resolves to the "bash" basename which is in the whitelist
+    if is_executable_file(bash_path) {
+        // An absolute path to bash resolves to the "bash" basename which is in the allowlist
         let result = Pty::validate_shell("/bin/bash");
         assert!(
             result.is_ok(),
@@ -52,20 +125,18 @@ fn test_validate_shell_absolute_path_bash() {
 
 #[test]
 fn test_validate_shell_rejects_relative_path_slash_slash() {
-    // Relative paths like "../bash" cannot be resolved by `which` as an absolute path,
-    // so they should be rejected
+    // Relative paths are rejected before any filesystem or PATH resolution.
     let result = Pty::validate_shell("../bash");
     assert!(result.is_err(), "relative path ../bash should be rejected");
 }
 
 #[test]
 fn test_validate_shell_rejects_python() {
-    // "python3" is not in the ALLOWED_SHELLS whitelist
-    // If it isn't even installed, which() will fail — either way we expect Err
+    // Relative executable names are rejected even before basename allowlist checks.
     let result = Pty::validate_shell("python3");
     assert!(
         result.is_err(),
-        "python3 should be rejected (not in whitelist)"
+        "python3 should be rejected (not in allowlist)"
     );
 }
 
@@ -75,10 +146,10 @@ fn test_validate_shell_rejects_python() {
 fn test_validate_shell_absolute_nix_store() {
     // Use $SHELL to test with the actual shell path on this system.
     // On NixOS this is a Nix store path like /nix/store/…/bin/fish.
-    // Skip gracefully if $SHELL is unset or points to a non-whitelisted shell.
+    // Skip gracefully if $SHELL is unset or points to a shell outside the allowlist.
     if let Ok(shell) = std::env::var("SHELL") {
         let p = std::path::Path::new(&shell);
-        if p.is_absolute() && p.exists() {
+        if p.is_absolute() && is_executable_file(p) {
             let basename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if ["bash", "zsh", "sh", "fish"].contains(&basename) {
                 let result = Pty::validate_shell(&shell);
@@ -109,16 +180,18 @@ fn test_validate_shell_absolute_nonexistent() {
 
 #[test]
 fn test_validate_shell_absolute_not_executable() {
-    // An absolute path with a whitelisted basename but no execute bit must be rejected.
-    // Use a PID-suffixed name to avoid collisions with parallel test runs.
-    use std::os::unix::fs::PermissionsExt as _;
-    let path = std::env::temp_dir().join(format!("fish_{}", std::process::id()));
+    // An absolute path with an allowed basename but no execute bit must be rejected.
+    let dir = std::env::temp_dir().join(format!("kuro_pty_shell_not_exec_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("fish");
     std::fs::write(&path, b"#!/bin/sh").unwrap();
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o644); // rw-r--r-- : no execute bit
     std::fs::set_permissions(&path, perms).unwrap();
     let result = Pty::validate_shell(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
     assert!(
         result.is_err(),
         "absolute path without execute bit must be rejected"
@@ -126,19 +199,41 @@ fn test_validate_shell_absolute_not_executable() {
 }
 
 #[test]
-fn test_validate_shell_absolute_not_in_whitelist() {
+fn test_validate_shell_absolute_not_in_allowlist() {
     // An executable absolute path whose basename is not in ALLOWED_SHELLS must be rejected.
-    use std::os::unix::fs::PermissionsExt as _;
-    let path = std::env::temp_dir().join(format!("curio_{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("kuro_pty_shell_not_allowed_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("curio");
     std::fs::write(&path, b"#!/bin/sh").unwrap();
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&path, perms).unwrap();
     let result = Pty::validate_shell(path.to_str().unwrap());
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
     assert!(
         result.is_err(),
-        "absolute path with non-whitelisted basename must be rejected"
+        "absolute path with basename outside the allowlist must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_shell_absolute_not_regular_file() {
+    // A directory with an allowed basename is not a valid exec target.
+    let dir =
+        std::env::temp_dir().join(format!("kuro_pty_shell_not_regular_{}", std::process::id()));
+    let path = dir.join("sh");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let result = Pty::validate_shell(path.to_str().unwrap());
+    let _ = std::fs::remove_dir(&path);
+    let _ = std::fs::remove_dir(&dir);
+    assert!(
+        result.is_err(),
+        "absolute directory path must be rejected even when basename is allowlisted"
     );
 }
 
@@ -148,7 +243,7 @@ fn test_validate_shell_absolute_bin_sh() {
     // Its basename "sh" is in ALLOWED_SHELLS. On NixOS it is a symlink into the
     // Nix store, so this test exercises the absolute-path branch on NixOS.
     let bin_sh = std::path::Path::new("/bin/sh");
-    if bin_sh.exists() {
+    if is_executable_file(bin_sh) {
         let result = Pty::validate_shell("/bin/sh");
         assert!(
             result.is_ok(),
@@ -178,7 +273,8 @@ fn test_validate_shell_absolute_bin_sh() {
 fn test_spawn_with_nonzero_dimensions_succeeds() {
     // Spawning with explicit non-zero rows/cols must succeed.
     // This exercises the openpty(Some(&winsize), ...) path.
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(
         pty.is_ok(),
         "Pty::spawn with rows=24 cols=80 must succeed: {:?}",
@@ -190,7 +286,8 @@ fn test_spawn_with_nonzero_dimensions_succeeds() {
 fn test_spawn_rows_cols_passed_through() {
     // After spawn, the parent can immediately set_winsize to the same value
     // without error — confirming the master fd is valid and TIOCSWINSZ works.
-    let pty = Pty::spawn("sh", &[], 24, 80);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 24, 80);
     assert!(pty.is_ok());
     let mut pty = pty.unwrap();
     // This mirrors what kuro does on resize; it must not error.
@@ -203,10 +300,9 @@ fn test_spawn_rows_cols_passed_through() {
 #[test]
 fn test_validate_shell_returns_absolute_path() {
     // validate_shell must return an absolute PathBuf so that execv uses
-    // the exact binary we validated, not whatever PATH finds first.
-    // Regression: previously execvp("bash", ...) was used, which could
-    // resolve to a different bash (e.g. Homebrew) than validate_shell chose.
-    let result = Pty::validate_shell("sh");
+    // the exact binary we validated, not a later PATH resolution.
+    let shell = required_test_shell_path();
+    let result = Pty::validate_shell(&shell);
     assert!(result.is_ok());
     let path = result.unwrap();
     assert!(
@@ -218,13 +314,13 @@ fn test_validate_shell_returns_absolute_path() {
 #[test]
 fn test_validate_shell_bash_returns_absolute_path() {
     // Same as above, specifically for bash.
-    if super::Pty::find_in_path("bash").is_some() {
-        let result = Pty::validate_shell("bash");
+    if let Some(bash) = optional_shell_path("bash") {
+        let result = Pty::validate_shell(&bash);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(
             path.is_absolute(),
-            "validate_shell('bash') must return an absolute path, got: {path:?}"
+            "validate_shell({bash:?}) must return an absolute path, got: {path:?}"
         );
     }
 }
@@ -236,7 +332,8 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     // correctly propagated the size.  If this returns 0×0, readline in the child
     // will enter dumb mode.
     use std::os::unix::io::AsRawFd as _;
-    let pty = Pty::spawn("sh", &[], 42, 120);
+    let shell = required_test_shell_path();
+    let pty = Pty::spawn(&shell, &[], 42, 120);
     assert!(pty.is_ok());
     let pty = pty.unwrap();
 
@@ -257,243 +354,5 @@ fn test_pty_tiocgwinsz_via_master_after_spawn() {
     );
 }
 
-// --- Tests for setup_child_env (pure env-var function) ---
-
-/// Serializes all fork-based and env-mutating `setup_child_env` tests.
-///
-/// `fork()` in a multi-threaded process (cargo test) copies only the calling
-/// thread but inherits all mutexes in their current state.  Rust's internal
-/// env-var `RwLock` will be permanently locked in the child if another thread
-/// holds it at fork time, causing a deadlock that hits the 2-second timeout.
-///
-/// By holding `ENV_FORK_LOCK` for the entire critical section
-/// (env mutation + fork + cleanup), we guarantee that no env-var write
-/// is in-flight when `fork()` is called in any of the three
-/// `setup_child_env` tests.
-#[cfg(unix)]
-static ENV_FORK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// `setup_child_env` tests run in a subprocess via `fork()` so that process-wide
-/// env-var mutations are isolated from parallel test threads.
-///
-/// Each test helper forks, calls `setup_child_env` in the child, writes a result
-/// byte to a pipe, and the parent asserts on it.
-///
-/// **IMPORTANT**: `fork()` in a multi-threaded process (cargo test) copies only
-/// the calling thread.  Mutexes held by other threads (including Rust's internal
-/// env-var `RwLock`) remain permanently locked in the child, causing deadlocks.
-/// To avoid hanging the test runner:
-///   - The parent polls `waitpid(WNOHANG)` with a timeout, escalating to SIGKILL.
-///   - The child uses `libc::_exit()` (not `std::process::exit`) to skip atexit
-///     handlers that may also deadlock.
-#[cfg(unix)]
-/// Returns `Some(true/false)` with the check result, or `None` when the
-/// child process timed out (common on WSL2 where `fork()` in a
-/// multi-threaded process deadlocks on Rust's internal env `RwLock`).
-/// Callers should skip the test rather than fail when `None` is returned.
-fn run_in_child_check<F: FnOnce() -> bool>(check: F) -> Option<bool> {
-    use std::os::unix::io::FromRawFd as _;
-    let mut fds = [0i32; 2];
-    // SAFETY: fds is a 2-element i32 array; libc::pipe fills it on success.
-    let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
-    assert_eq!(ret, 0, "pipe() failed");
-    let (read_fd, write_fd) = (fds[0], fds[1]);
-
-    // SAFETY: fork() duplicates the current thread's state; the child must
-    // use only async-signal-safe calls before _exit().  Note: std::env::var
-    // and setup_child_env are NOT async-signal-safe (they acquire an env
-    // RwLock), so this can deadlock if another test thread holds that lock.
-    // The timeout below prevents the test runner from hanging in that case.
-    match unsafe { nix::unistd::fork() }.expect("fork failed") {
-        nix::unistd::ForkResult::Child => {
-            // SAFETY: write_fd is a valid open fd from pipe above.
-            let mut wf = unsafe { std::fs::File::from_raw_fd(write_fd) };
-            unsafe { libc::close(read_fd) };
-            let ok = check();
-            use std::io::Write as _;
-            let _ = wf.write_all(&[ok as u8]);
-            // Use _exit to avoid running atexit handlers (unsafe after fork).
-            unsafe { libc::_exit(0) };
-        }
-        nix::unistd::ForkResult::Parent { child } => {
-            unsafe { libc::close(write_fd) };
-            // SAFETY: read_fd is a valid open fd from pipe above.
-            let mut rf = unsafe { std::fs::File::from_raw_fd(read_fd) };
-
-            // Poll with WNOHANG + timeout to avoid blocking forever if the
-            // child deadlocks on a poisoned mutex inherited from fork().
-            let mut reaped = false;
-            for _ in 0..200 {
-                // 200 × 10 ms = 2 s timeout
-                match nix::sys::wait::waitpid(child, Some(nix::sys::wait::WaitPidFlag::WNOHANG)) {
-                    Ok(nix::sys::wait::WaitStatus::StillAlive) => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Ok(_) | Err(nix::errno::Errno::ECHILD) => {
-                        reaped = true;
-                        break;
-                    }
-                    Err(_) => {
-                        reaped = true;
-                        break;
-                    }
-                }
-            }
-            if !reaped {
-                // Child is stuck (deadlocked on env RwLock after fork — typical
-                // on WSL2 where fork() in a multi-threaded process inherits
-                // other threads' locks).  Signal caller to skip, not fail.
-                let _ = nix::sys::signal::kill(child, nix::sys::signal::Signal::SIGKILL);
-                let _ = nix::sys::wait::waitpid(child, None);
-                return None;
-            }
-
-            let mut buf = [0u8; 1];
-            use std::io::Read as _;
-            let _ = rf.read_exact(&mut buf);
-            Some(buf[0] != 0)
-        }
-    }
-}
-
-#[test]
-#[cfg(unix)]
-fn test_setup_child_env_sets_term() {
-    // setup_child_env must set TERM=xterm-256color and COLORTERM=truecolor.
-    // Runs in a forked child to isolate env-var mutations from other test threads.
-    let _lock = ENV_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let result = run_in_child_check(|| {
-        super::setup_child_env(24, 80, std::path::Path::new("/bin/sh"));
-        std::env::var("TERM").as_deref() == Ok("xterm-256color")
-            && std::env::var("COLORTERM").as_deref() == Ok("truecolor")
-            && std::env::var("KURO_TERMINAL").as_deref() == Ok("1")
-    });
-    let Some(ok) = result else {
-        // Child deadlocked on env RwLock after fork() — skip on WSL2.
-        return;
-    };
-    assert!(
-        ok,
-        "TERM/COLORTERM/KURO_TERMINAL must be set by setup_child_env"
-    );
-}
-
-#[test]
-#[cfg(unix)]
-fn test_setup_child_env_propagates_dimensions() {
-    // Runs in a forked child to isolate env-var mutations from other test threads.
-    let _lock = ENV_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let result = run_in_child_check(|| {
-        super::setup_child_env(42, 120, std::path::Path::new("/bin/sh"));
-        std::env::var("LINES").as_deref() == Ok("42")
-            && std::env::var("COLUMNS").as_deref() == Ok("120")
-    });
-    let Some(ok) = result else {
-        return; // Child deadlocked on env RwLock after fork() — skip on WSL2.
-    };
-    assert!(ok, "LINES/COLUMNS must match the rows/cols arguments");
-}
-
-#[test]
-#[cfg(unix)]
-fn test_setup_child_env_removes_multiplexer_vars() {
-    // Set multiplexer vars in the PARENT before fork so the child inherits them.
-    // Hold ENV_FORK_LOCK for the full critical section (set_var + fork + cleanup)
-    // so no concurrent test can hold the env RwLock when fork() is called.
-    let _lock = ENV_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    #[allow(
-        deprecated,
-        reason = "set_var deprecated but fork lock serializes access"
-    )]
-    unsafe {
-        std::env::set_var("TMUX", "some-socket");
-        std::env::set_var("STY", "some-screen");
-        std::env::set_var("INSIDE_EMACS", "28.1");
-        std::env::set_var("EMACS_SOCKET_NAME", "/tmp/emacs");
-    }
-    let result = run_in_child_check(|| {
-        // Child inherits the vars set above; verify setup_child_env removes them.
-        // INSIDE_EMACS is now removed (not overwritten) to avoid triggering bash
-        // readline's Emacs-comint mode on macOS bash 3.2.
-        super::setup_child_env(24, 80, std::path::Path::new("/bin/sh"));
-        std::env::var("TMUX").is_err()
-            && std::env::var("STY").is_err()
-            && std::env::var("INSIDE_EMACS").is_err()
-            && std::env::var("EMACS_SOCKET_NAME").is_err()
-    });
-    // Clean up in the parent regardless of test outcome.
-    #[allow(
-        deprecated,
-        reason = "remove_var deprecated but fork lock serializes access"
-    )]
-    unsafe {
-        std::env::remove_var("TMUX");
-        std::env::remove_var("STY");
-        std::env::remove_var("INSIDE_EMACS");
-        std::env::remove_var("EMACS_SOCKET_NAME");
-    }
-    let Some(ok) = result else {
-        return; // Child deadlocked on env RwLock after fork() — skip on WSL2.
-    };
-    assert!(ok, "multiplexer vars must be removed by setup_child_env");
-}
-
-// --- Tests for Pty::has_pending_data ---
-
-#[test]
-fn test_has_pending_data_false_on_fresh_spawn() {
-    // A freshly spawned PTY has not yet produced output on the channel.
-    // has_pending_data() must return false before any data arrives.
-    let pty = Pty::spawn("sh", &[], 24, 80).expect("spawn failed");
-    // We do not call read() here; we just check the flag immediately.
-    // The shell may not have written anything yet, so the channel is likely empty.
-    // This is a best-effort check; the test is not racey because we never write.
-    let _ = pty.has_pending_data(); // must not panic
-}
-
-#[test]
-fn test_has_pending_data_true_after_echo() {
-    // Write a command that produces output and wait for data to arrive.
-    let mut pty = Pty::spawn("sh", &[], 24, 80).expect("spawn failed");
-    pty.write(b"echo kuro_test_marker\n").expect("write failed");
-
-    // Poll until data arrives (up to 2 s).
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while !pty.has_pending_data() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert!(
-        pty.has_pending_data(),
-        "has_pending_data() must return true after the shell writes output"
-    );
-}
-
-// --- Tests for validate_shell error message format ---
-
-#[test]
-fn test_validate_shell_disallowed_message_contains_shell_name() {
-    // The error message for a disallowed shell must include the shell's basename
-    // and the list of allowed shells, so users know what is permitted.
-    if super::Pty::find_in_path("python3").is_some() {
-        let err = Pty::validate_shell("python3").unwrap_err();
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("python3"),
-            "error message must contain the rejected shell name; got: {msg}"
-        );
-        assert!(
-            msg.contains("bash") || msg.contains("sh"),
-            "error message must mention allowed shells; got: {msg}"
-        );
-    }
-}
-
-#[test]
-fn test_validate_shell_not_found_message_contains_shell_name() {
-    let err = Pty::validate_shell("_no_such_shell_xyz_").unwrap_err();
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("_no_such_shell_xyz_") || msg.contains("not found") || msg.contains("Shell"),
-        "error message must indicate what failed; got: {msg}"
-    );
-}
+#[path = "posix/env.rs"]
+mod env;

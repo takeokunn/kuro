@@ -20,10 +20,13 @@
 (require 'kuro-ffi)
 (require 'kuro-ffi-modes)
 (require 'kuro-faces)
+(require 'kuro-render-buffer-macros)
 (require 'kuro-overlays)
 
 (declare-function kuro--clear-row-image-overlays "kuro-overlays" (row))
-(declare-function kuro--call-with-normalized-ffi-face-range "kuro-overlays" (range line-start line-end continuation))
+(declare-function kuro--remove-blink-overlay-from-lists "kuro-overlays" (ov))
+(declare-function kuro--filter-overlays "kuro-overlays" (overlays predicate &optional on-delete))
+(declare-function kuro--reset-blink-overlays "kuro-overlays" (remaining))
 (defvar kuro--has-images nil
   "Forward reference; `defvar-local' in kuro-overlays.el.")
 (defvar kuro--blink-overlays-by-row nil
@@ -52,16 +55,6 @@ Set to ROW before `kuro--apply-face-ranges' is called so that
 without calling `line-number-at-pos' (O(position)).
 Reset to -1 after the render call completes.")
 
-;;; Edit guard macro
-
-(defmacro kuro--with-buffer-edit (&rest body)
-  "Execute BODY with read-only and modification hooks suppressed.
-Saves and restores point via `save-excursion'."
-  `(let ((inhibit-read-only t)
-         (inhibit-modification-hooks t))
-     (save-excursion
-       ,@body)))
-
 ;;; Row position cache helpers
 
 (defun kuro--init-row-positions (rows)
@@ -72,6 +65,33 @@ Saves and restores point via `save-excursion'."
   "Clear all cached row positions (called after scroll or resize)."
   (when kuro--row-positions
     (fillarray kuro--row-positions nil)))
+
+(defsubst kuro--goto-row-start (row)
+  "Move point to the beginning of ROW using the row-position cache when possible.
+Return non-nil on a cache hit; nil when a linear scan was needed."
+  (let* ((rp kuro--row-positions)
+         (row-start (and rp (< row (length rp)) (aref rp row))))
+    (if row-start
+        (progn
+          (goto-char row-start)
+          t)
+      (goto-char (point-min))
+      (when (> (forward-line row) 0)
+        (goto-char (point-max))
+        (beginning-of-line))
+      nil)))
+
+(defun kuro--row-position (row)
+  "Return the buffer position at the start of terminal ROW.
+Uses the `kuro--row-positions' cache via `kuro--goto-row-start'; on a cache
+miss it resolves the position with a linear scan.  When the buffer has fewer
+than ROW+1 lines, `kuro--goto-row-start' clamps point to the start of the last
+line and that position is returned.  Used by per-row overlay consumers (OSC 8
+hyperlinks, OSC 66 text-sizing) to translate Rust-supplied in-row character
+offsets into absolute buffer positions."
+  (save-excursion
+    (kuro--goto-row-start row)
+    (point)))
 
 ;;; Scroll event application
 
@@ -132,40 +152,31 @@ Must be called before the line text is replaced (uses pre-replace line-end)."
   (when kuro--blink-overlays
     (let ((line-end-before (1+ (or pre-end (line-end-position)))))
       (if (and row (hash-table-p kuro--blink-overlays-by-row))
-          ;; Fast path: only scan overlays on this specific row.
-          (let ((row-ovs (gethash row kuro--blink-overlays-by-row)))
-            (when row-ovs
-              (dolist (ov row-ovs)
-                (when (and (overlay-buffer ov)
-                           (>= (overlay-start ov) line-start)
-                           (<= (overlay-end ov) line-end-before))
-                  (delete-overlay ov)
-                  (setq kuro--blink-overlays (delq ov kuro--blink-overlays))
-                  ;; Maintain typed sub-lists; overlay-get on a deleted overlay
-                  ;; is safe (properties survive delete-overlay).
-                  (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
-                      (setq kuro--blink-overlays-slow
-                            (delq ov kuro--blink-overlays-slow))
-                    (setq kuro--blink-overlays-fast
-                          (delq ov kuro--blink-overlays-fast)))))
-              (remhash row kuro--blink-overlays-by-row)))
-        ;; Fallback: full scan when row unavailable.
-        ;; Rebuild typed sub-lists in the same pass to keep them in sync.
-        (let ((remaining nil)
-              (remaining-slow nil)
-              (remaining-fast nil))
-          (dolist (ov kuro--blink-overlays)
-            (if (and (overlay-buffer ov)
-                     (>= (overlay-start ov) line-start)
-                     (<= (overlay-end ov) line-end-before))
-                (delete-overlay ov)
-              (if (eq (overlay-get ov 'kuro-blink-type) 'slow)
-                  (push ov remaining-slow)
-                (push ov remaining-fast))
-              (push ov remaining)))
-          (setq kuro--blink-overlays      (nreverse remaining)
-                kuro--blink-overlays-slow remaining-slow
-                kuro--blink-overlays-fast remaining-fast))))))
+          (kuro--clear-line-blink-overlays-from-row row line-start line-end-before)
+        (kuro--clear-line-blink-overlays-by-scan line-start line-end-before)))))
+
+(defun kuro--clear-line-blink-overlays-from-row (row line-start line-end-before)
+  "Remove blink overlays for ROW that fall within LINE-START..LINE-END-BEFORE."
+  (let ((row-ovs (gethash row kuro--blink-overlays-by-row)))
+    (when row-ovs
+      (kuro--filter-overlays
+       row-ovs
+       (lambda (ov)
+         (and (overlay-buffer ov)
+              (>= (overlay-start ov) line-start)
+              (<= (overlay-end ov) line-end-before)))
+       #'kuro--remove-blink-overlay-from-lists)
+      (remhash row kuro--blink-overlays-by-row))))
+
+(defun kuro--clear-line-blink-overlays-by-scan (line-start line-end-before)
+  "Remove blink overlays in the LINE-START..LINE-END-BEFORE range."
+  (kuro--reset-blink-overlays
+   (kuro--filter-overlays
+    kuro--blink-overlays
+    (lambda (ov)
+      (and (overlay-buffer ov)
+           (>= (overlay-start ov) line-start)
+           (<= (overlay-end ov) line-end-before))))))
 
 (defsubst kuro--apply-face-ranges (face-ranges line-start line-end)
   "Apply FACE-RANGES to the line bounded by LINE-START and LINE-END.
@@ -173,7 +184,8 @@ FACE-RANGES is a FLAT stride-6 vector produced by `kuro--decode-face-ranges',
 or nil for no face data.  Layout: [s0 e0 fg0 bg0 f0 ul0 s1 e1 fg1 bg1 f1 ul1 …].
 Each range occupies 6 consecutive slots — start-buf, end-buf, fg-enc, bg-enc,
 flags, ul-color-enc — with byte offsets relative to LINE-START.
-Must be called after the line text has been inserted (post-insert line-end).
+Must be called after the line text has been inserted, when LINE-END reflects the
+post-insert position.
 
 Stride-6 flat layout eliminates the inner-vector allocation per range that the
 old vector-of-vectors required (~21,600 allocs/sec at 120fps × 30 dirty rows ×
@@ -186,24 +198,10 @@ the old dotimes variant — eliminates ~21,600 integer multiplies/sec.
 `(when face-ranges ...)' nil guard avoids `(length nil)' + `<' on the ~50%
 of plain-text rows with no face data — saves ~1,800 function calls/sec."
   (when face-ranges
-    (let ((len (length face-ranges))
-          (base 0))
-      (while (< base len)
-      (let* ((b1        (1+ base))
-             (b2        (1+ b1))
-             (b3        (1+ b2))
-             (b4        (1+ b3))
-             (b5        (1+ b4))
-             (start-pos (min (+ line-start (aref face-ranges base)) line-end))
-             (end-pos   (min (+ line-start (aref face-ranges b1))   line-end)))
-        (when (> end-pos start-pos)
-          (kuro--apply-ffi-face-at
-           start-pos end-pos
-           (aref face-ranges b2)
-           (aref face-ranges b3)
-           (aref face-ranges b4)
-           (aref face-ranges b5)))
-        (setq base (1+ b5)))))))
+    (cl-loop for base from 0 below (length face-ranges) by 6
+             do (kuro--call-with-normalized-ffi-face-range
+                 face-ranges base line-start line-end
+                 #'kuro--apply-ffi-face-at))))
 
 (defun kuro--update-row-position-cache-after-line-change (row old-len new-len new-line-end)
   "Refresh cached row positions after replacing ROW from OLD-LEN to NEW-LEN.
@@ -315,190 +313,13 @@ single-pass when N rows are dirty.
 Critical: `line-end' is recomputed with `(line-end-position)' AFTER the
 delete+insert so face ranges use the new content offsets, not cached old ones."
   (when (and row text)
-    (kuro--store-col-to-buf row col-to-buf)
-    (kuro--with-buffer-edit
-      (kuro--ensure-buffer-row-exists row)
-      (let* ((line-start (point))
-             (old-end (line-end-position))
-             (old-len (- old-end line-start)))
-        (kuro--clear-row-overlays row old-end)
-        (delete-region line-start old-end)
-        (insert text)
-        ;; Capture new line-end once; used for both face application and cache update.
-        ;; Derive new-len from buffer positions (character units) rather than
-        ;; (length text) which returns byte-count for multibyte strings, causing
-        ;; wrong deltas in kuro--row-positions for CJK/emoji rows.
-        (let ((new-line-end (line-end-position)))
-          (kuro--update-row-position-cache-after-line-change row old-len (- new-line-end line-start) new-line-end)
-          ;; Bind current row so kuro--apply-blink-overlay can skip line-number-at-pos.
-          (setq kuro--current-render-row row)
-          ;; line-end MUST be recomputed after insert: multi-byte text means
-          ;; (+ line-start (length text)) would be wrong.
-          (kuro--apply-face-ranges face-ranges line-start new-line-end)
-          (setq kuro--current-render-row -1))))))
+    (kuro--with-rewritten-line row text col-to-buf
+      ;; Bind current row so `kuro--apply-blink-overlay' can skip
+      ;; `line-number-at-pos' while the post-rewrite face ranges are applied.
+      (kuro--with-current-render-row row
+        (kuro--apply-face-ranges face-ranges line-start new-line-end)))))
 
-(kuro--defvar-permanent-local kuro--last-cursor-row nil
-  "Cached cursor row from the previous render frame.
-Used to skip redundant cursor position computation when unchanged.")
-
-(kuro--defvar-permanent-local kuro--last-cursor-col nil
-  "Cached cursor column from the previous render frame.
-Used to skip redundant cursor position computation when unchanged.")
-
-(kuro--defvar-permanent-local kuro--last-cursor-visible nil
-  "Cached cursor visibility from the previous render frame.")
-
-(kuro--defvar-permanent-local kuro--last-cursor-shape nil
-  "Cached cursor shape from the previous render frame.")
-
-;;; Cursor position helpers
-
-(defun kuro--grid-col-to-buffer-pos (row col)
-  "Convert grid (ROW, COL) to a buffer position using the col-to-buf map.
-col_to_buf[col] gives the buffer char offset for cursor column COL on ROW.
-For pure ASCII lines, col == buf-offset; for CJK lines, col > buf-offset
-because wide placeholder cells are skipped in the buffer.
-Falls back to COL when the mapping is absent or shorter than COL
-\(e.g. cursor past last content — trailing spaces are pure ASCII).
-Uses `kuro--row-positions' cache for O(1) row navigation when available;
-falls back to O(row) `forward-line' only when the cache misses."
-  (let* ((row-map    (gethash row kuro--col-to-buf-map))
-         (buf-offset (if (and row-map (< col (length row-map)))
-                         (aref row-map col)
-                       col)))
-    (save-excursion
-      ;; Fast path: use row-positions cache to jump directly to row start (O(1)).
-      (let* ((rp        kuro--row-positions)
-             (row-start (and rp
-                             (< row (length rp))
-                             (aref rp row))))
-        (if row-start
-            (goto-char row-start)
-          ;; Slow path: linear scan from point-min (O(row)).
-          (goto-char (point-min))
-          (when (> (forward-line row) 0)
-            (goto-char (point-max))
-            (beginning-of-line))))
-      (goto-char (min (+ (point) buf-offset) (line-end-position)))
-      (point))))
-
-(defun kuro--anchor-window-at-pos (win target-pos)
-  "Anchor WIN display at point-min and move its point to TARGET-POS.
-`set-window-start' must precede `set-window-point' so TARGET-POS lands
-within the already-anchored viewport; together they prevent Emacs from
-scrolling when a full-screen app (vim, htop) moves the cursor to the
-last row.  Both calls are guarded by equality checks to avoid
-unnecessary redisplay triggers.
-Also resets vscroll and hscroll to zero: tall image overlays
-\(Sixel/Kitty) can leave non-zero vscroll, and horizontal scroll
-drift can accumulate even with `auto-hscroll-mode' disabled."
-  (unless (= (window-start win) (point-min))
-    (set-window-start win (point-min)))
-  (unless (= (window-point win) target-pos)
-    (set-window-point win target-pos))
-  (when (> (window-vscroll win) 0)
-    (set-window-vscroll win 0))
-  (when (> (window-hscroll win) 0)
-    (set-window-hscroll win 0)))
-
-(defun kuro--apply-cursor-display (visible shape)
-  "Set buffer-local `cursor-type' from VISIBLE flag and SHAPE integer.
-SHAPE is a DECSCUSR value (0-6, see `kuro--decscusr-to-cursor-type').
-When VISIBLE is nil the cursor is hidden by setting `cursor-type' to nil."
-  (setq-local cursor-type
-              (if visible
-                  (kuro--decscusr-to-cursor-type (or shape 0))
-                nil)))
-
-;;; Cursor state macros + helpers
-
-(defmacro kuro--cache-cursor-state (row col visible shape)
-  "Store ROW, COL, VISIBLE, SHAPE into the per-buffer cursor cache variables."
-  `(setq kuro--last-cursor-row     ,row
-         kuro--last-cursor-col     ,col
-         kuro--last-cursor-visible ,visible
-         kuro--last-cursor-shape   ,shape))
-
-(defsubst kuro--cursor-state-changed-p (row col visible shape)
-  "Return non-nil when (ROW COL VISIBLE SHAPE) differs from the cached state."
-  (or (not (eql row     kuro--last-cursor-row))
-      (not (eql col     kuro--last-cursor-col))
-      (not (eq  visible kuro--last-cursor-visible))
-      (not (eql shape   kuro--last-cursor-shape))))
-
-;;; Cursor window cache
-
-(kuro--defvar-permanent-local kuro--cached-window nil
-  "Cached window object for this terminal buffer.
-Validated with `window-live-p' (O(1) C check) on each frame instead of
-calling `get-buffer-window' with t (walks every live frame's window tree).
-Reset to nil by `kuro--start-render-loop' so the cache is rebuilt after
-buffer re-display in a new window.")
-
-;;; Cursor update
-
-(defun kuro--update-cursor ()
-  "Update cursor position and shape in buffer.
-Uses the consolidated `kuro--get-cursor-state' to fetch position,
-visibility, and shape in a single Mutex acquisition (PERF-004).
-Skips buffer position computation when cursor state is unchanged,
-but ALWAYS re-anchors the window at point-min to prevent Emacs'
-native redisplay from drifting the viewport between render cycles."
-  (unless (> kuro--scroll-offset 0)
-    (when-let ((state (kuro--get-cursor-state)))
-      ;; cdr-chain: each cdr advances the spine once (shared intermediate cells).
-      ;; cadr/caddr/cadddr would re-traverse from head each time.
-      (let* ((row     (car state))
-             (s1      (cdr state))
-             (col     (car s1))
-             (s2      (cdr s1))
-             (visible (car s2))
-             (shape   (car (cdr s2))))
-        ;; Fast path: reuse cached window (window-live-p is an O(1) C check).
-        ;; Fallback to get-buffer-window (O(frames×windows)) only on miss.
-        (when-let ((win (or (and (window-live-p kuro--cached-window)
-                                 kuro--cached-window)
-                            (setq kuro--cached-window
-                                  (get-buffer-window (current-buffer) t)))))
-          (if (kuro--cursor-state-changed-p row col visible shape)
-              ;; State changed: update cache, position, and shape.
-              (let ((target-pos (kuro--grid-col-to-buffer-pos row col)))
-                (kuro--cache-cursor-state row col visible shape)
-                ;; Always ensure the marker exists; create it on first use.
-                (if kuro--cursor-marker
-                    (set-marker kuro--cursor-marker target-pos)
-                  (setq kuro--cursor-marker (copy-marker target-pos)))
-                (kuro--anchor-window-at-pos win target-pos)
-                (kuro--apply-cursor-display visible shape))
-            ;; Cursor unchanged — still re-anchor to prevent viewport drift.
-            (kuro--anchor-window-at-pos win (or (and kuro--cursor-marker
-                                                     (marker-position kuro--cursor-marker))
-                                                (kuro--grid-col-to-buffer-pos row col)))))))))
-
-;;; Scrollback indicator
-
-(kuro--defvar-permanent-local kuro--last-scroll-indicator-offset -1
-  "Cached `kuro--scroll-offset' value from the last header-line update.
-Initialized to -1 (impossible offset) so the first render always writes the
-header-line even when the initial offset is 0.  Compared with `eql' (integer
-equality, no allocation) to avoid calling `format' + `equal' every frame.")
-
-(defun kuro--update-scroll-indicator ()
-  "Update header-line to show scrollback position.
-When `kuro--scroll-offset' is positive, display a header-line indicating
-how many lines into scrollback history the user has scrolled.
-When at live view (offset 0), remove the header-line.
-
-Uses an integer cache (`kuro--last-scroll-indicator-offset') so that string
-construction runs only when the offset changes — not every frame.
-`concat' + `number-to-string' avoids the printf-style parse overhead of
-`format' for this single-integer case."
-  (let ((offset kuro--scroll-offset))
-    (unless (eql offset kuro--last-scroll-indicator-offset)
-      (setq kuro--last-scroll-indicator-offset offset)
-      (setq header-line-format
-            (when (> offset 0)
-              (concat " ↑ Scrollback: +" (number-to-string offset) " lines (S-End to return) "))))))
+(require 'kuro-render-cursor)
 
 (provide 'kuro-render-buffer)
 

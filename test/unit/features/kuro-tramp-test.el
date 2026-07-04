@@ -112,6 +112,24 @@
     (should (string= (kuro--tramp-remote-path "host" nil)
                       "/ssh:host:/"))))
 
+(ert-deftest kuro-tramp-remote-path-rejects-invalid-method ()
+  "kuro--tramp-remote-path rejects non-allowlisted methods."
+  (let ((kuro-tramp-method "ssh:evil"))
+    (should-not (kuro--tramp-remote-path "host" "/tmp"))))
+
+(ert-deftest kuro-tramp-remote-path-rejects-invalid-host ()
+  "kuro--tramp-remote-path rejects hosts that can change TRAMP parsing."
+  (let ((kuro-tramp-method "ssh"))
+    (dolist (host '("user:host" "host|proxy" "-bad" "bad-" "bad..host" "例.example"))
+      (should-not (kuro--tramp-remote-path host "/tmp")))))
+
+(ert-deftest kuro-tramp-remote-path-rejects-invalid-path ()
+  "kuro--tramp-remote-path rejects unsafe cwd payloads."
+  (let ((kuro-tramp-method "ssh"))
+    (dolist (path '("relative" "/tmp/a:b" "/tmp/a|b" "/tmp/a\\b" "/tmp/\nname"
+                   "/ssh:evil:/tmp"))
+      (should-not (kuro--tramp-remote-path "host" path)))))
+
 ;;; Group 2: kuro--apply-cwd-with-tramp
 
 (ert-deftest kuro-tramp-apply-cwd-local-when-host-nil ()
@@ -126,9 +144,10 @@
         (should (string= default-directory "/home/user/"))))))
 
 (ert-deftest kuro-tramp-apply-cwd-tramp-when-host-present ()
-  "kuro--apply-cwd-with-tramp sets tramp path when host is present."
+  "kuro--apply-cwd-with-tramp sets tramp path when host is allowed."
   (let ((kuro--initialized t)
-        (kuro-tramp-method "ssh"))
+        (kuro-tramp-method "ssh")
+        (kuro-tramp-allowed-hosts '("remote-box")))
     (with-temp-buffer
       (cl-letf (((symbol-function 'kuro-core-get-cwd)
                  (lambda (_id) "/home/user"))
@@ -136,6 +155,56 @@
                  (lambda (_id) "remote-box")))
         (kuro--apply-cwd-with-tramp)
         (should (string= default-directory "/ssh:remote-box:/home/user/"))))))
+
+(ert-deftest kuro-tramp-apply-cwd-noop-when-remote-host-not-allowed ()
+  "kuro--apply-cwd-with-tramp rejects remote hosts by default."
+  (let ((kuro--initialized t)
+        (kuro-tramp-allowed-hosts nil))
+    (with-temp-buffer
+      (let ((orig default-directory))
+        (cl-letf (((symbol-function 'kuro-core-get-cwd)
+                   (lambda (_id) "/home/user"))
+                  ((symbol-function 'kuro-core-get-cwd-host)
+                   (lambda (_id) "remote-box")))
+          (kuro--apply-cwd-with-tramp)
+          (should (string= default-directory orig)))))))
+
+(ert-deftest kuro-tramp-apply-cwd-noop-when-host-invalid ()
+  "kuro--apply-cwd-with-tramp rejects invalid remote host payloads."
+  (let ((kuro--initialized t)
+        (kuro-tramp-allowed-hosts '("remote-box")))
+    (with-temp-buffer
+      (let ((orig default-directory))
+        (cl-letf (((symbol-function 'kuro-core-get-cwd)
+                   (lambda (_id) "/home/user"))
+                  ((symbol-function 'kuro-core-get-cwd-host)
+                   (lambda (_id) "remote-box:evil")))
+          (kuro--apply-cwd-with-tramp)
+          (should (string= default-directory orig)))))))
+
+(ert-deftest kuro-tramp-apply-cwd-noop-when-path-invalid ()
+  "kuro--apply-cwd-with-tramp rejects unsafe cwd payloads."
+  (let ((kuro--initialized t))
+    (with-temp-buffer
+      (let ((orig default-directory))
+        (cl-letf (((symbol-function 'kuro-core-get-cwd)
+                   (lambda (_id) "/tmp/a:b"))
+                  ((symbol-function 'kuro-core-get-cwd-host)
+                   (lambda (_id) nil)))
+          (kuro--apply-cwd-with-tramp)
+          (should (string= default-directory orig)))))))
+
+(ert-deftest kuro-tramp-apply-cwd-localhost-uses-local-path ()
+  "kuro--apply-cwd-with-tramp treats localhost as a local cwd."
+  (let ((kuro--initialized t)
+        (kuro-tramp-allowed-hosts nil))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'kuro-core-get-cwd)
+                 (lambda (_id) "/tmp/work"))
+                ((symbol-function 'kuro-core-get-cwd-host)
+                 (lambda (_id) "localhost")))
+        (kuro--apply-cwd-with-tramp)
+        (should (string= default-directory "/tmp/work/"))))))
 
 (ert-deftest kuro-tramp-apply-cwd-noop-when-cwd-nil ()
   "kuro--apply-cwd-with-tramp does nothing when cwd is nil."
@@ -152,6 +221,25 @@
 (ert-deftest kuro-tramp-method-defaults-to-ssh ()
   "kuro-tramp-method defcustom defaults to \"ssh\"."
   (should (string= (default-value 'kuro-tramp-method) "ssh")))
+
+(ert-deftest kuro-tramp-allowed-hosts-defaults-to-deny-all ()
+  "kuro-tramp-allowed-hosts defcustom defaults to deny all remote hosts."
+  (should-not (default-value 'kuro-tramp-allowed-hosts)))
+
+(ert-deftest kuro-tramp-method-setter-rejects-invalid-method ()
+  "kuro-tramp-method setter rejects methods outside the allowlist."
+  (let ((original (default-value 'kuro-tramp-method)))
+    (unwind-protect
+        (should-error (customize-set-variable 'kuro-tramp-method "sudo"))
+      (set-default 'kuro-tramp-method original))))
+
+(ert-deftest kuro-tramp-allowed-hosts-setter-rejects-invalid-host ()
+  "kuro-tramp-allowed-hosts setter rejects invalid host entries."
+  (let ((original (default-value 'kuro-tramp-allowed-hosts)))
+    (unwind-protect
+        (should-error
+         (customize-set-variable 'kuro-tramp-allowed-hosts '("bad..host")))
+      (set-default 'kuro-tramp-allowed-hosts original))))
 
 (provide 'kuro-tramp-test)
 

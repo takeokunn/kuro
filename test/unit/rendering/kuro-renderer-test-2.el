@@ -1,0 +1,269 @@
+;;; kuro-renderer-test-2.el --- ERT tests for kuro-renderer — Groups 10-14  -*-  lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'kuro-renderer-test-support)
+
+;;; Group 10: kuro--handle-clipboard-actions
+
+(ert-deftest kuro-renderer-handle-clipboard-write-only-policy-calls-kill-new ()
+  "kuro--handle-clipboard-actions calls kill-new for write actions under write-only policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called-with nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write "hello from terminal" "clipboard"))))
+                ((symbol-function 'kill-new)
+                 (lambda (text) (setq kill-new-called-with text)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should (equal kill-new-called-with "hello from terminal"))))))
+
+(ert-deftest kuro-renderer-handle-clipboard-allow-policy-calls-kill-new ()
+  "kuro--handle-clipboard-actions calls kill-new for write actions under allow policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil)
+          (kuro-clipboard-policy 'allow))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write "data" "clipboard"))))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-deny-policy-does-not-call-kill-new ()
+  "kuro--handle-clipboard-actions does NOT call kill-new under an unknown/deny policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil)
+          ;; 'deny is not a defined policy value; the pcase falls through
+          ;; without matching any branch, so kill-new must never be called.
+          (kuro-clipboard-policy 'deny))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write "secret" "clipboard"))))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-write-only-blocks-query ()
+  "kuro--handle-clipboard-actions does NOT respond to query actions under write-only policy."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((send-key-called nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((query nil "clipboard"))))
+                ((symbol-function 'kuro--send-key)
+                 (lambda (_s) (setq send-key-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not send-key-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-empty-actions-noop ()
+  "kuro--handle-clipboard-actions is a no-op when the action list is nil."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((kill-new-called nil))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () nil))
+                ((symbol-function 'kill-new)
+                 (lambda (_text) (setq kill-new-called t))))
+        (kuro--handle-clipboard-actions)
+        (should-not kill-new-called)))))
+
+(ert-deftest kuro-renderer-handle-clipboard-multiple-write-actions ()
+  "kuro--handle-clipboard-actions processes multiple write actions in sequence."
+  (kuro-renderer-helpers-test--with-buffer
+    (let ((killed-texts nil)
+          (kuro-clipboard-policy 'write-only))
+      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
+                 (lambda () '((write "first" "clipboard")
+                              (write "second" "clipboard"))))
+                ((symbol-function 'kill-new)
+                 (lambda (text) (push text killed-texts)))
+                ((symbol-function 'message) #'ignore))
+        (kuro--handle-clipboard-actions)
+        (should (= (length killed-texts) 2))
+        (should (member "first" killed-texts))
+        (should (member "second" killed-texts))))))
+
+;;; Group 10b: Blink overlay clearing during line update
+
+(ert-deftest test-kuro-update-line-full-clears-blink-overlays-on-row ()
+  "Updating a line removes blink overlays on that row."
+  (with-temp-buffer
+    (insert "old text\n")
+    (insert "other row\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--blink-overlays-by-row nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 0
+      (let ((ov (make-overlay 1 5)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'slow)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should clear blink overlay on that row
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (null kuro--blink-overlays)))))
+
+(ert-deftest test-kuro-update-line-full-preserves-blink-overlays-other-row ()
+  "Updating a line preserves blink overlays on other rows."
+  (with-temp-buffer
+    (insert "row zero\n")
+    (insert "row one\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Create a blink overlay on row 1
+      (let ((ov (make-overlay 10 15)))
+        (overlay-put ov 'kuro-blink t)
+        (overlay-put ov 'kuro-blink-type 'fast)
+        (push ov kuro--blink-overlays))
+      ;; Update row 0 — should NOT clear blink overlay on row 1
+      (kuro--update-line-full 0 "new text" nil nil)
+      (should (= 1 (length kuro--blink-overlays))))))
+
+;;; Group 12: kuro--install-render-timer
+
+(ert-deftest kuro-renderer-install-render-timer-creates-timer ()
+  "kuro--install-render-timer creates a live timer object."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (kuro--install-render-timer 30)
+    (should (timerp kuro--timer))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+(ert-deftest kuro-renderer-install-render-timer-cancels-existing ()
+  "kuro--install-render-timer cancels any pre-existing timer before installing.
+Verification: after a second install the old timer is no longer in `timer-list'."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    ;; Install a first timer.
+    (kuro--install-render-timer 30)
+    (let ((first kuro--timer))
+      ;; Install a second timer — must cancel the first.
+      (kuro--install-render-timer 60)
+      ;; The new timer must differ from the first.
+      (should-not (eq kuro--timer first))
+      ;; The first timer must no longer be in the active timer list.
+      (should-not (memq first timer-list))
+      (cancel-timer kuro--timer)
+      (setq kuro--timer nil))))
+
+(ert-deftest kuro-renderer-install-render-timer-interval-from-rate ()
+  "kuro--install-render-timer sets the repeat interval to 1/rate seconds."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (kuro--install-render-timer 60)
+    ;; timer--repeat-delay holds the repeat interval.
+    (let ((interval (timer--repeat-delay kuro--timer)))
+      (should (floatp interval))
+      ;; 1/60 ≈ 0.01667 — allow 1% tolerance.
+      (should (< (abs (- interval (/ 1.0 60))) 0.001)))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+(ert-deftest kuro-renderer-install-render-timer-nil-when-no-prior ()
+  "kuro--install-render-timer with no pre-existing timer does not error."
+  (kuro-renderer-test--with-buffer
+    (setq-local kuro--timer nil)
+    (should-not (condition-case err
+                    (progn (kuro--install-render-timer 30) nil)
+                  (error err)))
+    (cancel-timer kuro--timer)
+    (setq kuro--timer nil)))
+
+;;; Group 13: kuro--reset-cursor-cache macro
+
+(kuro-renderer-test--deftest-reset-cursor-cache-cases)
+
+;;; Group 14: kuro--sanitize-title edge cases
+
+(kuro-renderer-test--deftest-sanitize-title-edge-cases)
+
+(ert-deftest test-kuro-update-line-full-nil-col-to-buf-removes-stale ()
+  "Nil col-to-buf removes stale mapping from hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Pre-populate stale CJK mapping for row 0
+      (puthash 0 [0 0 1 1 2 2] kuro--col-to-buf-map)
+      ;; Update with nil col-to-buf (pure ASCII line)
+      (kuro--update-line-full 0 "ascii" nil nil)
+      ;; Stale mapping should be removed
+      (should (null (gethash 0 kuro--col-to-buf-map))))))
+
+(ert-deftest test-kuro-update-line-full-vector-col-to-buf-stores ()
+  "Vector col-to-buf is stored in hash table."
+  (with-temp-buffer
+    (insert "test line\n")
+    (let ((kuro--blink-overlays nil)
+          (kuro--image-overlays nil)
+          (kuro--col-to-buf-map (make-hash-table :test 'eql)))
+      ;; Update with a vector col-to-buf
+      (kuro--update-line-full 0 "日本" nil [0 0 1 1])
+      ;; Mapping should be stored
+      (should (equal (gethash 0 kuro--col-to-buf-map) [0 0 1 1])))))
+
+;;; Group 25: kuro--timed
+
+(ert-deftest kuro-renderer-timed-returns-body-value ()
+  "kuro--timed returns the value produced by body."
+  (let ((ms 0))
+    (should (eq 42 (kuro--timed ms 42)))))
+
+(ert-deftest kuro-renderer-timed-sets-ms-var ()
+  "kuro--timed sets the ms variable to a non-negative number."
+  (let ((ms 0))
+    (kuro--timed ms (sit-for 0))
+    (should (>= ms 0.0))))
+
+(ert-deftest kuro-renderer-timed-body-side-effects-execute ()
+  "kuro--timed executes body so its side effects take effect."
+  (let ((ms 0) (ran nil))
+    (kuro--timed ms (setq ran t))
+    (should ran)))
+
+;;; kuro--reset-cursor-cache structural tests (Group 13 ext.)
+
+(ert-deftest kuro-renderer-reset-cursor-cache-expands-to-setq ()
+  "`kuro--reset-cursor-cache' single-step expands to a `setq' form."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (eq (car exp) 'setq))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-first-target-is-cursor-row ()
+  "`kuro--reset-cursor-cache' first assignment target is `kuro--last-cursor-row'."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (eq (cadr exp) 'kuro--last-cursor-row))))
+
+(ert-deftest kuro-renderer-reset-cursor-cache-clears-all-four-vars ()
+  "`kuro--reset-cursor-cache' expansion contains all four cache variable names."
+  (let ((exp (macroexpand-1 '(kuro--reset-cursor-cache))))
+    (should (memq 'kuro--last-cursor-row     exp))
+    (should (memq 'kuro--last-cursor-col     exp))
+    (should (memq 'kuro--last-cursor-visible exp))
+    (should (memq 'kuro--last-cursor-shape   exp))))
+
+;;; kuro--timed structural tests (Group 25 ext.)
+
+(ert-deftest kuro-renderer-timed-expands-to-let ()
+  "`kuro--timed' single-step expands to a `let' form."
+  (let ((exp (macroexpand-1 '(kuro--timed ms (+ 1 2)))))
+    (should (eq (car exp) 'let))))
+
+(ert-deftest kuro-renderer-timed-binding-uses-private-name ()
+  "`kuro--timed' binds `--timed-start' to prevent BODY shadowing."
+  (let* ((exp (macroexpand-1 '(kuro--timed ms (ignore))))
+         (binding-name (car (caadr exp))))
+    (should (eq binding-name '--timed-start))))
+
+(ert-deftest kuro-renderer-timed-body-wrapped-in-prog1 ()
+  "`kuro--timed' wraps BODY in `prog1' to preserve the return value."
+  (let* ((exp (macroexpand-1 '(kuro--timed ms (+ 1 2))))
+         (body-form (caddr exp)))
+    (should (eq (car body-form) 'prog1))))
+
+(provide 'kuro-renderer-test-2)
+;;; kuro-renderer-test-2.el ends here

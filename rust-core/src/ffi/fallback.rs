@@ -11,10 +11,15 @@ use super::abstraction::{
     emacs_env, emacs_value, init_session, shutdown_session, with_session, with_session_readonly,
     KuroFFI,
 };
-use crate::error::KuroError;
+use super::boundary::{FfiScrollbackMaxLines, FfiScrollbackQueryLimit, FfiWindowSize};
 
 /// Legacy session ID used by the `RawFFI` trait implementation.
 const LEGACY_SESSION_ID: u64 = 0;
+
+#[inline]
+fn legacy_usize_to_i64(value: usize) -> i64 {
+    i64::try_from(value).expect("dirty line row index must fit i64")
+}
 
 /// Raw C types from Emacs module API
 #[repr(C)]
@@ -45,71 +50,30 @@ pub struct RawFFI;
 
 impl KuroFFI for RawFFI {
     fn init(env: *mut emacs_env, command: &str, rows: i64, cols: i64) -> *mut emacs_value {
-        // Convert i64 to u16 — KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
-        )]
-        let rows = rows as u16;
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
-        )]
-        let cols = cols as u16;
+        let Some(size) = FfiWindowSize::parse(rows, cols) else {
+            return Self::make_bool(env, false);
+        };
 
         // Initialize session
-        match init_session(command, &[], rows, cols) {
+        match init_session(command, &[], size.rows(), size.cols()) {
             Ok(_) => Self::make_bool(env, true),
             Err(_) => Self::make_bool(env, false),
         }
     }
 
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap,
-        reason = "raw FFI bridge: max_updates (i64→usize) has >0 guard; line_no (usize→i64) bounded by terminal height (≤ u16::MAX)"
-    )]
-    fn poll_updates(env: *mut emacs_env, max_updates: i64) -> *mut emacs_value {
-        let result: std::result::Result<Vec<(usize, String)>, KuroError> =
-            with_session(LEGACY_SESSION_ID, |session| {
-                let mut updates = Vec::new();
-                let mut collected = 0;
-
-                // Collect all dirty lines (max_updates: 0 means unlimited)
-                loop {
-                    session.poll_output()?;
-                    let dirty_lines = session.get_dirty_lines();
-
-                    if dirty_lines.is_empty() {
-                        break;
-                    }
-
-                    updates.extend(dirty_lines);
-                    collected += 1;
-
-                    if max_updates > 0 && collected >= max_updates as usize {
-                        break;
-                    }
-                }
-
-                Ok(updates)
-            });
-
+    fn poll_updates(env: *mut emacs_env, _max_updates: i64) -> *mut emacs_value {
+        let result = with_session(LEGACY_SESSION_ID, |session| {
+            session.poll_output()?;
+            Ok(session.get_dirty_lines())
+        });
         result.map_or_else(
             |_| Self::make_nil(env),
             |dirty_lines| {
-                // Convert to Emacs list of (line_no . text) pairs
-                let mut list = Self::make_nil(env);
-                for (line_no, text) in dirty_lines.into_iter().rev() {
-                    let line_no_val = Self::make_integer(env, line_no as i64);
+                Self::build_emacs_list_from_rev(env, dirty_lines, |env, (line_no, text)| {
+                    let line_no_val = Self::make_integer(env, legacy_usize_to_i64(line_no));
                     let text_val = Self::make_string(env, &text);
-                    let pair = Self::cons(env, line_no_val, text_val);
-                    list = Self::cons(env, pair, list);
-                }
-                list
+                    Self::cons(env, line_no_val, text_val)
+                })
             },
         )
     }
@@ -127,21 +91,12 @@ impl KuroFFI for RawFFI {
     }
 
     fn resize(env: *mut emacs_env, rows: i64, cols: i64) -> *mut emacs_value {
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
-        )]
-        let rows = rows as u16;
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "KuroFFI trait requires i64; Emacs window dimensions never exceed u16::MAX (max observed: ~500 rows × ~1000 cols)"
-        )]
-        let cols = cols as u16;
+        let Some(size) = FfiWindowSize::parse(rows, cols) else {
+            return Self::make_bool(env, false);
+        };
 
         let result = with_session(LEGACY_SESSION_ID, |session| {
-            session.resize(rows, cols)?;
+            session.resize(size.rows(), size.cols())?;
             Ok(())
         });
 
@@ -170,29 +125,20 @@ impl KuroFFI for RawFFI {
         )
     }
 
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "max_lines ≤ 0 is handled above; positive values bounded by practical terminal scrollback limits"
-    )]
     fn get_scrollback(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
-        let max_lines = if max_lines <= 0 {
-            usize::MAX
-        } else {
-            max_lines as usize
+        let Some(limit) = FfiScrollbackQueryLimit::parse(max_lines) else {
+            return Self::make_nil(env);
         };
 
         let result = with_session_readonly(LEGACY_SESSION_ID, |session| {
-            Ok(session.get_scrollback(max_lines))
+            Ok(session.get_scrollback(limit.get()))
         });
-
         result.map_or_else(
             |_| Self::make_nil(env),
             |lines| {
                 let mut list = Self::make_nil(env);
                 for line in lines.into_iter().rev() {
-                    let line_val = Self::make_string(env, &line);
-                    list = Self::cons(env, line_val, list);
+                    list = Self::cons(env, Self::make_string(env, &line), list);
                 }
                 list
             },
@@ -211,14 +157,13 @@ impl KuroFFI for RawFFI {
         }
     }
 
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "KuroFFI trait requires i64; caller passes non-negative scrollback limit"
-    )]
     fn set_scrollback_max_lines(env: *mut emacs_env, max_lines: i64) -> *mut emacs_value {
+        let Some(max_lines) = FfiScrollbackMaxLines::parse(max_lines) else {
+            return Self::make_bool(env, false);
+        };
+
         let result = with_session(LEGACY_SESSION_ID, |session| {
-            session.set_scrollback_max_lines(max_lines as usize);
+            session.set_scrollback_max_lines(max_lines.get());
             Ok(())
         });
 
@@ -230,6 +175,11 @@ impl KuroFFI for RawFFI {
 }
 
 impl RawFFI {
+    /// Return an opaque non-nil test value without encoding data into a pointer.
+    const fn make_non_nil_value() -> *mut emacs_value {
+        std::ptr::dangling_mut::<emacs_value>()
+    }
+
     /// Create a nil value
     const fn make_nil(_env: *mut emacs_env) -> *mut emacs_value {
         // In a real implementation, this would call emacs_make_nil or equivalent
@@ -244,22 +194,16 @@ impl RawFFI {
         if value {
             // Return a non-null pointer for t (this is a placeholder)
             // In real code, this would be env.intern("t")
-            std::ptr::dangling_mut::<emacs_value>()
+            Self::make_non_nil_value()
         } else {
             std::ptr::null_mut()
         }
     }
 
     /// Create an integer value
-    #[expect(
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation,
-        reason = "placeholder: encodes i64 as pointer offset; test double only — never called in production"
-    )]
-    const fn make_integer(_env: *mut emacs_env, value: i64) -> *mut emacs_value {
+    const fn make_integer(_env: *mut emacs_env, _value: i64) -> *mut emacs_value {
         // In a real implementation, this would call env.make_integer(value)
-        // For now, return a pointer with the value encoded (placeholder)
-        (value as usize + 0x1000) as *mut emacs_value
+        Self::make_non_nil_value()
     }
 
     /// Create a string value
@@ -274,20 +218,30 @@ impl RawFFI {
     }
 
     /// Create a cons cell (pair)
-    #[expect(
-        clippy::similar_names,
-        reason = "car_val/cdr_val are standard Lisp car/cdr terminology; renaming would obscure the intent"
-    )]
     fn cons(
         _env: *mut emacs_env,
-        car: *mut emacs_value,
-        cdr: *mut emacs_value,
+        _car: *mut emacs_value,
+        _cdr: *mut emacs_value,
     ) -> *mut emacs_value {
         // In a real implementation, this would call env.cons(car, cdr)
-        // For now, return a pointer with the pair encoded (placeholder)
-        let car_val = car as usize;
-        let cdr_val = cdr as usize;
-        ((car_val << 32) | cdr_val) as *mut emacs_value
+        Self::make_non_nil_value()
+    }
+
+    fn build_emacs_list_from_rev<T, I, F>(
+        env: *mut emacs_env,
+        items: I,
+        mut make_item: F,
+    ) -> *mut emacs_value
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: DoubleEndedIterator,
+        F: FnMut(*mut emacs_env, T) -> *mut emacs_value,
+    {
+        let mut list = Self::make_nil(env);
+        for item in items.into_iter().rev() {
+            list = Self::cons(env, make_item(env, item), list);
+        }
+        list
     }
 }
 
@@ -378,94 +332,5 @@ impl RawFFI {
 /// }
 /// ```
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_raw_ffi_trait_impl() {
-        // Verify RawFFI implements KuroFFI
-        // Note: KuroFFI is not dyn compatible
-        let _ = &RawFFI;
-    }
-
-    #[test]
-    fn test_placeholder_functions() {
-        // Test placeholder functions don't crash
-        let env = std::ptr::null_mut();
-        let nil = RawFFI::make_nil(env);
-        assert!(nil.is_null());
-
-        let t_val = RawFFI::make_bool(env, true);
-        assert!(!t_val.is_null());
-
-        let f_val = RawFFI::make_bool(env, false);
-        assert!(f_val.is_null());
-
-        let int_val = RawFFI::make_integer(env, 42);
-        assert!(!int_val.is_null());
-
-        let str_val = RawFFI::make_string(env, "hello");
-        assert!(!str_val.is_null());
-
-        let pair = RawFFI::cons(env, int_val, str_val);
-        assert!(!pair.is_null());
-    }
-
-    // --- Tests migrated from src/tests/unit/ffi/kuro_ffi_module.rs ---
-
-    // --- emacs_funcall_exit — discriminant values (C ABI contract) ---
-
-    #[test]
-    fn test_pbt_funcall_exit_return_discriminant() {
-        let val = emacs_funcall_exit::EmacsFuncallExitReturn as i32;
-        assert_eq!(val, 0, "EmacsFuncallExitReturn must have discriminant 0");
-    }
-
-    #[test]
-    fn test_pbt_funcall_exit_signal_discriminant() {
-        let val = emacs_funcall_exit::EmacsFuncallExitSignal as i32;
-        assert_eq!(val, 1, "EmacsFuncallExitSignal must have discriminant 1");
-    }
-
-    #[test]
-    fn test_pbt_funcall_exit_throw_discriminant() {
-        let val = emacs_funcall_exit::EmacsFuncallExitThrow as i32;
-        assert_eq!(val, 2, "EmacsFuncallExitThrow must have discriminant 2");
-    }
-
-    #[test]
-    fn test_pbt_funcall_exit_discriminants_distinct() {
-        let r = emacs_funcall_exit::EmacsFuncallExitReturn as i32;
-        let s = emacs_funcall_exit::EmacsFuncallExitSignal as i32;
-        let t = emacs_funcall_exit::EmacsFuncallExitThrow as i32;
-        assert_ne!(r, s, "Return and Signal discriminants must differ");
-        assert_ne!(r, t, "Return and Throw discriminants must differ");
-        assert_ne!(s, t, "Signal and Throw discriminants must differ");
-    }
-
-    // --- RawFFI — compile-time and public-surface tests ---
-
-    #[test]
-    fn test_pbt_raw_ffi_is_zero_sized() {
-        assert_eq!(
-            std::mem::size_of::<RawFFI>(),
-            0,
-            "RawFFI must be a zero-sized unit struct"
-        );
-    }
-
-    #[test]
-    fn test_pbt_raw_ffi_constructible() {
-        let _ffi = RawFFI;
-    }
-
-    // --- KuroFFI trait — compile-time coverage ---
-
-    #[test]
-    fn test_pbt_raw_ffi_implements_kuro_ffi_trait() {
-        use crate::ffi::kuro_ffi::KuroFFI as _;
-        let env: *mut emacs_env = std::ptr::null_mut();
-        let result = RawFFI::shutdown(env);
-        let _ = result;
-    }
-}
+#[path = "fallback_tests.rs"]
+mod tests;

@@ -14,6 +14,9 @@ pub(crate) struct TerminalMeta {
     pub(crate) pending_responses: Vec<Vec<u8>>,
     /// DCS (Device Control String) sequence state
     pub(crate) dcs_state: DcsState,
+    /// Window title push/pop stack for XTPUSHTITLE/XTPOPTITLE (CSI 22;0;0t / CSI 23;0;0t).
+    /// Used by tmux and other programs to save/restore the window title.
+    pub(crate) title_stack: Vec<String>,
     /// Current Emacs color scheme, pushed in from Elisp side via
     /// `kuro_core_set_color_scheme`. `true` = dark (default), `false` = light.
     ///
@@ -32,8 +35,17 @@ impl Default for TerminalMeta {
             bell_pending: false,
             pending_responses: Vec::new(),
             dcs_state: DcsState::default(),
+            title_stack: Vec::new(),
             color_scheme_dark: true,
         }
+    }
+}
+
+impl TerminalMeta {
+    /// Stores a new window title and marks it dirty for the UI layer.
+    pub(crate) fn set_title(&mut self, title: String) {
+        self.title = title;
+        self.title_dirty = true;
     }
 }
 
@@ -82,6 +94,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(m.title, "xterm-kitty");
+        assert!(m.title_dirty);
+    }
+
+    #[test]
+    // MUTATION: set_title() stores the title and marks the metadata dirty.
+    fn terminal_meta_set_title_helper_sets_dirty() {
+        let mut m = TerminalMeta::default();
+        m.set_title("kuro".to_owned());
+        assert_eq!(m.title, "kuro");
         assert!(m.title_dirty);
     }
 
@@ -273,8 +294,8 @@ mod tests {
             fn prop_terminal_meta_response_count(count in 0usize..=16usize) {
                 let mut m = TerminalMeta::default();
                 for i in 0..count {
-                    #[expect(clippy::cast_possible_truncation, reason = "i is 0..=16; always fits in u8")]
-                    m.pending_responses.push(vec![i as u8]);
+                    let byte = u8::try_from(i).expect("test index fits in u8");
+                    m.pending_responses.push(vec![byte]);
                 }
                 prop_assert_eq!(m.pending_responses.len(), count);
             }

@@ -16,6 +16,7 @@
 
 (require 'cl-lib)
 (require 'tabulated-list)
+(require 'kuro-keymap)
 
 (declare-function kuro-attach "kuro-lifecycle" (session-id))
 (declare-function kuro-core-list-sessions "ext:kuro-core" ())
@@ -83,13 +84,12 @@
   (tabulated-list-revert))
 
 (defvar kuro-sessions-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'kuro-sessions-attach)
-    (define-key map (kbd "a")   #'kuro-sessions-attach)
-    (define-key map (kbd "d")   #'kuro-sessions-destroy)
-    (define-key map (kbd "g")   #'kuro-sessions-refresh)
-    (define-key map (kbd "q")   #'quit-window)
-    map)
+  (kuro--define-keymap
+    ((kbd "RET") . kuro-sessions-attach)
+    ("a" . kuro-sessions-attach)
+    ("d" . kuro-sessions-destroy)
+    ("g" . kuro-sessions-refresh)
+    ("q" . quit-window))
   "Keymap for `kuro-sessions-mode'.")
 
 ;;;###autoload

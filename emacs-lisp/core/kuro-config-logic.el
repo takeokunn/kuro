@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -27,6 +27,11 @@
 ;; Forward declaration for kuro--keymap, defined in kuro-input-keymap.el.
 (defvar kuro--keymap nil
   "Forward reference; defvar in kuro-input-keymap.el.")
+
+;; Forward declaration for the font applicator defined in kuro-faces.el;
+;; called from `kuro--set-font' without a compile-time `require' (avoids a
+;; core->faces load cycle).
+(declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
 
 ;;; Internal buffer iterator
 

@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn <takeokunn@users.noreply.github.com>
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 

@@ -6,26 +6,26 @@
 #     previously-pushed tag without retagging).
 #
 # What it produces:
-#   For each of 4 target triples, builds the `kuro-core` cdylib in release
+#   For each of 2 target triples, builds the `kuro-core` cdylib in release
 #   mode and uploads two artifacts to the GitHub Release for the tag:
-#     - libkuro_core-<VERSION>-<TARGET>.tar.gz          (contains libkuro_core.{so,dylib})
+#     - libkuro_core-<VERSION>-<TARGET>.tar.gz          (contains libkuro_core.so)
 #     - libkuro_core-<VERSION>-<TARGET>.tar.gz.sha256   (sha256 of the tarball)
 #
 #   Targets:
 #     - x86_64-unknown-linux-gnu   (ubuntu-latest, native)
 #     - aarch64-unknown-linux-gnu  (ubuntu-22.04-arm, native aarch64 runner)
-#     - x86_64-apple-darwin        (macos-13, last Intel default macOS image)
-#     - aarch64-apple-darwin       (macos-latest, Apple Silicon default since late 2024)
+#
+#   macOS targets are intentionally not built here — GitHub-hosted macOS
+#   runner capacity/queue times made this workflow unreliable.
 #
 # How Elisp consumes it:
 #   The companion Elisp loader fetches
 #     https://github.com/takeokunn/kuro/releases/download/v<VERSION>/libkuro_core-<VERSION>-<TARGET>.tar.gz
 #   plus the matching `.sha256`, verifies the hash, untars, and dlopens
-#   `libkuro_core.{so,dylib}` from the resulting directory.
+#   `libkuro_core.so` from the resulting directory.
 #
 # Design notes:
-#   - Raw cargo (no Nix) for portability and speed. Nix-on-macOS-aarch64 in
-#     GitHub-hosted runners is ~10x slower than raw cargo + sccache.
+#   - Raw cargo (no Nix) for portability and speed.
 #   - MSRV pinned to 1.84.0 (matches Cargo.toml workspace.package.rust-version).
 #   - Release profile (lto=fat, codegen-units=1, strip=symbols) already set in
 #     workspace Cargo.toml — no extra flags needed.
@@ -56,8 +56,6 @@ jobs:
         include:
           - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu  }
           - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: macos-13,         target: x86_64-apple-darwin       }
-          - { os: macos-latest,     target: aarch64-apple-darwin      }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -79,7 +77,7 @@ jobs:
             --target ${{ matrix.target }} \
             --manifest-path rust-core/Cargo.toml
 
-      - name: Determine version + library filename
+      - name: Determine version
         id: meta
         shell: bash
         run: |
@@ -87,10 +85,6 @@ jobs:
           REF_NAME="${{ inputs.tag || github.ref_name }}"
           VERSION="${REF_NAME#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          case "${{ matrix.os }}" in
-            macos-*) echo "lib=libkuro_core.dylib" >> "$GITHUB_OUTPUT" ;;
-            *)       echo "lib=libkuro_core.so"    >> "$GITHUB_OUTPUT" ;;
-          esac
 
       - name: Package tarball + sha256
         shell: bash
@@ -98,7 +92,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.meta.outputs.version }}"
           TARGET="${{ matrix.target }}"
-          LIB="${{ steps.meta.outputs.lib }}"
+          LIB="libkuro_core.so"
           OUT="libkuro_core-${VERSION}-${TARGET}.tar.gz"
 
           tar -C "target/${TARGET}/release" -czf "${OUT}" "${LIB}"

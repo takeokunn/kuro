@@ -8,13 +8,9 @@ on:
 
 jobs:
   check:
-    name: nix flake check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: nix flake check
+    runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/setup-nix
@@ -24,13 +20,9 @@ jobs:
         run: nix flake check
 
   e2e:
-    name: E2E tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: E2E tests
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/setup-nix

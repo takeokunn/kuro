@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -133,10 +133,30 @@ Tracked from `command-end' marks regardless of
            (seconds       (% total-seconds 60)))
       (format "%dm%02ds" minutes seconds)))))
 
+(defconst kuro--prompt-extras-sanitize-regexp
+  "[\x00-\x1f\x7f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+  "Control and bidi-control characters stripped from OSC 133 extras.
+The `aid' and `err-path' fields come from untrusted OSC 133 \"D\" marks and
+are rendered in an overlay `after-string'.  Stripping ASCII control chars
+\(U+0000-U+001F, U+007F) and Unicode bidirectional control characters
+\(U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) prevents
+prompt-line reordering and spoofing, mirroring
+`kuro--sanitize-notification-text'.")
+
+(defun kuro--sanitize-prompt-extra (text)
+  "Return TEXT with control and bidi-override characters removed, or nil.
+TEXT may be nil, in which case nil is returned unchanged."
+  (and text
+       (replace-regexp-in-string kuro--prompt-extras-sanitize-regexp "" text)))
+
 (defun kuro--format-prompt-extras (aid duration-ms err-path)
   "Build a propertized extras string from AID, DURATION-MS, ERR-PATH.
+AID and ERR-PATH are sanitized of control/bidi characters before display,
+since they originate from untrusted OSC 133 marks.
 Returns nil if all three fields are nil/empty."
-  (let (parts)
+  (let ((aid (kuro--sanitize-prompt-extra aid))
+        (err-path (kuro--sanitize-prompt-extra err-path))
+        parts)
     (when (and aid (not (string-empty-p aid)))
       (push (concat "aid=" aid) parts))
     (when-let* ((dur (kuro--format-prompt-duration duration-ms)))

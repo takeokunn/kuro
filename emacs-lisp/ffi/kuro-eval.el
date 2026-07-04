@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -48,6 +48,49 @@ accepted; prefix matching is deliberately not supported."
 (defconst kuro-eval--env-name-regexp
   "\\`[A-Za-z_][A-Za-z0-9_]*\\'"
   "Strict environment variable names accepted by OSC 51 setenv.")
+
+(defcustom kuro-eval-denied-env-name-regexp
+  (concat "\\`\\(?:"
+          ;; Dynamic-linker code injection into every future child process.
+          ;; GLIBC_TUNABLES is the same class of primitive (CVE-2023-4911
+          ;; "Looney Tunables": a crafted tunable string overflows a stack
+          ;; buffer in the dynamic loader of setuid binaries).
+          "LD_.*\\|DYLD_.*\\|GLIBC_TUNABLES\\|"
+          ;; Exported shell functions (Shellshock-style) re-run by children.
+          "BASH_FUNC_.*\\|"
+          ;; Git reads many exec-capable env vars (GIT_CONFIG_COUNT/KEY/VALUE
+          ;; inject arbitrary config such as core.pager=!cmd; plus GIT_SSH*,
+          ;; GIT_EXTERNAL_DIFF, GIT_PAGER, GIT_EDITOR, GIT_SEQUENCE_EDITOR).
+          ;; magit/vc/project.el spawn git constantly, so block the whole family.
+          "GIT_.*\\|"
+          ;; Interpreter module/config load paths and startup hooks.
+          "PYTHON.*\\|PERL5.*\\|PERLLIB\\|RUBY.*\\|GEM_HOME\\|GEM_PATH\\|"
+          "LUA_.*\\|R_PROFILE.*\\|NODE_OPTIONS\\|NODE_PATH\\|CLASSPATH\\|"
+          "JAVA_TOOL_OPTIONS\\|_JAVA_OPTIONS\\|"
+          ;; Pager / editor families.  less runs `LESSOPEN=|cmd' as a shell
+          ;; input preprocessor — a direct command-execution primitive.
+          "LESS.*\\|PAGER\\|MANPAGER\\|EDITOR\\|VISUAL\\|BROWSER\\|"
+          ;; Shell / config-dir / startup-file redirection and helpers that a
+          ;; later subprocess consults: XDG_* config dirs, terminfo/termcap
+          ;; loading, the ssh askpass helper, and resolver configuration.
+          "\\(?:PATH\\|SHELL\\|IFS\\|ENV\\|BASH_ENV\\|ENV_FILE\\|ZDOTDIR"
+          "\\|PROMPT_COMMAND\\|HOME\\|TMPDIR\\|XAUTHORITY\\|XDG_.*"
+          "\\|TERMINFO\\|TERMINFO_DIRS\\|TERMCAP\\|SSH_ASKPASS\\|SSH_AUTH_SOCK"
+          "\\|HOSTALIASES\\|LOCALDOMAIN\\|RES_OPTIONS\\)"
+          "\\)\\'")
+  "Environment variable names that OSC 51 `setenv' must never set.
+Terminal output is untrusted, and `setenv' mutates the global
+`process-environment' inherited by every subprocess Emacs later spawns.
+This denylist blocks the variable families that turn \"bytes on a
+terminal\" into code execution: dynamic-linker preloads, PATH and shell
+hijacks, interpreter load paths, git config injection, pager input
+preprocessors, and config-directory redirection.  Matching is
+case-insensitive.  Because such vectors span every language and tool
+ecosystem, this list is necessarily conservative and blocks whole prefix
+families (GIT_*, PYTHON*, LESS*, XDG_*).  Set to nil to disable the
+denylist (not recommended)."
+  :type '(choice (const :tag "No denylist (unsafe)" nil) regexp)
+  :group 'kuro)
 
 (defconst kuro-eval--control-char-regexp
   "[[:cntrl:]]"
@@ -100,6 +143,14 @@ accepted; prefix matching is deliberately not supported."
   (and (stringp name)
        (string-match-p kuro-eval--env-name-regexp name)))
 
+(defun kuro--eval-env-name-denied-p (name)
+  "Return non-nil when NAME is a security-sensitive variable OSC 51 must not set.
+Matches NAME case-insensitively against `kuro-eval-denied-env-name-regexp'."
+  (and (stringp name)
+       kuro-eval-denied-env-name-regexp
+       (let ((case-fold-search t))
+         (string-match-p kuro-eval-denied-env-name-regexp name))))
+
 (defun kuro--eval-validate-command-string (cmd)
   "Signal an error unless CMD is a bounded OSC 51 command string."
   (unless (stringp cmd)
@@ -131,6 +182,8 @@ accepted; prefix matching is deliberately not supported."
            (value (cadr args)))
        (unless (kuro--eval-env-name-p name)
          (error "setenv expects a strict variable name: %S" name))
+       (when (kuro--eval-env-name-denied-p name)
+         (error "setenv refuses security-sensitive variable: %s" name))
        (unless (<= (string-bytes value) kuro-eval--max-env-value-bytes)
          (error "setenv value exceeds %d bytes" kuro-eval--max-env-value-bytes))))
     (_

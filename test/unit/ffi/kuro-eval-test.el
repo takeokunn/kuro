@@ -179,6 +179,56 @@
   "kuro--eval-command-allowed-p rejects extra setenv arguments."
   (should-not (kuro--eval-command-allowed-p "setenv FOO bar extra")))
 
+(ert-deftest kuro-eval-blocked-setenv-dangerous-names ()
+  "kuro--eval-command-allowed-p rejects security-sensitive variable names.
+Terminal output must not be able to hijack subprocesses Emacs later spawns."
+  (dolist (name '("LD_PRELOAD" "LD_LIBRARY_PATH" "DYLD_INSERT_LIBRARIES"
+                  "PATH" "SHELL" "IFS" "BASH_ENV" "PROMPT_COMMAND"
+                  "GIT_SSH_COMMAND" "PYTHONPATH" "NODE_OPTIONS"
+                  "BASH_FUNC_deploy"))
+    (should-not
+     (kuro--eval-command-allowed-p (format "setenv %s value" name)))))
+
+(ert-deftest kuro-eval-blocked-setenv-dangerous-names-case-insensitive ()
+  "The setenv denylist matches variable names case-insensitively."
+  (should-not (kuro--eval-command-allowed-p "setenv ld_preload x"))
+  (should-not (kuro--eval-command-allowed-p "setenv Path x")))
+
+(ert-deftest kuro-eval-blocked-setenv-extended-injection-families ()
+  "The denylist blocks env->RCE vectors beyond the linker/PATH families.
+Each name is a documented code-execution primitive when a later Emacs
+subprocess (git, less, python, ssh, ...) reads it."
+  (dolist (name '(;; less input preprocessor: LESSOPEN=|cmd runs a shell.
+                  "LESSOPEN" "LESSCLOSE" "LESS"
+                  ;; git config injection (magit/vc spawn git constantly).
+                  "GIT_CONFIG_COUNT" "GIT_CONFIG_KEY_0" "GIT_CONFIG_VALUE_0"
+                  "GIT_EDITOR" "GIT_SEQUENCE_EDITOR"
+                  ;; interpreter startup / module load hijacks.
+                  "PYTHONHOME" "PYTHONSTARTUP" "GEM_HOME" "GEM_PATH"
+                  "RUBYOPT" "LUA_PATH" "R_PROFILE"
+                  ;; config-dir, terminfo, resolver, ssh askpass redirection.
+                  "XDG_CONFIG_HOME" "TERMINFO" "TERMCAP" "SSH_ASKPASS"
+                  "HOSTALIASES" "RES_OPTIONS"
+                  ;; glibc dynamic-loader tunables (CVE-2023-4911).
+                  "GLIBC_TUNABLES"))
+    (should-not
+     (kuro--eval-command-allowed-p (format "setenv %s value" name)))))
+
+(ert-deftest kuro-eval-allows-setenv-benign-names ()
+  "The setenv denylist does not block ordinary application variables."
+  (dolist (name '("FOO" "MY_APP_TOKEN" "EDITOR_CONFIG" "PATHFINDER"))
+    (should (kuro--eval-command-allowed-p (format "setenv %s value" name)))))
+
+(ert-deftest kuro-eval-env-name-denied-p-predicate ()
+  "`kuro--eval-env-name-denied-p' flags dangerous names and clears benign ones."
+  (should (kuro--eval-env-name-denied-p "LD_PRELOAD"))
+  (should (kuro--eval-env-name-denied-p "PATH"))
+  (should-not (kuro--eval-env-name-denied-p "PATHFINDER"))
+  (should-not (kuro--eval-env-name-denied-p "MY_VAR"))
+  ;; A nil denylist disables the check entirely.
+  (let ((kuro-eval-denied-env-name-regexp nil))
+    (should-not (kuro--eval-env-name-denied-p "LD_PRELOAD"))))
+
 ;;; Group 2: kuro--eval-osc51-command dispatch
 
 (ert-deftest kuro-eval-osc51-dispatches-cd-bare ()

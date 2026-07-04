@@ -235,6 +235,22 @@ The payload and target are extracted and forwarded."
         (kuro--handle-notifications)
         (should (= drain-count 1))))))
 
+(ert-deftest kuro-poll-modes-handle-notifications-sanitizes-before-custom-fn ()
+  "A user-supplied kuro-notification-function receives already-sanitized text.
+Regression: sanitization must happen at this dispatch chokepoint, not only
+inside the built-in `kuro--default-notify', so replacing
+`kuro-notification-function' cannot reintroduce the control/bidi spoofing
+vector."
+  (kuro-poll-test--with-buffer
+    (let* ((seen nil)
+           (kuro-notifications-enabled t)
+           (kuro-notification-function
+            (lambda (title body &optional _id _report) (setq seen (list title body)))))
+      (cl-letf (((symbol-function 'kuro--poll-notifications)
+                 (lambda () (list (list "a\e[31mb" "c‮d" nil nil)))))
+        (kuro--handle-notifications)
+        (should (equal seen '("a[31mb" "cd")))))))
+
 ;;; Group U: kuro--send-osc52-clipboard-response
 
 (ert-deftest kuro-poll-modes-send-osc52-sends-escape-sequence ()

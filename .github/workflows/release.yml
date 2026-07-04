@@ -105,7 +105,7 @@ jobs:
           shasum -a 256 "${OUT}" | awk '{print $1}' > "${OUT}.sha256"
           ls -la "${OUT}" "${OUT}.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kuro-${{ matrix.target }}
           path: |

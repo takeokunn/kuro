@@ -2,6 +2,8 @@
 
 ;; Copyright (C) 2026 takeokunn
 
+;; Author: takeokunn <bararararatty@gmail.com>
+
 ;;; Commentary:
 
 ;; Macro helpers extracted from `kuro-mux-ext.el'.

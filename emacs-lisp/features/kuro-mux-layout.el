@@ -2,6 +2,8 @@
 
 ;; Copyright (C) 2026 takeokunn
 
+;; Author: takeokunn <bararararatty@gmail.com>
+
 ;;; Commentary:
 
 ;; Preset tmux-style layout arrangements for kuro-mux sessions.

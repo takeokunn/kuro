@@ -2,6 +2,8 @@
 
 ;; Copyright (C) 2026 takeokunn
 
+;; Author: takeokunn <bararararatty@gmail.com>
+
 ;;; Commentary:
 
 ;; Fixed-layout dispatch helpers for kuro-mux.  The layout names stay data in

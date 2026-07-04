@@ -2,6 +2,8 @@
 
 ;; Copyright (C) 2026 takeokunn
 
+;; Author: takeokunn <bararararatty@gmail.com>
+
 ;;; Commentary:
 
 ;; Extension of kuro-mux.el (split to keep files under 500 lines).
@@ -76,12 +78,12 @@ otherwise calls `switch-to-buffer'."
 
 ;;;; Splitting
 
-;;;###autoload
+;;;###autoload (autoload 'kuro-mux-split-right "kuro-mux-windows" nil t)
 (kuro--def-mux-split kuro-mux-split-right split-window-right
   "Split the current window to the right and open a new kuro terminal.
 COMMAND defaults to `kuro-shell'.")
 
-;;;###autoload
+;;;###autoload (autoload 'kuro-mux-split-below "kuro-mux-windows" nil t)
 (kuro--def-mux-split kuro-mux-split-below split-window-below
   "Split the current window below and open a new kuro terminal.
 COMMAND defaults to `kuro-shell'.")
@@ -138,11 +140,11 @@ When `kuro-mux-kill-confirm' is non-nil, prompts for confirmation first."
              (y-or-n-p (format "Kill kuro session %s? " (buffer-name))))
      (kill-buffer (current-buffer)))))
 
-;;;###autoload
+;;;###autoload (autoload 'kuro-mux-swap-pane-forward "kuro-mux-windows" nil t)
 (kuro--def-mux-swap kuro-mux-swap-pane-forward next-window
   "Swap the current window's buffer with the next visible window (tmux: `}').")
 
-;;;###autoload
+;;;###autoload (autoload 'kuro-mux-swap-pane-backward "kuro-mux-windows" nil t)
 (kuro--def-mux-swap kuro-mux-swap-pane-backward previous-window
   "Swap the current window's buffer with the previous visible window (tmux: `{').")
 

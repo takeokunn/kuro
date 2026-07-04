@@ -39,3 +39,4 @@ rust-core/fuzz/corpus/
 .sisyphus/
 .direnv/
 /result
+/result-*

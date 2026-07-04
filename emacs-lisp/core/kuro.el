@@ -6,12 +6,12 @@
 ;; URL: https://github.com/takeokunn/kuro
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.1"))
-;; Keywords: terminal, tools
+;; Keywords: terminals, tools
 
 ;;; Commentary:
 
 ;; Kuro is a modern terminal emulator for Emacs using a Rust core and
-;; Emacs Lisp UI. It implements the Remote Display Model where all
+;; Emacs Lisp UI.  It implements the Remote Display Model where all
 ;; terminal state is managed in Rust and Emacs is purely a display layer.
 
 ;; Usage:
@@ -21,55 +21,80 @@
 ;;; Code:
 
 ;; Add subdirectories to load-path so that (require 'kuro-xxx) works
-;; regardless of which subdirectory the file lives in.
+;; regardless of which subdirectory the file lives in.  This is only
+;; needed in the source tree layout; installed packages place the .el
+;; files flat into a single directory, in which case the subdirs do
+;; not exist and the dolist body is skipped entirely.
 (let ((base (file-name-directory
              (directory-file-name
               (file-name-directory (or load-file-name buffer-file-name
                                       (locate-library "kuro")))))))
   (dolist (subdir '("core" "rendering" "input" "ffi" "faces" "features"))
-    (add-to-list 'load-path (expand-file-name subdir base) t)))
+    (when (file-directory-p (expand-file-name subdir base))
+      (add-to-list 'load-path (expand-file-name subdir base) t))))
 
 (require 'kuro-module)
 (require 'kuro-config)
 (require 'kuro-ffi)
 (require 'kuro-faces)
+(require 'kuro-keymap)
+(require 'kuro-scrollback)
 (require 'kuro-overlays)
 (require 'kuro-navigation)
 (require 'kuro-input)
+;; kuro-input-mode is required AFTER kuro-mode-map is defined below, because
+;; kuro-input-mode.el references kuro-mode-map and must not shadow its defvar.
 (require 'kuro-stream)
 (require 'kuro-render-buffer)
 (require 'kuro-renderer)
 (require 'kuro-lifecycle)
 
-;; kuro-send-next-key is defined in kuro-input.el (loaded before kuro.el uses it).
-(declare-function kuro-send-next-key "kuro-input" ())
-(declare-function kuro--handle-focus-in "kuro-navigation" ())
+;; kuro-send-next-key is defined in kuro-input-encode.el (loaded via kuro-input).
+(declare-function kuro-send-next-key    "kuro-input-encode" ())
+(declare-function kuro--handle-focus-in  "kuro-navigation" ())
 (declare-function kuro--handle-focus-out "kuro-navigation" ())
+
+;; Input mode commands are in kuro-input-mode.el.
+(declare-function kuro-cycle-input-mode  "kuro-input-mode" ())
+(declare-function kuro--input-mode-lighter "kuro-input-mode" ())
+(declare-function kuro--progress-mode-line "kuro-poll-modes" ())
 
 ;; EA-Ambiguous font assignment and glyph-metric refinement are in kuro-char-width.el.
 (declare-function kuro--setup-char-width-table "kuro-char-width" ())
 (declare-function kuro--assign-mono-fonts "kuro-char-width" ())
 (declare-function kuro--refine-glyph-widths "kuro-char-width" ())
+(declare-function kuro-char-width-setup "kuro-char-width" ())
+
+;; Color palette table is rebuilt lazily on first kuro-mode entry; defined in kuro-colors.el.
+(declare-function kuro--rebuild-named-colors "kuro-colors" ())
 
 (defvar kuro-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; Terminal keybindings should pass through
-    (define-key map [?\C-c ?\C-c] 'kuro-send-interrupt)
-    (define-key map [?\C-c ?\C-z] 'kuro-send-sigstop)
-    (define-key map [?\C-c ?\C-\\] 'kuro-send-sigquit)
-    ;; Prompt navigation (OSC 133)
-    (define-key map [?\C-c ?\C-p] #'kuro-previous-prompt)
-    (define-key map [?\C-c ?\C-n] #'kuro-next-prompt)
-    ;; Copy mode: suspend PTY input and enable normal Emacs navigation/selection
-    (define-key map [?\C-c ?\C-t] #'kuro-copy-mode)
-    (define-key map (kbd "C-c C-SPC") #'kuro-copy-mode)
-    ;; Send next key directly to PTY, bypassing kuro-keymap-exceptions
-    (define-key map [?\C-c ?\C-q] #'kuro-send-next-key)
-    map)
+  (kuro--define-keymap
+    ("C-c C-c" . kuro-send-interrupt)
+    ("C-c C-z" . kuro-send-sigstop)
+    ("C-c C-\\" . kuro-send-sigquit)
+    ("C-c C-p" . kuro-previous-prompt)
+    ("C-c C-n" . kuro-next-prompt)
+    ("C-c C-o" . kuro-copy-command-output)
+    ("C-c C-M-n" . kuro-next-failed-command)
+    ("C-c C-M-p" . kuro-previous-failed-command)
+    ("C-c C-r" . kuro-command-history)
+    ("C-c C-t" . kuro-copy-mode)
+    ("C-c C-SPC" . kuro-copy-mode)
+    ("C-c C-q" . kuro-send-next-key)
+    ("C-c C-i" . kuro-cycle-input-mode)
+    ("C-c C-s" . kuro-search-forward)
+    ("C-c C-e" . kuro-edit-scrollback))
   "Keymap for Kuro major mode.")
 
+;; Load kuro-input-mode here — AFTER kuro-mode-map is defined — so the
+;; (defvar kuro-mode-map) forward declaration in kuro-input-mode.el does
+;; not shadow the real initialization above.
+(require 'kuro-input-mode)
+(require 'kuro-copy)
+
 (defun kuro--window-size-change (frame)
-  "Handle window size changes for kuro buffers in FRAME.
+  "Handle window size change for kuro buffers in FRAME.
 Called from `window-size-change-functions'.  For every kuro buffer
 whose window dimensions changed, records the new size in
 `kuro--resize-pending' so the render cycle can process it
@@ -89,69 +114,6 @@ cycle independently call `kuro--resize'."
               ;; synchronously, avoiding a race where both paths call kuro--resize.
               (setq kuro--resize-pending (cons new-rows new-cols)))))))))
 
-(kuro--defvar-permanent-local kuro--copy-mode nil
-  "Non-nil when Kuro copy mode is active.
-In copy mode the PTY keymap parent is detached so standard Emacs
-navigation and text-selection commands work in the terminal buffer.")
-
-(defcustom kuro-copy-mode-auto-exit t
-  "When non-nil, exit copy mode automatically after M-w (`kill-ring-save').
-This streamlines the copy workflow: enter copy mode with C-c C-t,
-select a region, press M-w to copy and return to terminal mode."
-  :type 'boolean
-  :group 'kuro)
-
-(defun kuro--copy-mode-save-and-exit ()
-  "Copy the region with `kill-ring-save', optionally exiting copy mode.
-When `kuro-copy-mode-auto-exit' is non-nil, also exits copy mode."
-  (interactive)
-  (call-interactively #'kill-ring-save)
-  (when kuro-copy-mode-auto-exit
-    (kuro--exit-copy-mode)))
-
-(defun kuro--enter-copy-mode ()
-  "Enter Kuro copy mode: suspend PTY input and enable Emacs navigation.
-Uses `use-local-map' so only the current buffer is affected; other Kuro
-buffers keep their normal terminal keymaps."
-  (setq-local kuro--copy-mode t)
-  ;; Install a minimal buffer-local keymap: C-c C-t to exit, M-w to
-  ;; copy-and-optionally-exit.  No parent → the global keymap applies,
-  ;; giving full Emacs navigation.
-  (let ((copy-map (make-sparse-keymap)))
-    (define-key copy-map [?\C-c ?\C-t] #'kuro-copy-mode)
-    (define-key copy-map (kbd "C-c C-SPC") #'kuro-copy-mode)
-    (define-key copy-map (kbd "M-w") #'kuro--copy-mode-save-and-exit)
-    (use-local-map copy-map))
-  (setq mode-name (propertize "Kuro[Copy]" 'face 'font-lock-warning-face))
-  (force-mode-line-update)
-  (message "Kuro copy mode on (C-c C-t or C-c C-SPC to exit)"))
-
-(defun kuro--exit-copy-mode ()
-  "Exit Kuro copy mode: restore PTY input keymap."
-  (setq-local kuro--copy-mode nil)
-  ;; Restore the standard kuro-mode-map (includes kuro--keymap as parent).
-  (use-local-map kuro-mode-map)
-  (setq mode-name "Kuro")
-  (force-mode-line-update)
-  ;; Re-render so the terminal cursor is restored to its correct position.
-  (when (fboundp 'kuro--render-cycle)
-    (kuro--render-cycle))
-  (message "Kuro copy mode off"))
-
-;;;###autoload
-(defun kuro-copy-mode ()
-  "Toggle Kuro copy mode.
-In copy mode the PTY keymap is suspended and standard Emacs cursor
-movement, region selection, and copy commands (M-w, C-w, C-s…) become
-available.  The buffer remains read-only; only navigation and selection
-are enabled.  Press C-c C-t or C-c C-SPC again to return to terminal mode."
-  (interactive)
-  (unless (derived-mode-p 'kuro-mode)
-    (user-error "kuro-copy-mode: not in a Kuro terminal buffer"))
-  (if kuro--copy-mode
-      (kuro--exit-copy-mode)
-    (kuro--enter-copy-mode)))
-
 (kuro--defvar-permanent-local kuro--last-rows 0
   "Last known terminal row count; used to detect window size changes.")
 
@@ -169,8 +131,20 @@ When PREV is a function it is called at the end; nil is ignored."
       (kuro--handle-focus-out))
     (when (functionp prev) (funcall prev))))
 
+;;;###autoload
 (define-derived-mode kuro-mode fundamental-mode "Kuro"
   "Major mode for Kuro terminal buffers."
+  ;; Install global hooks/state lazily — keeps load-time side-effect-free
+  ;; for users who require kuro from init.el but defer launching a
+  ;; terminal until later.  Both helpers are idempotent.
+  (kuro-char-width-setup)
+  (kuro--rebuild-named-colors)
+  ;; Show current input mode in the mode line: [C]=char [S]=semi-char [L]=line
+  (setq-local mode-name
+              '("Kuro" (:eval (kuro--input-mode-lighter))))
+  ;; Surface the ConEmu OSC 9;4 progress indicator (e.g. " ⏳50% ") in the
+  ;; mode-line process slot; nil when no foreground task reports progress.
+  (setq-local mode-line-process '(:eval (kuro--progress-mode-line)))
   (setq buffer-read-only t)
   (setq-local bidi-display-reordering nil)
   (setq-local bidi-paragraph-direction 'left-to-right)

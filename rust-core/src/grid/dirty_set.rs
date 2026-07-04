@@ -6,6 +6,7 @@
 //! hot path when printing characters to the screen.
 
 use crate::util::bit_set::BitSet;
+use std::ops::Range;
 
 /// Tracks which screen rows have been modified since the last render.
 pub trait DirtySet: Send + Sync {
@@ -66,11 +67,7 @@ impl BitVecDirtySet {
             self.clear_all();
             return;
         }
-        self.bits.copy_within(n..len, 0);
-        for i in (len - n)..len {
-            self.bits.set(i, false);
-        }
-        self.count = self.bits.count_ones();
+        self.shift_bits(n..len, 0, len - n..len);
     }
 
     /// Shift all dirty bits right by `n` positions (for scroll-down).
@@ -88,11 +85,7 @@ impl BitVecDirtySet {
             self.clear_all();
             return;
         }
-        self.bits.copy_within(0..len - n, n);
-        for i in 0..n {
-            self.bits.set(i, false);
-        }
-        self.count = self.bits.count_ones();
+        self.shift_bits(0..len - n, n, 0..n);
     }
 
     /// Iterate over dirty row indices directly, bypassing the `DirtySet` trait's
@@ -121,6 +114,13 @@ impl BitVecDirtySet {
     fn clear_all(&mut self) {
         self.bits.fill(false);
         self.count = 0;
+    }
+
+    #[inline]
+    fn shift_bits(&mut self, src: Range<usize>, dst: usize, clear: Range<usize>) {
+        self.bits.copy_within(src, dst);
+        self.bits.fill_range(clear, false);
+        self.count = self.bits.count_ones();
     }
 }
 
@@ -162,7 +162,5 @@ impl DirtySet for BitVecDirtySet {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    include!("dirty_set_tests.rs");
-}
+#[path = "dirty_set/tests.rs"]
+mod tests;

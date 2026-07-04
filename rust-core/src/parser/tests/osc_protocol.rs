@@ -5,136 +5,9 @@
 
 use super::*;
 
-// ── Macros ───────────────────────────────────────────────────────────────────
-
-/// Generate an `handle_osc_104` palette-reset test for a single valid index.
-///
-/// Pre-sets `palette[$idx]` to `$init`, calls `handle_osc_104` with that
-/// index, and asserts the entry becomes `None` and `palette_dirty` is `true`.
-macro_rules! test_osc_104_reset_index {
-    ($name:ident, $idx:expr, $init:expr) => {
-        #[test]
-        fn $name() {
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            core.osc_data.palette[$idx] = Some($init);
-            let idx_str = stringify!($idx);
-            let params: &[&[u8]] = &[b"104", idx_str.as_bytes()];
-            super::handle_osc_104(&mut core, params);
-            assert_eq!(
-                core.osc_data().palette[$idx],
-                None,
-                concat!("palette index ", stringify!($idx), " must be reset to None")
-            );
-            assert!(core.osc_data().palette_dirty);
-        }
-    };
-}
-
-/// Generate a `handle_osc_default_colors` query test where the color IS set.
-///
-/// Pre-sets `core.osc_data.$field` to `Color::Rgb($r, $g, $b)`, sends the
-/// query `params = [$osc_num, b"?"]`, and asserts:
-/// - exactly one response is queued
-/// - the response contains the OSC number string and `"rgb:"`
-macro_rules! test_osc_default_colors_query_set {
-    ($name:ident, $osc_num:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
-        #[test]
-        fn $name() {
-            use crate::types::Color;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            core.osc_data.$field = Some(Color::Rgb($r, $g, $b));
-            let params: &[&[u8]] = &[$osc_num, b"?"];
-            super::handle_osc_default_colors(&mut core, params);
-            assert_eq!(core.pending_responses().len(), 1);
-            let resp = std::str::from_utf8(&core.pending_responses()[0]).unwrap();
-            let num_str = std::str::from_utf8($osc_num).unwrap();
-            assert!(
-                resp.contains(num_str),
-                "response must contain OSC number {num_str}: got {resp:?}"
-            );
-            assert!(
-                resp.contains("rgb:"),
-                "response must contain rgb: color spec: got {resp:?}"
-            );
-        }
-    };
-}
-
-/// Generate an `encode_color_spec` test: call with `[$r, $g, $b]` and assert
-/// the result equals `$expected`.
-macro_rules! test_encode_color_spec {
-    ($name:ident, [$r:expr, $g:expr, $b:expr], $expected:expr) => {
-        #[test]
-        fn $name() {
-            let result = encode_color_spec([$r, $g, $b]);
-            assert_eq!(result, $expected);
-        }
-    };
-}
-
-/// Generate a `parse_color_spec` success test: call with `$input` and assert
-/// the result equals `Some([$r, $g, $b])`.
-macro_rules! test_parse_color_spec_ok {
-    ($name:ident, $input:expr, [$r:expr, $g:expr, $b:expr]) => {
-        #[test]
-        fn $name() {
-            let result = parse_color_spec($input);
-            assert_eq!(result, Some([$r, $g, $b]));
-        }
-    };
-}
-
-/// Generate a `parse_color_spec` failure test: call with `$input` and assert
-/// the result is `None`.
-macro_rules! test_parse_color_spec_none {
-    ($name:ident, $input:expr) => {
-        #[test]
-        fn $name() {
-            assert_eq!(parse_color_spec($input), None);
-        }
-    };
-}
-
-/// Generate a `handle_osc_133` prompt-mark test.
-///
-/// Sends the one-byte mark `$byte` (e.g. `b"A"`) and asserts that the single
-/// recorded event carries the variant `PromptMark::$variant`.
-macro_rules! test_osc_133_mark {
-    ($name:ident, $byte:expr, $variant:ident) => {
-        #[test]
-        fn $name() {
-            use crate::types::osc::PromptMark;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            let params: &[&[u8]] = &[b"133", $byte];
-            super::handle_osc_133(&mut core, params);
-            assert_eq!(core.osc_data().prompt_marks.len(), 1);
-            assert_eq!(core.osc_data().prompt_marks[0].mark, PromptMark::$variant);
-        }
-    };
-}
-
-/// Generate a `handle_osc_default_colors` set test (OSC 10/11/12).
-///
-/// Sends `params = [osc_num, color_spec]`, then asserts:
-/// - `$field` on `osc_data()` equals `Some(Color::Rgb($r, $g, $b))`
-/// - `default_colors_dirty` is `true`
-macro_rules! test_osc_default_colors_set {
-    ($name:ident, $osc_num:expr, $spec:expr, $field:ident, $r:expr, $g:expr, $b:expr) => {
-        #[test]
-        fn $name() {
-            use crate::types::Color;
-            use crate::TerminalCore;
-            let mut core = TerminalCore::new(24, 80);
-            let params: &[&[u8]] = &[$osc_num, $spec];
-            super::handle_osc_default_colors(&mut core, params);
-            assert_eq!(core.osc_data().$field, Some(Color::Rgb($r, $g, $b)));
-            assert!(core.osc_data().default_colors_dirty);
-        }
-    };
-}
+#[macro_use]
+#[path = "osc_protocol/support.rs"]
+mod support;
 
 // ── encode_color_spec ────────────────────────────────────────────────────────
 
@@ -226,31 +99,84 @@ test_parse_color_spec_none!(
 
 #[test]
 fn test_handle_osc_52_write_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     // base64("hello") = "aGVsbG8="
     let params: &[&[u8]] = &[b"52", b"c", b"aGVsbG8="];
     super::handle_osc_52(&mut core, params);
-    assert_eq!(core.osc_data().clipboard_actions.len(), 1);
-    match &core.osc_data().clipboard_actions[0] {
-        ClipboardAction::Write(s) => assert_eq!(s, "hello"),
-        other @ ClipboardAction::Query => panic!("expected Write, got {other:?}"),
-    }
+    assert_osc_52_action!(core, ClipboardAction::Write { data, .. } if data == "hello");
 }
 
 #[test]
 fn test_handle_osc_52_query_clipboard() {
-    use crate::types::osc::ClipboardAction;
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"52", b"c", b"?"];
     super::handle_osc_52(&mut core, params);
-    assert_eq!(core.osc_data().clipboard_actions.len(), 1);
-    assert!(matches!(
-        core.osc_data().clipboard_actions[0],
-        ClipboardAction::Query
-    ));
+    assert_osc_52_action!(core, ClipboardAction::Query { .. });
+}
+
+#[test]
+fn test_handle_osc_52_primary_selection_target() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; p ; base64("hello") -> Primary target.
+    let params: &[&[u8]] = &[b"52", b"p", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::Primary, data } if data == "hello"
+    );
+}
+
+#[test]
+fn test_handle_osc_52_empty_selector_defaults_clipboard() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; ; base64("hello") -> empty selector defaults to Clipboard.
+    let params: &[&[u8]] = &[b"52", b"", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Write { target: SelectionTarget::Clipboard, data } if data == "hello"
+    );
+}
+
+#[test]
+fn test_handle_osc_52_query_carries_clipboard_target() {
+    use crate::types::osc::SelectionTarget;
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; c ; ? -> query the clipboard target.
+    let params: &[&[u8]] = &[b"52", b"c", b"?"];
+    super::handle_osc_52(&mut core, params);
+    assert_osc_52_action!(
+        core,
+        ClipboardAction::Query {
+            target: SelectionTarget::Clipboard
+        }
+    );
+}
+
+#[test]
+fn test_handle_osc_52_cut_buffer_target_is_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    // OSC 52 ; 3 ; base64("hello") -> rejected legacy cut buffer selector.
+    let params: &[&[u8]] = &[b"52", b"3", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert!(core.osc_data().clipboard_actions.is_empty());
+}
+
+#[test]
+fn test_handle_osc_52_unknown_selector_is_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"52", b"bogus", b"aGVsbG8="];
+    super::handle_osc_52(&mut core, params);
+    assert!(core.osc_data().clipboard_actions.is_empty());
 }
 
 #[test]
@@ -310,141 +236,7 @@ fn test_handle_osc_104_reset_all_when_no_arg() {
     assert!(core.osc_data().palette_dirty);
 }
 
-// ── handle_osc_133 ────────────────────────────────────────────────────────────
-
-test_osc_133_mark!(test_handle_osc_133_prompt_start, b"A", PromptStart);
-test_osc_133_mark!(test_handle_osc_133_prompt_end, b"B", PromptEnd);
-test_osc_133_mark!(test_handle_osc_133_command_start, b"C", CommandStart);
-test_osc_133_mark!(test_handle_osc_133_command_end, b"D", CommandEnd);
-
-#[test]
-fn test_handle_osc_133_unknown_mark_is_noop() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"Z"];
-    super::handle_osc_133(&mut core, params);
-    assert!(core.osc_data().prompt_marks.is_empty());
-}
-
-#[test]
-fn test_handle_osc_133_missing_param_is_noop() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133"];
-    super::handle_osc_133(&mut core, params);
-    assert!(core.osc_data().prompt_marks.is_empty());
-}
-
-#[test]
-fn test_handle_osc_133_mark_records_cursor_position() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    // Move cursor to a known position before emitting the mark
-    core.advance(b"\x1b[5;10H"); // row 5, col 10 (1-based → 4, 9 zero-based)
-    let params: &[&[u8]] = &[b"133", b"A"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::PromptStart);
-    // cursor row/col must be captured at call time
-    assert_eq!(ev.row, 4);
-    assert_eq!(ev.col, 9);
-}
-
-// ── handle_osc_133 exit_code ─────────────────────────────────────────────────
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_zero() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"0"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(0));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_one() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_127() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"127"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(127));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_negative() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"-1"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, Some(-1));
-}
-
-#[test]
-fn test_handle_osc_133_command_end_exit_code_non_numeric_is_none() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D", b"abc"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, None);
-}
-
-#[test]
-fn test_handle_osc_133_command_end_no_exit_code_param() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"133", b"D"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::CommandEnd);
-    assert_eq!(ev.exit_code, None);
-}
-
-#[test]
-fn test_handle_osc_133_prompt_start_exit_code_always_none() {
-    use crate::types::osc::PromptMark;
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    // Even if a third param is provided, non-D marks should have exit_code: None
-    let params: &[&[u8]] = &[b"133", b"A", b"0"];
-    super::handle_osc_133(&mut core, params);
-    assert_eq!(core.osc_data().prompt_marks.len(), 1);
-    let ev = &core.osc_data().prompt_marks[0];
-    assert_eq!(ev.mark, PromptMark::PromptStart);
-    assert_eq!(ev.exit_code, None);
-}
+// ── handle_osc_133 (moved to osc_protocol/osc133.rs) ─────────────────────────
 
 // ── handle_osc_default_colors ─────────────────────────────────────────────────
 
@@ -487,23 +279,43 @@ test_osc_default_colors_query_set!(
     0
 );
 
-// ── handle_osc_51 (Elisp eval) ───────────────────────────────────────────────
+// ── handle_osc_51 (strict command payloads) ──────────────────────────────────
 
 #[test]
-fn osc51_eval_command_stored() {
+fn osc51_cd_command_stored() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"51", b"e", b"(message \"hello\")"];
+    let params: &[&[u8]] = &[b"51", b"e", b"cd /tmp"];
     super::handle_osc_51(&mut core, params);
     assert_eq!(core.osc_data().eval_commands.len(), 1);
-    assert_eq!(core.osc_data().eval_commands[0], "(message \"hello\")");
+    assert_eq!(core.osc_data().eval_commands[0], "cd /tmp");
+}
+
+#[test]
+fn osc51_setenv_command_stored() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"setenv FOO bar"];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "setenv FOO bar");
+}
+
+#[test]
+fn osc51_surrounding_spaces_trimmed() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"  setenv FOO bar  "];
+    super::handle_osc_51(&mut core, params);
+    assert_eq!(core.osc_data().eval_commands.len(), 1);
+    assert_eq!(core.osc_data().eval_commands[0], "setenv FOO bar");
 }
 
 #[test]
 fn osc51_non_e_subcommand_ignored() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"51", b"x", b"(evil-stuff)"];
+    let params: &[&[u8]] = &[b"51", b"x", b"setenv FOO bar"];
     super::handle_osc_51(&mut core, params);
     assert!(core.osc_data().eval_commands.is_empty());
 }
@@ -512,7 +324,8 @@ fn osc51_non_e_subcommand_ignored() {
 fn osc51_oversized_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let big = vec![b'a'; 4097];
+    let mut big = b"setenv FOO ".to_vec();
+    big.extend(vec![b'a'; 4097]);
     let params: &[&[u8]] = &[b"51", b"e", &big];
     super::handle_osc_51(&mut core, params);
     assert!(core.osc_data().eval_commands.is_empty());
@@ -529,61 +342,91 @@ fn osc51_invalid_utf8_rejected() {
 }
 
 #[test]
-fn osc51_empty_command_stored() {
+fn osc51_empty_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
     let params: &[&[u8]] = &[b"51", b"e", b""];
     super::handle_osc_51(&mut core, params);
-    assert_eq!(core.osc_data().eval_commands.len(), 1);
-    assert_eq!(core.osc_data().eval_commands[0], "");
-}
-
-// ── handle_osc_7 hostname preservation ───────────────────────────────────────
-
-#[test]
-fn osc7_localhost_yields_none_host() {
-    use crate::TerminalCore;
-    let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file://localhost/home/user"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
-    assert!(core.osc_data().cwd_host.is_none());
+    assert!(core.osc_data().eval_commands.is_empty());
 }
 
 #[test]
-fn osc7_empty_host_yields_none() {
+fn osc51_sexp_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file:///tmp"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/tmp"));
-    assert!(core.osc_data().cwd_host.is_none());
+    let params: &[&[u8]] = &[b"51", b"e", b"(setenv \"FOO\" \"bar\")"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
 }
 
 #[test]
-fn osc7_remote_host_preserved() {
+fn osc51_unknown_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    let params: &[&[u8]] = &[b"7", b"file://myhost/home/user"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home/user"));
-    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("myhost"));
+    let params: &[&[u8]] = &[b"51", b"e", b"delete-file /etc/passwd"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
 }
 
 #[test]
-fn osc7_host_cleared_on_localhost() {
+fn osc51_prefix_command_rejected() {
     use crate::TerminalCore;
     let mut core = TerminalCore::new(24, 80);
-    // First set a remote host
-    let params: &[&[u8]] = &[b"7", b"file://remotehost/srv"];
-    crate::parser::osc::handle_osc(&mut core, params, false);
-    assert_eq!(core.osc_data().cwd_host.as_deref(), Some("remotehost"));
-    // Then set localhost — host should be cleared
-    let params2: &[&[u8]] = &[b"7", b"file://localhost/home"];
-    crate::parser::osc::handle_osc(&mut core, params2, false);
-    assert!(core.osc_data().cwd_host.is_none());
-    assert_eq!(core.osc_data().cwd.as_deref(), Some("/home"));
+    let params: &[&[u8]] = &[b"51", b"e", b"cd-evil /tmp"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
 }
 
-include!("osc_protocol_colors.rs");
-include!("osc_protocol_coverage.rs");
+#[test]
+fn osc51_control_command_rejected() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e", b"setenv FOO bar\n"];
+    super::handle_osc_51(&mut core, params);
+    assert!(core.osc_data().eval_commands.is_empty());
+}
+
+/// OSC 51 with no subcommand param at all (`params = ["51"]`) must be a no-op.
+///
+/// Exercises the `if let Some(sub) = params.get(1)` None branch.
+#[test]
+fn osc51_no_subcommand_param_is_noop() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51"];
+    super::handle_osc_51(&mut core, params);
+    assert!(
+        core.osc_data().eval_commands.is_empty(),
+        "no subcommand -> no command payload"
+    );
+}
+
+/// OSC 51 with `e` subcommand but no command param (`params = ["51","e"]`) is a no-op.
+///
+/// Exercises the `if let Some(cmd_raw) = params.get(2)` None branch.
+#[test]
+fn osc51_e_subcommand_no_command_is_noop() {
+    use crate::TerminalCore;
+    let mut core = TerminalCore::new(24, 80);
+    let params: &[&[u8]] = &[b"51", b"e"];
+    super::handle_osc_51(&mut core, params);
+    assert!(
+        core.osc_data().eval_commands.is_empty(),
+        "e without command -> no command payload"
+    );
+}
+
+#[path = "osc_protocol/osc7.rs"]
+mod osc7;
+
+#[path = "osc_protocol/colors.rs"]
+mod colors;
+
+#[path = "osc_protocol/colors_extra.rs"]
+mod colors_extra;
+
+#[path = "osc_protocol/coverage.rs"]
+mod coverage;
+
+#[path = "osc_protocol/osc133.rs"]
+mod osc133;

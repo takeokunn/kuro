@@ -13,7 +13,13 @@ A high-performance terminal emulator for Emacs, powered by a Rust dynamic module
 - **VTE Compliance**: VT100/VT220 compatible with cursor movement, erase, scroll regions, insert/delete, tab stops
 - **SGR Attributes**: Bold, italic, underline, blink, reverse, strikethrough, conceal, dim; 256-color and TrueColor
 - **Kitty Protocols**: Kitty Graphics Protocol (APC), Kitty Keyboard Protocol
-- **OSC Support**: OSC 7 (CWD), OSC 8 (hyperlinks), OSC 52 (clipboard), OSC 133 (shell integration)
+- **OSC Support**: OSC 7 (CWD), OSC 8 (hyperlinks), OSC 52 (clipboard), OSC 133 shell integration with FinalTerm/Ghostty extras (`aid=`, `duration=`, `err=`, exit code on D-mark), with extras (aid, duration, err) rendered as left-margin status indicators and end-of-line annotations
+- **Device Attributes**: DA1, DA2, DA3 (`CSI = c` → `DCS ! | 00000000 ST`)
+- **Color Scheme Notifications**: DEC private mode 2031 + DSR 996 (Contour/Ghostty extension), automatically synchronized to Emacs's current theme via `enable-theme-functions`
+- **In-band Resize Notifications**: DEC private mode 2048 reports text-area size changes as `CSI 48 ; rows ; cols ; 0 ; 0 t` sequences directly in the PTY stream — a robust modern alternative to SIGWINCH, compatible with foot/Ghostty/kitty/iTerm2/Contour
+- **Window Size Queries**: XTWINOPS `CSI 14/18/19 t` report the text-area/screen size on demand (`CSI 8 ; rows ; cols t`); window-manipulation and position/title ops are ignored for security
+- **Status String Queries**: DECRQSS `DCS $ q ... ST` reports the current cursor style (DECSCUSR), scroll region (DECSTBM), and SGR rendition (round-trip-faithful) — e.g. so neovim can restore your cursor shape on exit
+- **Desktop Notifications**: OSC 9 (iTerm2) and OSC 777 notifications surface to Emacs and display via `notifications-notify` (D-Bus, with echo-area fallback) — long-running TUIs can alert you when you're looking elsewhere
 - **Sixel Graphics**: Inline image display via Sixel protocol
 - **Unicode**: Full CJK support, grapheme clusters, emoji (unicode-width)
 - **Multi-session**: Multiple terminal sessions with independent state, auto-reaping of dead sessions
@@ -45,19 +51,34 @@ cachix use takeokunn-kuro
 
 ### From Source (without Nix)
 
+Build the Rust dynamic module with cargo and place it where Emacs can load it:
+
 ```bash
 git clone https://github.com/takeokunn/kuro.git
 cd kuro
-make install        # cargo build --release + copy to ~/.local/share/kuro
+cargo build --release --manifest-path rust-core/Cargo.toml
+mkdir -p ~/.local/share/kuro
+
+# The workspace target directory is at the repo root.
+# Linux:
+cp target/release/libkuro_core.so ~/.local/share/kuro/
+
+# macOS:
+cp target/release/libkuro_core.dylib ~/.local/share/kuro/
 ```
 
-### MELPA
+After installing Kuro, you can also use the native module helpers below to build locally or fetch a prebuilt binary.
 
-MELPA packaging is prepared (recipe, `.elpaignore`, package-lint CI). Submission pending.
+### Native Module Helpers
+
+Use these commands after installing Kuro:
 
 ```elisp
-;; Once published:
-M-x package-install RET kuro RET
+;; Fetch the prebuilt native module for your platform:
+M-x kuro-module-download
+
+;; Or compile from source via cargo (requires a Rust toolchain):
+M-x kuro-module-build
 ```
 
 ## Quick Start
@@ -83,7 +104,7 @@ M-x package-install RET kuro RET
 
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS across Emacs 29.4 and 30.1 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS; the Elisp checks run on Emacs 30 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 
@@ -107,7 +128,7 @@ graph LR
 
 ### Emacs Lisp (`emacs-lisp/`)
 
-28 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-renderer-pipeline`, `kuro-binary-decoder`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation), `kuro-poll-modes`, `kuro-typewriter`, `kuro-tui-mode`.
+28 modules including: `kuro-module` (FFI bridge), `kuro-config`, `kuro-faces`, `kuro-renderer`, `kuro-renderer-pipeline`, `kuro-binary-decoder`, `kuro-input`, `kuro-stream`, `kuro-lifecycle`, `kuro-navigation` (OSC 133 prompt navigation), `kuro-poll-modes`, `kuro-typewriter`, `kuro-tui-mode`, `kuro-color-scheme` (Emacs theme bridge to DEC 2031 / DSR 996), `kuro-prompt-status` (OSC 133 exit-status indicators and prompt extras annotations).
 
 ## Development
 
@@ -128,7 +149,7 @@ nix run .#run       # Build + install + launch Emacs
 ### Test
 
 ```bash
-nix flake check                                        # All checks (Rust + ERT + byte-compile + audit)
+nix flake check                                        # All checks (Rust + ERT + byte-compile + package-lint + checkdoc + treefmt)
 nix develop --command bash test/scripts/runners/run-e2e.sh       # E2E tests (PTY — outside sandbox)
 nix develop --command bash test/scripts/runners/vttest-compliance.sh  # VTE compliance
 ```
@@ -163,12 +184,10 @@ The `fuzz` devShell provides nightly Rust + cargo-fuzz. Available targets: `adva
 | `kuro-clippy` | Clippy with `-D warnings` |
 | `kuro-fmt` | `cargo fmt --check` |
 | `kuro-test` | Rust unit + integration tests |
-| `kuro-audit` | Security audit (rustsec advisory-db) |
-| `kuro-elisp-emacs-29` | ERT test suite on Emacs 29.4 |
-| `kuro-elisp-emacs-30` | ERT test suite on Emacs 30.1 |
-| `kuro-byte-compile-emacs-29` | Byte-compile on Emacs 29.4 |
-| `kuro-byte-compile-emacs-30` | Byte-compile on Emacs 30.1 |
-| `kuro-package-lint` | `package-lint` on `kuro.el` |
+| `kuro-elisp` | ERT test suite on Emacs 30 |
+| `kuro-byte-compile` | Byte-compile on Emacs 30 |
+| `kuro-package-lint` | `package-lint` on user-facing entry points |
+| `kuro-checkdoc` | `checkdoc` across `emacs-lisp/` |
 | `treefmt` | Rust + Nix files are formatted (treefmt) |
 
 ### Nix file layout

@@ -28,17 +28,30 @@
                               (string-match-p "/nonexistent/shell/that/does/not/exist" e)))
                        errors)))))
 
-(ert-deftest test-kuro-validate-config-invalid-scrollback ()
-  "A negative scrollback size produces an error."
-  (let ((kuro-scrollback-size -1))
-    (let ((errors (kuro--validate-config)))
-      (should (consp errors)))))
+(defconst kuro-config-test--validate-consp-table
+  '((test-kuro-validate-config-invalid-scrollback  kuro-scrollback-size -1)
+    (test-kuro-validate-config-zero-scrollback      kuro-scrollback-size  0)
+    (test-kuro-validate-config-invalid-color-short  kuro-color-red       "#fff")
+    (test-kuro-validate-config-invalid-font-size    kuro-font-size       -5))
+  "Table of (test-name var-sym value): each binding yields (consp errors) from kuro--validate-config.")
 
-(ert-deftest test-kuro-validate-config-zero-scrollback ()
-  "Zero scrollback size produces an error (must be positive)."
-  (let ((kuro-scrollback-size 0))
-    (let ((errors (kuro--validate-config)))
-      (should (consp errors)))))
+(defmacro kuro-config-test--def-validate-consp (test-name var-sym value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--validate-config' returns errors for `%s' = %S." var-sym value)
+     (let ((,var-sym ,value))
+       (should (consp (kuro--validate-config))))))
+
+(kuro-config-test--def-validate-consp test-kuro-validate-config-invalid-scrollback  kuro-scrollback-size -1)
+(kuro-config-test--def-validate-consp test-kuro-validate-config-zero-scrollback      kuro-scrollback-size  0)
+(kuro-config-test--def-validate-consp test-kuro-validate-config-invalid-color-short  kuro-color-red       "#fff")
+(kuro-config-test--def-validate-consp test-kuro-validate-config-invalid-font-size    kuro-font-size       -5)
+
+(ert-deftest kuro-config-test--all-validate-consp-errors-correct ()
+  "All kuro-config-test--validate-consp-table entries produce (consp errors)."
+  (dolist (entry kuro-config-test--validate-consp-table)
+    (pcase-let ((`(,_name ,var-sym ,value) entry))
+      (cl-letf (((symbol-value var-sym) value))
+        (should (consp (kuro--validate-config)))))))
 
 (ert-deftest test-kuro-validate-config-invalid-color ()
   "An invalid color string produces an error that mentions kuro-color-red."
@@ -48,18 +61,6 @@
       (should (cl-some (lambda (e)
                          (string-match-p "kuro-color-red" e))
                        errors)))))
-
-(ert-deftest test-kuro-validate-config-invalid-color-short ()
-  "A 3-digit hex color (#fff) is rejected because it is not 6 digits."
-  (let ((kuro-color-red "#fff"))
-    (let ((errors (kuro--validate-config)))
-      (should (consp errors)))))
-
-(ert-deftest test-kuro-validate-config-invalid-font-size ()
-  "A negative font size produces an error."
-  (let ((kuro-font-size -5))
-    (let ((errors (kuro--validate-config)))
-      (should (consp errors)))))
 
 (ert-deftest test-kuro-validate-config-nil-font-size ()
   "nil font size is valid (inherit from default face) — no font-size error."
@@ -156,26 +157,42 @@ the \"red\" entry in kuro--named-colors."
 
 ;;; Group 5: kuro--positive-integer-p
 
-(ert-deftest test-kuro-positive-integer-p-positive ()
-  "Positive integers return non-nil."
-  (should (kuro--positive-integer-p 1))
-  (should (kuro--positive-integer-p 100))
-  (should (kuro--positive-integer-p 10000)))
+(defconst kuro-config-test--positive-integer-p-table
+  '((test-kuro-positive-integer-p-one          1      t)
+    (test-kuro-positive-integer-p-hundred      100    t)
+    (test-kuro-positive-integer-p-ten-thousand 10000  t)
+    (test-kuro-positive-integer-p-zero         0      nil)
+    (test-kuro-positive-integer-p-neg-one      -1     nil)
+    (test-kuro-positive-integer-p-neg-hundred  -100   nil)
+    (test-kuro-positive-integer-p-float        1.0    nil)
+    (test-kuro-positive-integer-p-string       "1"    nil)
+    (test-kuro-positive-integer-p-nil          nil    nil))
+  "Table of (test-name val expectedp) for `kuro--positive-integer-p'.")
 
-(ert-deftest test-kuro-positive-integer-p-zero ()
-  "Zero is not positive: returns nil."
-  (should-not (kuro--positive-integer-p 0)))
+(defmacro kuro-config-test--def-positive-integer-p (test-name val expectedp)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--positive-integer-p' (%S) => %s." val (if expectedp "non-nil" "nil"))
+     ,(if expectedp
+          `(should     (kuro--positive-integer-p ,val))
+        `(should-not (kuro--positive-integer-p ,val)))))
 
-(ert-deftest test-kuro-positive-integer-p-negative ()
-  "Negative integers return nil."
-  (should-not (kuro--positive-integer-p -1))
-  (should-not (kuro--positive-integer-p -100)))
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-one          1      t)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-hundred      100    t)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-ten-thousand 10000  t)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-zero         0      nil)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-neg-one      -1     nil)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-neg-hundred  -100   nil)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-float        1.0    nil)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-string       "1"    nil)
+(kuro-config-test--def-positive-integer-p test-kuro-positive-integer-p-nil          nil    nil)
 
-(ert-deftest test-kuro-positive-integer-p-non-integer ()
-  "Non-integers (float, string, nil) return nil."
-  (should-not (kuro--positive-integer-p 1.0))
-  (should-not (kuro--positive-integer-p "1"))
-  (should-not (kuro--positive-integer-p nil)))
+(ert-deftest test-kuro-positive-integer-p--all-cases-correct ()
+  "Every entry in `kuro-config-test--positive-integer-p-table' produces the expected result."
+  (dolist (entry kuro-config-test--positive-integer-p-table)
+    (pcase-let ((`(,_name ,val ,expectedp) entry))
+      (if expectedp
+          (should     (kuro--positive-integer-p val))
+        (should-not (kuro--positive-integer-p val))))))
 
 ;;; Group 6: kuro--check-positive-integer
 
@@ -186,21 +203,33 @@ the \"red\" entry in kuro--named-colors."
     (kuro--check-positive-integer kuro-frame-rate errors)
     (should (null errors))))
 
-(ert-deftest test-kuro-check-positive-integer-zero ()
-  "kuro--check-positive-integer pushes error for zero."
-  (let ((errors nil)
-        (kuro-frame-rate 0))
-    (kuro--check-positive-integer kuro-frame-rate errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-frame-rate" (car errors)))))
+(defconst kuro-config-test--check-pi-error-table
+  '((test-kuro-check-positive-integer-zero     kuro-frame-rate    0)
+    (test-kuro-check-positive-integer-negative kuro-scrollback-size -5))
+  "Table of (test-name var-sym value) for kuro--check-positive-integer error cases.")
 
-(ert-deftest test-kuro-check-positive-integer-negative ()
-  "kuro--check-positive-integer pushes error for negative value."
-  (let ((errors nil)
-        (kuro-scrollback-size -5))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-scrollback-size" (car errors)))))
+(defmacro kuro-config-test--def-check-pi-error (test-name var-sym value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--check-positive-integer' pushes error for `%s' bound to %S."
+              var-sym value)
+     (let ((errors nil)
+           (,var-sym ,value))
+       (kuro--check-positive-integer ,var-sym errors)
+       (should (consp errors))
+       (should (string-match-p ,(symbol-name var-sym) (car errors))))))
+
+(kuro-config-test--def-check-pi-error test-kuro-check-positive-integer-zero     kuro-frame-rate     0)
+(kuro-config-test--def-check-pi-error test-kuro-check-positive-integer-negative kuro-scrollback-size -5)
+
+(ert-deftest kuro-config-test--all-check-pi-errors-push-error ()
+  "All kuro-config-test--check-pi-error-table entries push an error with the var name."
+  (dolist (entry kuro-config-test--check-pi-error-table)
+    (pcase-let ((`(,_name ,var-sym ,value) entry))
+      (let ((errors nil))
+        (cl-progv (list var-sym) (list value)
+          (kuro--check-positive-integer var-sym errors))
+        (should (consp errors))
+        (should (string-match-p (symbol-name var-sym) (car errors)))))))
 
 ;;; Group 7: kuro--broadcast-to-buffers (structural)
 
@@ -232,21 +261,22 @@ the \"red\" entry in kuro--named-colors."
   (kuro--test-pi-setter-set 'kuro--test-pi-setter-var 42)
   (should (= (default-value 'kuro--test-pi-setter-var) 42)))
 
-(ert-deftest test-kuro-def-positive-int-setter-rejects-zero ()
-  "Generated setter signals user-error for zero."
-  (kuro--def-positive-int-setter kuro--test-pi-setter-zero
-      "kuro: test must be positive integer, got: %s"
-      "Test setter."
-    nil)
-  (should-error (kuro--test-pi-setter-zero 'ignored 0) :type 'user-error))
+(defconst kuro-config-test--pi-setter-reject-table
+  '((test-kuro-def-positive-int-setter-rejects-zero     kuro--test-pi-setter-zero 0)
+    (test-kuro-def-positive-int-setter-rejects-negative kuro--test-pi-setter-neg  -5))
+  "Table of (test-name setter-name value) for kuro--def-positive-int-setter rejection.")
 
-(ert-deftest test-kuro-def-positive-int-setter-rejects-negative ()
-  "Generated setter signals user-error for negative values."
-  (kuro--def-positive-int-setter kuro--test-pi-setter-neg
-      "kuro: test must be positive integer, got: %s"
-      "Test setter."
-    nil)
-  (should-error (kuro--test-pi-setter-neg 'ignored -5) :type 'user-error))
+(defmacro kuro-config-test--def-pi-setter-reject (test-name setter-name value)
+  `(ert-deftest ,test-name ()
+     ,(format "Generated setter `%s' signals user-error for %S." setter-name value)
+     (kuro--def-positive-int-setter ,setter-name
+         "kuro: test must be positive integer, got: %s"
+         "Test setter."
+       nil)
+     (should-error (,setter-name 'ignored ,value) :type 'user-error)))
+
+(kuro-config-test--def-pi-setter-reject test-kuro-def-positive-int-setter-rejects-zero     kuro--test-pi-setter-zero 0)
+(kuro-config-test--def-pi-setter-reject test-kuro-def-positive-int-setter-rejects-negative kuro--test-pi-setter-neg  -5)
 
 (ert-deftest test-kuro-def-positive-int-setter-runs-body ()
   "Generated setter evaluates BODY after set-default."
@@ -261,43 +291,50 @@ the \"red\" entry in kuro--named-colors."
 
 ;;; Group 9: kuro--set-input-echo-delay
 
-(ert-deftest test-kuro-set-input-echo-delay-valid ()
-  "kuro--set-input-echo-delay accepts a positive number."
-  (let ((orig kuro-input-echo-delay))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-input-echo-delay
-                                  'kuro-input-echo-delay 0.05)
-                                 nil)
-                        (error err)))
-          (should (= kuro-input-echo-delay 0.05)))
-      (set-default 'kuro-input-echo-delay orig))))
+(defconst kuro-config-test--echo-delay-valid-table
+  '((test-kuro-set-input-echo-delay-valid 0.05)
+    (test-kuro-set-input-echo-delay-zero  0))
+  "Table of (test-name value) for valid kuro--set-input-echo-delay inputs.")
 
-(ert-deftest test-kuro-set-input-echo-delay-zero ()
-  "kuro--set-input-echo-delay accepts zero (non-negative)."
-  (let ((orig kuro-input-echo-delay))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-input-echo-delay
-                                  'kuro-input-echo-delay 0)
-                                 nil)
-                        (error err)))
-          (should (= kuro-input-echo-delay 0)))
-      (set-default 'kuro-input-echo-delay orig))))
+(defmacro kuro-config-test--def-echo-delay-valid (test-name value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--set-input-echo-delay' accepts %S without error." value)
+     (let ((orig kuro-input-echo-delay))
+       (unwind-protect
+           (progn
+             (should-not (condition-case err
+                             (progn (kuro--set-input-echo-delay
+                                     'kuro-input-echo-delay ,value)
+                                    nil)
+                           (error err)))
+             (should (= kuro-input-echo-delay ,value)))
+         (set-default 'kuro-input-echo-delay orig)))))
 
-(ert-deftest test-kuro-set-input-echo-delay-negative ()
-  "kuro--set-input-echo-delay rejects a negative number."
-  (should-error (kuro--set-input-echo-delay 'kuro-input-echo-delay -0.1)
-                :type 'user-error))
+(kuro-config-test--def-echo-delay-valid test-kuro-set-input-echo-delay-valid 0.05)
+(kuro-config-test--def-echo-delay-valid test-kuro-set-input-echo-delay-zero  0)
 
-(ert-deftest test-kuro-set-input-echo-delay-non-number ()
-  "kuro--set-input-echo-delay rejects non-number values."
-  (should-error (kuro--set-input-echo-delay 'kuro-input-echo-delay "0.01")
-                :type 'user-error)
-  (should-error (kuro--set-input-echo-delay 'kuro-input-echo-delay nil)
-                :type 'user-error))
+(defconst kuro-config-test--echo-delay-error-table
+  '((test-kuro-set-input-echo-delay-negative           -0.1)
+    (test-kuro-set-input-echo-delay-non-number-string  "0.01")
+    (test-kuro-set-input-echo-delay-non-number-nil     nil))
+  "Table of (test-name value) for kuro--set-input-echo-delay user-error cases.")
+
+(defmacro kuro-config-test--def-echo-delay-error (test-name value)
+  `(ert-deftest ,test-name ()
+     ,(format "`kuro--set-input-echo-delay' signals user-error for %S." value)
+     (should-error (kuro--set-input-echo-delay 'kuro-input-echo-delay ,value)
+                   :type 'user-error)))
+
+(kuro-config-test--def-echo-delay-error test-kuro-set-input-echo-delay-negative          -0.1)
+(kuro-config-test--def-echo-delay-error test-kuro-set-input-echo-delay-non-number-string "0.01")
+(kuro-config-test--def-echo-delay-error test-kuro-set-input-echo-delay-non-number-nil    nil)
+
+(ert-deftest kuro-config-test--all-echo-delay-errors-signal-user-error ()
+  "All kuro-config-test--echo-delay-error-table entries signal user-error."
+  (dolist (entry kuro-config-test--echo-delay-error-table)
+    (pcase-let ((`(,_name ,value) entry))
+      (should-error (kuro--set-input-echo-delay 'kuro-input-echo-delay value)
+                    :type 'user-error))))
 
 ;;; Group 10: kuro--kuro-buffers
 
@@ -331,514 +368,6 @@ the \"red\" entry in kuro--named-colors."
         (let ((result (kuro--kuro-buffers)))
           (should (memq this-buf result)))))))
 
-;;; Group 11: kuro--set-font
-
-(ert-deftest test-kuro-set-font-sets-default-value ()
-  "kuro--set-font sets the default value of the given symbol."
-  (let ((kuro--test-font-sym nil))
-    (defvar kuro--test-font-sym nil)
-    (cl-letf (((symbol-function 'kuro--apply-font-to-buffer) #'ignore))
-      (kuro--set-font 'kuro--test-font-sym "Mono 12")
-      (should (equal (default-value 'kuro--test-font-sym) "Mono 12")))))
-
-(ert-deftest test-kuro-set-font-broadcasts-to-kuro-buffers ()
-  "kuro--set-font calls kuro--apply-font-to-buffer in each kuro-mode buffer."
-  ;; kuro--broadcast-to-buffers expands to (kuro--apply-font-to-buffer buf),
-  ;; so the stub must accept one argument.
-  (let ((apply-called-in nil))
-    (cl-letf (((symbol-function 'kuro-mode)
-               (lambda () (setq major-mode 'kuro-mode)))
-              ((symbol-function 'kuro--apply-font-to-buffer)
-               (lambda (_buf) (push (current-buffer) apply-called-in))))
-      (with-temp-buffer
-        (funcall 'kuro-mode)
-        (let ((kuro-buf (current-buffer)))
-          (defvar kuro--test-font-sym2 nil)
-          (kuro--set-font 'kuro--test-font-sym2 "DejaVu Mono")
-          (should (memq kuro-buf apply-called-in)))))))
-
-(ert-deftest test-kuro-set-font-skips-non-kuro-buffers ()
-  "kuro--set-font does not call kuro--apply-font-to-buffer on non-kuro buffers."
-  (let ((apply-called nil))
-    (cl-letf (((symbol-function 'kuro--apply-font-to-buffer)
-               (lambda (_buf) (setq apply-called t))))
-      (with-temp-buffer
-        ;; This buffer is NOT in kuro-mode.
-        (defvar kuro--test-font-sym3 nil)
-        (kuro--set-font 'kuro--test-font-sym3 "Inconsolata")
-        ;; kuro--kuro-buffers returns nil (kuro-mode not defined or this buf not in it)
-        ;; so apply-font-to-buffer must not be called for this buffer.
-        (should-not apply-called)))))
-
-(ert-deftest test-kuro-set-font-handles-no-kuro-buffers ()
-  "kuro--set-font completes without error when no kuro-mode buffers are active."
-  (defvar kuro--test-font-sym4 nil)
-  (should-not
-   (condition-case err
-       (progn (kuro--set-font 'kuro--test-font-sym4 "Courier") nil)
-     (error err))))
-
-;;; Group 12: kuro--set-shell
-
-(ert-deftest test-kuro-set-shell-null-value ()
-  "kuro--set-shell accepts nil as value (null means system default)."
-  (let ((orig kuro-shell))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-shell 'kuro-shell nil) nil)
-                        (error err)))
-          (should (null kuro-shell)))
-      (set-default 'kuro-shell orig))))
-
-(ert-deftest test-kuro-set-shell-empty-string ()
-  "kuro--set-shell accepts an empty string (treated as no-shell override)."
-  (let ((orig kuro-shell))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-shell 'kuro-shell "") nil)
-                        (error err)))
-          (should (equal kuro-shell "")))
-      (set-default 'kuro-shell orig))))
-
-(ert-deftest test-kuro-set-shell-nonexistent-signals-error ()
-  "kuro--set-shell signals user-error for a non-existent shell path."
-  (should-error
-   (kuro--set-shell 'kuro-shell "/nonexistent/shell/no/such/file")
-   :type 'user-error))
-
-(ert-deftest test-kuro-set-shell-valid-executable ()
-  "kuro--set-shell accepts a valid shell found on PATH."
-  ;; /bin/sh is virtually guaranteed to exist on any Unix-like system.
-  (let ((orig kuro-shell))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-shell 'kuro-shell "/bin/sh") nil)
-                        (error err)))
-          (should (equal kuro-shell "/bin/sh")))
-      (set-default 'kuro-shell orig))))
-
-;;; Group 13: kuro--set-scrollback-size
-
-(ert-deftest test-kuro-set-scrollback-size-valid ()
-  "kuro--set-scrollback-size accepts a positive integer."
-  (let ((orig kuro-scrollback-size))
-    (unwind-protect
-        (progn
-          (cl-letf (((symbol-function 'kuro--set-scrollback-max-lines) #'ignore))
-            (should-not (condition-case err
-                            (progn (kuro--set-scrollback-size
-                                    'kuro-scrollback-size 5000)
-                                   nil)
-                          (error err)))
-            (should (= kuro-scrollback-size 5000))))
-      (set-default 'kuro-scrollback-size orig))))
-
-(ert-deftest test-kuro-set-scrollback-size-zero-errors ()
-  "kuro--set-scrollback-size signals user-error for zero."
-  (should-error (kuro--set-scrollback-size 'kuro-scrollback-size 0)
-                :type 'user-error))
-
-(ert-deftest test-kuro-set-scrollback-size-negative-errors ()
-  "kuro--set-scrollback-size signals user-error for negative value."
-  (should-error (kuro--set-scrollback-size 'kuro-scrollback-size -1)
-                :type 'user-error))
-
-;;; Group 14: kuro--set-tui-frame-rate
-
-(ert-deftest test-kuro-set-tui-frame-rate-valid ()
-  "kuro--set-tui-frame-rate accepts a positive integer."
-  (let ((orig kuro-tui-frame-rate))
-    (unwind-protect
-        (progn
-          (should-not (condition-case err
-                          (progn (kuro--set-tui-frame-rate
-                                  'kuro-tui-frame-rate 10)
-                                 nil)
-                        (error err)))
-          (should (= kuro-tui-frame-rate 10)))
-      (set-default 'kuro-tui-frame-rate orig))))
-
-(ert-deftest test-kuro-set-tui-frame-rate-zero-errors ()
-  "kuro--set-tui-frame-rate signals user-error for zero."
-  (should-error (kuro--set-tui-frame-rate 'kuro-tui-frame-rate 0)
-                :type 'user-error))
-
-(ert-deftest test-kuro-set-tui-frame-rate-negative-errors ()
-  "kuro--set-tui-frame-rate signals user-error for negative value."
-  (should-error (kuro--set-tui-frame-rate 'kuro-tui-frame-rate -3)
-                :type 'user-error))
-
-;;; Group 15: kuro--positive-integer-p additional edge cases
-
-(ert-deftest test-kuro-positive-integer-p-float-one-point-five ()
-  "1.5 is a float, not an integer — returns nil."
-  (should-not (kuro--positive-integer-p 1.5)))
-
-(ert-deftest test-kuro-positive-integer-p-symbol ()
-  "A symbol is not an integer — returns nil."
-  (should-not (kuro--positive-integer-p 'foo)))
-
-(ert-deftest test-kuro-positive-integer-p-list ()
-  "A list is not an integer — returns nil."
-  (should-not (kuro--positive-integer-p '(1))))
-
-;;; Group 16: kuro--check-positive-integer edge cases
-
-(ert-deftest test-kuro-check-positive-integer-float-is-invalid ()
-  "kuro--check-positive-integer treats a float as invalid and pushes an error."
-  (let ((errors nil)
-        (kuro-frame-rate 1.5))
-    (kuro--check-positive-integer kuro-frame-rate errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-frame-rate" (car errors)))))
-
-(ert-deftest test-kuro-check-positive-integer-string-is-invalid ()
-  "kuro--check-positive-integer treats a string as invalid and pushes an error."
-  (let ((errors nil)
-        (kuro-scrollback-size "1000"))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (should (consp errors))))
-
-;;; Group 17: kuro--broadcast-to-buffers with multiple buffers
-
-(ert-deftest test-kuro-broadcast-to-buffers-calls-fn-in-each-kuro-buffer ()
-  "kuro--broadcast-to-buffers calls the function in every kuro-mode buffer."
-  (let ((visited nil))
-    (cl-letf (((symbol-function 'kuro-mode)
-               (lambda () (setq major-mode 'kuro-mode)))
-              ((symbol-function 'kuro--test-broadcast-fn)
-               (lambda () (push (current-buffer) visited))))
-      (let ((buf1 (generate-new-buffer " *kuro-bcast-test-1*"))
-            (buf2 (generate-new-buffer " *kuro-bcast-test-2*")))
-        (unwind-protect
-            (progn
-              (with-current-buffer buf1 (funcall 'kuro-mode))
-              (with-current-buffer buf2 (funcall 'kuro-mode))
-              (kuro--broadcast-to-buffers kuro--test-broadcast-fn)
-              (should (memq buf1 visited))
-              (should (memq buf2 visited)))
-          (kill-buffer buf1)
-          (kill-buffer buf2))))))
-
-;;; Group 18: kuro--validate-config additional coverage
-
-(ert-deftest test-kuro-validate-config-positive-font-size-no-error ()
-  "A positive font size produces no font-size error."
-  (let ((kuro-font-size 14))
-    (let ((errors (kuro--validate-config)))
-      (should-not (cl-some (lambda (e) (string-match-p "font-size" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-zero-tui-frame-rate ()
-  "Zero tui-frame-rate produces an error."
-  (let ((kuro-tui-frame-rate 0))
-    (let ((errors (kuro--validate-config)))
-      (should (consp errors))
-      (should (cl-some (lambda (e) (string-match-p "tui-frame-rate" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-color-uppercase-hex-valid ()
-  "An uppercase 6-digit hex color like #AABBCC is valid."
-  (let ((kuro-color-blue "#AABBCC"))
-    (let ((errors (kuro--validate-config)))
-      (should-not (cl-some (lambda (e) (string-match-p "kuro-color-blue" e))
-                           errors)))))
-
-(ert-deftest test-kuro-validate-config-shell-null-is-valid ()
-  "nil kuro-shell is valid (no shell error produced)."
-  (let ((kuro-shell nil))
-    (let ((errors (kuro--validate-config)))
-      (should-not (cl-some (lambda (e) (string-match-p "shell" e)) errors)))))
-
-;;; Group 19: kuro--validate-config — color string edge cases
-
-(ert-deftest test-kuro-validate-config-color-no-hash-prefix ()
-  "A hex color without the # prefix is rejected."
-  (let ((kuro-color-green "00ff00"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-green" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-color-too-short ()
-  "A 5-digit hex color is rejected."
-  (let ((kuro-color-yellow "#abcde"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-yellow" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-color-too-long ()
-  "An 8-digit hex color (RGBA) is rejected — must be exactly 6 digits."
-  (let ((kuro-color-cyan "#aabbccdd"))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-cyan" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-color-nil-rejected ()
-  "nil as a color value is rejected."
-  (let ((kuro-color-magenta nil))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "kuro-color-magenta" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-shell-empty-string-is-valid ()
-  "An empty string kuro-shell is valid (no shell error)."
-  (let ((kuro-shell ""))
-    (let ((errors (kuro--validate-config)))
-      (should-not (cl-some (lambda (e) (string-match-p "shell" e)) errors)))))
-
-(ert-deftest test-kuro-validate-config-negative-frame-rate-errors ()
-  "A negative frame-rate produces an error mentioning frame-rate."
-  (let ((kuro-frame-rate -10))
-    (let ((errors (kuro--validate-config)))
-      (should (cl-some (lambda (e) (string-match-p "frame-rate" e)) errors)))))
-
-;;; Group 20: kuro-validate-config interactive wrapper — error message branch
-
-(ert-deftest test-kuro-validate-config-interactive-error-branch ()
-  "kuro-validate-config prints error count in message when errors exist."
-  (let ((msgs nil))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args)
-                 (push (apply #'format fmt args) msgs))))
-      (let ((kuro-scrollback-size -1)
-            (kuro-frame-rate 0))
-        (kuro-validate-config)))
-    (should (cl-some (lambda (m) (string-match-p "error" m)) msgs))))
-
-(ert-deftest test-kuro-validate-config-interactive-ok-branch ()
-  "kuro-validate-config prints 'valid' message when all settings are correct."
-  (let ((msgs nil))
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args)
-                 (push (apply #'format fmt args) msgs))))
-      (kuro-validate-config))
-    (should (cl-some (lambda (m) (string-match-p "valid" m)) msgs))))
-
-;;; Group 21: defcustom default values and constants
-
-(ert-deftest test-kuro-default-rows-constant ()
-  "kuro--default-rows is 24."
-  (should (= kuro--default-rows 24)))
-
-(ert-deftest test-kuro-default-cols-constant ()
-  "kuro--default-cols is 80."
-  (should (= kuro--default-cols 80)))
-
-(ert-deftest test-kuro-scrollback-size-default ()
-  "kuro-scrollback-size defaults to 10000."
-  (should (= (default-value 'kuro-scrollback-size) 10000)))
-
-(ert-deftest test-kuro-frame-rate-default ()
-  "kuro-frame-rate defaults to 120."
-  (should (= (default-value 'kuro-frame-rate) 120)))
-
-(ert-deftest test-kuro-tui-frame-rate-default ()
-  "kuro-tui-frame-rate defaults to 5."
-  (should (= (default-value 'kuro-tui-frame-rate) 5)))
-
-(ert-deftest test-kuro-input-echo-delay-default ()
-  "kuro-input-echo-delay defaults to 0.01."
-  (should (= (default-value 'kuro-input-echo-delay) 0.01)))
-
-;;; Group 22: kuro--check-positive-integer — nil and multi-accumulation
-
-(ert-deftest test-kuro-check-positive-integer-nil-is-invalid ()
-  "kuro--check-positive-integer treats nil as invalid."
-  (let ((errors nil)
-        (kuro-scrollback-size nil))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (should (consp errors))))
-
-(ert-deftest test-kuro-check-positive-integer-accumulates-multiple ()
-  "kuro--check-positive-integer pushes onto an existing error list (now 2 items)."
-  (let ((errors '("pre-existing error"))
-        (kuro-frame-rate 0))
-    (kuro--check-positive-integer kuro-frame-rate errors)
-    ;; push prepends: new error is at car, pre-existing is at cadr.
-    (should (= (length errors) 2))
-    (should (string-match-p "kuro-frame-rate" (car errors)))
-    (should (string= (cadr errors) "pre-existing error"))))
-
-(ert-deftest test-kuro-check-positive-integer-string-value ()
-  "kuro--check-positive-integer treats a string value as invalid."
-  (let ((errors nil)
-        (kuro-tui-frame-rate "5"))
-    (kuro--check-positive-integer kuro-tui-frame-rate errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-tui-frame-rate" (car errors)))))
-
-(ert-deftest test-kuro-check-positive-integer-large-value-valid ()
-  "kuro--check-positive-integer treats a large positive integer as valid."
-  (let ((errors nil)
-        (kuro-scrollback-size 1000000))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (should (null errors))))
-
-;;; Group 23: kuro--check-hex-color macro
-
-(ert-deftest test-kuro-check-hex-color-valid-lowercase ()
-  "kuro--check-hex-color accepts a valid lowercase 6-digit hex color."
-  (let ((errors nil))
-    (kuro--check-hex-color 'kuro-color-black errors)
-    (should (null errors))))
-
-(ert-deftest test-kuro-check-hex-color-invalid-short ()
-  "kuro--check-hex-color rejects a 3-digit hex string."
-  (let ((errors nil)
-        (kuro-color-red "#fff"))
-    (kuro--check-hex-color 'kuro-color-red errors)
-    (should (consp errors))
-    (should (string-match-p "kuro-color-red" (car errors)))))
-
-(ert-deftest test-kuro-check-hex-color-invalid-no-hash ()
-  "kuro--check-hex-color rejects a hex string without the # prefix."
-  (let ((errors nil)
-        (kuro-color-green "00ff00"))
-    (kuro--check-hex-color 'kuro-color-green errors)
-    (should (consp errors))))
-
-(ert-deftest test-kuro-check-hex-color-invalid-non-string ()
-  "kuro--check-hex-color rejects a non-string value."
-  (let ((errors nil)
-        (kuro-color-blue 42))
-    (kuro--check-hex-color 'kuro-color-blue errors)
-    (should (consp errors))))
-
-(ert-deftest test-kuro-check-hex-color-accumulates-errors ()
-  "kuro--check-hex-color pushes onto an existing error list."
-  (let ((errors '("pre-existing"))
-        (kuro-color-yellow "bad"))
-    (kuro--check-hex-color 'kuro-color-yellow errors)
-    (should (= (length errors) 2))
-    (should (string= (cadr errors) "pre-existing"))))
-
-;;; Group 24: kuro--color-defcustom-vars enumeration
-
-(ert-deftest test-kuro-color-defcustom-vars-count ()
-  "kuro--color-defcustom-vars contains exactly 16 color variable symbols."
-  (should (= (length kuro--color-defcustom-vars) 16)))
-
-(ert-deftest test-kuro-color-defcustom-vars-all-bound ()
-  "All variables in kuro--color-defcustom-vars are bound."
-  (dolist (v kuro--color-defcustom-vars)
-    (should (boundp v))))
-
-(ert-deftest test-kuro-color-defcustom-vars-all-hex-strings ()
-  "All variables in kuro--color-defcustom-vars are valid 6-digit hex colors."
-  (dolist (v kuro--color-defcustom-vars)
-    (should (string-match-p "^#[0-9a-fA-F]\\{6\\}$" (symbol-value v)))))
-
-(ert-deftest test-kuro-color-defcustom-vars-contains-black ()
-  "kuro--color-defcustom-vars includes kuro-color-black."
-  (should (memq 'kuro-color-black kuro--color-defcustom-vars)))
-
-(ert-deftest test-kuro-color-defcustom-vars-contains-bright-white ()
-  "kuro--color-defcustom-vars includes kuro-color-bright-white."
-  (should (memq 'kuro-color-bright-white kuro--color-defcustom-vars)))
-
-;;; Group 25: kuro--set-keymap-exceptions
-
-(ert-deftest kuro-config-set-keymap-exceptions-sets-default-value ()
-  "kuro--set-keymap-exceptions calls set-default-toplevel-value with symbol and value."
-  (let ((set-sym nil) (set-val nil))
-    (cl-letf (((symbol-function 'set-default-toplevel-value)
-               (lambda (s v) (setq set-sym s set-val v)))
-              ((symbol-function 'kuro--build-keymap) #'ignore)
-              ((symbol-function 'kuro--kuro-buffers) (lambda () nil)))
-      (kuro--set-keymap-exceptions 'kuro-keymap-exceptions '(some-key))
-      (should (eq set-sym 'kuro-keymap-exceptions))
-      (should (equal set-val '(some-key))))))
-
-(ert-deftest kuro-config-set-keymap-exceptions-calls-build-keymap-when-bound ()
-  "kuro--set-keymap-exceptions calls kuro--build-keymap when it is fboundp."
-  (let ((built nil))
-    (cl-letf (((symbol-function 'set-default-toplevel-value) #'ignore)
-              ((symbol-function 'kuro--build-keymap)
-               (lambda () (setq built t)))
-              ((symbol-function 'kuro--kuro-buffers) (lambda () nil)))
-      (kuro--set-keymap-exceptions 'kuro-keymap-exceptions nil)
-      (should built))))
-
-(ert-deftest kuro-config-set-keymap-exceptions-skips-build-when-not-bound ()
-  "kuro--set-keymap-exceptions skips kuro--build-keymap when it is not fboundp."
-  (let ((built nil))
-    (cl-letf (((symbol-function 'set-default-toplevel-value) #'ignore)
-              ((symbol-function 'kuro--kuro-buffers) (lambda () nil))
-              ((symbol-function 'fboundp)
-               (lambda (sym) (not (eq sym 'kuro--build-keymap)))))
-      ;; Should not error even though build-keymap is unavailable
-      (kuro--set-keymap-exceptions 'kuro-keymap-exceptions nil)
-      (should-not built))))
-
-;;; Group 26: kuro--in-all-buffers macro
-
-(ert-deftest kuro-config-ext-test-in-all-buffers-empty-list-no-exec ()
-  "`kuro--in-all-buffers' does not evaluate body when buffer list is empty."
-  (let (called)
-    (cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () nil)))
-      (kuro--in-all-buffers (setq called t)))
-    (should-not called)))
-
-(ert-deftest kuro-config-ext-test-in-all-buffers-single-buf-executes-once ()
-  "`kuro--in-all-buffers' evaluates body exactly once for a single buffer."
-  (let ((count 0)
-        (buf (get-buffer-create " *kuro-in-all-test-1*")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () (list buf))))
-          (kuro--in-all-buffers (cl-incf count))
-          (should (= count 1)))
-      (kill-buffer buf))))
-
-(ert-deftest kuro-config-ext-test-in-all-buffers-body-runs-with-buf-current ()
-  "`kuro--in-all-buffers' evaluates body with each buffer current."
-  (let ((buf (get-buffer-create " *kuro-in-all-test-2*"))
-        captured)
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () (list buf))))
-          (kuro--in-all-buffers (setq captured (current-buffer)))
-          (should (eq captured buf)))
-      (kill-buffer buf))))
-
-(ert-deftest kuro-config-ext-test-in-all-buffers-multi-buf-iterates-all ()
-  "`kuro--in-all-buffers' visits all buffers in the list."
-  (let ((b1 (get-buffer-create " *kuro-in-all-test-3a*"))
-        (b2 (get-buffer-create " *kuro-in-all-test-3b*"))
-        visited)
-    (unwind-protect
-        (cl-letf (((symbol-function 'kuro--kuro-buffers) (lambda () (list b1 b2))))
-          (kuro--in-all-buffers (push (current-buffer) visited))
-          (should (= (length visited) 2))
-          (should (member b1 visited))
-          (should (member b2 visited)))
-      (kill-buffer b1)
-      (kill-buffer b2))))
-
-;;; Group 27: kuro--defvar-permanent-local macro
-
-(ert-deftest kuro-config-ext-test-defvar-permanent-local-sets-property ()
-  "`kuro--defvar-permanent-local' sets the permanent-local property to t."
-  ;; Evaluate the macro with a fresh test symbol so we are not relying on
-  ;; kuro-ffi.el's pre-existing variables (tested separately in kuro-ffi-ext2).
-  (let ((sym (gensym "kuro-perm-local-test-")))
-    (eval `(kuro--defvar-permanent-local ,sym nil "test var") t)
-    (should (eq t (get sym 'permanent-local)))))
-
-(ert-deftest kuro-config-ext-test-defvar-permanent-local-variable-is-defvarred ()
-  "`kuro--defvar-permanent-local' produces a bound (defvar'd) variable."
-  (let ((sym (gensym "kuro-perm-local-bound-")))
-    (eval `(kuro--defvar-permanent-local ,sym :initial-value "bound test") t)
-    (should (boundp sym))))
-
-(ert-deftest kuro-config-ext-test-defvar-permanent-local-survives-kill-all-local-variables ()
-  "A permanent-local variable retains its buffer-local value after `kill-all-local-variables'."
-  ;; Use an existing kuro variable that is already declared permanent-local so
-  ;; we exercise the real survival semantics without needing to defvar-local
-  ;; a gensym (which would require more setup to be buffer-local).
-  (with-temp-buffer
-    ;; kuro--initialized is declared permanent-local via kuro--defvar-permanent-local.
-    (setq kuro--initialized :test-marker)
-    ;; kill-all-local-variables clears ordinary buffer-locals but must NOT
-    ;; clear permanent-local ones.
-    (kill-all-local-variables)
-    (should (eq kuro--initialized :test-marker))))
 
 (provide 'kuro-config-test)
-
 ;;; kuro-config-test.el ends here

@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -21,7 +20,7 @@
 ;;
 ;; # Multi-session support
 ;;
-;; Each buffer has a `kuro--session-id' (a non-negative integer) set by
+;; Each buffer has a positive `kuro--session-id' set by
 ;; `kuro--init' (which allocates a new ID via an atomic counter) or by
 ;; `kuro-attach' (which restores an existing ID for a detached session).
 ;; Per-session FFI calls pass this ID as their first argument so that
@@ -31,6 +30,7 @@
 ;;; Code:
 
 (require 'kuro-config)
+(require 'kuro-ffi-macros)
 
 (declare-function kuro--ensure-module-loaded "kuro-module" ())
 
@@ -51,7 +51,7 @@ When exceeded, the oldest half of the buffer is truncated.")
 
 (defsubst kuro--log (err)
   "Write a timestamped error entry for ERR to the `*kuro-log*' buffer.
-ERR is a condition-case error value (a list whose car is the error symbol).
+ERR is a `condition-case' error value (a list whose car is the error symbol).
 Only called when `kuro-log-errors' is non-nil.  Uses `with-current-buffer'
 and `insert' for speed (no echo-area overhead)."
   (let ((buf (get-buffer-create kuro--log-buffer-name)))
@@ -75,41 +75,14 @@ and `insert' for speed (no echo-area overhead)."
         (special-mode)))
     (display-buffer buf)))
 
-;;; Structural macros
-;; Defined first so they are available for the variable declarations below.
-
-(defmacro kuro--when-divisible (counter divisor &rest body)
-  "Execute BODY when COUNTER is divisible by DIVISOR (counter mod divisor = 0).
-This is the fundamental cadence-gating primitive used for periodic polling and
-animation timing: BODY is a continuation invoked at exact multiples of DIVISOR.
-`%' is used instead of `mod': both are identical for non-negative COUNTER
-(frame counter is always ≥ 0), but `%' avoids the sign-normalization branch
-inside `mod'."
-  (declare (indent 2))
-  `(when (zerop (% ,counter ,divisor))
-     ,@body))
-
-(defmacro kuro--defvar-permanent-local (name value &optional doc)
-  "Define NAME as a buffer-local variable with VALUE, marked permanent-local.
-Convenience macro for the common pattern:
-  (defvar-local NAME VALUE DOC)
-  (put \\='NAME \\='permanent-local t)
-
-Variables marked permanent-local survive `kill-all-local-variables', which is
-called when a major mode is activated.  This is required for all Kuro state
-variables so that mode re-activation (e.g., after a theme change) does not
-destroy in-progress terminal session state."
-  (declare (doc-string 3) (indent defun))
-  `(progn
-     (defvar-local ,name ,value ,doc)
-     (put ',name 'permanent-local t)))
-
 ;; These functions are provided by the Rust dynamic module at runtime.
 ;; declare-function suppresses byte/native compiler "not known to be defined" warnings.
 (declare-function kuro-core-init                    "ext:kuro-core" (command shell-args rows cols))
 (declare-function kuro-core-send-key                "ext:kuro-core" (session-id bytes))
+(declare-function kuro-core-send-paste              "ext:kuro-core" (session-id text))
 (declare-function kuro-core-poll-updates-with-faces "ext:kuro-core" (session-id))
 (declare-function kuro-core-resize                  "ext:kuro-core" (session-id rows cols))
+(declare-function kuro-core-set-cell-pixel-size     "ext:kuro-core" (session-id width height))
 (declare-function kuro-core-shutdown                "ext:kuro-core" (session-id))
 (declare-function kuro-core-get-cursor              "ext:kuro-core" (session-id))
 (declare-function kuro-core-is-process-alive        "ext:kuro-core" (session-id))
@@ -122,7 +95,7 @@ session state independently.  When nil, all FFI calls are suppressed.")
 (kuro--defvar-permanent-local kuro--session-id 0
   "Session ID returned by `kuro-core-init'.
 Buffer-local so each kuro buffer routes FFI calls to its own session.
-The first session gets ID 0; subsequent sessions get incrementing integers.")
+Real session IDs are positive; 0 means no session has been assigned.")
 
 (kuro--defvar-permanent-local kuro--col-to-buf-map (make-hash-table :test 'eql)
   "Per-row mapping of grid column → buffer char offset.
@@ -133,76 +106,17 @@ grid column index to buffer character offset.")
   "Non-nil when a resize event is pending from the window-size-change hook.
 Value is a (NEW-ROWS . NEW-COLS) cons cell, or nil when no resize is pending.")
 
-;;; FFI definition macros
-
-(defmacro kuro--def-ffi-getter (name core-fn default doc)
-  "Define a zero-argument FFI getter function NAME.
-CORE-FN is called with `kuro--session-id'; DEFAULT is returned on error.
-DOC is the docstring for the generated function."
-  `(defun ,name () ,doc (kuro--call ,default (,core-fn kuro--session-id))))
-
-(defmacro kuro--def-ffi-unary (name core-fn default arg doc)
-  "Define a one-argument FFI wrapper wrapping CORE-FN with fallback DEFAULT.
-ARG is the parameter name symbol (used in the docstring)."
-  `(defun ,name (,arg) ,doc (kuro--call ,default (,core-fn kuro--session-id ,arg))))
-
-(defmacro kuro--define-ffi-getters (&rest entries)
-  "Expand ENTRIES into top-level `kuro--def-ffi-getter' forms.
-Each entry has the form (NAME CORE-FN DEFAULT DOC)."
-  (declare (indent 0))
-  `(progn
-     ,@(mapcar (lambda (entry)
-                 `(kuro--def-ffi-getter
-                   ,(nth 0 entry)
-                   ,(nth 1 entry)
-                   ,(nth 2 entry)
-                   ,(nth 3 entry)))
-               entries)))
-
-(defmacro kuro--define-ffi-unary-getters (&rest entries)
-  "Expand ENTRIES into top-level `kuro--def-ffi-unary' forms.
-Each entry has the form (NAME CORE-FN DEFAULT ARG DOC)."
-  (declare (indent 0))
-  `(progn
-     ,@(mapcar (lambda (entry)
-                 `(kuro--def-ffi-unary
-                   ,(nth 0 entry)
-                   ,(nth 1 entry)
-                   ,(nth 2 entry)
-                   ,(nth 3 entry)
-                   ,(nth 4 entry)))
-               entries)))
-
-;;; Core dispatch macro
-
-(defmacro kuro--call (fallback &rest body)
-  "Guard a Rust FFI call with initialization check and error recovery.
-
-Evaluates BODY only when `kuro--initialized' is non-nil.
-On error, logs a message and returns FALLBACK.
-
-Usage:
-  (kuro--call nil (kuro-core-get-cursor kuro--session-id))
-  (kuro--call 0   (kuro-core-get-scroll-offset kuro--session-id))"
-  (declare (indent 1))
-  `(when kuro--initialized
-     (condition-case err
-         (progn ,@body)
-       (error
-        (when kuro-log-errors (kuro--log err))
-        ,fallback))))
-
 ;;; Session lifecycle
 
 (defun kuro--init (command &optional shell-args rows cols)
   "Initialize Kuro with COMMAND (e.g., \"bash\").
 SHELL-ARGS is an optional list of string arguments passed to the shell
-(e.g., \\='(\"--norc\" \"--noprofile\")); nil means no extra arguments.
+\(e.g., \\='(\"--norc\" \"--noprofile\")); nil means no extra arguments.
 ROWS and COLS specify the initial terminal dimensions.  When omitted,
 `kuro--default-rows' and `kuro--default-cols' are used.  Callers should always
 pass the actual window dimensions so full-screen programs start with the correct
 geometry and do not suffer a SIGWINCH race on their first render.
-Returns the session ID (a non-negative integer) on success, nil otherwise."
+Returns the session ID (a positive integer) on success, nil otherwise."
   (interactive "sShell command: ")
   (condition-case err
       (let* ((r (or rows kuro--default-rows))
@@ -212,7 +126,10 @@ Returns the session ID (a non-negative integer) on success, nil otherwise."
              (result (kuro-core-init command (or shell-args nil) r c)))
         (when result
           (setq kuro--session-id result)
-          (setq kuro--initialized t))
+          (setq kuro--initialized t)
+          ;; Push real cell pixel metrics so OSC 1337 ReportCellSize replies
+          ;; reflect this frame's font; guarded for headless/older modules.
+          (kuro--push-cell-pixel-size-from-font))
         result)
     (error
      (message "Kuro initialization error: %s" err)
@@ -240,19 +157,46 @@ Returns t if successful, nil otherwise."
                    (apply #'string (append data nil)))))
       (kuro-core-send-key kuro--session-id bytes))))
 
+(defun kuro--send-paste (text)
+  "Send TEXT to the terminal through the Rust paste API.
+TEXT must be a string.  Rust checks the session's current DEC 2004 mode and
+applies bracketed-paste wrapping and sanitization when the mode is active."
+  (unless (stringp text)
+    (signal 'wrong-type-argument (list 'stringp text)))
+  (kuro--call nil
+    (kuro-core-send-paste kuro--session-id text)))
+
 (kuro--define-ffi-getters
  (kuro--poll-updates-with-faces
   kuro-core-poll-updates-with-faces nil
   "Poll for terminal updates with face information.
-Returns (DIRTY-LINES . COL-TO-BUF-VECTOR) where DIRTY-LINES is a list
-of ((ROW . TEXT) . FACE-RANGES) and COL-TO-BUF-VECTOR is a vector mapping
-grid columns to buffer character offsets.  FACE-RANGES is a list of
-\(START-COL END-COL FG BG FLAGS) for each text segment."))
+Returns nil or a vector of dirty update vectors.  Each dirty update is
+[ROW TEXT FACE-RANGES COL-TO-BUF], where ROW is a u32 row index, TEXT is a
+string, FACE-RANGES is a flat stride-6 u32 vector, and COL-TO-BUF is a u32
+vector.  Schema validation happens before renderer mutation."))
 
 (defun kuro--resize (rows cols)
   "Resize the terminal to ROWS x COLS.
 Returns t if successful, nil otherwise."
   (kuro--call nil (kuro-core-resize kuro--session-id rows cols)))
+
+(defun kuro--set-cell-pixel-size (width height)
+  "Report the terminal cell pixel size as WIDTH x HEIGHT points to the core.
+Used to answer iTerm2 OSC 1337 `ReportCellSize' queries with real font
+metrics.  No-op when the `kuro-core-set-cell-pixel-size' FFI function is
+unavailable (older module).  Returns t if successful, nil otherwise."
+  (when (fboundp 'kuro-core-set-cell-pixel-size)
+    (kuro--call nil
+      (kuro-core-set-cell-pixel-size kuro--session-id width height))))
+
+(defun kuro--push-cell-pixel-size-from-font ()
+  "Push the current frame font cell metrics to the core.
+Reads `default-font-width' / `default-font-height' (guarded by `fboundp')
+and forwards them via `kuro--set-cell-pixel-size'.  Safe to call when the
+metrics functions are unavailable (returns nil)."
+  (when (and (fboundp 'default-font-width)
+             (fboundp 'default-font-height))
+    (kuro--set-cell-pixel-size (default-font-width) (default-font-height))))
 
 ;;; Process state
 

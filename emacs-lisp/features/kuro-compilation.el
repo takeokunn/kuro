@@ -1,8 +1,8 @@
 ;;; kuro-compilation.el --- Compilation error navigation for Kuro  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
+
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 ;; Integrates Emacs compilation-mode error parsing with Kuro terminal output.

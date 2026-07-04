@@ -9,12 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `.elpaignore` for clean package distribution (excludes Rust, tests, docs from package)
-- `package-lint` CI step for MELPA compliance validation
+- Desktop notifications (OSC 9 / OSC 777): terminal applications can raise native desktop notifications. `OSC 9 ; <body> ST` (iTerm2) and `OSC 777 ; notify ; <title> ; <body> ST` (urxvt) are parsed in the Rust core, surfaced to Emacs via the new `kuro-core-poll-notifications` FFI, and shown through `notifications-notify` (D-Bus) with an echo-area fallback. The ConEmu `OSC 9 ; <n> ; …` progress form is deliberately ignored, and oversized fields (>4 KiB) are dropped. Gated by `kuro-notifications-enabled` (default t) with a customizable `kuro-notification-function` (FR-129).
+- DEC private mode 2048 (in-band resize notifications): when enabled via `CSI ? 2048 h`, the terminal reports text-area size changes in-band as `CSI 48 ; rows ; cols ; 0 ; 0 t` directly in the PTY stream — a robust modern alternative to SIGWINCH, matching foot/Ghostty/kitty/iTerm2/Contour. Enabling the mode emits an immediate current-size report (per spec), and DECRQM (`CSI ? 2048 $ p`) advertises support. Pixel fields are `0` — the cell-based core has no pixel geometry. See <https://gist.github.com/rockorager/e695fb2924d36b2bcf1fff4a3704bd83> (FR-126).
+- XTWINOPS window size queries (`CSI 14/18/19 t`): the terminal answers size-report queries on demand — `CSI 8 ; rows ; cols t` (text area in chars), `CSI 9 ; rows ; cols t` (screen in chars), `CSI 4 ; 0 ; 0 t` (text area in pixels; `0` — cell-based core) — the synchronous counterpart to the DEC 2048 push (e.g. the `stty`/serial-init `printf '\033[18t'` idiom). Window-manipulation ops (resize/move/iconify/maximize) and host-revealing reports (window position `CSI 13 t`, title `CSI 21 t`) are deliberately ignored for security, mirroring xterm's `allowWindowOps`-off default (FR-127).
+- DECRQSS (Request Status String, `DCS $ q <setting> ST`): the terminal answers cursor-style (`SP q`), scroll-region (`r`, 1-indexed inclusive), and SGR (`m`) queries with their current values as `DCS 1 $ r <value><setting> ST`, returning the invalid-request response `DCS 0 $ r ST` for unsupported settings. The SGR reply serializes the full rendition — flags, 16/256/RGB foreground & background, styled underlines (`4:n`) and underline color — in a form that round-trips through the parser (verified by a serialize→re-parse property test). Neovim issues the cursor-style query at startup to restore the cursor shape on exit (FR-128).
+- OSC 133 extras: `aid=`, `duration=`, `err=` kv pairs and positional exit code on D-mark for richer shell-integration job tracking (FR-115).
+- DA3 (Tertiary Device Attributes) response: reply to `CSI = c` with `DCS ! | 00000000 ST`, completing the DA1/DA2/DA3 triad (FR-117).
+- DEC private mode 2031 (`color_scheme_notifications`) and DSR 996: terminal answers `CSI ? 996 n` with `CSI ? 997 ; 1 n` and proactively emits color-scheme change notifications when mode 2031 is set (FR-119).
+- OSC 133 prompt extras (aid, duration, err path) are now surfaced to Emacs via the extended 7-tuple returned by `kuro-core-poll-prompt-marks` and rendered as end-of-line annotations by the `kuro-prompt-status` feature. Gated by `kuro-prompt-status-show-extras` (default t). New face `kuro-prompt-extras` (FR-124).
+- Automatic dark/light theme bridge: Emacs's `enable-theme-functions` is debounced and forwarded to `kuro-core-set-color-scheme`, so DSR 996 queries and DEC private mode 2031 notifications reflect the real Emacs theme. New defcustom `kuro-color-scheme-debounce-seconds`, autoload `M-x kuro-color-scheme-refresh` (FR-125).
+- `.elpaignore` for packaging hygiene (excludes Rust, tests, docs from package)
+- `package-lint` CI step for Emacs Lisp packaging hygiene
 - Module availability detection in E2E tests (`kuro-test--module-loaded`)
+
+### Changed
+
+- **Breaking for downstream hooks**: `kuro-core-poll-prompt-marks` now returns 7-tuples `(MARK-TYPE ROW COL EXIT-CODE AID DURATION-MS ERR-PATH)` instead of 4-tuples. Consumers that read positions 0–3 via `nth` or `pcase` rest patterns are unaffected. Consumers using closed-arity `pcase` patterns (e.g. `` `(,t ,r ,c ,e) mark ``) must migrate to the rest pattern `` `(,t ,r ,c ,e . ,_) mark ``.
 
 ### Fixed
 
+- Documentation drift: rewrote `test/README.md` and `CONTRIBUTING.md` to match the current `test/unit/**` layout and the Nix-first workflow (the `Makefile` was dropped in `07f0bda` in favor of `nix flake check`), and corrected the README's from-source install path to `target/release/` (the crate builds into the workspace target dir at the repo root, not `rust-core/target/release/`). Removed references to deleted `test/elisp/` files, nonexistent `make` targets, broken `docs/` links, `M-x kuro-reload`, and stale Rust/Emacs version requirements (now 1.84.0 / 29.4). The documented ERT invocation is verified to run green.
+- Restored the ERT suite to green (2544/2544): five tests were left stale by the module-download SHA256-format hardening and the OSC 51 eval-whitelist security tightening. They now assert the hardened behavior — `.sha256` sidecar responses must be a valid 64-hex digest, and the `kuro-` namespace prefix is correctly excluded from `kuro-eval-command-whitelist` (so terminal output cannot invoke arbitrary `kuro-` commands via OSC 51).
 - 40 ERT unit test failures: `kuro-core-send-key` stubs updated from 1-arg to 2-arg `(_sid bytes)` to match multi-session FFI signature
 - 93 E2E tests marked `:expected-result :failed` when Rust module not loaded (previously errored unexpectedly)
 - 7 cargo doc warnings: escaped `<bool>`, `[R,G,B]`, `#[defun]` and private item links
@@ -108,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Release Infrastructure**
 
-- MELPA recipe preparation and `package.el`-compatible packaging
+- Package metadata maintenance and `package.el` compatibility
 - Pre-built `.so` / `.dylib` release artifacts for Linux glibc, Linux musl, macOS x86_64, and macOS ARM64
 - CI/CD pipeline for automated build, test, and release artifact generation
 - `cargo-audit` integration for dependency vulnerability scanning

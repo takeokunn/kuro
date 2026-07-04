@@ -11,9 +11,12 @@ pub use crate::grid::image::{GraphicsStore, ImageData, ImageNotification, ImageP
 
 mod alternate;
 mod cursor;
+pub(crate) use cursor::{PrintableAsciiBuffer, PrintableAsciiRun};
 mod dirty;
 mod edit;
 mod graphics;
+mod placeholder;
+mod reflow;
 mod resize;
 pub mod scroll;
 mod scrollback;
@@ -25,6 +28,11 @@ mod scrollback;
 /// This value is overridden at runtime by the Emacs-side `kuro-scrollback-size`
 /// custom variable via `kuro-core-set-scrollback-max-lines`.
 pub(crate) const DEFAULT_SCROLLBACK_MAX: usize = 10_000;
+
+pub(super) fn assert_non_zero_dimensions(rows: u16, cols: u16) {
+    assert!(rows > 0, "screen rows must be non-zero");
+    assert!(cols > 0, "screen cols must be non-zero");
+}
 
 #[cfg(test)]
 #[path = "../tests/screen.rs"]
@@ -111,14 +119,16 @@ impl Screen {
     /// Create a new screen with the specified dimensions
     #[must_use]
     pub fn new(rows: u16, cols: u16) -> Self {
-        let lines: VecDeque<Line> = (0..rows).map(|_| Line::new(cols as usize)).collect();
+        assert_non_zero_dimensions(rows, cols);
+
+        let lines: VecDeque<Line> = (0..rows).map(|_| Line::new(usize::from(cols))).collect();
 
         Self {
             lines,
             cursor: Cursor::new(0, 0),
-            dirty_set: BitVecDirtySet::new(rows as usize),
+            dirty_set: BitVecDirtySet::new(usize::from(rows)),
             full_dirty: false,
-            scroll_region: ScrollRegion::full_screen(rows as usize),
+            scroll_region: ScrollRegion::full_screen(usize::from(rows)),
             rows,
             cols,
             alternate_screen: None,
@@ -165,7 +175,7 @@ impl Screen {
             );
             self.alternate_screen.as_ref().map(|s| {
                 debug_assert!(
-                    s.lines.len() == s.rows as usize,
+                    s.lines.len() == usize::from(s.rows),
                     "alt_lines length {} != rows {}",
                     s.lines.len(),
                     s.rows
@@ -194,7 +204,7 @@ impl Screen {
             );
             self.alternate_screen.as_mut().map(|s| {
                 debug_assert!(
-                    s.lines.len() == s.rows as usize,
+                    s.lines.len() == usize::from(s.rows),
                     "alt_lines length {} != rows {}",
                     s.lines.len(),
                     s.rows
@@ -262,5 +272,20 @@ impl Screen {
         } else {
             Some(self)
         }
+    }
+
+    /// Run `f` on the currently active screen, if one exists.
+    #[inline]
+    pub(super) fn with_active_screen<'a, R>(&'a self, f: impl FnOnce(&'a Self) -> R) -> Option<R> {
+        self.active_screen().map(f)
+    }
+
+    /// Run `f` on the currently active screen, if one exists.
+    #[inline]
+    pub(super) fn with_active_screen_mut<'a, R>(
+        &'a mut self,
+        f: impl FnOnce(&'a mut Self) -> R,
+    ) -> Option<R> {
+        self.active_screen_mut().map(f)
     }
 }

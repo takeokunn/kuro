@@ -18,43 +18,7 @@
 ;;; Code:
 
 (require 'ert)
-(require 'cl-lib)
-
-;; Stub FFI symbols so kuro-prompt-status loads without the Rust module.
-(dolist (sym '(kuro-core-init
-               kuro-core-send-key
-               kuro-core-poll-updates
-               kuro-core-poll-updates-with-faces
-               kuro-core-resize
-               kuro-core-shutdown
-               kuro-core-get-cursor
-               kuro-core-get-cursor-visible
-               kuro-core-get-cursor-shape
-               kuro-core-is-process-alive))
-  (unless (fboundp sym)
-    (fset sym (lambda (&rest _) nil))))
-
-(unless (fboundp 'module-load)
-  (fset 'module-load (lambda (_path) nil)))
-
-(let* ((this-dir (file-name-directory
-                  (or load-file-name buffer-file-name default-directory)))
-       (el-dir (expand-file-name "../../emacs-lisp" this-dir)))
-  (add-to-list 'load-path el-dir t))
-
-(require 'kuro-prompt-status)
-
-;;; Helpers
-
-(defmacro kuro-prompt-status-test--with-buffer (&rest body)
-  "Run BODY in a temp buffer with prompt status state initialized."
-  `(with-temp-buffer
-     (let ((inhibit-read-only t)
-           (kuro--prompt-status-overlays nil)
-           (kuro-prompt-status-annotations t)
-           (kuro-prompt-status-success-indicator "✓")
-           (kuro-prompt-status-failure-indicator "✗"))
-       ,@body)))
+(require 'kuro-prompt-status-test-support)
 
 ;;; Group 1: kuro--prompt-status-indicator — return values
 
@@ -62,19 +26,19 @@
   "kuro--prompt-status-indicator returns nil when exit-code is nil."
   (should (null (kuro--prompt-status-indicator nil))))
 
-(ert-deftest kuro-prompt-status--indicator-success-for-zero ()
-  "kuro--prompt-status-indicator returns a propertized success string for exit 0."
-  (let ((result (kuro--prompt-status-indicator 0)))
-    (should (stringp result))
-    (should (string= (substring-no-properties result) "✓"))
-    (should (eq (get-text-property 0 'face result) 'kuro-prompt-success))))
+(kuro-prompt-status-test--def-indicator-result
+ kuro-prompt-status--indicator-success-for-zero    0 "✓" kuro-prompt-success)
+(kuro-prompt-status-test--def-indicator-result
+ kuro-prompt-status--indicator-failure-for-nonzero 1 "✗" kuro-prompt-failure)
 
-(ert-deftest kuro-prompt-status--indicator-failure-for-nonzero ()
-  "kuro--prompt-status-indicator returns a propertized failure string for non-zero exit."
-  (let ((result (kuro--prompt-status-indicator 1)))
-    (should (stringp result))
-    (should (string= (substring-no-properties result) "✗"))
-    (should (eq (get-text-property 0 'face result) 'kuro-prompt-failure))))
+(ert-deftest kuro-prompt-status--indicator-all-exit-codes-correct ()
+  "Invariant: indicator returns correct text+face for both success and failure exit codes."
+  (dolist (entry kuro-prompt-status-test--indicator-result-table)
+    (pcase-let ((`(,_name ,exit-code ,expected-text ,expected-face) entry))
+      (let ((result (kuro--prompt-status-indicator exit-code)))
+        (should (stringp result))
+        (should (string= (substring-no-properties result) expected-text))
+        (should (eq (get-text-property 0 'face result) expected-face))))))
 
 ;;; Group 2: kuro--apply-prompt-status-overlay — overlay creation
 
@@ -120,6 +84,24 @@
                         (overlays-in (point-min) (point-max)))))
         (should (null remaining))))))
 
+(ert-deftest kuro-prompt-status--clear-overlays-noop-when-empty ()
+  "kuro--clear-prompt-status-overlays is a no-op when the list is already nil."
+  (kuro-prompt-status-test--with-buffer
+    (kuro--clear-prompt-status-overlays)
+    (should (null kuro--prompt-status-overlays))))
+
+(ert-deftest kuro-prompt-status--clear-overlays-skips-dead-overlay ()
+  "kuro--clear-prompt-status-overlays does not error on an already-deleted overlay."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 3) (insert "line\n"))
+    (let ((indicator (propertize "✓" 'face 'kuro-prompt-success)))
+      (kuro--apply-prompt-status-overlay 0 indicator)
+      ;; Pre-delete the first overlay so overlay-buffer returns nil
+      (delete-overlay (car kuro--prompt-status-overlays))
+      ;; clear must not error even though the overlay is dead
+      (kuro--clear-prompt-status-overlays)
+      (should (null kuro--prompt-status-overlays)))))
+
 ;;; Group 4: kuro--update-prompt-status — mark processing
 
 (ert-deftest kuro-prompt-status--update-processes-command-end-marks ()
@@ -150,6 +132,106 @@
        '(("command-end" 2 0 0)))
       (should (null kuro--prompt-status-overlays)))))
 
+;;; Group 4b: kuro--update-prompt-status — 7-tuple destructure & extras
+
+(ert-deftest kuro-prompt-status--update-7tuple-renders-indicator-only ()
+  "T2a: 7-tuple with all-nil extras still renders the exit-code indicator."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 4 0 0 nil nil nil)))
+    ;; Only the indicator overlay; no extras overlay since all extras nil.
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (let ((ov (car kuro--prompt-status-overlays)))
+      (should (overlay-get ov 'kuro-prompt-status))
+      (should-not (overlay-get ov 'kuro-prompt-extras)))))
+
+(ert-deftest kuro-prompt-status--update-renders-extras-when-aid-set ()
+  "T2b: extras overlay is created when aid is non-nil."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 2 0 0 "job1" nil nil)))
+    ;; Indicator + extras = 2 overlays.
+    (should (= (length kuro--prompt-status-overlays) 2))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "aid=job1" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-formats-duration-1500-as-1.5s ()
+  "T2c: duration-ms 1500 renders as \"1.5s\"."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 1 0 0 nil 1500 nil)))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "1\\.5s" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-formats-duration-75000-as-1m15s ()
+  "T2d: duration-ms 75000 renders as \"1m15s\"."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (kuro--update-prompt-status
+     '(("command-end" 1 0 0 nil 75000 nil)))
+    (let ((extras (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                            kuro--prompt-status-overlays)))
+      (should extras)
+      (should (string-match-p "1m15s" (overlay-get extras 'after-string))))))
+
+(ert-deftest kuro-prompt-status--update-skips-extras-when-toggle-off ()
+  "T2e: extras overlay is suppressed when kuro-prompt-status-show-extras is nil."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    (let ((kuro-prompt-status-show-extras nil))
+      (kuro--update-prompt-status
+       '(("command-end" 3 0 0 "job1" 1500 "/tmp/log"))))
+    ;; Only the indicator overlay; extras suppressed.
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (should-not (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                          kuro--prompt-status-overlays))))
+
+(ert-deftest kuro-prompt-status--format-extras-all-nil-returns-nil ()
+  "T2f: kuro--format-prompt-extras with all nil fields returns nil."
+  (should (null (kuro--format-prompt-extras nil nil nil))))
+
+(ert-deftest kuro-prompt-status--update-accepts-legacy-4-tuple ()
+  "Backward-compat: the dotted-rest pcase pattern still matches a 4-tuple."
+  (kuro-prompt-status-test--with-buffer
+    (dotimes (_ 10) (insert "line\n"))
+    ;; Old-shape 4-tuple — extras are absent (nil), indicator still rendered.
+    (kuro--update-prompt-status '(("command-end" 2 0 1)))
+    (should (= (length kuro--prompt-status-overlays) 1))
+    (should-not (seq-find (lambda (ov) (overlay-get ov 'kuro-prompt-extras))
+                          kuro--prompt-status-overlays))))
+
+(ert-deftest kuro-prompt-status--format-extras-includes-err-path ()
+  "Extras include err= prefix when err-path is provided."
+  (let ((s (kuro--format-prompt-extras nil nil "/tmp/build.log")))
+    (should (stringp s))
+    (should (string-match-p "err=/tmp/build\\.log" s))))
+
+(ert-deftest kuro-prompt-status--format-duration-sub-second ()
+  "Duration <1000ms renders as \"Nms\"."
+  (should (equal (kuro--format-prompt-duration 250) "250ms")))
+
+;;; Group 4c: kuro--format-prompt-duration — band boundary values
+
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-0ms       0       "0ms")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-999ms     999     "999ms")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-1000ms    1000    "1.0s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-59999ms   59999   "60.0s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-60000ms   60000   "1m00s")
+(kuro-prompt-status-test--def-format-duration kuro-prompt-status--format-duration-3600000ms 3600000 "60m00s")
+
+(ert-deftest kuro-prompt-status--format-duration-all-bands-correct ()
+  "Every entry in `kuro-prompt-status-test--format-duration-table' formats correctly."
+  (dolist (entry kuro-prompt-status-test--format-duration-table)
+    (pcase-let ((`(,_name ,ms ,expected) entry))
+      (should (equal (kuro--format-prompt-duration ms) expected)))))
+
 ;;; Group 5: kuro--ensure-left-margin — margin setup
 
 (ert-deftest kuro-prompt-status--ensure-left-margin-sets-width ()
@@ -160,15 +242,32 @@
       (kuro--ensure-left-margin)
       (should (= left-margin-width 2)))))
 
+(ert-deftest kuro-prompt-status--ensure-left-margin-noop-when-annotations-off ()
+  "kuro--ensure-left-margin does nothing when annotations are disabled."
+  (with-temp-buffer
+    (let ((kuro-prompt-status-annotations nil)
+          (left-margin-width nil))
+      (kuro--ensure-left-margin)
+      (should (null left-margin-width)))))
+
+(ert-deftest kuro-prompt-status--ensure-left-margin-noop-when-already-wide ()
+  "kuro--ensure-left-margin does nothing when left-margin-width is already 2."
+  (with-temp-buffer
+    (let ((kuro-prompt-status-annotations t)
+          (left-margin-width 2))
+      (kuro--ensure-left-margin)
+      (should (= left-margin-width 2)))))
+
 ;;; Group 6: faces and defcustom defaults
 
-(ert-deftest kuro-prompt-status--success-face-exists ()
-  "kuro-prompt-success face is defined."
-  (should (facep 'kuro-prompt-success)))
+(kuro-prompt-status-test--def-face-exists kuro-prompt-status--success-face-exists kuro-prompt-success)
+(kuro-prompt-status-test--def-face-exists kuro-prompt-status--failure-face-exists kuro-prompt-failure)
 
-(ert-deftest kuro-prompt-status--failure-face-exists ()
-  "kuro-prompt-failure face is defined."
-  (should (facep 'kuro-prompt-failure)))
+(ert-deftest kuro-prompt-status--all-faces-defined ()
+  "Invariant: all prompt-status faces are defined."
+  (dolist (entry kuro-prompt-status-test--face-exists-table)
+    (pcase-let ((`(,_name ,face-sym) entry))
+      (should (facep face-sym)))))
 
 (ert-deftest kuro-prompt-status--defcustom-annotations-default-t ()
   "kuro-prompt-status-annotations defaults to t."

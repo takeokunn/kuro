@@ -1,30 +1,19 @@
 //! SGR (Select Graphic Rendition) parameter parsing
 
-use crate::types::cell::{SgrFlags, UnderlineStyle};
+use crate::types::cell::{SgrAttributes, SgrFlags, UnderlineStyle};
 use crate::types::{Color, NamedColor};
+
+#[path = "sgr_support.rs"]
+mod support;
+use support::{
+    apply_extended_sgr_color, apply_named_sgr_color_group, apply_sgr_color, SgrColorTarget,
+};
 
 /// Maximum number of SGR parameter groups in a single CSI sequence.
 ///
 /// `vte::Params` caps at `MAX_PARAMS = 32` groups, so a fixed-size stack array
 /// of this length is sufficient to collect all groups without allocation.
 const SGR_MAX_PARAMS: usize = 32;
-
-/// Sub-parameter index for the color mode selector in a colon-form SGR extended color sequence.
-///
-/// In `CSI 38 : mode : ... m`, the sub-parameters are `[38, mode, ...]`.
-/// Index 0 is the base param (`38` for foreground, `48` for background, `58` for underline).
-/// Index 1 is the mode: `2` = RGB, `5` = 256-color indexed.
-const COLOR_MODE_IDX: usize = 1;
-/// Sub-parameter index for the palette index in 256-color indexed mode (`mode = 5`).
-///
-/// In `CSI 38 : 5 : n m`, `n` is the 256-color palette entry (0-255).
-const COLOR_INDEX_IDX: usize = 2;
-/// Sub-parameter index for the red RGB component.
-const RGB_RED_IDX: usize = 2;
-/// Sub-parameter index for the green RGB component.
-const RGB_GREEN_IDX: usize = 3;
-/// Sub-parameter index for the blue RGB component.
-const RGB_BLUE_IDX: usize = 4;
 
 /// Generate a `const fn` that maps an offset (0–7) to a `Color::Named` variant.
 ///
@@ -74,107 +63,37 @@ color_mapper!(bright_named_color_from_offset, [
 ///
 /// All other CSI sequences (cursor movement, erase, scroll) are handled
 /// by their dedicated modules (`parser::csi`, `parser::erase`, `parser::scroll`).
+///
+/// Collects `params` into a fixed-size stack array and delegates to
+/// `apply_sgr_attrs`, which owns the full dispatch table.  The two entry
+/// points exist because `apply_sgr_attrs` operates on a bare `SgrAttributes`
+/// (needed by DECCARA) while this function is called from the VTE parser
+/// with a `TerminalCore` borrow.
 pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
-    // Collect all param groups into a fixed stack array for index-based cross-group consumption.
-    // This handles both forms of extended color sequences:
-    //   Semicolon form: \e[38;5;196m  → groups [[38], [5], [196]] (3 separate groups)
-    //   Colon form:     \e[38:5:196m  → groups [[38, 5, 196]] (1 group, 3 sub-params)
-    // vte::Params caps at MAX_PARAMS = 32 groups, so a fixed array is sufficient.
-    let mut group_buf: [&[u16]; SGR_MAX_PARAMS] = [&[]; SGR_MAX_PARAMS];
+    let (group_buf, group_count) = collect_param_groups(params);
+    apply_sgr_attrs(&mut term.current_attrs, &group_buf[..group_count]);
+}
+
+/// Collect all `vte::Params` groups into a fixed stack array.
+///
+/// `vte::Params` caps the number of parameter groups, so a fixed array is
+/// sufficient and avoids heap allocation. The returned slice range preserves
+/// the original group order for cross-group parsing.
+pub(crate) fn collect_param_groups<'a>(
+    params: &'a vte::Params,
+) -> ([&'a [u16]; SGR_MAX_PARAMS], usize) {
+    let mut group_buf: [&'a [u16]; SGR_MAX_PARAMS] = [&[]; SGR_MAX_PARAMS];
     let mut group_count = 0;
+
     for group in params {
+        if group_count == SGR_MAX_PARAMS {
+            break;
+        }
         group_buf[group_count] = group;
         group_count += 1;
     }
-    let groups = &group_buf[..group_count];
 
-    if groups.is_empty() {
-        term.current_attrs.reset();
-        return;
-    }
-
-    let mut i = 0;
-    while i < groups.len() {
-        let group = groups[i];
-        if group.is_empty() {
-            i += 1;
-            continue;
-        }
-        let param = group[0];
-        i += 1;
-
-        match param {
-            0 => term.current_attrs.reset(),
-            1 => term.current_attrs.flags.insert(SgrFlags::BOLD),
-            2 => term.current_attrs.flags.insert(SgrFlags::DIM),
-            3 => term.current_attrs.flags.insert(SgrFlags::ITALIC),
-            4 => {
-                // SGR 4 with no sub-params = straight underline; sub-params handled below
-                if group.len() > 1 {
-                    // 4:0 = none, 4:1 = straight, 4:2 = double, 4:3 = curly, 4:4 = dotted, 4:5 = dashed
-                    term.current_attrs.underline_style = match group[1] {
-                        0 => UnderlineStyle::None,
-                        2 => UnderlineStyle::Double,
-                        3 => UnderlineStyle::Curly,
-                        4 => UnderlineStyle::Dotted,
-                        5 => UnderlineStyle::Dashed,
-                        _ => UnderlineStyle::Straight,
-                    };
-                } else {
-                    term.current_attrs.underline_style = UnderlineStyle::Straight;
-                }
-            }
-            5 => term.current_attrs.flags.insert(SgrFlags::BLINK_SLOW),
-            6 => term.current_attrs.flags.insert(SgrFlags::BLINK_FAST),
-            7 => term.current_attrs.flags.insert(SgrFlags::INVERSE),
-            8 => term.current_attrs.flags.insert(SgrFlags::HIDDEN),
-            9 => term.current_attrs.flags.insert(SgrFlags::STRIKETHROUGH),
-            22 => {
-                term.current_attrs.flags.remove(SgrFlags::BOLD);
-                term.current_attrs.flags.remove(SgrFlags::DIM);
-            }
-            23 => term.current_attrs.flags.remove(SgrFlags::ITALIC),
-            24 => term.current_attrs.underline_style = UnderlineStyle::None,
-            25 => {
-                term.current_attrs.flags.remove(SgrFlags::BLINK_SLOW);
-                term.current_attrs.flags.remove(SgrFlags::BLINK_FAST);
-            }
-            21 => term.current_attrs.underline_style = UnderlineStyle::Double, // SGR 21: double underline
-            27 => term.current_attrs.flags.remove(SgrFlags::INVERSE),
-            28 => term.current_attrs.flags.remove(SgrFlags::HIDDEN),
-            29 => term.current_attrs.flags.remove(SgrFlags::STRIKETHROUGH),
-
-            // Foreground colors
-            30..=37 => {
-                term.current_attrs.foreground = named_color_from_offset(param - 30);
-            }
-            38 => parse_extended_color(term, groups, &mut i, group, true),
-            39 => term.current_attrs.foreground = Color::Default,
-
-            // Background colors
-            40..=47 => {
-                term.current_attrs.background = named_color_from_offset(param - 40);
-            }
-            48 => parse_extended_color(term, groups, &mut i, group, false),
-            49 => term.current_attrs.background = Color::Default,
-
-            // Underline color (SGR 58/59)
-            58 => parse_underline_color(term, groups, &mut i, group),
-            59 => term.current_attrs.underline_color = Color::Default,
-
-            // Bright foreground (90-97)
-            90..=97 => {
-                term.current_attrs.foreground = bright_named_color_from_offset(param - 90);
-            }
-
-            // Bright background (100-107)
-            100..=107 => {
-                term.current_attrs.background = bright_named_color_from_offset(param - 100);
-            }
-
-            _ => {}
-        }
-    }
+    (group_buf, group_count)
 }
 
 /// Extract the next sub-parameter group's first byte, advancing `i`.
@@ -183,138 +102,234 @@ pub fn handle_sgr(term: &mut crate::TerminalCore, params: &vte::Params) {
 /// color for a truncated truecolor sequence like `\e[38;2;255;128m` (missing blue).
 /// Values > 255 are truncated to the low 8 bits (xterm-compatible behavior).
 #[inline]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "VTE sub-params are u16; RGB values 0-255 fit; out-of-range values truncate to low 8 bits (xterm-compatible)"
-)]
-fn next_component(groups: &[&[u16]], i: &mut usize) -> u8 {
-    if *i < groups.len() && !groups[*i].is_empty() {
-        let v = groups[*i][0] as u8;
-        *i += 1;
-        v
-    } else {
-        0
-    }
-}
-
-/// Shared color parser for `38`/`48`/`58` SGR sequences.
-///
-/// Handles two structural forms produced by the VTE parser:
-///
-/// **Colon form** (`38:5:196`): All sub-params are in `current_group` as
-/// `[38, 5, 196]`.  The mode and color values are read directly from the
-/// sub-parameter slots via the named index constants.
-///
-/// **Semicolon form** (`38;5;196`): Each value arrives as a separate group:
-/// `[[38], [5], [196]]`.  After `38` is consumed, subsequent groups are
-/// consumed by advancing `i` through `groups`.
-///
-/// Returns `None` if the sequence is malformed.
-#[inline]
-fn parse_color_from_subparams(
-    groups: &[&[u16]],
-    i: &mut usize,
-    current_group: &[u16],
-) -> Option<Color> {
-    if current_group.len() > 1 {
-        // Colon form: sub-params are already in current_group.
-        match current_group.get(COLOR_MODE_IDX).copied() {
-            Some(5) => {
-                // 256-color indexed: XX:5:n
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "palette index 0-255 from u16 sub-param; values > 255 truncate (xterm-compatible)"
-                )]
-                let n = current_group.get(COLOR_INDEX_IDX).copied()? as u8;
-                Some(Color::Indexed(n))
-            }
-            Some(2) => {
-                // TrueColor RGB: XX:2:r:g:b
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "RGB components 0-255 from u16 sub-params; values > 255 truncate (xterm-compatible)"
-                )]
-                let (r, g, b) = (
-                    current_group.get(RGB_RED_IDX).copied().unwrap_or(0) as u8,
-                    current_group.get(RGB_GREEN_IDX).copied().unwrap_or(0) as u8,
-                    current_group.get(RGB_BLUE_IDX).copied().unwrap_or(0) as u8,
-                );
-                Some(Color::Rgb(r, g, b))
-            }
-            _ => None,
+fn apply_underline_style(attrs: &mut SgrAttributes, group: &[u16]) {
+    attrs.underline_style = if group.len() > 1 {
+        match group[1] {
+            0 => UnderlineStyle::None,
+            2 => UnderlineStyle::Double,
+            3 => UnderlineStyle::Curly,
+            4 => UnderlineStyle::Dotted,
+            5 => UnderlineStyle::Dashed,
+            _ => UnderlineStyle::Straight,
         }
     } else {
-        // Semicolon form: consume subsequent groups from `groups` via index `i`.
-        if *i >= groups.len() || groups[*i].is_empty() {
-            return None;
+        UnderlineStyle::Straight
+    };
+}
+
+#[inline]
+fn remove_sgr_flags(attrs: &mut SgrAttributes, flags: &[SgrFlags]) {
+    for flag in flags {
+        attrs.flags.remove(*flag);
+    }
+}
+
+#[inline]
+fn set_sgr_script(attrs: &mut SgrAttributes, superscript: bool, subscript: bool) {
+    attrs.superscript = superscript;
+    attrs.subscript = subscript;
+}
+
+#[inline]
+fn apply_sgr_flag_group(attrs: &mut SgrAttributes, param: u16) -> bool {
+    match param {
+        0 => {
+            attrs.reset();
+            true
         }
-        let mode = groups[*i][0];
+        1 => {
+            attrs.flags.insert(SgrFlags::BOLD);
+            true
+        }
+        2 => {
+            attrs.flags.insert(SgrFlags::DIM);
+            true
+        }
+        3 => {
+            attrs.flags.insert(SgrFlags::ITALIC);
+            true
+        }
+        5 => {
+            attrs.flags.insert(SgrFlags::BLINK_SLOW);
+            true
+        }
+        6 => {
+            attrs.flags.insert(SgrFlags::BLINK_FAST);
+            true
+        }
+        7 => {
+            attrs.flags.insert(SgrFlags::INVERSE);
+            true
+        }
+        8 => {
+            attrs.flags.insert(SgrFlags::HIDDEN);
+            true
+        }
+        9 => {
+            attrs.flags.insert(SgrFlags::STRIKETHROUGH);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[inline]
+fn apply_sgr_style_group(attrs: &mut SgrAttributes, param: u16) -> bool {
+    match param {
+        21 => {
+            attrs.underline_style = UnderlineStyle::Double;
+            true
+        }
+        22 => {
+            remove_sgr_flags(attrs, &[SgrFlags::BOLD, SgrFlags::DIM]);
+            true
+        }
+        23 => {
+            attrs.flags.remove(SgrFlags::ITALIC);
+            true
+        }
+        24 => {
+            attrs.underline_style = UnderlineStyle::None;
+            true
+        }
+        25 => {
+            remove_sgr_flags(attrs, &[SgrFlags::BLINK_SLOW, SgrFlags::BLINK_FAST]);
+            true
+        }
+        27 => {
+            attrs.flags.remove(SgrFlags::INVERSE);
+            true
+        }
+        28 => {
+            attrs.flags.remove(SgrFlags::HIDDEN);
+            true
+        }
+        29 => {
+            attrs.flags.remove(SgrFlags::STRIKETHROUGH);
+            true
+        }
+        53 => {
+            attrs.overline = true;
+            true
+        }
+        55 => {
+            attrs.overline = false;
+            true
+        }
+        73 => {
+            set_sgr_script(attrs, true, false);
+            true
+        }
+        74 => {
+            set_sgr_script(attrs, false, false);
+            true
+        }
+        75 => {
+            set_sgr_script(attrs, false, true);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[inline]
+fn apply_sgr_underline_group(attrs: &mut SgrAttributes, param: u16, group: &[u16]) -> bool {
+    if param != 4 {
+        return false;
+    }
+
+    apply_underline_style(attrs, group);
+    true
+}
+
+#[inline]
+fn apply_sgr_color_group(
+    attrs: &mut SgrAttributes,
+    groups: &[&[u16]],
+    i: &mut usize,
+    group: &[u16],
+    param: u16,
+) -> bool {
+    if apply_named_sgr_color_group(attrs, param) {
+        return true;
+    }
+
+    match param {
+        38 => {
+            apply_extended_sgr_color(attrs, SgrColorTarget::Foreground, groups, i, group);
+            true
+        }
+        39 => {
+            apply_sgr_color(attrs, SgrColorTarget::Foreground, Color::Default);
+            true
+        }
+        48 => {
+            apply_extended_sgr_color(attrs, SgrColorTarget::Background, groups, i, group);
+            true
+        }
+        49 => {
+            apply_sgr_color(attrs, SgrColorTarget::Background, Color::Default);
+            true
+        }
+        58 => {
+            apply_extended_sgr_color(attrs, SgrColorTarget::Underline, groups, i, group);
+            true
+        }
+        59 => {
+            apply_sgr_color(attrs, SgrColorTarget::Underline, Color::Default);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[inline]
+fn apply_sgr_group(attrs: &mut SgrAttributes, groups: &[&[u16]], i: &mut usize, group: &[u16]) {
+    let param = group[0];
+    let _ = apply_sgr_flag_group(attrs, param)
+        || apply_sgr_underline_group(attrs, param, group)
+        || apply_sgr_style_group(attrs, param)
+        || apply_sgr_color_group(attrs, groups, i, group, param);
+}
+
+#[inline]
+fn next_sgr_group<'a>(groups: &'a [&'a [u16]], i: &mut usize) -> Option<&'a [u16]> {
+    while *i < groups.len() {
+        let group = groups[*i];
         *i += 1;
-
-        match mode {
-            5 => {
-                // mode == 5: indexed color — a missing palette index cannot default to 0
-                // (which would silently render as black), so we return None instead.
-                // Contrast with mode == 2 (RGB) where missing components default to 0
-                // via `next_component` (producing black channel, not black color).
-                // 256-color indexed: XX;5;n
-                if *i < groups.len() && !groups[*i].is_empty() {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "palette index 0-255; values > 255 truncate (xterm-compatible)"
-                    )]
-                    let n = groups[*i][0] as u8;
-                    *i += 1;
-                    Some(Color::Indexed(n))
-                } else {
-                    None
-                }
-            }
-            2 => {
-                // TrueColor RGB: XX;2;r;g;b
-                let r = next_component(groups, i);
-                let g = next_component(groups, i);
-                let b = next_component(groups, i);
-                Some(Color::Rgb(r, g, b))
-            }
-            _ => None,
+        if !group.is_empty() {
+            return Some(group);
         }
     }
+    None
 }
 
-/// Parse extended color (256-color or truecolor) from SGR 38/48 parameters.
+/// Apply pre-parsed SGR parameter groups directly to `attrs`.
 ///
-/// `foreground` — `true` sets `current_attrs.foreground` (SGR 38),
-/// `false` sets `current_attrs.background` (SGR 48).
+/// This is the single authoritative SGR dispatch table, shared by both
+/// [`handle_sgr`] (VTE parser path, via `term.current_attrs`) and
+/// [`handle_deccara`][crate::parser::erase::handle_deccara] (rectangular-area
+/// attribute change, direct `SgrAttributes` borrow).
+///
+/// `groups` is a slice of sub-parameter slices as produced by iterating
+/// [`vte::Params`] and collecting into a `[&[u16]; N]` array.
 #[inline]
-fn parse_extended_color(
-    term: &mut crate::TerminalCore,
-    groups: &[&[u16]],
-    i: &mut usize,
-    current_group: &[u16],
-    foreground: bool,
-) {
-    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
-        if foreground {
-            term.current_attrs.foreground = color;
-        } else {
-            term.current_attrs.background = color;
-        }
+pub(crate) fn apply_sgr_attrs(attrs: &mut SgrAttributes, groups: &[&[u16]]) {
+    if groups.is_empty() {
+        attrs.reset();
+        return;
+    }
+
+    let mut i = 0;
+    while let Some(group) = next_sgr_group(groups, &mut i) {
+        apply_sgr_group(attrs, groups, &mut i, group);
     }
 }
 
-/// Parse underline color from SGR 58 parameters (same structure as extended color).
-#[inline]
-fn parse_underline_color(
-    term: &mut crate::TerminalCore,
-    groups: &[&[u16]],
-    i: &mut usize,
-    current_group: &[u16],
-) {
-    if let Some(color) = parse_color_from_subparams(groups, i, current_group) {
-        term.current_attrs.underline_color = color;
-    }
-}
+#[path = "sgr_serialize.rs"]
+mod serialize;
+
+pub(crate) use serialize::serialize_sgr;
 
 #[cfg(test)]
 #[path = "tests/sgr.rs"]

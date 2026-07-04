@@ -6,6 +6,65 @@
 use super::*;
 use proptest::prelude::*;
 
+pub(super) fn pending_response_texts(core: &crate::TerminalCore) -> Vec<String> {
+    core.meta
+        .pending_responses
+        .iter()
+        .map(|response| String::from_utf8_lossy(response).into_owned())
+        .collect()
+}
+
+pub(super) fn assert_no_pending_responses(core: &crate::TerminalCore) {
+    assert!(
+        core.meta.pending_responses.is_empty(),
+        "expected no queued responses, got {:?}",
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_pending_response_count(core: &crate::TerminalCore, count: usize) {
+    assert_eq!(
+        core.meta.pending_responses.len(),
+        count,
+        "expected {} queued responses, got {:?}",
+        count,
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_single_pending_response_bytes(core: &crate::TerminalCore, expected: &[u8]) {
+    assert_eq!(
+        core.meta.pending_responses,
+        vec![expected.to_vec()],
+        "expected a single queued response {:?}, got {:?}",
+        expected,
+        core.meta.pending_responses
+    );
+}
+
+pub(super) fn assert_single_pending_response_text(core: &crate::TerminalCore, expected: &str) {
+    assert_eq!(
+        pending_response_texts(core),
+        vec![expected.to_owned()],
+        "expected a single queued response {:?}, got {:?}",
+        expected,
+        pending_response_texts(core)
+    );
+}
+
+pub(super) fn assert_pending_response_texts(core: &crate::TerminalCore, expected: &[&str]) {
+    let expected = expected
+        .iter()
+        .map(|response| response.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        pending_response_texts(core),
+        expected,
+        "unexpected queued responses: {:?}",
+        core.meta.pending_responses
+    );
+}
+
 /// Generate a set/reset pair for a simple boolean DEC mode field.
 ///
 /// Both generated tests follow the three-step pattern:
@@ -55,6 +114,9 @@ test_dec_mode!(
     2004,
     bracketed_paste
 );
+
+// UTF-8 mouse encoding (mode 1005)
+test_dec_mode!(test_set_mouse_utf8, test_reset_mouse_utf8, 1005, mouse_utf8);
 
 // SGR mouse extension (mode 1006)
 test_dec_mode!(test_set_mouse_sgr, test_reset_mouse_sgr, 1006, mouse_sgr);
@@ -270,142 +332,38 @@ fn test_get_mode_new_modes() {
     assert_eq!(modes.get_mode(2026), Some(true));
 }
 
-#[test]
-fn test_alt_screen_saves_and_restores_sgr_attrs() {
-    use crate::types::cell::SgrFlags;
-    use crate::types::{Color, NamedColor};
-
-    let mut term = crate::TerminalCore::new(5, 10);
-
-    // Set bold and foreground color
-    term.current_attrs.flags.insert(SgrFlags::BOLD);
-    term.current_attrs.foreground = Color::Named(NamedColor::Red);
-
-    // Enter alternate screen (CSI ? 1049 h)
-    term.advance(b"\x1b[?1049h");
-
-    // Verify saved_primary_attrs is Some
-    assert!(
-        term.saved_primary_attrs.is_some(),
-        "saved_primary_attrs should be Some after entering alt screen"
-    );
-
-    // Change attrs while in alternate screen
-    term.current_attrs.flags.remove(SgrFlags::BOLD);
-    term.current_attrs.foreground = Color::Named(NamedColor::Green);
-
-    // Exit alternate screen (CSI ? 1049 l)
-    term.advance(b"\x1b[?1049l");
-
-    // Original attrs should be restored
-    assert!(
-        term.current_attrs.flags.contains(SgrFlags::BOLD),
-        "bold should be restored to true after exiting alt screen"
-    );
-    assert_eq!(
-        term.current_attrs.foreground,
-        Color::Named(NamedColor::Red),
-        "foreground should be restored to Red after exiting alt screen"
-    );
-
-    // saved_primary_attrs should be consumed (None after take())
-    assert!(
-        term.saved_primary_attrs.is_none(),
-        "saved_primary_attrs should be None after exiting alt screen (consumed by take())"
-    );
+/// Assert that `TerminalCore::advance(set_seq)` sets `dec_modes.$field` and
+/// `advance(reset_seq)` clears it, starting from the default-false value.
+///
+/// Form: `test_dec_mode_via_advance!(fn_name, set_seq, reset_seq, field)`
+macro_rules! test_dec_mode_via_advance {
+    ($fn_name:ident, $set:literal, $reset:literal, $field:ident) => {
+        #[test]
+        fn $fn_name() {
+            let mut term = crate::TerminalCore::new(24, 80);
+            assert!(
+                !term.dec_modes.$field,
+                concat!(stringify!($field), " must default to false")
+            );
+            term.advance($set);
+            assert!(
+                term.dec_modes.$field,
+                concat!(stringify!($set), " must set ", stringify!($field))
+            );
+            term.advance($reset);
+            assert!(
+                !term.dec_modes.$field,
+                concat!(stringify!($reset), " must clear ", stringify!($field))
+            );
+        }
+    };
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(500))]
-    #[test]
-    fn prop_dec_modes_set_reset_no_panic(mode in 0u16..=65535u16) {
-        let mut modes = DecModes::new();
-        modes.set_mode(mode);   // must not panic
-        modes.reset_mode(mode); // must not panic
-        let _ = modes.get_mode(mode);
-    }
+#[path = "dec_private/ext.rs"]
+mod ext;
 
-    #[test]
-    /// For every recognised boolean DEC mode: `get_mode` returns `Some(true)`
-    /// immediately after `set_mode` and `Some(false)` after a subsequent
-    /// `reset_mode`.  Mouse mode uses equality comparison, so 1000/1002/1003
-    /// are also covered correctly.
-    fn prop_set_then_get_mode_round_trip(
-        mode in proptest::prop_oneof![
-            Just(1u16), Just(6), Just(7), Just(25),
-            Just(1000), Just(1002), Just(1003), Just(1004),
-            Just(1006), Just(1016), Just(1049), Just(2004), Just(2026),
-        ]
-    ) {
-        let mut modes = DecModes::new();
-        modes.set_mode(mode);
-        let after_set = modes.get_mode(mode);
-        prop_assert!(
-            after_set == Some(true),
-            "get_mode({}) after set_mode must be Some(true), got {:?}",
-            mode, after_set
-        );
-        modes.reset_mode(mode);
-        let after_reset = modes.get_mode(mode);
-        prop_assert!(
-            after_reset == Some(false),
-            "get_mode({}) after reset_mode must be Some(false), got {:?}",
-            mode, after_reset
-        );
-    }
-}
+#[path = "dec_private/kitty_keyboard.rs"]
+mod kitty_keyboard;
 
-include!("dec_private_kitty_keyboard.rs");
-
-include!("dec_private_edge.rs");
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(500))]
-
-    #[test]
-    // PANIC SAFETY: Unknown DECSET mode numbers (50000–65000) never panic
-    fn prop_decset_unknown_no_panic(mode in 50000u16..=65000u16) {
-        let mut term = crate::TerminalCore::new(24, 80);
-        // DECSET: CSI ? {mode} h
-        term.advance(format!("\x1b[?{mode}h").as_bytes());
-        // DECRST: CSI ? {mode} l
-        term.advance(format!("\x1b[?{mode}l").as_bytes());
-        // Terminal must still have a valid cursor position
-        prop_assert!(term.screen.cursor.row < 24);
-    }
-
-    #[test]
-    // PANIC SAFETY: DECSCUSR (CSI Ps SP q) valid range 0–6 never panics
-    fn prop_decscusr_valid_range(ps in 0u16..=6u16) {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[{ps} q").as_bytes());
-        // Cursor must still be within bounds
-        prop_assert!(term.screen.cursor.row < 24);
-    }
-
-    #[test]
-    // PANIC SAFETY: mouse mode DECSET/DECRST for known modes never panics
-    fn prop_mouse_mode_toggle_no_panic(
-        mode in prop_oneof![
-            Just(1000u16),
-            Just(1002u16),
-            Just(1003u16),
-            Just(1006u16),
-            Just(1015u16),
-        ]
-    ) {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[?{mode}h").as_bytes());
-        term.advance(format!("\x1b[?{mode}l").as_bytes());
-        prop_assert!(term.screen.cursor.row < 24);
-    }
-
-    #[test]
-    // PANIC SAFETY: arbitrary DECSET mode 1–9999 never panics
-    fn prop_decset_arbitrary_range_no_panic(mode in 1u16..=9999u16) {
-        let mut term = crate::TerminalCore::new(24, 80);
-        term.advance(format!("\x1b[?{mode}h").as_bytes());
-        term.advance(format!("\x1b[?{mode}l").as_bytes());
-        prop_assert!(term.screen.cursor.row < 24);
-    }
-}
+#[path = "dec_private/edge.rs"]
+mod edge;

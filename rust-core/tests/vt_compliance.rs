@@ -6,6 +6,23 @@
 use kuro_core::types::cell::SgrFlags;
 use kuro_core::TerminalCore;
 
+/// Assert DEC private mode N enables on `h` and disables on `l`.
+///
+/// Form: `vt_dec_toggle!(fn_name, set_seq, reset_seq, field)`
+/// where `field` is the bool field on `DecModes`.
+macro_rules! vt_dec_toggle {
+    ($fn_name:ident, $set:literal, $reset:literal, $field:ident) => {
+        #[test]
+        fn $fn_name() {
+            let mut t = TerminalCore::new(24, 80);
+            t.advance($set);
+            assert!(t.dec_modes().$field);
+            t.advance($reset);
+            assert!(!t.dec_modes().$field);
+        }
+    };
+}
+
 // === VT100 Basic Cursor Movement ===
 
 #[test]
@@ -129,14 +146,12 @@ fn vt_dectcem_cursor_visibility() {
     assert!(t.dec_modes().cursor_visible);
 }
 
-#[test]
-fn vt_decckm_app_cursor() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?1h");
-    assert!(t.dec_modes().app_cursor_keys);
-    t.advance(b"\x1b[?1l");
-    assert!(!t.dec_modes().app_cursor_keys);
-}
+vt_dec_toggle!(
+    vt_decckm_app_cursor,
+    b"\x1b[?1h",
+    b"\x1b[?1l",
+    app_cursor_keys
+);
 
 #[test]
 fn vt_decawm_auto_wrap() {
@@ -203,14 +218,12 @@ fn vt_decawm_off_no_wrap() {
     assert_eq!(t.get_cell(0, 4).unwrap().char(), 'H');
 }
 
-#[test]
-fn vt_bracketed_paste() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?2004h");
-    assert!(t.dec_modes().bracketed_paste);
-    t.advance(b"\x1b[?2004l");
-    assert!(!t.dec_modes().bracketed_paste);
-}
+vt_dec_toggle!(
+    vt_bracketed_paste,
+    b"\x1b[?2004h",
+    b"\x1b[?2004l",
+    bracketed_paste
+);
 
 // === Alt Screen ===
 
@@ -274,114 +287,46 @@ fn vt_da2_response() {
     );
 }
 
-// === DECSC/DECRC ===
-
 #[test]
-fn vt_save_restore_cursor() {
+fn da3_tertiary_device_attributes_responds_with_unit_id() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[10;20H\x1b7\x1b[1;1H\x1b8");
-    assert_eq!(t.cursor_row(), 9);
-    assert_eq!(t.cursor_col(), 19);
-}
-
-// === Mouse Tracking ===
-
-#[test]
-fn vt_mouse_modes() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?1000h");
-    assert_eq!(t.dec_modes().mouse_mode, 1000);
-    t.advance(b"\x1b[?1000l");
-    assert_eq!(t.dec_modes().mouse_mode, 0);
-    t.advance(b"\x1b[?1002h");
-    assert_eq!(t.dec_modes().mouse_mode, 1002);
-    t.advance(b"\x1b[?1006h");
-    assert!(t.dec_modes().mouse_sgr);
-}
-
-// === VT220 Extensions ===
-
-#[test]
-fn vt_decscusr_cursor_shape() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[5 q");
-    assert_eq!(
-        t.dec_modes().cursor_shape,
-        kuro_core::types::cursor::CursorShape::BlinkingBar
+    t.advance(b"\x1b[=c");
+    assert!(
+        !t.pending_responses().is_empty(),
+        "DA3 must generate response"
     );
-    t.advance(b"\x1b[2 q");
+    let resp = t.pending_responses().last().expect("response present");
     assert_eq!(
-        t.dec_modes().cursor_shape,
-        kuro_core::types::cursor::CursorShape::SteadyBlock
-    );
-    t.advance(b"\x1b[3 q");
-    assert_eq!(
-        t.dec_modes().cursor_shape,
-        kuro_core::types::cursor::CursorShape::BlinkingUnderline
+        resp.as_slice(),
+        b"\x1bP!|00000000\x1b\\",
+        "DA3 response must be DCS ! | 00000000 ST"
     );
 }
 
 #[test]
-fn vt_decstr_soft_reset() {
+fn da3_with_zero_param() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[?1h\x1b[1m\x1b[10;20H");
-    t.advance(b"\x1b[!p");
-    assert!(!t.dec_modes().app_cursor_keys);
-    assert!(!t.current_attrs().flags.contains(SgrFlags::BOLD));
-    assert_eq!(t.cursor_row(), 0);
-    assert!(t.dec_modes().auto_wrap);
-}
-
-// === Modern Terminal Features ===
-
-#[test]
-fn vt_kitty_keyboard_protocol() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[>1u");
-    assert_eq!(t.dec_modes().keyboard_flags, 1);
-    t.advance(b"\x1b[>3u");
-    assert_eq!(t.dec_modes().keyboard_flags, 3);
-    t.advance(b"\x1b[<u");
-    assert_eq!(t.dec_modes().keyboard_flags, 1);
-    t.advance(b"\x1b[<u");
-    assert_eq!(t.dec_modes().keyboard_flags, 0);
-}
-
-#[test]
-fn vt_kitty_keyboard_query() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[>5u");
-    t.advance(b"\x1b[?u");
-    assert!(!t.pending_responses().is_empty());
-    assert_eq!(t.pending_responses().last().unwrap(), b"\x1b[?5u");
-}
-
-#[test]
-fn vt_osc7_cwd() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]7;file://localhost/tmp/test\x07");
-    assert_eq!(t.osc_data().cwd, Some("/tmp/test".to_owned()));
-    assert!(t.osc_data().cwd_dirty);
-}
-
-#[test]
-fn vt_osc8_hyperlink() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]8;;https://example.com\x07");
-    assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
-        Some("https://example.com")
+    t.advance(b"\x1b[=0c");
+    assert!(
+        !t.pending_responses().is_empty(),
+        "DA3 with zero param must generate response"
     );
-    t.advance(b"\x1b]8;;\x07");
-    assert!(t.osc_data().hyperlink.uri.is_none());
+    let resp = t.pending_responses().last().expect("response present");
+    assert_eq!(
+        resp.as_slice(),
+        b"\x1bP!|00000000\x1b\\",
+        "DA3 zero-param response must be DCS ! | 00000000 ST"
+    );
 }
 
-#[test]
-fn vt_osc133_prompt_marks() {
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b]133;A\x07");
-    assert_eq!(t.osc_data().prompt_marks.len(), 1);
-}
+#[path = "include/vt_compliance_device_attrs.rs"]
+mod device_attrs;
 
-include!("include/vt_compliance_device_attrs.rs");
-include!("include/vt_compliance_cursor_movement.rs");
+#[path = "include/vt_compliance_cursor_movement.rs"]
+mod cursor_movement;
+
+#[path = "include/vt_compliance_save_restore.rs"]
+mod save_restore;
+
+#[path = "include/vt_compliance_ext.rs"]
+mod ext;

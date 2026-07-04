@@ -81,6 +81,8 @@
       (fset sym fn))))
 
 (require 'kuro-stream)
+(require 'kuro-stream-test-cases)
+(require 'kuro-stream-test-macros)
 
 (provide 'kuro-stream-test-support)
 

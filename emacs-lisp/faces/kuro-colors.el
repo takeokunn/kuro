@@ -3,7 +3,6 @@
 ;; Copyright (C) 2026 takeokunn
 
 ;; Author: takeokunn
-;; Version: 1.0.0
 
 ;;; Commentary:
 
@@ -27,6 +26,8 @@
 
 (declare-function kuro--clear-face-cache "kuro-faces" ())
 
+(require 'kuro-colors-macros)
+
 ;;; Customization Group
 
 (defgroup kuro-colors nil
@@ -39,27 +40,36 @@
 (defconst kuro--hex-color-regexp "^#[0-9a-fA-F]\\{6\\}$"
   "Regular expression that matches a valid 6-digit hex color string (#rrggbb).")
 
-;;; ANSI color name → defcustom symbol mapping
+;;; ANSI Color Palette — single source of truth for all color data
+
+(defconst kuro--color-palette
+  '(("black"          "#000000" "black"                    0)
+    ("red"            "#c23621" "red"                      1)
+    ("green"          "#25bc24" "green"                    2)
+    ("yellow"         "#adad27" "yellow"                   3)
+    ("blue"           "#492ee1" "blue"                     4)
+    ("magenta"        "#d338d3" "magenta"                  5)
+    ("cyan"           "#33bbc8" "cyan"                     6)
+    ("white"          "#cbcccd" "white"                    7)
+    ("bright-black"   "#808080" "bright black / dark gray" 8)
+    ("bright-red"     "#ff0000" "bright red"               9)
+    ("bright-green"   "#00ff00" "bright green"            10)
+    ("bright-yellow"  "#ffff00" "bright yellow"           11)
+    ("bright-blue"    "#0000ff" "bright blue"             12)
+    ("bright-magenta" "#ff00ff" "bright magenta"          13)
+    ("bright-cyan"    "#00ffff" "bright cyan"             14)
+    ("bright-white"   "#ffffff" "bright white"            15))
+  "ANSI color palette data: each entry is (SUFFIX DEFAULT-HEX LABEL INDEX).
+This is the single source of truth from which `kuro--color-name-alist' is
+derived and all 16 `kuro-color-*' defcustoms are defined.")
+
+;;; ANSI color name → defcustom symbol mapping (derived from kuro--color-palette)
 
 (defconst kuro--color-name-alist
-  '(("black"          . kuro-color-black)
-    ("red"            . kuro-color-red)
-    ("green"          . kuro-color-green)
-    ("yellow"         . kuro-color-yellow)
-    ("blue"           . kuro-color-blue)
-    ("magenta"        . kuro-color-magenta)
-    ("cyan"           . kuro-color-cyan)
-    ("white"          . kuro-color-white)
-    ("bright-black"   . kuro-color-bright-black)
-    ("bright-red"     . kuro-color-bright-red)
-    ("bright-green"   . kuro-color-bright-green)
-    ("bright-yellow"  . kuro-color-bright-yellow)
-    ("bright-blue"    . kuro-color-bright-blue)
-    ("bright-magenta" . kuro-color-bright-magenta)
-    ("bright-cyan"    . kuro-color-bright-cyan)
-    ("bright-white"   . kuro-color-bright-white))
+  (mapcar (lambda (e) (cons (car e) (intern (concat "kuro-color-" (car e)))))
+          kuro--color-palette)
   "Alist mapping ANSI color name strings to `kuro-color-*' defcustom symbols.
-Used by `kuro--rebuild-named-colors' to populate `kuro--named-colors'.")
+Derived from `kuro--color-palette'; used by `kuro--rebuild-named-colors'.")
 
 ;;; Internal Color Table
 
@@ -84,23 +94,13 @@ during `defcustom' initialization before all 16 colors are defined)."
   "Set SYMBOL to VALUE, rebuild color table, and clear face cache."
   (unless (and (stringp value)
                (string-match-p kuro--hex-color-regexp value))
-    (user-error "kuro: color must be a 6-digit hex string like #rrggbb, got: %s" value))
+    (user-error "Kuro: color must be a 6-digit hex string like #rrggbb, got: %s" value))
   (set-default symbol value)
   (kuro--rebuild-named-colors)
   (when (fboundp 'kuro--clear-face-cache)
     (kuro--clear-face-cache)))
 
 ;;; ANSI Color Palette
-
-(defmacro kuro--defcolor (suffix default label index)
-  "Define a `defcustom' for ANSI palette entry SUFFIX with DEFAULT hex value.
-LABEL is the color name string; INDEX is the palette index integer."
-  `(defcustom ,(intern (concat "kuro-color-" suffix)) ,default
-     ,(concat "Color for ANSI " label " (palette index " (number-to-string index)
-              ").\nValue must be a 6-digit hex string, e.g. #rrggbb.")
-     :type '(string :tag "Hex color (#rrggbb)")
-     :group 'kuro-colors
-     :set #'kuro--set-color))
 
 (kuro--defcolor "black"          "#000000" "black"                    0)
 (kuro--defcolor "red"            "#c23621" "red"                      1)

@@ -3,21 +3,14 @@
 //! Module under test: `parser/dcs.rs`
 //! Tier: T3 — `ProptestConfig::with_cases(256)`
 
-use super::*;
+#[path = "dcs/tests_support.rs"]
+mod tests_support;
 
-/// Build a minimal `vte::Params` with no numeric parameters.
-fn empty_params() -> vte::Params {
-    vte::Params::default()
-}
-
-/// Simulate a complete DCS sequence: hook → put bytes → unhook.
-fn run_dcs(core: &mut crate::TerminalCore, intermediates: &[u8], c: char, data: &[u8]) {
-    dcs_hook(core, &empty_params(), intermediates, false, c);
-    for &byte in data {
-        dcs_put(core, byte);
-    }
-    dcs_unhook(core);
-}
+pub(crate) use tests_support::{
+    assert_dcs_response_prefixes, assert_no_dcs_responses, assert_no_sixel_notifications,
+    assert_single_dcs_response_contains, assert_single_sixel_notification,
+    assert_sixel_notification_count, dcs_response_texts, run_dcs,
+};
 
 // -------------------------------------------------------------------------
 // Macros for repetitive XTGETTCAP assertion patterns
@@ -29,21 +22,8 @@ fn run_dcs(core: &mut crate::TerminalCore, intermediates: &[u8], c: char, data: 
 /// Usage: `assert_xtgettcap_success!(core, hex_name)`
 macro_rules! assert_xtgettcap_success {
     ($core:expr, $hex:expr) => {{
-        assert_eq!(
-            $core.meta.pending_responses.len(),
-            1,
-            "exactly one response should be queued"
-        );
-        let resp = std::str::from_utf8(&$core.meta.pending_responses[0])
-            .expect("response must be valid UTF-8");
-        assert!(
-            resp.starts_with("\x1bP1+r"),
-            "known capability response must start with ESC P 1 + r, got: {resp:?}"
-        );
-        assert!(
-            resp.contains($hex),
-            "response must echo back the hex-encoded capability name"
-        );
+        let responses = dcs_response_texts(&$core);
+        assert_single_dcs_response_contains(&responses, "\x1bP1+r", &[$hex]);
     }};
 }
 
@@ -53,17 +33,8 @@ macro_rules! assert_xtgettcap_success {
 /// Usage: `assert_xtgettcap_failure!(core)`
 macro_rules! assert_xtgettcap_failure {
     ($core:expr) => {{
-        assert_eq!(
-            $core.meta.pending_responses.len(),
-            1,
-            "exactly one response should be queued for unknown capability"
-        );
-        let resp = std::str::from_utf8(&$core.meta.pending_responses[0])
-            .expect("response must be valid UTF-8");
-        assert!(
-            resp.starts_with("\x1bP0+r"),
-            "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
-        );
+        let responses = dcs_response_texts(&$core);
+        assert_single_dcs_response_contains(&responses, "\x1bP0+r", &[]);
     }};
 }
 
@@ -107,42 +78,21 @@ fn test_dcs_unknown_command_is_noop() {
 
     run_dcs(&mut core, b"", 'z', b"some data");
 
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "unknown DCS command must produce no response"
-    );
+    assert_no_dcs_responses(&core);
 }
 
 /// XTGETTCAP with two semicolon-separated capabilities must produce exactly
-/// two responses — one per capability — each with the correct DCS prefix.
+/// two responses - one per capability - each with the correct DCS prefix.
 ///
 /// Capabilities used: "TN" (hex "544e", known) and "RGB" (hex "524742", known).
 #[test]
 fn test_xtgettcap_multiple_capabilities() {
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // "544e" = "TN", "524742" = "RGB" — both known capabilities.
     run_dcs(&mut core, b"+", 'q', b"544e;524742");
 
-    assert_eq!(
-        core.meta.pending_responses.len(),
-        2,
-        "two capabilities in one XTGETTCAP request must produce two responses"
-    );
-
-    let resp0 = std::str::from_utf8(&core.meta.pending_responses[0])
-        .expect("first response must be valid UTF-8");
-    let resp1 = std::str::from_utf8(&core.meta.pending_responses[1])
-        .expect("second response must be valid UTF-8");
-
-    assert!(
-        resp0.starts_with("\x1bP1+r"),
-        "TN capability response must start with ESC P 1 + r, got: {resp0:?}"
-    );
-    assert!(
-        resp1.starts_with("\x1bP1+r"),
-        "RGB capability response must start with ESC P 1 + r, got: {resp1:?}"
-    );
+    let responses = dcs_response_texts(&core);
+    assert_dcs_response_prefixes(&responses, &["\x1bP1+r", "\x1bP1+r"]);
 }
 
 /// XTGETTCAP with an odd-length hex string (not a valid two-hex-char-per-byte
@@ -154,50 +104,34 @@ fn test_xtgettcap_odd_length_hex_is_skipped() {
     // "54f" is 3 hex characters — odd length, cannot represent whole bytes.
     run_dcs(&mut core, b"+", 'q', b"54f");
 
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "odd-length hex in XTGETTCAP must be silently skipped (no response)"
-    );
+    assert_no_dcs_responses(&core);
 }
 
-/// XTGETTCAP for "Tc" (true-color flag) must produce a success response.
-///
-/// "Tc" hex-encoded is "5463".
+// ── Single-capability XTGETTCAP: truecolor + colors ──────────────────────────
+// `test_xtgettcap!(payload => success hex)`: ESC P 1 + r prefix + hex echo.
+
+/// "Tc" (true-color flag) — hex "5463".
 #[test]
 fn test_xtgettcap_truecolor_flag_response() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    run_dcs(&mut core, b"+", 'q', b"5463");
-
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "Tc capability response must start with ESC P 1 + r, got: {resp:?}"
-    );
-    assert!(
-        resp.contains("5463"),
-        "response must echo back the hex-encoded name"
-    );
+    test_xtgettcap!(b"5463"         => success "5463");
 }
-
-/// XTGETTCAP for "colors" (hex "636f6c6f7273") must produce a success response
-/// with the "256" value encoded.
+/// "colors" (256-colour count) — hex "636f6c6f7273".
 #[test]
 fn test_xtgettcap_colors_capability_response() {
+    test_xtgettcap!(b"636f6c6f7273" => success "636f6c6f7273");
+}
+
+/// XTGETTCAP for "E3" (clear-scrollback) must report the `CSI 3 J` sequence so
+/// tmux knows it can clear the host scrollback.
+/// "E3" hex = "4533"; value "\x1b[3J" hex = "1b5b334a".
+#[test]
+fn test_xtgettcap_e3_clear_scrollback_response() {
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // "colors" hex-encoded: c=63, o=6f, l=6c, o=6f, r=72, s=73 → "636f6c6f7273"
-    run_dcs(&mut core, b"+", 'q', b"636f6c6f7273");
+    run_dcs(&mut core, b"+", 'q', b"4533");
 
-    assert_eq!(core.meta.pending_responses.len(), 1);
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
-    assert!(
-        resp.starts_with("\x1bP1+r"),
-        "colors capability response must start with ESC P 1 + r, got: {resp:?}"
-    );
+    let responses = dcs_response_texts(&core);
+    assert_single_dcs_response_contains(&responses, "\x1bP1+r", &["4533", "1b5b334a"]);
 }
 
 /// XTGETTCAP with three semicolon-separated capabilities (one unknown) must
@@ -206,20 +140,10 @@ fn test_xtgettcap_colors_capability_response() {
 fn test_xtgettcap_mixed_known_unknown_capabilities() {
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // "TN" = "544e" (known), "ZZZZ" = "5a5a5a5a" (unknown), "RGB" = "524742" (known)
     run_dcs(&mut core, b"+", 'q', b"544e;5a5a5a5a;524742");
 
-    assert_eq!(
-        core.meta.pending_responses.len(),
-        3,
-        "three capabilities must yield three responses"
-    );
-    let r0 = std::str::from_utf8(&core.meta.pending_responses[0]).unwrap();
-    let r1 = std::str::from_utf8(&core.meta.pending_responses[1]).unwrap();
-    let r2 = std::str::from_utf8(&core.meta.pending_responses[2]).unwrap();
-    assert!(r0.starts_with("\x1bP1+r"), "TN must succeed, got: {r0:?}");
-    assert!(r1.starts_with("\x1bP0+r"), "ZZZZ must fail, got: {r1:?}");
-    assert!(r2.starts_with("\x1bP1+r"), "RGB must succeed, got: {r2:?}");
+    let responses = dcs_response_texts(&core);
+    assert_dcs_response_prefixes(&responses, &["\x1bP1+r", "\x1bP0+r", "\x1bP1+r"]);
 }
 
 /// XTGETTCAP with multiple unknown capabilities must produce one failure
@@ -231,259 +155,132 @@ fn test_xtgettcap_multiple_unknown_capabilities() {
     // "AA" = "4141", "BB" = "4242" — both unknown
     run_dcs(&mut core, b"+", 'q', b"4141;4242");
 
-    assert_eq!(
-        core.meta.pending_responses.len(),
-        2,
-        "two unknown capabilities must each produce a failure response"
-    );
-    for resp_bytes in &core.meta.pending_responses {
-        let resp = std::str::from_utf8(resp_bytes).expect("response must be valid UTF-8");
-        assert!(
-            resp.starts_with("\x1bP0+r"),
-            "unknown capability response must start with ESC P 0 + r, got: {resp:?}"
-        );
-    }
+    let responses = dcs_response_texts(&core);
+    assert_dcs_response_prefixes(&responses, &["\x1bP0+r", "\x1bP0+r"]);
 }
 
-/// A Sixel DCS sequence with valid pixel data must produce exactly one image
-/// placement notification.
-///
-/// The sixel data "#0~" uses color register 0 (black by default) and encodes
-/// a 1×6 pixel column. Raster attributes "\"1;1;1;6" declare 1×6 pixel size.
+// ── Single-capability XTGETTCAP: terminfo / key capabilities ─────────────────
+
+/// `Ts` (strikethrough set) — hex "5473"; response echoes "5473=".
 #[test]
-fn test_sixel_produces_image_placement() {
-    let mut core = crate::TerminalCore::new(24, 80);
+fn test_xtgettcap_strikethrough_ts() {
+    test_xtgettcap!(b"5473"           => success "5473=");
+}
+/// `Te` (strikethrough reset) — hex "5465".
+#[test]
+fn test_xtgettcap_strikethrough_te() {
+    test_xtgettcap!(b"5465"           => success "5465");
+}
+/// `setrgbf` (truecolor fg terminfo) — hex "73657472676266".
+#[test]
+fn test_xtgettcap_setrgbf() {
+    test_xtgettcap!(b"73657472676266" => success "73657472676266");
+}
+/// `setrgbb` (truecolor bg terminfo) — hex "73657472676262".
+#[test]
+fn test_xtgettcap_setrgbb() {
+    test_xtgettcap!(b"73657472676262" => success "73657472676262");
+}
+/// `kbs` (backspace key) — hex "6B6273".
+#[test]
+fn test_xtgettcap_kbs() {
+    test_xtgettcap!(b"6B6273"         => success "6B6273");
+}
+/// `Sync` (synchronized output) — hex "53796E63".
+#[test]
+fn test_xtgettcap_sync() {
+    test_xtgettcap!(b"53796E63"       => success "53796E63");
+}
 
-    // Minimal sixel: raster attrs, color select, one pixel column.
-    run_dcs(&mut core, b"", 'q', b"\"1;1;1;6#0~");
+// ── DECTABSR ─────────────────────────────────────────────────────────────────
+// `DCS 2 $ t ST` → `DCS 2 ; 0 $ u col1/col2/.../colN ST`
+// Columns are 1-indexed per the VT420 spec; default stops every 8 cols.
 
+/// DECTABSR default tab stops: 80-col terminal has stops at 1-indexed columns
+/// 9, 17, 25, 33, 41, 49, 57, 65, 73 (every 8 cols from col 9).
+#[test]
+fn test_dectabsr_reports_default_tab_stops() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
     assert_eq!(
-        core.kitty.pending_image_notifications.len(),
+        responses.len(),
         1,
-        "one sixel sequence must produce exactly one image notification"
+        "DECTABSR must produce exactly one response"
     );
-    assert_eq!(
-        core.kitty.pending_image_notifications[0].row, 0,
-        "sixel placement must default to cursor row 0"
-    );
-    assert_eq!(
-        core.kitty.pending_image_notifications[0].col, 0,
-        "sixel placement must default to cursor col 0"
-    );
-}
-
-/// Two consecutive Sixel DCS sequences must each produce a separate image
-/// notification, giving two notifications total.
-#[test]
-fn test_two_consecutive_sixels_produce_two_placements() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    run_dcs(&mut core, b"", 'q', b"\"1;1;1;6#0~");
-    run_dcs(&mut core, b"", 'q', b"\"1;1;1;6#0~");
-
-    assert_eq!(
-        core.kitty.pending_image_notifications.len(),
-        2,
-        "two sixel sequences must produce two distinct image notifications"
-    );
-}
-
-/// After a Sixel DCS sequence, the cursor must have advanced past the rendered
-/// image region (row should be greater than the initial row).
-#[test]
-fn test_sixel_advances_cursor_after_render() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    // Cursor starts at (0, 0).
-    assert_eq!(core.screen.cursor().row, 0);
-
-    // Sixel with declared height=6 → cell_h = ceil(6/16) = 1 → new row = 0 + 1 = 1.
-    run_dcs(&mut core, b"", 'q', b"\"1;1;1;6#0~");
-
-    let cursor = core.screen.cursor();
+    let resp = responses[0];
     assert!(
-        cursor.row >= 1,
-        "cursor row must advance past the rendered sixel region, got row {}",
-        cursor.row
+        resp.starts_with("\x1bP2;0$u"),
+        "DECTABSR response must start with DCS 2;0$u, got: {resp:?}"
     );
-    assert_eq!(
-        cursor.col, 0,
-        "sixel rendering must reset cursor column to 0"
+    assert!(
+        resp.ends_with("\x1b\\"),
+        "DECTABSR response must end with ST (ESC \\), got: {resp:?}"
+    );
+    // Default 80-col stops: 9/17/25/33/41/49/57/65/73
+    assert!(
+        resp.contains("9/17/25/33/41/49/57/65/73"),
+        "DECTABSR must report default tab stops, got: {resp:?}"
     );
 }
 
-/// A Sixel DCS sequence with empty data (no pixel commands) must not add any
-/// image notification (`decoder.finish()` returns None for an empty sequence).
+/// DECTABSR with param 0 (not 2) must be silently ignored — no response.
 #[test]
-fn test_sixel_empty_data_no_placement() {
-    let mut core = crate::TerminalCore::new(24, 80);
-
-    // Hook a sixel DCS but provide no pixel data at all.
-    run_dcs(&mut core, b"", 'q', b"");
-
-    assert!(
-        core.kitty.pending_image_notifications.is_empty(),
-        "empty sixel data must produce no image notification"
-    );
+fn test_dectabsr_wrong_param_is_ignored() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP0$t\x1b\\"); // param 0, not 2
+    assert_no_dcs_responses(&term);
 }
 
-// -------------------------------------------------------------------------
-// build_xtgettcap_response unit tests (pure lookup, no TerminalCore needed)
-// -------------------------------------------------------------------------
-
-/// Test `build_xtgettcap_response` for a known capability: assert that the
-/// response starts with the DCS success prefix and (optionally) contains a
-/// specific substring.
-///
-/// Forms:
-/// ```text
-/// test_build_response!(fn_name, name, hex => success)
-/// test_build_response!(fn_name, name, hex => success contains "needle")
-/// test_build_response!(fn_name, name, hex => failure)
-/// ```
-macro_rules! test_build_response {
-    ($fn_name:ident, $name:expr, $hex:expr => success) => {
-        #[test]
-        fn $fn_name() {
-            let resp = build_xtgettcap_response($name, $hex);
-            assert!(
-                resp.starts_with("\x1bP1+r"),
-                "{} must produce a success response, got: {resp:?}",
-                $name
-            );
-        }
-    };
-    ($fn_name:ident, $name:expr, $hex:expr => success contains $needle:expr) => {
-        #[test]
-        fn $fn_name() {
-            let resp = build_xtgettcap_response($name, $hex);
-            assert!(
-                resp.starts_with("\x1bP1+r"),
-                "{} must produce a success response, got: {resp:?}",
-                $name
-            );
-            assert!(
-                resp.contains($needle),
-                "{} response must contain {:?}, got: {resp:?}",
-                $name,
-                $needle
-            );
-        }
-    };
-    ($fn_name:ident, $name:expr, $hex:expr => failure) => {
-        #[test]
-        fn $fn_name() {
-            let resp = build_xtgettcap_response($name, $hex);
-            assert!(
-                resp.starts_with("\x1bP0+r"),
-                "{} must produce a failure response, got: {resp:?}",
-                $name
-            );
-        }
-    };
-}
-
-test_build_response!(
-    build_xtgettcap_response_tn_starts_with_success_prefix,
-    "TN", "544e" => success contains "544e"
-);
-
+/// DECTABSR with no param defaults to 0 and must also be ignored.
 #[test]
-fn build_xtgettcap_response_name_alias_same_as_tn() {
-    let resp_tn = build_xtgettcap_response("TN", "544e");
-    let resp_name = build_xtgettcap_response("name", "6e616d65");
-    // Both must produce success responses (same match arm)
-    assert!(resp_tn.starts_with("\x1bP1+r"));
-    assert!(resp_name.starts_with("\x1bP1+r"));
+fn test_dectabsr_no_param_is_ignored() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1bP$t\x1b\\"); // no param — VTE delivers 0 as default
+    assert_no_dcs_responses(&term);
 }
 
+/// DECTABSR after TBC 3 must respond with default stops (Kuro restores defaults
+/// on TBC 3 rather than clearing to empty — this is a deliberate implementation
+/// choice matching many other terminals).
 #[test]
-fn build_xtgettcap_response_rgb_encodes_888() {
-    let resp = build_xtgettcap_response("RGB", "524742");
+fn test_dectabsr_after_tbc3_reports_defaults() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    term.advance(b"\x1b[3g"); // TBC 3: reset tab stops to defaults
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
+    assert_eq!(responses.len(), 1);
+    let resp = responses[0];
+    // After TBC 3, Kuro restores default stops (every 8 cols from 9).
     assert!(
-        resp.starts_with("\x1bP1+r"),
-        "RGB must succeed, got: {resp:?}"
-    );
-    // "8:8:8" hex-encoded is "383a383a38"
-    let expected_val = {
-        let mut s = String::new();
-        for b in b"8:8:8" {
-            use std::fmt::Write as _;
-            let _ = write!(s, "{b:02x}");
-        }
-        s
-    };
-    assert!(
-        resp.contains(&expected_val),
-        "RGB response must contain hex-encoded '8:8:8', got: {resp:?}"
+        resp.contains("9/17/25/33/41/49/57/65/73"),
+        "DECTABSR after TBC 3 must report default stops, got: {resp:?}"
     );
 }
 
+/// DECTABSR after setting a custom tab stop via HTS (ESC H) must report it.
 #[test]
-fn build_xtgettcap_response_tc_empty_value() {
-    let resp = build_xtgettcap_response("Tc", "5463");
+fn test_dectabsr_custom_stop_via_hts() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Clear all defaults, then set a stop at column 5 (0-indexed) = column 6 (1-indexed).
+    term.advance(b"\x1b[3g"); // TBC 3: clear all
+    term.advance(b"\x1b[1;5H"); // move cursor to row 1, col 5 (1-indexed = col 4 0-indexed)
+    term.advance(b"\x1bH"); // HTS: set tab stop at current column (col 4 0-indexed = col 5 1-indexed)
+    term.advance(b"\x1bP2$t\x1b\\");
+    let responses = dcs_response_texts(&term);
+    assert_eq!(responses.len(), 1);
+    let resp = responses[0];
     assert!(
-        resp.starts_with("\x1bP1+r"),
-        "Tc must succeed, got: {resp:?}"
-    );
-    // The value part is empty: "...5463=\x1b\\"
-    assert!(
-        resp.contains("5463=\x1b\\"),
-        "Tc response value must be empty, got: {resp:?}"
+        resp.contains('5'),
+        "DECTABSR must include the custom tab stop column 5, got: {resp:?}"
     );
 }
 
-test_build_response!(
-    build_xtgettcap_response_colors_encodes_256,
-    "colors", "636f6c6f7273" => success
-);
+#[path = "dcs/sixel.rs"]
+mod sixel;
 
-test_build_response!(
-    build_xtgettcap_response_co_alias_same_branch,
-    "Co", "436f" => success
-);
+#[path = "dcs/xtgettcap.rs"]
+mod xtgettcap;
 
-test_build_response!(
-    build_xtgettcap_response_unknown_starts_with_failure_prefix,
-    "UNKNOWN", "554e4b4e4f574e" => failure
-);
-
-test_build_response!(
-    build_xtgettcap_response_ms_encodes_clipboard_format,
-    "Ms", "4d73" => success contains "4d73"
-);
-
-include!("dcs_xtgettcap_payload.rs");
-
-use proptest::prelude::*;
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
-
-    #[test]
-    // PANIC SAFETY: DCS XTGETTCAP with arbitrary hex-encoded capability name never panics
-    fn prop_xtgettcap_arbitrary_hex_no_panic(
-        cap in proptest::collection::vec(0u8..=255u8, 0..=30)
-    ) {
-        use std::fmt::Write as _;
-        let mut term = crate::TerminalCore::new(24, 80);
-        // Encode as hex string
-        let mut hex = String::with_capacity(cap.len() * 2);
-        for b in &cap { let _ = write!(hex, "{b:02X}"); }
-        let seq = format!("\x1bP+q{hex}\x1b\\");
-        term.advance(seq.as_bytes());
-        prop_assert!(term.screen.cursor().row < 24);
-    }
-
-    #[test]
-    // PANIC SAFETY: DCS with arbitrary payload bytes never panics
-    fn prop_dcs_arbitrary_payload_no_panic(
-        payload in proptest::collection::vec(0x20u8..=0x7eu8, 0..=50)
-    ) {
-        let mut term = crate::TerminalCore::new(24, 80);
-        let p = String::from_utf8(payload).unwrap_or_default();
-        let seq = format!("\x1bP{p}\x1b\\");
-        term.advance(seq.as_bytes());
-        prop_assert!(term.screen.cursor().row < 24);
-    }
-}
+#[path = "dcs/decrqss.rs"]
+mod decrqss;

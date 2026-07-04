@@ -12,27 +12,7 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-poll-modes)
-
-;;; Test helpers
-
-(defmacro kuro-poll-test--with-buffer (&rest body)
-  "Run BODY in a temporary buffer with poll-modes state initialized."
-  `(with-temp-buffer
-     (let ((kuro--initialized t)
-           (kuro--mode-poll-frame-count 0)
-           (kuro--prompt-positions nil)
-           (kuro--application-cursor-keys-mode nil)
-           (kuro--app-keypad-mode nil)
-           (kuro--mouse-mode nil)
-           (kuro--mouse-sgr nil)
-           (kuro--mouse-pixel-mode nil)
-           (kuro--bracketed-paste-mode nil)
-           (kuro--keyboard-flags 0)
-           (kuro-kill-buffer-on-exit nil))
-       ,@body)))
+(require 'kuro-poll-modes-test-support)
 
 ;;; Group A: kuro--apply-terminal-modes
 
@@ -92,33 +72,15 @@
 
 (ert-deftest kuro-poll-modes-check-exit-kills-when-dead ()
   "kuro--check-process-exit calls kuro-kill when process is dead and flag is set."
-  (kuro-poll-test--with-buffer
-    (setq-local kuro-kill-buffer-on-exit t)
-    (let ((kill-called nil))
-      (cl-letf (((symbol-function 'kuro--is-process-alive) (lambda () nil))
-                ((symbol-function 'kuro-kill)              (lambda () (setq kill-called t))))
-        (kuro--check-process-exit)
-        (should kill-called)))))
+  (kuro-poll-test--check-exit nil t should))
 
 (ert-deftest kuro-poll-modes-check-exit-noop-when-alive ()
   "kuro--check-process-exit does not call kuro-kill when process is alive."
-  (kuro-poll-test--with-buffer
-    (setq-local kuro-kill-buffer-on-exit t)
-    (let ((kill-called nil))
-      (cl-letf (((symbol-function 'kuro--is-process-alive) (lambda () t))
-                ((symbol-function 'kuro-kill)              (lambda () (setq kill-called t))))
-        (kuro--check-process-exit)
-        (should-not kill-called)))))
+  (kuro-poll-test--check-exit t t should-not))
 
 (ert-deftest kuro-poll-modes-check-exit-noop-when-flag-nil ()
   "kuro--check-process-exit does not call kuro-kill when kill-on-exit is nil."
-  (kuro-poll-test--with-buffer
-    (setq-local kuro-kill-buffer-on-exit nil)
-    (let ((kill-called nil))
-      (cl-letf (((symbol-function 'kuro--is-process-alive) (lambda () nil))
-                ((symbol-function 'kuro-kill)              (lambda () (setq kill-called t))))
-        (kuro--check-process-exit)
-        (should-not kill-called)))))
+  (kuro-poll-test--check-exit nil nil should-not))
 
 ;;; Group D: kuro--poll-prompt-mark-updates
 
@@ -127,13 +89,13 @@
   (kuro-poll-test--with-buffer
     (let ((update-called-with nil))
       (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 5 0))))
+                 (lambda () '(("prompt-start" 5 0 nil nil nil nil))))
                 ((symbol-function 'kuro--update-prompt-positions)
                  (lambda (marks positions max)
                    (setq update-called-with (list marks positions max))
                    positions)))
         (kuro--poll-prompt-mark-updates)
-        (should (equal (car update-called-with) '(("prompt-start" 5 0))))))))
+        (should (equal (car update-called-with) '(("prompt-start" 5 0 nil nil nil nil))))))))
 
 (ert-deftest kuro-poll-modes-prompt-mark-updates-noop-on-nil ()
   "kuro--poll-prompt-mark-updates does nothing when FFI returns nil."
@@ -153,7 +115,7 @@
     (let ((kill-new-called-with nil)
           (kuro-clipboard-policy 'write-only))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "hello from terminal"))))
+                 (lambda () '((write "hello from terminal" "clipboard"))))
                 ((symbol-function 'kill-new)
                  (lambda (text) (setq kill-new-called-with text)))
                 ((symbol-function 'message) #'ignore))
@@ -166,7 +128,7 @@
     (let ((kill-new-called nil)
           (kuro-clipboard-policy 'deny))
       (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "secret"))))
+                 (lambda () '((write "secret" "clipboard"))))
                 ((symbol-function 'kill-new)
                  (lambda (_text) (setq kill-new-called t))))
         (kuro--handle-clipboard-actions)
@@ -183,54 +145,77 @@
         (kuro--handle-clipboard-actions)
         (should-not kill-new-called)))))
 
+;;; Group E2: kuro--handle-notifications (OSC 9 / OSC 777)
+
+(ert-deftest kuro-poll-modes-notifications-displayed-when-enabled ()
+  "kuro--handle-notifications invokes kuro-notification-function per notification."
+  (kuro-poll-test--with-buffer
+    ;; let* so the notification lambda closes over the just-bound `calls'.
+    (let* ((calls nil)
+           (kuro-notifications-enabled t)
+           (kuro-notification-function
+            (lambda (title body &optional _id _report) (push (cons title body) calls))))
+      (cl-letf (((symbol-function 'kuro--poll-notifications)
+                 (lambda () '(("Build" "done" nil nil) (nil "ping" nil nil)))))
+        (kuro--handle-notifications)
+        (should (equal (nreverse calls)
+                       '(("Build" . "done") (nil . "ping"))))))))
+
+(ert-deftest kuro-poll-modes-notifications-suppressed-when-disabled ()
+  "kuro--handle-notifications drains the queue but displays nothing when disabled."
+  (kuro-poll-test--with-buffer
+    (let ((displayed nil)
+          (drained nil)
+          (kuro-notifications-enabled nil)
+          (kuro-notification-function (lambda (_t _b &optional _id _report) (setq displayed t))))
+      (cl-letf (((symbol-function 'kuro--poll-notifications)
+                 (lambda () (setq drained t) '((nil "ignored" nil nil)))))
+        (kuro--handle-notifications)
+        (should drained)         ; always drains so the queue cannot grow
+        (should-not displayed))))) ; but nothing is shown
+
+(ert-deftest kuro-poll-modes-notifications-empty-noop ()
+  "kuro--handle-notifications is a no-op when nothing is pending."
+  (kuro-poll-test--with-buffer
+    (let ((displayed nil)
+          (kuro-notifications-enabled t)
+          (kuro-notification-function (lambda (_t _b &optional _id _report) (setq displayed t))))
+      (cl-letf (((symbol-function 'kuro--poll-notifications) (lambda () nil)))
+        (kuro--handle-notifications)
+        (should-not displayed)))))
+
+(ert-deftest kuro-poll-modes-default-notify-falls-back-to-message ()
+  "kuro--default-notify uses the echo area (TITLE: BODY) when D-Bus is unavailable."
+  (kuro-poll-test--assert-default-notify "Title" "Body" "Title: Body"))
+
+(ert-deftest kuro-poll-modes-default-notify-no-title-omits-prefix ()
+  "kuro--default-notify shows only BODY when TITLE is nil."
+  (kuro-poll-test--assert-default-notify nil "Body only" "Body only"))
+
+(ert-deftest kuro-poll-modes-default-notify-empty-title-omits-prefix ()
+  "kuro--default-notify shows only BODY when TITLE is an empty string."
+  (kuro-poll-test--assert-default-notify "" "Body only" "Body only"))
+
 ;;; Group F: kuro--poll-terminal-modes (cadence gating)
 
 (ert-deftest kuro-poll-modes-tier1-fires-at-cadence-multiple ()
   "kuro--poll-terminal-modes calls kuro--poll-tier1-modes at cadence multiples."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count (* 2 kuro--mode-poll-cadence))
-    (let ((tier1-called nil))
-      (cl-letf (((symbol-function 'kuro--poll-tier1-modes)
-                 (lambda () (setq tier1-called t)))
-                ((symbol-function 'kuro--poll-osc-events) #'ignore))
-        (kuro--poll-terminal-modes)
-        (should tier1-called)))))
+  (kuro-poll-test--assert-tier1 (* 2 kuro--mode-poll-cadence) should))
 
 (ert-deftest kuro-poll-modes-tier1-silent-on-non-cadence-frame ()
   "kuro--poll-terminal-modes does NOT call tier1 on non-cadence frames."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count (1+ kuro--mode-poll-cadence))
-    (let ((tier1-called nil))
-      (cl-letf (((symbol-function 'kuro--poll-tier1-modes)
-                 (lambda () (setq tier1-called t)))
-                ((symbol-function 'kuro--poll-osc-events) #'ignore))
-        (kuro--poll-terminal-modes)
-        (should-not tier1-called)))))
+  (kuro-poll-test--assert-tier1 (1+ kuro--mode-poll-cadence) should-not))
 
 ;;; Group G: kuro--poll-terminal-modes tier-2 cadence
 
 (ert-deftest kuro-poll-modes-tier2-fires-at-rare-cadence-multiple ()
   "kuro--poll-terminal-modes calls kuro--poll-osc-events at rare cadence multiples."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count (* 3 kuro--osc-rare-poll-cadence))
-    (let ((osc-called nil))
-      (cl-letf (((symbol-function 'kuro--poll-tier1-modes) #'ignore)
-                ((symbol-function 'kuro--poll-osc-events)
-                 (lambda () (setq osc-called t))))
-        (kuro--poll-terminal-modes)
-        (should osc-called)))))
+  (kuro-poll-test--assert-tier2 (* 3 kuro--osc-rare-poll-cadence) should))
 
 (ert-deftest kuro-poll-modes-tier2-silent-on-non-rare-cadence-frame ()
   "kuro--poll-terminal-modes does NOT call kuro--poll-osc-events on non-rare-cadence frames."
-  (kuro-poll-test--with-buffer
-    ;; tier-1 fires (multiple of cadence) but NOT tier-2
-    (setq kuro--mode-poll-frame-count kuro--mode-poll-cadence)
-    (let ((osc-called nil))
-      (cl-letf (((symbol-function 'kuro--poll-tier1-modes) #'ignore)
-                ((symbol-function 'kuro--poll-osc-events)
-                 (lambda () (setq osc-called t))))
-        (kuro--poll-terminal-modes)
-        (should-not osc-called)))))
+  ;; tier-1 fires (multiple of cadence) but NOT tier-2
+  (kuro-poll-test--assert-tier2 kuro--mode-poll-cadence should-not))
 
 (ert-deftest kuro-poll-modes-tier1-and-tier2-both-fire-at-lcm ()
   "Both tier-1 and tier-2 fire when frame count is a multiple of the rare cadence."
@@ -254,10 +239,22 @@
       (cl-letf (((symbol-function 'kuro--apply-palette-updates)
                  (lambda () (setq palette-called t)))
                 ((symbol-function 'kuro--apply-default-colors)
-                 (lambda () (setq default-colors-called t))))
+                 (lambda () (setq default-colors-called t)))
+                ((symbol-function 'kuro--handle-notifications) #'ignore))
         (kuro--poll-osc-events)
         (should palette-called)
         (should default-colors-called)))))
+
+(ert-deftest kuro-poll-modes-poll-osc-events-calls-handle-notifications ()
+  "kuro--poll-osc-events calls kuro--handle-notifications."
+  (kuro-poll-test--with-buffer
+    (let ((notif-called nil))
+      (cl-letf (((symbol-function 'kuro--apply-palette-updates) #'ignore)
+                ((symbol-function 'kuro--apply-default-colors) #'ignore)
+                ((symbol-function 'kuro--handle-notifications)
+                 (lambda () (setq notif-called t))))
+        (kuro--poll-osc-events)
+        (should notif-called)))))
 
 ;;; Group I: kuro--poll-image-events
 
@@ -287,458 +284,150 @@
 
 (ert-deftest kuro-poll-modes-tier1-modes-applies-modes-when-ffi-returns-list ()
   "kuro--poll-tier1-modes applies terminal modes when kuro--get-terminal-modes returns a list."
-  (kuro-poll-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--get-terminal-modes)
-               (lambda () '(t nil 1003 t nil t 0)))
-              ((symbol-function 'kuro--poll-cwd) #'ignore)
-              ((symbol-function 'kuro--handle-clipboard-actions) #'ignore)
-              ((symbol-function 'kuro--poll-prompt-mark-updates) #'ignore)
-              ((symbol-function 'kuro--poll-image-events) #'ignore)
-              ((symbol-function 'kuro--check-process-exit) #'ignore))
-      (kuro--poll-tier1-modes)
-      (should (eq kuro--application-cursor-keys-mode t))
-      (should (= kuro--mouse-mode 1003)))))
+  (kuro-poll-test--with-tier1-stubs (lambda () '(t nil 1003 t nil t 0))
+    (kuro--poll-tier1-modes)
+    (should (eq kuro--application-cursor-keys-mode t))
+    (should (= kuro--mouse-mode 1003))))
 
 (ert-deftest kuro-poll-modes-tier1-modes-skips-apply-when-ffi-returns-nil ()
   "kuro--poll-tier1-modes skips kuro--apply-terminal-modes when FFI returns nil."
-  (kuro-poll-test--with-buffer
+  (kuro-poll-test--with-tier1-stubs (lambda () nil)
     (setq kuro--application-cursor-keys-mode 'original)
-    (cl-letf (((symbol-function 'kuro--get-terminal-modes) (lambda () nil))
-              ((symbol-function 'kuro--poll-cwd) #'ignore)
-              ((symbol-function 'kuro--handle-clipboard-actions) #'ignore)
-              ((symbol-function 'kuro--poll-prompt-mark-updates) #'ignore)
-              ((symbol-function 'kuro--poll-image-events) #'ignore)
-              ((symbol-function 'kuro--check-process-exit) #'ignore))
-      (kuro--poll-tier1-modes)
-      ;; Flag must be unchanged because apply-terminal-modes was not called.
-      (should (eq kuro--application-cursor-keys-mode 'original)))))
+    (kuro--poll-tier1-modes)
+    ;; Flag must be unchanged because apply-terminal-modes was not called.
+    (should (eq kuro--application-cursor-keys-mode 'original))))
 
 (ert-deftest kuro-poll-modes-tier1-modes-calls-all-tier1-fns ()
   "kuro--poll-tier1-modes invokes every function in kuro--tier1-poll-fns."
   (kuro-poll-test--with-buffer
     (let ((calls nil))
-      (cl-letf (((symbol-function 'kuro--get-terminal-modes) (lambda () nil))
+      (cl-letf (((symbol-function 'kuro--poll-terminal-mode-state)
+                 (lambda () (push 'modes calls)))
                 ((symbol-function 'kuro--poll-cwd)
                  (lambda () (push 'cwd calls)))
                 ((symbol-function 'kuro--handle-clipboard-actions)
                  (lambda () (push 'clipboard calls)))
                 ((symbol-function 'kuro--poll-prompt-mark-updates)
                  (lambda () (push 'prompts calls)))
+                ((symbol-function 'kuro--poll-eval-command-updates)
+                 (lambda () (push 'eval calls)))
                 ((symbol-function 'kuro--poll-image-events)
                  (lambda () (push 'images calls)))
+                ((symbol-function 'kuro--apply-hyperlink-ranges)
+                 (lambda () (push 'hyperlinks calls)))
+                ((symbol-function 'kuro--poll-progress)
+                 (lambda () (push 'progress calls)))
+                ((symbol-function 'kuro--poll-user-vars)
+                 (lambda () (push 'user-vars calls)))
                 ((symbol-function 'kuro--check-process-exit)
                  (lambda () (push 'exit calls))))
         (kuro--poll-tier1-modes)
+        (should (memq 'modes calls))
         (should (memq 'cwd calls))
+        (should (memq 'progress calls))
+        (should (memq 'user-vars calls))
         (should (memq 'clipboard calls))
         (should (memq 'prompts calls))
+        (should (memq 'eval calls))
         (should (memq 'images calls))
+        (should (memq 'hyperlinks calls))
         (should (memq 'exit calls))))))
 
-;;; Group K: kuro--handle-clipboard-actions — allow and prompt policies
+;;; Group: OSC 9;4 progress (ConEmu) mode-line indicator
 
-(ert-deftest kuro-poll-modes-clipboard-allow-policy-writes-kill-ring ()
-  "kuro--handle-clipboard-actions calls kill-new for write actions under allow policy."
+(ert-deftest kuro-poll-modes-progress-state-glyph-known ()
+  "kuro--progress-state-glyph maps known states to their glyph strings."
+  (let ((kuro-progress-state-glyphs '((1 . "A") (2 . "B"))))
+    (should (equal (kuro--progress-state-glyph 1) "A"))
+    (should (equal (kuro--progress-state-glyph 2) "B"))))
+
+(ert-deftest kuro-poll-modes-progress-state-glyph-unknown ()
+  "kuro--progress-state-glyph returns empty string for unknown states."
+  (let ((kuro-progress-state-glyphs '((1 . "A"))))
+    (should (equal (kuro--progress-state-glyph 9) ""))))
+
+(ert-deftest kuro-poll-modes-progress-mode-line-string-formats ()
+  "kuro--progress-mode-line-string formats glyph + percent via kuro-progress-format."
+  (let ((kuro-progress-format " %s%d%% ")
+        (kuro-progress-state-glyphs '((1 . "X"))))
+    (should (equal (kuro--progress-mode-line-string 1 42) " X42% "))))
+
+(ert-deftest kuro-poll-modes-progress-mode-line-string-nil-format ()
+  "kuro--progress-mode-line-string returns nil when kuro-progress-format is nil."
+  (let ((kuro-progress-format nil))
+    (should-not (kuro--progress-mode-line-string 1 42))))
+
+(ert-deftest kuro-poll-modes-apply-progress-stores-active ()
+  "kuro--apply-progress stores a non-zero-state progress cons when enabled."
   (kuro-poll-test--with-buffer
-    (let ((kill-new-called-with nil)
-          (kuro-clipboard-policy 'allow))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "allowed text"))))
-                ((symbol-function 'kill-new)
-                 (lambda (text) (setq kill-new-called-with text)))
-                ((symbol-function 'message) #'ignore))
-        (kuro--handle-clipboard-actions)
-        (should (equal kill-new-called-with "allowed text"))))))
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(1 . 50)))
+      (should (equal kuro--progress-state '(1 . 50))))))
 
-(ert-deftest kuro-poll-modes-clipboard-prompt-write-accepted ()
-  "kuro--handle-clipboard-actions calls kill-new under prompt policy when user accepts."
+(ert-deftest kuro-poll-modes-apply-progress-state-zero-clears ()
+  "kuro--apply-progress clears the indicator on state 0 (done)."
   (kuro-poll-test--with-buffer
-    (let ((kill-new-called nil)
-          (kuro-clipboard-policy 'prompt))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "prompted text"))))
-                ((symbol-function 'yes-or-no-p) (lambda (_prompt) t))
-                ((symbol-function 'kill-new)
-                 (lambda (_text) (setq kill-new-called t))))
-        (kuro--handle-clipboard-actions)
-        (should kill-new-called)))))
+    (setq kuro--progress-state '(1 . 50))
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(0 . 0)))
+      (should-not kuro--progress-state))))
 
-(ert-deftest kuro-poll-modes-clipboard-prompt-write-rejected ()
-  "kuro--handle-clipboard-actions does NOT call kill-new under prompt policy when user declines."
+(ert-deftest kuro-poll-modes-apply-progress-disabled-clears ()
+  "kuro--apply-progress clears the indicator when kuro-progress-enabled is nil."
   (kuro-poll-test--with-buffer
-    (let ((kill-new-called nil)
-          (kuro-clipboard-policy 'prompt))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "rejected text"))))
-                ((symbol-function 'yes-or-no-p) (lambda (_prompt) nil))
-                ((symbol-function 'kill-new)
-                 (lambda (_text) (setq kill-new-called t))))
-        (kuro--handle-clipboard-actions)
-        (should-not kill-new-called)))))
+    (let ((kuro-progress-enabled nil))
+      (cl-letf (((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--apply-progress '(2 . 75)))
+      (should-not kuro--progress-state))))
 
-(ert-deftest kuro-poll-modes-clipboard-allow-policy-sends-query-response ()
-  "kuro--handle-clipboard-actions sends OSC 52 response for query under allow policy."
+(ert-deftest kuro-poll-modes-poll-progress-applies-ffi ()
+  "kuro--poll-progress routes a non-nil FFI result into kuro--progress-state."
   (kuro-poll-test--with-buffer
-    (let ((sent-key nil)
-          (kuro-clipboard-policy 'allow))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((query))))
-                ((symbol-function 'current-kill) (lambda (_n _do-not-move) "clip text"))
-                ((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq sent-key s))))
-        (kuro--handle-clipboard-actions)
-        (should (stringp sent-key))
-        (should (string-prefix-p "\e]52;c;" sent-key))))))
+    (let ((kuro-progress-enabled t))
+      (cl-letf (((symbol-function 'kuro--get-progress) (lambda () '(2 . 80)))
+                ((symbol-function 'force-mode-line-update) #'ignore))
+        (kuro--poll-progress)
+        (should (equal kuro--progress-state '(2 . 80)))))))
 
-(ert-deftest kuro-poll-modes-clipboard-query-deny-policy-does-not-send ()
-  "kuro--handle-clipboard-actions does NOT send query response under deny policy."
+(ert-deftest kuro-poll-modes-poll-progress-nil-leaves-state ()
+  "kuro--poll-progress leaves the cached indicator untouched on nil FFI result."
   (kuro-poll-test--with-buffer
-    (let ((sent-key nil)
-          (kuro-clipboard-policy 'deny))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((query))))
-                ((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq sent-key s))))
-        (kuro--handle-clipboard-actions)
-        (should-not sent-key)))))
+    (setq kuro--progress-state '(1 . 10))
+    (cl-letf (((symbol-function 'kuro--get-progress) (lambda () nil))
+              ((symbol-function 'force-mode-line-update) #'ignore))
+      (kuro--poll-progress)
+      (should (equal kuro--progress-state '(1 . 10))))))
 
-;;; Group L: kuro--poll-prompt-mark-updates — result stored
-
-(ert-deftest kuro-poll-modes-prompt-mark-updates-stores-result ()
-  "kuro--poll-prompt-mark-updates stores the return value from kuro--update-prompt-positions."
+(ert-deftest kuro-poll-modes-progress-mode-line-active-and-inactive ()
+  "kuro--progress-mode-line yields a string when active, nil when inactive."
   (kuro-poll-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-               (lambda () '(("prompt-start" 1 0))))
-              ((symbol-function 'kuro--update-prompt-positions)
-               (lambda (_marks _positions _max) '(42 . stored))))
-      (kuro--poll-prompt-mark-updates)
-      (should (equal kuro--prompt-positions '(42 . stored))))))
+    (let ((kuro-progress-format " %s%d%% ")
+          (kuro-progress-state-glyphs '((1 . "X"))))
+      (setq kuro--progress-state '(1 . 33))
+      (should (equal (kuro--progress-mode-line) " X33% "))
+      (setq kuro--progress-state nil)
+      (should-not (kuro--progress-mode-line)))))
 
-(ert-deftest kuro-poll-modes-prompt-mark-updates-passes-max-count ()
-  "kuro--poll-prompt-mark-updates passes kuro--max-prompt-positions to update fn."
+;;; Group: OSC 1337 SetUserVar user variables
+
+(ert-deftest kuro-poll-modes-poll-user-vars-stores-alist ()
+  "kuro--poll-user-vars stores the FFI alist into kuro--user-vars."
   (kuro-poll-test--with-buffer
-    (let ((received-max nil))
-      (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 1 0))))
-                ((symbol-function 'kuro--update-prompt-positions)
-                 (lambda (_marks _positions max)
-                   (setq received-max max)
-                   nil)))
-        (kuro--poll-prompt-mark-updates)
-        (should (= received-max kuro--max-prompt-positions))))))
+    (cl-letf (((symbol-function 'kuro--poll-user-vars-raw)
+               (lambda () '(("FOO" . "bar") ("BAZ" . "qux")))))
+      (kuro--poll-user-vars)
+      (should (equal kuro--user-vars '(("FOO" . "bar") ("BAZ" . "qux"))))
+      (should (equal (cdr (assoc "FOO" kuro--user-vars)) "bar")))))
 
-;;; Group M: kuro--poll-cwd — already has nil/empty; add trailing slash
-
-(ert-deftest kuro-poll-modes-poll-cwd-adds-trailing-slash ()
-  "kuro--poll-cwd ensures default-directory has a trailing slash via file-name-as-directory."
+(ert-deftest kuro-poll-modes-poll-user-vars-nil-leaves-cache ()
+  "kuro--poll-user-vars leaves the cached alist untouched on nil FFI result."
   (kuro-poll-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--get-cwd) (lambda () "/home/user/project")))
-      (kuro--poll-cwd)
-      (should (string-suffix-p "/" default-directory)))))
-
-(ert-deftest kuro-poll-modes-poll-cwd-idempotent-with-trailing-slash ()
-  "kuro--poll-cwd works correctly when CWD already has a trailing slash."
-  (kuro-poll-test--with-buffer
-    (cl-letf (((symbol-function 'kuro--get-cwd) (lambda () "/tmp/")))
-      (kuro--poll-cwd)
-      (should (equal default-directory "/tmp/")))))
-
-;; ------------------------------------------------------------
-;; Group N — kuro--send-osc52-clipboard-response
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-osc52-response-format ()
-  "kuro--send-osc52-clipboard-response sends correctly formatted OSC 52 sequence."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill) (lambda (_n _no-move) "hello"))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        (should (string-prefix-p "\e]52;c;" sent))
-        (should (string-suffix-p "\a" sent))))))
-
-(ert-deftest kuro-poll-modes-osc52-response-contains-base64 ()
-  "kuro--send-osc52-clipboard-response encodes kill-ring text as base64."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill) (lambda (_n _no-move) "abc"))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        ;; base64 of "abc" is "YWJj"
-        (should (string-match-p "YWJj" sent))))))
-
-(ert-deftest kuro-poll-modes-osc52-response-empty-kill-ring-sends-empty ()
-  "kuro--send-osc52-clipboard-response sends empty base64 when kill-ring errors."
-  (kuro-poll-test--with-buffer
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'current-kill)
-                 (lambda (_n _no-move) (error "kill-ring is empty")))
-                ((symbol-function 'kuro--send-key) (lambda (s) (setq sent s))))
-        (kuro--send-osc52-clipboard-response)
-        ;; base64 of "" is ""
-        (should (string-match-p "\e]52;c;\a" sent))))))
-
-;; ------------------------------------------------------------
-;; Group O — kuro--handle-clipboard-actions multiple/compound scenarios
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-clipboard-multiple-write-actions ()
-  "kuro--handle-clipboard-actions processes all write actions in the list."
-  (kuro-poll-test--with-buffer
-    (let ((written nil)
-          (kuro-clipboard-policy 'allow))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "first") (write . "second"))))
-                ((symbol-function 'kill-new)
-                 (lambda (text) (push text written)))
-                ((symbol-function 'message) #'ignore))
-        (kuro--handle-clipboard-actions)
-        (should (member "first" written))
-        (should (member "second" written))))))
-
-(ert-deftest kuro-poll-modes-clipboard-prompt-query-accepted ()
-  "kuro--handle-clipboard-actions sends OSC 52 response for query under prompt policy when user accepts."
-  (kuro-poll-test--with-buffer
-    (let ((sent-key nil)
-          (kuro-clipboard-policy 'prompt))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((query))))
-                ((symbol-function 'yes-or-no-p) (lambda (_prompt) t))
-                ((symbol-function 'current-kill) (lambda (_n _no-move) "clip"))
-                ((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq sent-key s))))
-        (kuro--handle-clipboard-actions)
-        (should (stringp sent-key))
-        (should (string-prefix-p "\e]52;c;" sent-key))))))
-
-(ert-deftest kuro-poll-modes-clipboard-prompt-query-rejected ()
-  "kuro--handle-clipboard-actions does NOT send OSC 52 under prompt policy when user declines."
-  (kuro-poll-test--with-buffer
-    (let ((sent-key nil)
-          (kuro-clipboard-policy 'prompt))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((query))))
-                ((symbol-function 'yes-or-no-p) (lambda (_prompt) nil))
-                ((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq sent-key s))))
-        (kuro--handle-clipboard-actions)
-        (should-not sent-key)))))
-
-(ert-deftest kuro-poll-modes-clipboard-write-then-query-both-processed ()
-  "kuro--handle-clipboard-actions handles a write action followed by a query action."
-  (kuro-poll-test--with-buffer
-    (let ((kill-ring-text nil)
-          (sent-key nil)
-          (kuro-clipboard-policy 'allow))
-      (cl-letf (((symbol-function 'kuro--poll-clipboard-actions)
-                 (lambda () '((write . "written") (query))))
-                ((symbol-function 'kill-new)
-                 (lambda (text) (setq kill-ring-text text)))
-                ((symbol-function 'message) #'ignore)
-                ((symbol-function 'current-kill)
-                 (lambda (_n _no-move) "previous"))
-                ((symbol-function 'kuro--send-key)
-                 (lambda (s) (setq sent-key s))))
-        (kuro--handle-clipboard-actions)
-        (should (equal kill-ring-text "written"))
-        (should (stringp sent-key))))))
-
-;; ------------------------------------------------------------
-;; Group P — kuro--poll-tier1-modes detailed behavior
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-tier1-modes-tier1-fns-run-even-when-modes-nil ()
-  "kuro--poll-tier1-modes always runs tier1 fns even when kuro--get-terminal-modes returns nil."
-  (kuro-poll-test--with-buffer
-    (let ((cwd-called nil))
-      (cl-letf (((symbol-function 'kuro--get-terminal-modes) (lambda () nil))
-                ((symbol-function 'kuro--poll-cwd)
-                 (lambda () (setq cwd-called t)))
-                ((symbol-function 'kuro--handle-clipboard-actions) #'ignore)
-                ((symbol-function 'kuro--poll-prompt-mark-updates) #'ignore)
-                ((symbol-function 'kuro--poll-image-events) #'ignore)
-                ((symbol-function 'kuro--check-process-exit) #'ignore))
-        (kuro--poll-tier1-modes)
-        (should cwd-called)))))
-
-(ert-deftest kuro-poll-modes-tier1-modes-fns-called-in-order ()
-  "kuro--poll-tier1-modes calls tier1 functions in the order listed in kuro--tier1-poll-fns."
-  (kuro-poll-test--with-buffer
-    (let ((call-order nil))
-      (cl-letf (((symbol-function 'kuro--get-terminal-modes) (lambda () nil))
-                ((symbol-function 'kuro--poll-cwd)
-                 (lambda () (push 'cwd call-order)))
-                ((symbol-function 'kuro--handle-clipboard-actions)
-                 (lambda () (push 'clipboard call-order)))
-                ((symbol-function 'kuro--poll-prompt-mark-updates)
-                 (lambda () (push 'prompts call-order)))
-                ((symbol-function 'kuro--poll-image-events)
-                 (lambda () (push 'images call-order)))
-                ((symbol-function 'kuro--check-process-exit)
-                 (lambda () (push 'exit call-order))))
-        (kuro--poll-tier1-modes)
-        (should (equal (nreverse call-order)
-                       '(cwd clipboard prompts images exit)))))))
-
-(ert-deftest kuro-poll-modes-tier1-modes-apply-modes-called-with-ffi-result ()
-  "kuro--poll-tier1-modes passes the FFI result to kuro--apply-terminal-modes."
-  (kuro-poll-test--with-buffer
-    (let ((applied nil))
-      (cl-letf (((symbol-function 'kuro--get-terminal-modes)
-                 (lambda () '(nil t 0 nil nil nil 4)))
-                ((symbol-function 'kuro--apply-terminal-modes)
-                 (lambda (modes) (setq applied modes)))
-                ((symbol-function 'kuro--poll-cwd) #'ignore)
-                ((symbol-function 'kuro--handle-clipboard-actions) #'ignore)
-                ((symbol-function 'kuro--poll-prompt-mark-updates) #'ignore)
-                ((symbol-function 'kuro--poll-image-events) #'ignore)
-                ((symbol-function 'kuro--check-process-exit) #'ignore))
-        (kuro--poll-tier1-modes)
-        (should (equal applied '(nil t 0 nil nil nil 4)))))))
-
-;; ------------------------------------------------------------
-;; Group Q — kuro--apply-terminal-modes field isolation
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-apply-modes-acm-only-changed ()
-  "kuro--apply-terminal-modes sets only application-cursor-keys-mode when others were nil."
-  (kuro-poll-test--with-buffer
-    (kuro--apply-terminal-modes '(t nil 0 nil nil nil 0))
-    (should (eq kuro--application-cursor-keys-mode t))
-    (should-not kuro--app-keypad-mode)
-    (should (= kuro--mouse-mode 0))))
-
-(ert-deftest kuro-poll-modes-apply-modes-akm-only-changed ()
-  "kuro--apply-terminal-modes sets only app-keypad-mode when others are nil/0."
-  (kuro-poll-test--with-buffer
-    (kuro--apply-terminal-modes '(nil t 0 nil nil nil 0))
-    (should-not kuro--application-cursor-keys-mode)
-    (should (eq kuro--app-keypad-mode t))
-    (should (= kuro--mouse-mode 0))))
-
-(ert-deftest kuro-poll-modes-apply-modes-mouse-mode-set ()
-  "kuro--apply-terminal-modes correctly sets mouse-mode to 1002."
-  (kuro-poll-test--with-buffer
-    (kuro--apply-terminal-modes '(nil nil 1002 nil nil nil 0))
-    (should (= kuro--mouse-mode 1002))))
-
-(ert-deftest kuro-poll-modes-apply-modes-bracketed-paste-set ()
-  "kuro--apply-terminal-modes correctly sets bracketed-paste-mode."
-  (kuro-poll-test--with-buffer
-    (kuro--apply-terminal-modes '(nil nil 0 nil nil t 0))
-    (should (eq kuro--bracketed-paste-mode t))))
-
-(ert-deftest kuro-poll-modes-apply-modes-keyboard-flags-set ()
-  "kuro--apply-terminal-modes correctly sets keyboard-flags to a non-zero value."
-  (kuro-poll-test--with-buffer
-    (kuro--apply-terminal-modes '(nil nil 0 nil nil nil 31))
-    (should (= kuro--keyboard-flags 31))))
-
-;; ------------------------------------------------------------
-;; Group R — kuro--poll-image-events single notification and order
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-poll-image-events-single-notification ()
-  "kuro--poll-image-events handles exactly one notification correctly."
-  (kuro-poll-test--with-buffer
-    (let ((rendered nil))
-      (cl-letf (((symbol-function 'kuro--poll-image-notifications)
-                 (lambda () '(notif-only)))
-                ((symbol-function 'kuro--render-image-notification)
-                 (lambda (n) (push n rendered))))
-        (kuro--poll-image-events)
-        (should (equal rendered '(notif-only)))))))
-
-(ert-deftest kuro-poll-modes-poll-image-events-preserves-order ()
-  "kuro--poll-image-events renders notifications in the order returned by FFI."
-  (kuro-poll-test--with-buffer
-    (let ((rendered nil))
-      (cl-letf (((symbol-function 'kuro--poll-image-notifications)
-                 (lambda () '(first second third)))
-                ((symbol-function 'kuro--render-image-notification)
-                 (lambda (n) (push n rendered))))
-        (kuro--poll-image-events)
-        (should (equal (nreverse rendered) '(first second third)))))))
-
-;; ------------------------------------------------------------
-;; Group S — kuro--poll-prompt-mark-updates positions passed through
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-prompt-mark-updates-passes-existing-positions ()
-  "kuro--poll-prompt-mark-updates passes existing kuro--prompt-positions to update fn."
-  (kuro-poll-test--with-buffer
-    (setq kuro--prompt-positions '(10 20 30))
-    (let ((received-positions nil))
-      (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-                 (lambda () '(("prompt-start" 5 0))))
-                ((symbol-function 'kuro--update-prompt-positions)
-                 (lambda (_marks positions _max)
-                   (setq received-positions positions)
-                   positions)))
-        (kuro--poll-prompt-mark-updates)
-        (should (equal received-positions '(10 20 30)))))))
-
-(ert-deftest kuro-poll-modes-prompt-mark-updates-result-replaces-positions ()
-  "kuro--poll-prompt-mark-updates replaces kuro--prompt-positions with the new result."
-  (kuro-poll-test--with-buffer
-    (setq kuro--prompt-positions '(1 2 3))
-    (cl-letf (((symbol-function 'kuro--poll-prompt-marks)
-               (lambda () '(("prompt-start" 99 0))))
-              ((symbol-function 'kuro--update-prompt-positions)
-               (lambda (_marks _positions _max) '(99))))
-      (kuro--poll-prompt-mark-updates)
-      (should (equal kuro--prompt-positions '(99))))))
-
-;; ------------------------------------------------------------
-;; Group T — kuro--gated-poll macro
-;; ------------------------------------------------------------
-
-(ert-deftest kuro-poll-modes-gated-poll-fires-at-multiple ()
-  "kuro--gated-poll invokes FN when frame count is an exact multiple of cadence."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 20)
-    (let ((called nil))
-      (kuro--gated-poll 10 (lambda () (setq called t)))
-      (should called))))
-
-(ert-deftest kuro-poll-modes-gated-poll-silent-on-non-multiple ()
-  "kuro--gated-poll does NOT invoke FN on non-multiple frame counts."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 11)
-    (let ((called nil))
-      (kuro--gated-poll 10 (lambda () (setq called t)))
-      (should-not called))))
-
-(ert-deftest kuro-poll-modes-gated-poll-fires-at-zero ()
-  "kuro--gated-poll fires when frame count is zero (initial state)."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 0)
-    (let ((called nil))
-      (kuro--gated-poll 10 (lambda () (setq called t)))
-      (should called))))
-
-(ert-deftest kuro-poll-modes-gated-poll-passes-result-through ()
-  "kuro--gated-poll returns the return value of FN when invoked."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 30)
-    (should (eq (kuro--gated-poll 10 (lambda () 'result)) 'result))))
-
-(ert-deftest kuro-poll-modes-gated-poll-returns-nil-when-skipped ()
-  "kuro--gated-poll returns nil when the cadence gate is not satisfied."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 11)
-    (should (null (kuro--gated-poll 10 (lambda () 'result))))))
-
-(ert-deftest kuro-poll-modes-gated-poll-different-cadences-independent ()
-  "kuro--gated-poll with cadence 10 and 30 behave independently at frame 10."
-  (kuro-poll-test--with-buffer
-    (setq kuro--mode-poll-frame-count 10)
-    (let ((tier1-called nil) (tier2-called nil))
-      (kuro--gated-poll 10  (lambda () (setq tier1-called t)))
-      (kuro--gated-poll 30  (lambda () (setq tier2-called t)))
-      (should tier1-called)
-      (should-not tier2-called))))
+    (setq kuro--user-vars '(("OLD" . "v")))
+    (cl-letf (((symbol-function 'kuro--poll-user-vars-raw) (lambda () nil)))
+      (kuro--poll-user-vars)
+      (should (equal kuro--user-vars '(("OLD" . "v")))))))
 
 (provide 'kuro-poll-modes-test)
-
 ;;; kuro-poll-modes-test.el ends here

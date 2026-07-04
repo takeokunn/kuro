@@ -1,0 +1,312 @@
+;;; kuro-color-scheme-test.el --- Unit tests for kuro-color-scheme.el  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 takeokunn
+
+;;; Commentary:
+
+;; ERT tests for kuro-color-scheme.el — Emacs theme bridge for DEC mode 2031.
+;; Tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
+;;
+;; Groups:
+;;   Group 1 (L): kuro--color-scheme-luminance — Rec.709 conversion
+;;   Group 2 (D): kuro--color-scheme-detect-dark-p — frame-background-mode + bg luminance
+;;   Group 3 (G): kuro--color-scheme-install-hook — Emacs 29.1+ branch + fallback warning
+;;   Group 4 (B): kuro--color-scheme-schedule — debounce coalescing
+;;   Group 5 (R): kuro-color-scheme-refresh — push to live sessions / no-op safety
+
+;;; Code:
+
+(require 'ert)
+(require 'kuro-color-scheme-test-support)
+
+;;; ── Group 1 (L): kuro--color-scheme-luminance ───────────────────────────────
+
+(ert-deftest kuro-color-scheme-luminance-black-is-zero ()
+  "L1: Pure black has luminance ≈ 0."
+  (let ((y (kuro--color-scheme-luminance "#000000")))
+    (should (numberp y))
+    (should (< y 0.001))))
+
+(ert-deftest kuro-color-scheme-luminance-white-is-one ()
+  "L2: Pure white has luminance ≈ 1."
+  (let ((y (kuro--color-scheme-luminance "#ffffff")))
+    (should (numberp y))
+    (should (> y 0.999))))
+
+(ert-deftest kuro-color-scheme-luminance-invalid-returns-nil ()
+  "L3: Unknown color name returns nil rather than signalling."
+  (should (null (kuro--color-scheme-luminance "this-is-not-a-color-xyz"))))
+
+;;; ── Group 2 (D): kuro--color-scheme-detect-dark-p ───────────────────────────
+
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-from-frame-mode-dark
+ "D1: frame-background-mode=dark forces t regardless of bg."
+ 'dark "#ffffff" t)
+
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-from-frame-mode-light
+ "D2: frame-background-mode=light forces nil regardless of bg."
+ 'light "#000000" nil)
+
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-unspecified-bg-falls-back
+ "D3: nil mode + unspecified bg → conservative t."
+ nil 'unspecified t)
+
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-light-bg-via-luminance
+ "D4: nil mode + #f0f0f0 background (Y ≈ 0.94) → nil (light)."
+ nil "#f0f0f0" nil)
+
+(kuro-color-scheme-test--deftest-detect-dark
+ kuro-color-scheme-detect-dark-dark-bg-via-luminance
+ "D5: nil mode + #1e1e1e background (Y ≈ 0.013) → t (dark)."
+ nil "#1e1e1e" t)
+
+;;; ── Group 3 (G): kuro--color-scheme-install-hook ────────────────────────────
+
+(ert-deftest kuro-color-scheme-install-hook-modern-emacs-adds-hook ()
+  "G1: On Emacs with `enable-theme-functions' bound, install adds the hook."
+  (let ((enable-theme-functions nil))
+    (kuro--color-scheme-install-hook)
+    (unwind-protect
+        (should (memq #'kuro--color-scheme-schedule enable-theme-functions))
+      (remove-hook 'enable-theme-functions #'kuro--color-scheme-schedule))))
+
+(ert-deftest kuro-color-scheme-install-hook-old-emacs-warns ()
+  "G2: On simulated old Emacs (variable unbound), install emits a warning."
+  (cl-letf (((symbol-function 'boundp)
+             (lambda (sym) (not (eq sym 'enable-theme-functions)))))
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (&rest _args) (setq warned t))))
+        (kuro--color-scheme-install-hook)
+        (should warned)))))
+
+;;; ── Group 4 (B): debounce coalescing ────────────────────────────────────────
+
+(ert-deftest kuro-color-scheme-schedule-debounces-bursts ()
+  "B1: Two back-to-back schedule calls fire apply-now exactly once."
+  (let ((apply-count 0)
+        (timers      nil)
+        (kuro--color-scheme-debounce-timer nil))
+    (cl-letf* (((symbol-function 'kuro--color-scheme-apply-now)
+                (lambda () (cl-incf apply-count)))
+               ((symbol-function 'run-with-idle-timer)
+                (lambda (_secs _repeat fn &rest _args)
+                  (let ((tok (cons 'fake-timer fn)))
+                    (push tok timers)
+                    tok)))
+               ((symbol-function 'cancel-timer)
+                (lambda (tok) (setq timers (delq tok timers)))))
+      (kuro--color-scheme-schedule)
+      (kuro--color-scheme-schedule)
+      ;; Only one timer survives the second schedule (first was cancelled).
+      (should (= 1 (length timers)))
+      ;; Fire the surviving timer manually.
+      (funcall (cdr (car timers)))
+      (should (= 1 apply-count)))))
+
+;;; ── Group 5 (R): kuro-color-scheme-refresh ──────────────────────────────────
+
+(ert-deftest kuro-color-scheme-refresh-pushes-to-live-session ()
+  "R1: refresh with one stubbed live session calls the FFI once with (id, dark)."
+  (let ((calls nil))
+    (kuro-color-scheme-test--with-session-buffer 42
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (cons id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro-color-scheme-refresh))))
+    (should (= 1 (length calls)))
+    (should (equal (car calls) '(42 . t)))))
+
+(ert-deftest kuro-color-scheme-refresh-no-sessions-is-noop ()
+  "R2: refresh with no live sessions is a no-op (does not error)."
+  (let ((calls 0))
+    (kuro-color-scheme-test--with-fake-buffers nil
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (&rest _) (cl-incf calls))
+        (should-not (kuro-color-scheme-refresh))))
+    (should (zerop calls))))
+
+(ert-deftest kuro-color-scheme-refresh-light-theme-passes-nil ()
+  "R3: refresh with a light theme propagates is-dark=nil to Rust."
+  (let ((calls nil))
+    (kuro-color-scheme-test--with-session-buffer 7
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (cons id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark nil
+          (kuro-color-scheme-refresh))))
+    (should (equal (car calls) '(7 . nil)))))
+
+(ert-deftest kuro-color-scheme-refresh-skips-buffers-without-session-id ()
+  "R4: buffers with nil/zero kuro--session-id are skipped silently."
+  (let ((calls 0))
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        ;; No setq-local of kuro--session-id → unbound in this buffer.
+        (kuro-color-scheme-test--with-fake-buffers (list buf)
+          (kuro-color-scheme-test--with-stubbed-set
+              (lambda (&rest _) (cl-incf calls))
+            (kuro-color-scheme-refresh)))))
+    (should (zerop calls))))
+
+;;; ── Group 6: defcustom defaults ─────────────────────────────────────────────
+
+(ert-deftest kuro-color-scheme-debounce-default-is-50ms ()
+  "Default debounce window is 50 ms (0.05 s)."
+  (should (= (default-value 'kuro-color-scheme-debounce-seconds) 0.05)))
+
+;;; ── Group 7 (C): install-time sync + idempotency ────────────────────────────
+
+(ert-deftest kuro-color-scheme-install-hook-syncs-current-theme-once ()
+  "C3: install-hook pushes the current theme to live sessions immediately.
+Without this sync, Rust's `color_scheme_dark' stays at its default until
+the user next switches themes — visible bug for users enabling the
+feature mid-session."
+  (let ((calls 0)
+        (enable-theme-functions nil))
+    (kuro-color-scheme-test--with-session-buffer 1
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (&rest _) (cl-incf calls))
+        (unwind-protect
+            (progn
+              (kuro--color-scheme-install-hook)
+              (should (>= calls 1)))
+          (remove-hook 'enable-theme-functions
+                       #'kuro--color-scheme-schedule))))))
+
+(ert-deftest kuro-color-scheme-install-hook-idempotent ()
+  "C5: calling install twice leaves exactly one copy of the schedule fn
+on `enable-theme-functions'.  Relies on `add-hook' eq-deduplication."
+  (let ((enable-theme-functions nil))
+    (unwind-protect
+        (progn
+          (kuro--color-scheme-install-hook)
+          (kuro--color-scheme-install-hook)
+          (should (= 1 (cl-count #'kuro--color-scheme-schedule
+                                 enable-theme-functions))))
+      (remove-hook 'enable-theme-functions #'kuro--color-scheme-schedule))))
+
+;;; ── Group 8 (W): luminance + nil-color-values fallback ──────────────────────
+
+(ert-deftest kuro-color-scheme-luminance-mid-gray-near-half ()
+  "W2: 0x7f7f7f mid-gray has Rec.709 Y ≈ 0.498 — pins the boundary near 0.5.
+Stubs `color-values' to return the true 0x7f scaled-to-65535 triplet because
+batch Emacs without a display rounds non-pure-bit hex values (0x7f → 0)."
+  (cl-letf (((symbol-function 'color-values)
+             (lambda (&rest _)
+               ;; 0x7f / 0xff * 65535 ≈ 32639 — true device-independent value.
+               (list 32639 32639 32639))))
+    (let ((y (kuro--color-scheme-luminance "#7f7f7f")))
+      (should (numberp y))
+      (should (and (> y 0.45) (< y 0.55))))))
+
+(ert-deftest kuro-color-scheme-detect-dark-color-values-nil-falls-back-dark ()
+  "W4: when `color-values' returns nil for a stringp bg, detect-dark-p
+falls back to t (dark).  Covers the `(if y (< y 0.5) t)' nil-y branch."
+  (cl-letf (((symbol-function 'frame-parameter)
+             (lambda (_f _p) nil))
+            ((symbol-function 'face-attribute)
+             (lambda (&rest _) "#abcdef"))
+            ((symbol-function 'color-values)
+             (lambda (&rest _) nil)))
+    (should (kuro--color-scheme-detect-dark-p))))
+
+(ert-deftest kuro-color-scheme-refresh-idempotent-on-no-op ()
+  "W3: repeated refresh calls keep invoking the FFI; the FFI's return value
+on the second call is nil (the Rust side reports no-op via nil).  This pins
+the behavior so we notice if the contract changes."
+  (let ((returns nil))
+    (kuro-color-scheme-test--with-session-buffer 99
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (&rest _) nil)
+        (kuro-color-scheme-test--with-detected-dark t
+          (push (kuro-color-scheme-refresh) returns)
+          (push (kuro-color-scheme-refresh) returns))))
+    (should (= 2 (length returns)))
+    ;; The second (most recently pushed) call's FFI invocation returns nil.
+    (should-not (car returns))))
+
+;;; ── Group (H): kuro--color-scheme-uninstall-hook ─────────────────────────────
+
+(ert-deftest kuro-color-scheme-uninstall-hook-removes-theme-hook ()
+  "`kuro--color-scheme-uninstall-hook' removes `kuro--color-scheme-schedule' from
+`enable-theme-functions' when the variable is bound (Emacs 29.1+)."
+  (let ((enable-theme-functions nil))
+    (add-hook 'enable-theme-functions #'kuro--color-scheme-schedule)
+    (kuro--color-scheme-uninstall-hook)
+    (should-not (memq #'kuro--color-scheme-schedule enable-theme-functions))))
+
+(ert-deftest kuro-color-scheme-uninstall-hook-cancels-debounce-timer ()
+  "`kuro--color-scheme-uninstall-hook' cancels and clears any pending debounce timer."
+  (let ((kuro--color-scheme-debounce-timer (run-at-time 1 nil #'ignore)))
+    (kuro--color-scheme-uninstall-hook)
+    (should (null kuro--color-scheme-debounce-timer))))
+
+(ert-deftest kuro-color-scheme-uninstall-hook-noop-when-no-timer ()
+  "`kuro--color-scheme-uninstall-hook' is a noop when `kuro--color-scheme-debounce-timer' is nil."
+  (let ((kuro--color-scheme-debounce-timer nil)
+        (enable-theme-functions nil))
+    (kuro--color-scheme-uninstall-hook)
+    (should (null kuro--color-scheme-debounce-timer))))
+
+
+;;; ── Group 9 (A): kuro--color-scheme-apply-now direct tests ──────────────────
+
+(ert-deftest kuro-color-scheme-apply-now-clears-debounce-timer ()
+  "A1: `kuro--color-scheme-apply-now' sets `kuro--color-scheme-debounce-timer' to nil."
+  (let ((kuro--color-scheme-debounce-timer 'fake-timer-token))
+    (kuro-color-scheme-test--with-fake-buffers nil
+      (kuro-color-scheme-test--with-stubbed-set #'ignore
+        (cl-letf (((symbol-function 'kuro--color-scheme-detect-dark-p)
+                   (lambda () nil)))
+          (kuro--color-scheme-apply-now))))
+    (should (null kuro--color-scheme-debounce-timer))))
+
+(ert-deftest kuro-color-scheme-apply-now-direct-push-to-session ()
+  "A2: `kuro--color-scheme-apply-now' calls FFI with session id and dark flag."
+  (let ((calls nil))
+    (kuro-color-scheme-test--with-session-buffer 99
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro--color-scheme-apply-now))))
+    (should (= 1 (length calls)))
+    (should (equal (car calls) '(99 t)))))
+
+(ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-nil-session-id ()
+  "A3: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is nil."
+  (let ((calls nil))
+    (kuro-color-scheme-test--with-session-buffer nil
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark t
+          (kuro--color-scheme-apply-now))))
+    (should (null calls))))
+
+(ert-deftest kuro-color-scheme-apply-now-skips-buffer-with-zero-session-id ()
+  "A4: `kuro--color-scheme-apply-now' skips a buffer when kuro--session-id is 0."
+  (let ((calls nil))
+    (kuro-color-scheme-test--with-session-buffer 0
+      (kuro-color-scheme-test--with-stubbed-set
+          (lambda (id dark) (push (list id dark) calls))
+        (kuro-color-scheme-test--with-detected-dark nil
+          (kuro--color-scheme-apply-now))))
+    (should (null calls))))
+
+(ert-deftest kuro-color-scheme-apply-now-swallows-ffi-error ()
+  "A5: `kuro--color-scheme-apply-now' swallows FFI errors via ignore-errors."
+  (kuro-color-scheme-test--with-session-buffer 7
+    (kuro-color-scheme-test--with-stubbed-set
+        (lambda (_id _dark) (error "FFI failure"))
+      (kuro-color-scheme-test--with-detected-dark t
+        ;; Must not propagate the error.
+        (should-not (condition-case err
+                        (progn (kuro--color-scheme-apply-now) nil)
+                      (error err)))))))
+
+(provide 'kuro-color-scheme-test)
+
+;;; kuro-color-scheme-test.el ends here

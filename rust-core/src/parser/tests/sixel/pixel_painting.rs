@@ -161,6 +161,26 @@ fn finish_uses_declared_dimensions_over_actual() {
     assert_eq!(h, 6);
 }
 
+#[test]
+fn declared_width_over_draw_limit_does_not_paint_past_limit() {
+    // Regression: a raster declaring a width far above SIXEL_DRAW_LIMIT (4096)
+    // combined with a huge `!<count>` repeat must not drive the paint loop past
+    // 4096 columns.  Otherwise ~11 bytes of input would fan out into millions of
+    // pixel writes and freeze the synchronous module call (CPU DoS).
+    let d = decode(b"\"1;1;5000;6#0!5000~");
+    // cursor_x still advances by the full declared repeat count (logical cursor).
+    assert_eq!(d.cursor_x, 5000);
+    // Canvas is width 5000, row-major, so pixel (x, 0) sits at offset x*4.
+    // Column 4095 (last within the draw limit) is painted opaque...
+    assert_eq!(d.pixels[4095 * 4 + 3], 255, "column 4095 must be painted");
+    // ...but column 4096 and beyond are never touched (transparent).
+    assert_eq!(
+        d.pixels[4096 * 4 + 3],
+        0,
+        "column 4096 must stay unpainted (draw limit enforced)"
+    );
+}
+
 #[path = "hls.rs"]
 mod hls;
 

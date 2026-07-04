@@ -88,6 +88,14 @@ impl Screen {
         let bottom = self.scroll_region.bottom;
         let cols = usize::from(self.cols);
 
+        // Clamp to the region height, mirroring the full-screen path's
+        // `n.min(rows)`. Scrolling by >= the region height blanks the whole
+        // region, so extra iterations are pure churn — and `n` comes from a vte
+        // param (up to 65535), so an unclamped loop is an amplification DoS
+        // (each iteration heap-allocates a blank `Line` and does VecDeque
+        // remove+insert), freezing the synchronous module call.
+        let n = n.min(bottom.saturating_sub(top));
+
         // Partial-region scroll: fall back to remove+insert.
         // Each iteration is O(min(top, len-top)) for both remove and
         // insert.  For n > 1 this is O(n * region_size), but n > 1 is
@@ -141,6 +149,11 @@ impl Screen {
         let top = self.scroll_region.top;
         let bottom = self.scroll_region.bottom;
         let cols = usize::from(self.cols);
+
+        // Clamp to the region height (see `scroll_up_partial_region`): an
+        // unclamped vte param would drive an amplification DoS via per-iteration
+        // blank-line allocation and VecDeque remove+insert.
+        let n = n.min(bottom.saturating_sub(top));
 
         // Partial-region scroll: fall back to remove+insert.
         for _ in 0..n {

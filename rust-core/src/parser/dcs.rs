@@ -77,11 +77,13 @@ pub fn dcs_hook(
 /// Called for each data byte of the DCS sequence.
 pub fn dcs_put(core: &mut TerminalCore, byte: u8) {
     match &mut core.meta.dcs_state {
-        DcsState::Xtgettcap { buf } => {
-            buf.push(byte);
-        }
-        DcsState::Decrqss { buf } => {
-            buf.push(byte);
+        DcsState::Xtgettcap { buf } | DcsState::Decrqss { buf } => {
+            // Cap accumulation: vte streams DCS bytes uncapped, so an
+            // unterminated request would otherwise grow `buf` without bound
+            // and exhaust host-Emacs heap. Excess bytes are silently dropped.
+            if buf.len() < crate::parser::limits::MAX_DCS_PAYLOAD_BYTES {
+                buf.push(byte);
+            }
         }
         DcsState::Sixel(decoder) => {
             decoder.put(byte);
@@ -319,7 +321,12 @@ fn for_each_xtgettcap_request(buf: &[u8], mut f: impl FnMut(&str, &str)) {
 }
 
 fn hex_decode(hex: &str) -> Option<String> {
-    if !hex.len().is_multiple_of(2) {
+    // `hex[i..i + 2]` is a byte-index slice; a multibyte UTF-8 scalar whose
+    // boundary falls mid-slice (e.g. `a€`, 4 bytes, passes the even-length
+    // check) would panic.  That panic unwinds inside `parser.advance`, leaving
+    // `core.parser` unrestored and killing all further escape parsing for the
+    // session.  Gate on ASCII; `from_str_radix` already rejects non-hex ASCII.
+    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
         return None;
     }
 

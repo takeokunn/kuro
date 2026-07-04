@@ -232,13 +232,19 @@ pub(crate) fn sixel_resolved_output_dimensions(
 }
 
 pub(super) fn sixel_draw_limits(declared_width: u32, declared_height: u32) -> (u32, u32) {
+    // Cap the paint region at SIXEL_DRAW_LIMIT even when the raster command
+    // declares larger dimensions.  `paint_sixel` breaks its repeat loop on
+    // `x >= max_w`, so an attacker-declared width up to MAX_SIXEL_SIZE would
+    // otherwise let a tiny `!<count>` token drive millions of iterations and
+    // freeze the synchronous module call.  The clamp keeps drawing bounded to
+    // 4096x4096 regardless of the declared size.
     let max_w = if declared_width > 0 {
-        declared_width
+        declared_width.min(SIXEL_DRAW_LIMIT)
     } else {
         SIXEL_DRAW_LIMIT
     };
     let max_h = if declared_height > 0 {
-        declared_height
+        declared_height.min(SIXEL_DRAW_LIMIT)
     } else {
         SIXEL_DRAW_LIMIT
     };

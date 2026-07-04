@@ -212,6 +212,18 @@ fn test_parse_color_spec_rgb_5digit_channel_returns_none() {
     assert_eq!(parse_color_spec("rgb:0ffff/00/00"), None);
 }
 
+// ── parse_color_spec `#` multibyte char-boundary regression ───────────────────
+
+#[test]
+fn test_parse_color_spec_hash_multibyte_returns_none_no_panic() {
+    // "aa€b" is 6 bytes ('a','a', 3-byte '€', 'b'), so it passes the byte-length
+    // == 6 check, but `&hex[2..4]` would split the euro sign on a non-char
+    // boundary and panic (killing the session's escape parser). Must be rejected.
+    assert_eq!(parse_color_spec("#aa\u{20ac}b"), None);
+    // A 3-byte scalar right after '#' also must not panic.
+    assert_eq!(parse_color_spec("#\u{20ac}\u{20ac}"), None);
+}
+
 // ── round-trip ────────────────────────────────────────────────────────────────
 
 #[test]

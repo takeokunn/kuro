@@ -3,31 +3,26 @@
 use super::*;
 use crate::parser::dcs::build_xtgettcap_response;
 
-/// A DCS XTGETTCAP payload at exactly the `MAX_APC_PAYLOAD_BYTES` byte count
-/// must be processed without panic.
+/// A DCS XTGETTCAP payload at exactly the `MAX_DCS_PAYLOAD_BYTES` cap must be
+/// processed without panic and yield one response.
 ///
-/// DCS does not impose its own byte-count cap (the cap lives in the APC
-/// pre-scanner); `dcs_put` accepts every byte.  The hex string of length
-/// `MAX_APC_PAYLOAD_BYTES` is even (4 MiB is divisible by 2), so `hex_decode`
+/// `dcs_put` caps accumulation at `MAX_DCS_PAYLOAD_BYTES`; a payload exactly at
+/// the cap is retained in full.  The cap (4096) is even, so `hex_decode`
 /// succeeds and decodes to a long ASCII string that is not a known capability,
 /// yielding exactly one failure response.
-///
-/// We synthesise the payload with `run_dcs` (calling `dcs_put` per byte) to
-/// exercise the same code path a real sequence would take, keeping the payload
-/// at exactly `MAX_APC_PAYLOAD_BYTES` ASCII bytes.
 #[test]
-fn test_dcs_payload_at_max_limit_no_panic() {
-    use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
+fn test_dcs_payload_at_cap_no_panic() {
+    use crate::parser::limits::MAX_DCS_PAYLOAD_BYTES;
 
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // "41" repeated MAX/2 times → hex string of exactly MAX bytes.
+    // "41" repeated CAP/2 times → hex string of exactly CAP bytes.
     // hex_decode("41"×N) decodes to 'A'×(N/2) — not a known capability.
-    let payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_APC_PAYLOAD_BYTES / 2)
+    let payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_DCS_PAYLOAD_BYTES / 2)
         .flatten()
         .copied()
         .collect();
-    assert_eq!(payload.len(), MAX_APC_PAYLOAD_BYTES);
+    assert_eq!(payload.len(), MAX_DCS_PAYLOAD_BYTES);
 
     // Must not panic.
     run_dcs(&mut core, b"+", 'q', &payload);
@@ -37,30 +32,30 @@ fn test_dcs_payload_at_max_limit_no_panic() {
     assert_single_dcs_response_contains(&responses, "\x1bP0+r", &[]);
 }
 
-/// A DCS XTGETTCAP payload that is one byte over `MAX_APC_PAYLOAD_BYTES`
-/// produces an odd-length hex string, which `hex_decode` rejects with `None`,
-/// so no response is queued.
+/// A DCS XTGETTCAP payload far larger than `MAX_DCS_PAYLOAD_BYTES` must be
+/// truncated at the cap (not accumulated unboundedly) and still not panic.
 ///
-/// `MAX_APC_PAYLOAD_BYTES` is 4 MiB (even).  Adding one byte yields an
-/// odd-length string; `!hex.len().is_multiple_of(2)` returns true and the
-/// capability is silently skipped.
+/// With a uniform `"41"` fill the retained even-length prefix decodes to an
+/// unknown capability, so exactly one failure response is queued — proving the
+/// excess bytes were dropped rather than growing the buffer without bound.
 #[test]
-fn test_dcs_payload_one_byte_over_limit_is_skipped() {
-    use crate::parser::limits::MAX_APC_PAYLOAD_BYTES;
+fn test_dcs_payload_over_cap_is_truncated() {
+    use crate::parser::limits::MAX_DCS_PAYLOAD_BYTES;
 
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // MAX bytes of "41" + one trailing '4' → odd length → skipped by hex_decode.
-    let mut payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_APC_PAYLOAD_BYTES / 2)
+    // Four times the cap of "41" plus one stray byte — all excess is dropped.
+    let mut payload: Vec<u8> = std::iter::repeat_n(b"41" as &[u8], MAX_DCS_PAYLOAD_BYTES * 2)
         .flatten()
         .copied()
         .collect();
-    payload.push(b'4'); // one extra byte → odd length
-    assert_eq!(payload.len(), MAX_APC_PAYLOAD_BYTES + 1);
+    payload.push(b'4');
 
     run_dcs(&mut core, b"+", 'q', &payload);
 
-    assert_no_dcs_responses(&core);
+    // Buffer capped to an even-length prefix → one failure response.
+    let responses = dcs_response_texts(&core);
+    assert_single_dcs_response_contains(&responses, "\x1bP0+r", &[]);
 }
 
 /// An empty DCS string — ST arrives immediately after the DCS introducer —

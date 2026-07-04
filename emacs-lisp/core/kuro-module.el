@@ -31,7 +31,7 @@
          (or source "module search") path reason))
 
 (defun kuro-module--library-candidate-from-path (path &optional required source)
-  "Return a validated native module candidate for PATH.
+  "Return a validated native module candidate for PATH or SOURCE.
 When REQUIRED is non-nil, missing or empty PATH is an error."
   (let ((origin (or source "module search")))
     (cond

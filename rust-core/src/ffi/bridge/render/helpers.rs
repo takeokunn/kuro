@@ -116,8 +116,8 @@ pub(super) fn build_emacs_poll_updates_with_faces_line<'e>(
     env: &'e Env,
     line: crate::ffi::codec::EncodedLine,
 ) -> EmacsResult<Value<'e>> {
-    let line_no_val = usize_to_lisp_i64(line.row_index, "encoded line row must fit i64")
-        .into_lisp(env)?;
+    let line_no_val =
+        usize_to_lisp_i64(line.row_index, "encoded line row must fit i64").into_lisp(env)?;
     let text_val = line.text.into_lisp(env)?;
     let face_ranges_vec = build_emacs_face_ranges_vector(env, line.face_ranges)?;
 

@@ -101,7 +101,7 @@ jobs:
           LIB="${{ steps.meta.outputs.lib }}"
           OUT="libkuro_core-${VERSION}-${TARGET}.tar.gz"
 
-          tar -C "rust-core/target/${TARGET}/release" -czf "${OUT}" "${LIB}"
+          tar -C "target/${TARGET}/release" -czf "${OUT}" "${LIB}"
           shasum -a 256 "${OUT}" | awk '{print $1}' > "${OUT}.sha256"
           ls -la "${OUT}" "${OUT}.sha256"
 

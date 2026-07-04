@@ -320,13 +320,17 @@ fn for_each_xtgettcap_request(buf: &[u8], mut f: impl FnMut(&str, &str)) {
     }
 }
 
+#[expect(
+    clippy::manual_is_multiple_of,
+    reason = "is_multiple_of stabilized in 1.87.0, above the crate's 1.84.0 MSRV"
+)]
 fn hex_decode(hex: &str) -> Option<String> {
     // `hex[i..i + 2]` is a byte-index slice; a multibyte UTF-8 scalar whose
     // boundary falls mid-slice (e.g. `a€`, 4 bytes, passes the even-length
     // check) would panic.  That panic unwinds inside `parser.advance`, leaving
     // `core.parser` unrestored and killing all further escape parsing for the
     // session.  Gate on ASCII; `from_str_radix` already rejects non-hex ASCII.
-    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
+    if !hex.is_ascii() || hex.len() % 2 != 0 {
         return None;
     }
 

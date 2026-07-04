@@ -50,12 +50,16 @@ pub(crate) fn encode(input: &[u8]) -> String {
 /// Decode base64 (standard alphabet, `=` padding). Returns `Err` on invalid input.
 ///
 /// Whitespace (`\n`, `\r`, ` `) is stripped before decoding.
+#[expect(
+    clippy::manual_is_multiple_of,
+    reason = "is_multiple_of stabilized in 1.87.0, above the crate's 1.84.0 MSRV"
+)]
 pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, DecodeError> {
     let filtered = without_decode_whitespace(input);
     if filtered.is_empty() {
         return Ok(Vec::new());
     }
-    if !filtered.len().is_multiple_of(4) || has_invalid_padding(&filtered) {
+    if filtered.len() % 4 != 0 || has_invalid_padding(&filtered) {
         return Err(DecodeError);
     }
 

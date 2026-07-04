@@ -184,6 +184,46 @@ fn scroll_region_scroll_up_does_not_affect_outside_rows() {
     assert_eq!(screen.get_cell(LAST_ROW, 0).unwrap().char(), 'E');
 }
 
+/// Regression: a huge scroll count on a *partial* scroll region must be clamped
+/// to the region height. Before the fix the partial path looped `for _ in 0..n`
+/// with the raw vte param (up to 65535+), heap-allocating a blank line and doing
+/// a VecDeque remove+insert each iteration — an amplification DoS that froze the
+/// synchronous module call. Clamping keeps the result identical (the region is
+/// fully blanked) while bounding the work. This test would hang pre-fix.
+#[test]
+fn partial_region_scroll_up_clamps_huge_count() {
+    let mut screen = screen();
+    put_char(&mut screen, 0, 0, 'S'); // outside region (above)
+    put_char(&mut screen, 10, 0, 'X'); // inside region
+    put_char(&mut screen, LAST_ROW, 0, 'E'); // outside region (below)
+    set_middle_region(&mut screen); // region rows 10..20
+
+    screen.scroll_up(1_000_000, Color::Default);
+
+    // Region fully blanked, outside rows untouched, geometry stable.
+    assert_eq!(screen.get_cell(10, 0).unwrap().char(), ' ');
+    assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'S');
+    assert_eq!(screen.get_cell(LAST_ROW, 0).unwrap().char(), 'E');
+    assert_size_is_stable(&screen);
+}
+
+/// Regression: same clamp for `scroll_down` on a partial region.
+#[test]
+fn partial_region_scroll_down_clamps_huge_count() {
+    let mut screen = screen();
+    put_char(&mut screen, 0, 0, 'S');
+    put_char(&mut screen, 15, 0, 'X');
+    put_char(&mut screen, LAST_ROW, 0, 'E');
+    set_middle_region(&mut screen);
+
+    screen.scroll_down(1_000_000, Color::Default);
+
+    assert_eq!(screen.get_cell(15, 0).unwrap().char(), ' ');
+    assert_eq!(screen.get_cell(0, 0).unwrap().char(), 'S');
+    assert_eq!(screen.get_cell(LAST_ROW, 0).unwrap().char(), 'E');
+    assert_size_is_stable(&screen);
+}
+
 #[test]
 fn full_dirty_is_set_after_full_screen_scroll_up() {
     let mut screen = screen();

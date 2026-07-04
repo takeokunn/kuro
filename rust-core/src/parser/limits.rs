@@ -39,6 +39,16 @@ pub const OSC7_MAX_PATH_BYTES: usize = 4096;
 /// 4 KiB is generous for the supported `cd` and `setenv` payloads.
 pub const OSC51_MAX_EVAL_BYTES: usize = 4096;
 
+/// Maximum DCS passthrough payload accumulation in bytes (XTGETTCAP / DECRQSS).
+///
+/// **`DoS` prevention:** vte streams DCS `put` bytes with no internal cap, and
+/// `dcs_put` appends each byte to a `Vec<u8>`. Without this bound a
+/// never-terminated `DCS + q <huge stream>` (XTGETTCAP) or `DCS $ q ...`
+/// (DECRQSS) would grow the buffer without limit and exhaust host-Emacs heap.
+/// 4 KiB is far larger than any real XTGETTCAP/DECRQSS request; excess bytes
+/// are silently dropped, mirroring the OSC-side caps above.
+pub const MAX_DCS_PAYLOAD_BYTES: usize = 4096;
+
 /// Maximum URI length for OSC 8 (hyperlink).
 ///
 /// 8 KiB is a practical upper bound used by Alacritty and kitty;

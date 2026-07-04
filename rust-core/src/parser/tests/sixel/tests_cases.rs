@@ -338,5 +338,29 @@ fn repeat_non_data_byte_resets_state() {
     assert!(d.state == SixelParseState::Normal);
 }
 
+/// Regression: a flood of `;` separators in a parameterized command must not
+/// grow `params` without bound. Before the cap, each `;` pushed one `u32`, so a
+/// stream of separators (`#1;;;…`) allocated 4 bytes of heap per input byte —
+/// an OOM DoS. The cap drops excess parameters while parsing continues, so a
+/// following valid color command still resolves correctly.
+#[test]
+fn parameter_flood_is_capped_and_parsing_survives() {
+    let mut d = make_decoder();
+    // Color command `#1` followed by 10_000 empty parameters.
+    let mut seq = b"#1".to_vec();
+    seq.extend(std::iter::repeat_n(b';', 10_000));
+    feed(&mut d, &seq);
+    assert!(
+        d.params.len() <= 16,
+        "sixel params must be capped, got {}",
+        d.params.len()
+    );
+
+    // A subsequent well-formed color definition still registers correctly,
+    // proving the flood did not wedge the parser (`$` terminates the command).
+    feed(&mut d, b"#2;2;100;0;0$");
+    assert_eq!(d.color_map.get(&2), Some(&[255, 0, 0]));
+}
+
 #[path = "pixel_painting.rs"]
 mod pixel_painting;

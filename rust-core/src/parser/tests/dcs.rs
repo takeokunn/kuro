@@ -276,6 +276,54 @@ fn test_dectabsr_custom_stop_via_hts() {
     );
 }
 
+// ── Regression: untrusted-input hardening ────────────────────────────────────
+
+/// Regression: an XTGETTCAP payload containing a multibyte UTF-8 scalar whose
+/// byte boundary falls inside a 2-char hex slice must not panic. Before the
+/// fix, `hex_decode` sliced `&hex[i..i + 2]` on a non-char-boundary, panicking
+/// *inside* `parser.advance` — which left `core.parser` unrestored and killed
+/// all further escape parsing for the session. This test proves both that the
+/// crafted sequence is handled gracefully AND that a following CSI still works.
+#[test]
+fn test_xtgettcap_multibyte_payload_does_not_kill_parser() {
+    let mut term = crate::TerminalCore::new(24, 80);
+    // "a€" is 4 bytes (61 e2 82 ac): even length passes the multiple-of-2 check,
+    // and `&hex[2..4]` would split the euro sign — the pre-fix panic trigger.
+    term.advance("\x1bP+qa\u{20ac}\x1b\\".as_bytes());
+    // Parser survived: a subsequent CSI cursor move is still honored.
+    term.advance(b"\x1b[5;10H");
+    let cur = term.screen.cursor();
+    assert_eq!(
+        (cur.row, cur.col),
+        (4, 9),
+        "escape parsing must remain alive after the malicious XTGETTCAP"
+    );
+}
+
+/// Regression: the DCS passthrough buffer must be capped. vte streams `put`
+/// bytes uncapped, so an unterminated XTGETTCAP would otherwise grow `buf`
+/// without bound and exhaust host heap.
+#[test]
+fn test_xtgettcap_payload_accumulation_is_capped() {
+    use crate::parser::dcs::DcsState;
+    use crate::parser::limits::MAX_DCS_PAYLOAD_BYTES;
+
+    let mut term = crate::TerminalCore::new(24, 80);
+    // Open an XTGETTCAP request and stream far more payload than the cap,
+    // without the terminating ST so it stays in the accumulating state.
+    let mut seq = b"\x1bP+q".to_vec();
+    seq.extend(std::iter::repeat_n(b'a', MAX_DCS_PAYLOAD_BYTES * 4));
+    term.advance(&seq);
+    match &term.meta.dcs_state {
+        DcsState::Xtgettcap { buf } => assert!(
+            buf.len() <= MAX_DCS_PAYLOAD_BYTES,
+            "DCS payload buffer must be capped at {MAX_DCS_PAYLOAD_BYTES}, got {}",
+            buf.len()
+        ),
+        _ => panic!("expected Xtgettcap accumulation state"),
+    }
+}
+
 #[path = "dcs/sixel.rs"]
 mod sixel;
 

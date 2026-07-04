@@ -37,7 +37,14 @@ pub(super) fn parse_color_spec(s: &str) -> Option<[u8; 3]> {
             normalize_hex_channel(b, parts[2].len())?,
         ])
     } else if let Some(hex) = s.strip_prefix('#') {
-        if hex.len() == 6 {
+        // `hex.len()` counts bytes, but the slices below are byte-index slices.
+        // A multibyte UTF-8 scalar (e.g. `#aa€b`, 6 bytes) would pass the length
+        // check yet split a char boundary and panic.  Since the panic unwinds
+        // inside `parser.advance`, `core.parser` is never restored and every
+        // later escape sequence is dropped for the rest of the session.  Reject
+        // non-ASCII up front; `from_str_radix` already rejects non-hex ASCII, so
+        // this changes no valid behavior.
+        if hex.len() == 6 && hex.is_ascii() {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
             let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
             let b = u8::from_str_radix(&hex[4..6], 16).ok()?;

@@ -149,8 +149,19 @@ impl SixelDecoder {
             .unwrap_or([255, 255, 255])
     }
 
+    /// Upper bound on accumulated sixel command parameters.
+    ///
+    /// Legitimate parameterized commands use at most 5 (`#Pc;Pu;Px;Py;Pz`
+    /// color) or 4 (`"Pan;Pad;Ph;Pv` raster) parameters. Without a cap, a
+    /// stream of `;` separators (`#1;1;1;...`) would grow `params` one `u32`
+    /// per input byte and exhaust host-Emacs heap. Excess parameters are
+    /// dropped while parsing state still advances, preserving correctness.
+    const MAX_PARAMS: usize = 16;
+
     fn push_current_param(&mut self) {
-        self.params.push(self.num_buf);
+        if self.params.len() < Self::MAX_PARAMS {
+            self.params.push(self.num_buf);
+        }
         self.num_buf = 0;
     }
 

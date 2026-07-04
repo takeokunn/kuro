@@ -6,8 +6,8 @@ use emacs::{Env, IntoLisp as _, Result as EmacsResult, Value};
 use super::{
     build_emacs_list_from_rev, build_emacs_list_from_values, define_session_data_query_mut,
     define_session_data_query_or_false, define_session_query_bool, define_session_query_default,
-    define_session_query_opt, query_session, query_session_mut, query_session_opt,
-    u64_to_lisp_i64, usize_to_lisp_i64,
+    define_session_query_opt, query_session, query_session_mut, query_session_opt, u64_to_lisp_i64,
+    usize_to_lisp_i64,
 };
 
 define_session_query_opt!(

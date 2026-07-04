@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -45,6 +45,7 @@
 (declare-function kuro--recompute-blink-frame-intervals "kuro-overlays" ())
 (declare-function kuro--start-stream-idle-timer     "kuro-stream"   ())
 (declare-function kuro--stop-stream-idle-timer      "kuro-stream"   ())
+(declare-function kuro--stop-typewriter-timer       "kuro-typewriter" ())
 
 ;;; Buffer-local render state
 
@@ -191,11 +192,15 @@ Also starts the low-latency streaming idle timer when
   (kuro--start-stream-idle-timer))
 
 (defun kuro--stop-render-loop ()
-  "Stop the render loop and streaming idle timer."
+  "Stop the render loop and streaming idle timer.
+Also cancels the typewriter drip timer so a killed buffer does not leak a
+repeating timer that fires forever as a no-op."
   (when (timerp kuro--timer)
     (cancel-timer kuro--timer)
     (setq kuro--timer nil))
-  (kuro--stop-stream-idle-timer))
+  (kuro--stop-stream-idle-timer)
+  (when (fboundp 'kuro--stop-typewriter-timer)
+    (kuro--stop-typewriter-timer)))
 
 ;;; Render cycle utilities
 

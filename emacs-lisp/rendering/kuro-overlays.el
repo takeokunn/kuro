@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 takeokunn
 
-;; Author: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
 
 ;;; Commentary:
 
@@ -36,6 +36,7 @@
 (declare-function kuro--image-frame-gap "kuro-ffi-osc" (image-id frame-index))
 (declare-function kuro--image-animation-state "kuro-ffi-osc" (image-id))
 (declare-function kuro--goto-row-start "kuro-render-buffer" (row))
+(declare-function kuro--grid-col-to-buffer-pos "kuro-render-cursor" (row col))
 
 (defvar kuro--current-render-row -1
   "Forward reference; `defvar-local' in kuro-render-buffer.el.
@@ -361,16 +362,14 @@ Return nil when B64 is invalid, oversized, or `create-image' fails."
 
 (defun kuro--place-image-overlay (img row col cell-width &optional image-id)
   "Create a display overlay for IMG at grid (ROW, COL) spanning CELL-WIDTH cols.
-Uses `forward-char' for column positioning so wide characters (2 terminal
-columns, 1 buffer position) are handled correctly.  Pushes the new overlay
-onto `kuro--image-overlays'.  No-op if the grid position is beyond the buffer.
-When IMAGE-ID is non-nil it is stored on the overlay so animation playback
-\(`kuro--animation-advance') can locate and update the right overlay.
-Returns the created overlay, or nil when out of bounds."
-  (let* ((start (save-excursion
-                  (kuro--goto-row-start row)
-                  (forward-char col)
-                  (point)))
+Translates the grid column COL to a buffer position via
+`kuro--grid-col-to-buffer-pos' so wide characters (2 terminal columns, 1
+buffer position) to the left of the image do not shift it.  Pushes the new
+overlay onto `kuro--image-overlays'.  No-op if the grid position is beyond
+the buffer.  When IMAGE-ID is non-nil it is stored on the overlay so
+animation playback (`kuro--animation-advance') can locate and update the
+right overlay.  Returns the created overlay, or nil when out of bounds."
+  (let* ((start (kuro--grid-col-to-buffer-pos row col))
          (end (min (+ start cell-width) (point-max))))
     (when (< start (point-max))
       (let ((ov (make-overlay start end)))
@@ -414,10 +413,7 @@ SLICE is the `(slice X Y W H)' pixel rectangle (image-relative) shown in this
 cell, so each placeholder cell renders its own sub-rectangle of IMG.  Pushes
 the overlay onto `kuro--placeholder-overlays'.  Returns the overlay, or nil
 when the grid position is beyond the buffer."
-  (let ((start (save-excursion
-                 (kuro--goto-row-start row)
-                 (forward-char col)
-                 (point))))
+  (let ((start (kuro--grid-col-to-buffer-pos row col)))
     (when (< start (point-max))
       (let ((ov (make-overlay start (min (1+ start) (point-max)))))
         (overlay-put ov 'kuro-placeholder t)

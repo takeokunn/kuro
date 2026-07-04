@@ -1,3 +1,5 @@
+use super::*;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // current_foreground() — SGR 38;2 RGB color
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,7 +114,7 @@ fn test_decrc_without_prior_decsc_is_noop() {
     let row_before = t.cursor_row();
     let col_before = t.cursor_col();
     t.advance(b"\x1b8"); // DECRC with no saved state
-    // Cursor must not move (no saved state to restore)
+                         // Cursor must not move (no saved state to restore)
     assert_eq!(
         t.cursor_row(),
         row_before,

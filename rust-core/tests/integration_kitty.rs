@@ -72,12 +72,13 @@ fn kitty_transmit_png_then_query_returns_ok() {
 // 2. Delete all images (a=d,d=A) clears all placements
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `d=A` (uppercase A) is the sub-command "delete all placements on or above
-/// the current cursor row".  After transmitting and displaying an image,
-/// issuing `a=d,d=A` must not panic and the implementation must handle it
-/// without corrupting state.  A new placement can still be added afterwards.
+/// `d=A` (uppercase A) is "delete all placements AND free their image data".
+/// Per the Kitty graphics protocol, uppercase delete targets free the backing
+/// image data of every placed image, not just the placement.  After
+/// transmitting and displaying an image, issuing `a=d,d=A` must not panic and
+/// must free image 200's data.
 #[test]
-fn kitty_delete_uppercase_a_does_not_panic() {
+fn kitty_delete_uppercase_a_frees_image_data() {
     let mut t = TerminalCore::new(24, 80);
 
     // Transmit and display image 200 at cursor row 0.
@@ -88,14 +89,14 @@ fn kitty_delete_uppercase_a_does_not_panic() {
         "one notification must be queued after transmit-and-display"
     );
 
-    // Delete all placements on or above current row (d=A, uppercase).
+    // Delete all placements and free image data (d=A, uppercase).
     t.advance(b"\x1b_Ga=d,d=A\x1b\\");
 
-    // Image data must still be retrievable (d=A clears placements, not image data).
+    // Image data must now be gone (uppercase delete frees the image).
     let png = t.get_image_png_base64(200);
     assert!(
-        !png.is_empty(),
-        "image data must survive d=A (only placements are cleared)"
+        png.is_empty(),
+        "image data must be freed by d=A (uppercase frees image data)"
     );
 }
 

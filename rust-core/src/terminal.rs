@@ -1,8 +1,7 @@
 //! `TerminalCore` — integrates VTE parser, virtual screen, and PTY state.
 
-use crate::grid::screen::Screen;
+use crate::grid::screen::{PrintableAsciiBuffer, Screen};
 use crate::parser;
-use crate::parser::apc::ApcScanState;
 use crate::parser::dec_private::DecModes;
 use crate::parser::tabs::TabStops;
 use crate::types;
@@ -48,7 +47,7 @@ pub struct TerminalCore {
     /// Buffer for batching ASCII characters from VTE `print()` callbacks.
     /// Flushed via `Screen::print_ascii_run()` when a non-print callback
     /// fires, a non-ASCII char is printed, or VTE `advance()` returns.
-    pub(crate) print_buf: Vec<u8>,
+    pub(crate) print_buf: PrintableAsciiBuffer,
     /// G0 character set designation (ESC ( 0 / ESC ( B)
     pub(crate) g0_charset: types::charset::CharsetType,
     /// G1 character set designation (ESC ) 0 / ESC ) B)
@@ -61,6 +60,25 @@ pub struct TerminalCore {
     saved_g1_charset: Option<types::charset::CharsetType>,
     /// Saved GL shift state for DECSC/DECRC (ESC 7 / ESC 8)
     saved_gl_is_g1: Option<bool>,
+    /// Last printed (non-combining) character, tracked for REP (CSI Ps b).
+    pub(crate) last_printed_char: Option<char>,
+    /// SGR attributes stack for XTPUSHSGR (CSI # {) / XTPOPSGR (CSI # }).
+    pub(crate) sgr_stack: Vec<types::cell::SgrAttributes>,
+    /// Grapheme-clustering (DEC mode 2027) state: a ZWJ (U+200D) was just
+    /// attached to the previous cell, so the NEXT printable char joins that
+    /// cluster instead of advancing the cursor. Only consulted when
+    /// `dec_modes.grapheme_clustering` is set; reset on any control/cursor/edit.
+    pub(crate) grapheme_join_pending: bool,
+    /// Grapheme-clustering (DEC mode 2027) state: a lone regional-indicator
+    /// (U+1F1E6..=U+1F1FF) is pending in the previous cell, awaiting a second
+    /// RI to form a flag. Only consulted when `dec_modes.grapheme_clustering`
+    /// is set; reset on any non-RI print / control / cursor move / edit.
+    pub(crate) regional_indicator_pending: bool,
+    /// Transient Kitty text-sizing (OSC 66) sizing applied to cells printed
+    /// during an OSC 66 payload. Set before feeding the payload chars through
+    /// the print path and cleared immediately after, so ordinary prints never
+    /// pay any cost. `None` (the overwhelming default) means "normal size".
+    pub(crate) active_text_size: Option<types::cell::TextSize>,
 }
 
 impl TerminalCore {
@@ -72,7 +90,7 @@ impl TerminalCore {
             current_attrs: types::cell::SgrAttributes::default(),
             parser: Some(vte::Parser::new()),
             dec_modes: DecModes::new(),
-            tab_stops: TabStops::new(cols as usize),
+            tab_stops: TabStops::new(usize::from(cols)),
             saved_cursor: None,
             saved_attrs: None,
             saved_primary_attrs: None,
@@ -82,14 +100,33 @@ impl TerminalCore {
             parser_in_ground: true,
             vte_callback_count: 0,
             vte_last_ground: true,
-            print_buf: Vec::with_capacity(256),
+            print_buf: PrintableAsciiBuffer::with_capacity(256),
             g0_charset: types::charset::CharsetType::Ascii,
             g1_charset: types::charset::CharsetType::Ascii,
             gl_is_g1: false,
             saved_g0_charset: None,
             saved_g1_charset: None,
             saved_gl_is_g1: None,
+            last_printed_char: None,
+            sgr_stack: Vec::new(),
+            grapheme_join_pending: false,
+            regional_indicator_pending: false,
+            active_text_size: None,
         }
+    }
+
+    /// Push an in-band resize report (`CSI 48 ; rows ; cols ; 0 ; 0 t`) to
+    /// `meta.pending_responses`.
+    ///
+    /// Called when DEC mode 2048 (resize-in-band) is enabled or re-enabled
+    /// so the receiving application learns the current size immediately.
+    /// Pixel dimensions are reported as 0 (cell-based core has no pixel geometry).
+    #[inline]
+    pub(crate) fn push_in_band_resize_report(&mut self) {
+        let rows = self.screen.rows();
+        let cols = self.screen.cols();
+        let response = format!("\x1b[48;{rows};{cols};0;0t");
+        self.meta.pending_responses.push(response.into_bytes());
     }
 
     /// Flush the VTE print buffer — sends any buffered ASCII bytes to
@@ -102,7 +139,7 @@ impl TerminalCore {
         if !self.print_buf.is_empty() {
             let len = self.print_buf.len();
             self.screen.print_ascii_run(
-                &self.print_buf,
+                self.print_buf.as_run(),
                 self.current_attrs,
                 self.dec_modes.auto_wrap,
             );
@@ -128,7 +165,7 @@ impl TerminalCore {
             None => return,
         };
         let cursor = *self.screen.cursor();
-        let cols = self.screen.cols() as usize;
+        let cols = usize::from(self.screen.cols());
         let mut remaining = n;
         let mut row = cursor.row;
         let mut col = cursor.col;
@@ -159,6 +196,60 @@ impl TerminalCore {
         }
     }
 
+    /// Print an OSC 66 text-sizing payload, stamping each printed cell with the
+    /// given [`types::cell::TextSize`].
+    ///
+    /// The payload chars are fed through the normal `Screen::print` path so that
+    /// cursor advance, auto-wrap, and wide-character handling all behave exactly
+    /// as for ordinary text.  After each char is printed the resulting cell (and
+    /// the wide placeholder, if any) is tagged with `ts` — mirroring the
+    /// hyperlink stamping strategy.  A default (`is_default`) sizing is a no-op
+    /// beyond ordinary printing, so it never allocates `CellExtras`.
+    ///
+    /// `payload` is the already-decoded, UTF-8 text (capped to 4096 bytes by the
+    /// caller).
+    pub(crate) fn print_text_sized_payload(&mut self, payload: &str, ts: types::cell::TextSize) {
+        // Flush any pending ASCII run so buffered chars are not retroactively
+        // attributed to this text-sizing region.
+        self.flush_print_buf();
+
+        let stamp = !ts.is_default();
+        self.active_text_size = Some(ts);
+
+        for c in payload.chars() {
+            if c.is_control() {
+                // Control chars inside the payload are ignored for sizing; they
+                // would not produce a printable cell anyway.
+                continue;
+            }
+            let pre_cursor = *self.screen.cursor();
+            let width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+            self.screen
+                .print(c, self.current_attrs, self.dec_modes.auto_wrap);
+
+            if stamp {
+                let cursor_after = *self.screen.cursor();
+                let (write_row, write_col) = text_size_write_position(pre_cursor, cursor_after);
+                if let Some(cell) = self.screen.get_cell_mut(write_row, write_col) {
+                    cell.set_text_size(Some(ts));
+                }
+                if width > 1 {
+                    if let Some(cell) = self.screen.get_cell_mut(write_row, write_col + 1) {
+                        cell.set_text_size(Some(ts));
+                    }
+                }
+                // `get_cell_mut` mutates the cell in place without bumping the
+                // line version (and an identical re-print would have short-
+                // circuited `update_cell_with`).  Force the row dirty + version
+                // bump so a text-size-only change is never dropped by the dirty
+                // pipeline's `line.version` skip.
+                self.screen.mark_line_dirty_and_bump(write_row);
+            }
+        }
+
+        self.active_text_size = None;
+    }
+
     /// Get the currently active charset for GL (the "left" graphic set).
     #[inline]
     pub(crate) fn active_charset(&self) -> types::charset::CharsetType {
@@ -177,10 +268,17 @@ impl TerminalCore {
         parser::apc::advance_with_apc(self, bytes);
     }
 
-    /// Resize the terminal screen
+    /// Resize the terminal screen.
+    ///
+    /// When DEC mode 2048 (in-band resize notifications) is active, emits a
+    /// `CSI 48 ; rows ; cols ; 0 ; 0 t` report so the running application
+    /// learns the new size without relying on SIGWINCH.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.screen.resize(rows, cols);
-        self.tab_stops.resize(cols as usize);
+        self.tab_stops.resize(usize::from(cols));
+        if self.dec_modes.resize_in_band {
+            self.push_in_band_resize_report();
+        }
     }
 
     /// Save cursor position, SGR attributes, and charset state (DECSC - ESC 7)
@@ -210,268 +308,38 @@ impl TerminalCore {
             self.gl_is_g1 = gl;
         }
     }
+}
 
-    // === Public accessors for integration tests ===
-    // Note: current_bold/italic/underline expose internal SGR state for testing.
-    // These should not be used in production code paths.
-
-    /// Get the cursor row (0-indexed), using the active screen (primary or alternate)
-    #[must_use]
-    pub fn cursor_row(&self) -> usize {
-        self.screen.cursor().row
-    }
-
-    /// Get the cursor column (0-indexed), using the active screen (primary or alternate)
-    #[must_use]
-    pub fn cursor_col(&self) -> usize {
-        self.screen.cursor().col
-    }
-
-    /// Get the number of rows in the terminal screen
-    #[must_use]
-    pub const fn rows(&self) -> u16 {
-        self.screen.rows()
-    }
-
-    /// Get the number of columns in the terminal screen
-    #[must_use]
-    pub const fn cols(&self) -> u16 {
-        self.screen.cols()
-    }
-
-    /// Get whether the cursor is visible (DECTCEM state)
-    #[must_use]
-    pub const fn cursor_visible(&self) -> bool {
-        self.dec_modes.cursor_visible
-    }
-
-    /// Get whether application cursor keys mode is active (DECCKM)
-    #[must_use]
-    pub const fn app_cursor_keys(&self) -> bool {
-        self.dec_modes.app_cursor_keys
-    }
-
-    /// Get whether bracketed paste mode is active (mode 2004)
-    #[must_use]
-    pub const fn bracketed_paste(&self) -> bool {
-        self.dec_modes.bracketed_paste
-    }
-
-    /// Get whether the alternate screen buffer is currently active
-    #[must_use]
-    pub const fn is_alternate_screen_active(&self) -> bool {
-        self.screen.is_alternate_screen_active()
-    }
-
-    /// Get whether bold SGR attribute is currently set
-    #[must_use]
-    pub const fn current_bold(&self) -> bool {
-        self.current_attrs
-            .flags
-            .contains(types::cell::SgrFlags::BOLD)
-    }
-
-    /// Get whether italic SGR attribute is currently set
-    #[must_use]
-    pub const fn current_italic(&self) -> bool {
-        self.current_attrs
-            .flags
-            .contains(types::cell::SgrFlags::ITALIC)
-    }
-
-    /// Get whether underline SGR attribute is currently set
-    #[must_use]
-    pub fn current_underline(&self) -> bool {
-        self.current_attrs.underline()
-    }
-
-    /// Get a cell from the screen at the given (row, col) position
-    #[must_use]
-    pub fn get_cell(&self, row: usize, col: usize) -> Option<&types::cell::Cell> {
-        self.screen.get_cell(row, col)
-    }
-
-    /// Get the number of lines currently in the scrollback buffer
-    #[must_use]
-    pub const fn scrollback_line_count(&self) -> usize {
-        self.screen.scrollback_line_count
-    }
-
-    /// Get scrollback lines as cell characters; most recent line first.
-    /// Each inner Vec is the characters of one scrolled-off line.
-    #[must_use]
-    pub fn scrollback_chars(&self, max_lines: usize) -> Vec<Vec<char>> {
-        self.screen
-            .get_scrollback_lines(max_lines)
-            .into_iter()
-            .map(|line| {
-                line.cells
-                    .iter()
-                    .map(super::types::cell::Cell::char)
-                    .collect()
-            })
-            .collect()
-    }
-
-    /// Get current DEC modes state (read-only reference)
-    #[must_use]
-    pub const fn dec_modes(&self) -> &parser::dec_private::DecModes {
-        &self.dec_modes
-    }
-
-    /// Get current SGR attributes (read-only reference)
-    #[must_use]
-    pub const fn current_attrs(&self) -> &types::cell::SgrAttributes {
-        &self.current_attrs
-    }
-
-    /// Get current OSC data (read-only reference)
-    #[must_use]
-    pub const fn osc_data(&self) -> &types::osc::OscData {
-        &self.osc_data
-    }
-
-    /// Returns whether the 256-color palette has been updated since the last render (OSC 4).
-    #[inline]
-    #[must_use]
-    pub const fn palette_dirty(&self) -> bool {
-        self.osc_data.palette_dirty
-    }
-
-    /// Returns whether the default fg/bg/cursor colors have changed since the last render (OSC 10/11/12).
-    #[inline]
-    #[must_use]
-    pub const fn default_colors_dirty(&self) -> bool {
-        self.osc_data.default_colors_dirty
-    }
-
-    /// Get the current window title
-    #[must_use]
-    pub fn title(&self) -> &str {
-        &self.meta.title
-    }
-
-    /// Get whether the title has been updated and not yet read
-    #[must_use]
-    pub const fn title_dirty(&self) -> bool {
-        self.meta.title_dirty
-    }
-
-    /// Get pending terminal responses (for DA1, DA2, Kitty keyboard, etc.)
-    #[must_use]
-    pub fn pending_responses(&self) -> &[Vec<u8>] {
-        &self.meta.pending_responses
-    }
-
-    /// Get pending image placement notifications (Kitty Graphics + Sixel).
-    ///
-    /// Returns notifications that have accumulated since terminal construction.
-    /// Each notification describes one image that was placed on the terminal grid.
-    #[must_use]
-    pub fn pending_image_notifications(&self) -> &[crate::grid::screen::ImageNotification] {
-        &self.kitty.pending_image_notifications
-    }
-
-    /// Re-encode a stored image as a base64-encoded PNG string.
-    ///
-    /// Returns an empty string if no image with `image_id` is stored.
-    /// Searches the active screen's graphics store (primary or alternate).
-    #[must_use]
-    pub fn get_image_png_base64(&self, image_id: u32) -> String {
-        self.screen.get_image_png_base64(image_id)
-    }
-
-    /// Get current foreground color
-    #[must_use]
-    pub const fn current_foreground(&self) -> &types::Color {
-        &self.current_attrs.foreground
-    }
-
-    /// Soft terminal reset (DECSTR - CSI ! p)
-    ///
-    /// Resets modes but preserves screen content and scrollback.
-    pub fn soft_reset(&mut self) {
-        // Reset cursor keys to normal mode
-        self.dec_modes.app_cursor_keys = false;
-        // Reset origin mode
-        self.dec_modes.origin_mode = false;
-        // Auto-wrap back on
-        self.dec_modes.auto_wrap = true;
-        // Cursor visible
-        self.dec_modes.cursor_visible = true;
-        // Reset SGR attributes
-        self.current_attrs = types::cell::SgrAttributes::default();
-        // Reset scroll region to full screen
-        let rows = self.screen.rows() as usize;
-        self.screen.set_scroll_region(0, rows);
-        // Move cursor to home
-        self.screen.move_cursor(0, 0);
-        // Reset cursor shape
-        self.dec_modes.cursor_shape = types::cursor::CursorShape::BlinkingBlock;
-        // Reset Kitty keyboard protocol flags
-        self.dec_modes.keyboard_flags = 0;
-        self.dec_modes.keyboard_flags_stack.clear();
-        // Clear alt-screen SGR snapshot so a subsequent ?1049l cannot restore stale attrs
-        self.saved_primary_attrs = None;
-        // Reset character set designations to US ASCII
-        self.g0_charset = types::charset::CharsetType::Ascii;
-        self.g1_charset = types::charset::CharsetType::Ascii;
-        self.gl_is_g1 = false;
-        // Note: does NOT clear scrollback, does NOT switch screens, does NOT clear screen
-    }
-
-    /// Full terminal reset (RIS - ESC c)
-    pub fn reset(&mut self) {
-        // Switch back to primary screen if alternate is active
-        if self.screen.is_alternate_screen_active() {
-            self.screen.switch_to_primary();
-        }
-        // Reset cursor to home position
-        self.screen.move_cursor(0, 0);
-        // Reset SGR attributes to defaults
-        self.current_attrs = types::cell::SgrAttributes::default();
-        // Clear saved cursor state
-        self.saved_cursor = None;
-        self.saved_attrs = None;
-        self.saved_primary_attrs = None;
-        self.saved_g0_charset = None;
-        self.saved_g1_charset = None;
-        self.saved_gl_is_g1 = None;
-        // Reset DEC private modes to correct terminal defaults
-        self.dec_modes = DecModes::new();
-        // Reset tab stops to every 8th column
-        self.tab_stops = TabStops::new(self.screen.cols() as usize);
-        // Clear title state
-        self.meta.title = String::new();
-        self.meta.title_dirty = false;
-        // Clear pending bell
-        self.meta.bell_pending = false;
-        // Clear pending responses
-        self.meta.pending_responses.clear();
-        // Clear Kitty Graphics state
-        self.kitty.apc_state = ApcScanState::Idle;
-        self.kitty.apc_buf.clear();
-        self.kitty.kitty_chunk = None;
-        self.meta.dcs_state = parser::dcs::DcsState::Idle;
-        self.kitty.pending_image_notifications.clear();
-        // Clear OSC data
-        self.osc_data = types::osc::OscData::default();
-        // Reset VTE parser to fresh Ground state
-        self.parser = Some(vte::Parser::new());
-        self.parser_in_ground = true;
-        // Clear any buffered print characters
-        self.print_buf.clear();
-        // Reset character set designations to US ASCII
-        self.g0_charset = types::charset::CharsetType::Ascii;
-        self.g1_charset = types::charset::CharsetType::Ascii;
-        self.gl_is_g1 = false;
+/// Compute the (row, col) where the just-printed char landed, given the cursor
+/// before and after the print and the screen width.
+///
+/// Mirrors `hyperlink_write_position` in `vte_handler.rs`: if the cursor wrapped
+/// to a new row (or jumped backward on the same row via pending-wrap reset), the
+/// char was written at column 0 of the new row; otherwise it sits at the
+/// pre-print position.
+#[inline]
+fn text_size_write_position(
+    pre_cursor: types::cursor::Cursor,
+    cursor_after: types::cursor::Cursor,
+) -> (usize, usize) {
+    if cursor_after.row != pre_cursor.row || cursor_after.col < pre_cursor.col {
+        // Wrapped: the char landed at column 0 of the new row. This holds for
+        // BOTH a deferred wrap (`pending_wrap` was set by a prior char filling
+        // the last column) AND an immediate wide-char wrap — in either case the
+        // glyph is placed at (cursor_after.row, 0). The earlier `pending_wrap`
+        // special case was wrong: it stamped the *previous* row's last cell,
+        // corrupting that cell's sizing and dropping the wrapped char's stamp.
+        (cursor_after.row, 0)
+    } else {
+        (pre_cursor.row, pre_cursor.col)
     }
 }
 
+#[path = "terminal_accessors.rs"]
+mod accessors;
+
 #[cfg(test)]
 mod tests {
-    use crate::types;
-
     /// Create a standard 24x80 `TerminalCore` for testing.
     fn make_term() -> super::TerminalCore {
         super::TerminalCore::new(24, 80)

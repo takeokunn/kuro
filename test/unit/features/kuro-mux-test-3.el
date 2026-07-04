@@ -1,0 +1,318 @@
+;;; kuro-mux-test-3.el --- ERT tests for kuro-mux.el — Groups 23-26  -*-  lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'kuro-test-stubs)
+(require 'kuro-config)
+(require 'kuro-mux)
+
+;;; Group 23 — kuro-mux-find-window
+
+(ert-deftest kuro-mux-test-find-window-is-interactive ()
+  "`kuro-mux-find-window' is an interactive command."
+  (should (commandp #'kuro-mux-find-window)))
+
+(ert-deftest kuro-mux-test-find-window-bound-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds f to kuro-mux-find-window."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "f"))
+              #'kuro-mux-find-window)))
+
+(ert-deftest kuro-mux-test-find-window-selects-visible-window ()
+  "`kuro-mux-find-window' calls `select-window' when the buffer is visible."
+  (let* ((fake-win (list 'window 'fake))
+         selected-win)
+    (cl-letf (((symbol-function 'get-buffer)
+               (lambda (_) (current-buffer)))
+              ((symbol-function 'get-buffer-window)
+               (lambda (_buf _flag) fake-win))
+              ((symbol-function 'select-window)
+               (lambda (w) (setq selected-win w)))
+              ((symbol-function 'switch-to-buffer)
+               (lambda (_) (error "switch-to-buffer must not be called"))))
+      (kuro-mux-find-window "*kuro-test*")
+      (should (eq selected-win fake-win)))))
+
+(ert-deftest kuro-mux-test-find-window-switches-when-not-visible ()
+  "`kuro-mux-find-window' calls `switch-to-buffer' when buffer exists but is not visible."
+  (let (switched-to)
+    (cl-letf (((symbol-function 'get-buffer)
+               (lambda (_) (current-buffer)))
+              ((symbol-function 'get-buffer-window)
+               (lambda (_buf _flag) nil))
+              ((symbol-function 'select-window)
+               (lambda (_) (error "select-window must not be called")))
+              ((symbol-function 'switch-to-buffer)
+               (lambda (buf) (setq switched-to buf))))
+      (kuro-mux-find-window "*kuro-test*")
+      (should (eq switched-to (current-buffer))))))
+
+(ert-deftest kuro-mux-test-find-window-errors-on-missing-buffer ()
+  "`kuro-mux-find-window' signals user-error when `get-buffer' returns nil."
+  (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil)))
+    (should-error (kuro-mux-find-window "nonexistent") :type 'user-error)))
+
+(ert-deftest kuro-mux-test-find-window-uses-live-sessions-for-completion ()
+  "The `completing-read' candidates come from `kuro-mux--live-sessions'."
+  (let ((candidates :unset))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt cands &rest _) (setq candidates cands) ""))
+              ((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list (current-buffer))))
+              ((symbol-function 'get-buffer) (lambda (_) nil)))
+      (ignore-errors (call-interactively #'kuro-mux-find-window))
+      (should (listp candidates)))))
+
+;;; Group 24 — kuro-mux-auto-save-layout + kill-emacs-hook integration
+
+(ert-deftest kuro-mux-test-auto-save-layout-default-is-nil ()
+  "`kuro-mux-auto-save-layout' defaults to nil."
+  (should (null (default-value 'kuro-mux-auto-save-layout))))
+
+(ert-deftest kuro-mux-test-install-hooks-adds-kill-emacs-hook ()
+  "`kuro-mux--install-hooks' adds `kuro-mux--auto-save-on-exit' to `kill-emacs-hook'."
+  (let ((kill-emacs-hook nil))
+    (kuro-mux--install-hooks)
+    (should (memq #'kuro-mux--auto-save-on-exit kill-emacs-hook))
+    (kuro-mux--uninstall-hooks)))
+
+(ert-deftest kuro-mux-test-uninstall-hooks-removes-kill-emacs-hook ()
+  "`kuro-mux--uninstall-hooks' removes `kuro-mux--auto-save-on-exit' from `kill-emacs-hook'."
+  (let ((kill-emacs-hook (list #'kuro-mux--auto-save-on-exit)))
+    (kuro-mux--uninstall-hooks)
+    (should (null (memq #'kuro-mux--auto-save-on-exit kill-emacs-hook)))))
+
+(ert-deftest kuro-mux-test-auto-save-on-exit-noop-when-disabled ()
+  "`kuro-mux--auto-save-on-exit' does not call `kuro-mux-save-layout' when auto-save is nil."
+  (let ((kuro-mux-auto-save-layout nil)
+        (saved nil))
+    (cl-letf (((symbol-function 'kuro-mux-save-layout)
+               (lambda () (setq saved t)))
+              ((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list (current-buffer)))))
+      (kuro-mux--auto-save-on-exit)
+      (should (null saved)))))
+
+(ert-deftest kuro-mux-test-auto-save-on-exit-saves-when-enabled ()
+  "`kuro-mux--auto-save-on-exit' calls `kuro-mux-save-layout' when auto-save is t."
+  (let ((kuro-mux-auto-save-layout t)
+        (saved nil))
+    (cl-letf (((symbol-function 'kuro-mux-save-layout)
+               (lambda () (setq saved t)))
+              ((symbol-function 'kuro-mux--live-sessions)
+               (lambda () (list (current-buffer)))))
+      (kuro-mux--auto-save-on-exit)
+      (should saved))))
+
+(ert-deftest kuro-mux-test-auto-save-on-exit-noop-when-no-sessions ()
+  "`kuro-mux--auto-save-on-exit' skips save when no live sessions exist."
+  (let ((kuro-mux-auto-save-layout t)
+        (saved nil))
+    (cl-letf (((symbol-function 'kuro-mux-save-layout)
+               (lambda () (setq saved t)))
+              ((symbol-function 'kuro-mux--live-sessions)
+               (lambda () nil)))
+      (kuro-mux--auto-save-on-exit)
+      (should (null saved)))))
+
+;;; Group 25 — kuro-mux-break-pane + kuro-mux-join-pane
+
+(ert-deftest kuro-mux-test-break-pane-rejects-non-kuro-buffer ()
+  "`kuro-mux-break-pane' signals user-error when not in a kuro buffer."
+  (with-temp-buffer
+    (should-error (kuro-mux-break-pane) :type 'user-error)))
+
+(ert-deftest kuro-mux-test-break-pane-creates-new-frame ()
+  "`kuro-mux-break-pane' calls `make-frame' to create a new frame."
+  (with-temp-buffer
+    (kuro-mode)
+    (let ((frame-made nil))
+      (cl-letf (((symbol-function 'make-frame)
+                 (lambda (&optional _params) (setq frame-made t) (selected-frame)))
+                ((symbol-function 'window-list)
+                 (lambda (&rest _) '(win1)))
+                ((symbol-function 'delete-window)
+                 (lambda (&optional _) nil)))
+        (kuro-mux-break-pane)
+        (should frame-made)))))
+
+(ert-deftest kuro-mux-test-break-pane-deletes-window-when-multiple ()
+  "`kuro-mux-break-pane' deletes the source window when multiple windows exist."
+  (with-temp-buffer
+    (kuro-mode)
+    (let ((window-deleted nil))
+      (cl-letf (((symbol-function 'make-frame)
+                 (lambda (&optional _params) (selected-frame)))
+                ((symbol-function 'window-list)
+                 (lambda (&rest _) '(win1 win2)))
+                ((symbol-function 'delete-window)
+                 (lambda (&optional _) (setq window-deleted t))))
+        (kuro-mux-break-pane)
+        (should window-deleted)))))
+
+(ert-deftest kuro-mux-test-break-pane-no-delete-when-sole-window ()
+  "`kuro-mux-break-pane' does not delete window when it is the only one."
+  (with-temp-buffer
+    (kuro-mode)
+    (let ((window-deleted nil))
+      (cl-letf (((symbol-function 'make-frame)
+                 (lambda (&optional _params) (selected-frame)))
+                ((symbol-function 'window-list)
+                 (lambda (&rest _) '(win1)))
+                ((symbol-function 'delete-window)
+                 (lambda (&optional _) (setq window-deleted t))))
+        (kuro-mux-break-pane)
+        (should (null window-deleted))))))
+
+(ert-deftest kuro-mux-test-break-pane-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds `!' to `kuro-mux-break-pane'."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "!")) #'kuro-mux-break-pane)))
+
+(ert-deftest kuro-mux-test-join-pane-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds `@' to `kuro-mux-join-pane'."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "@")) #'kuro-mux-join-pane)))
+
+(ert-deftest kuro-mux-test-join-pane-dead-buffer-signals-error ()
+  "`kuro-mux-join-pane' signals user-error when the named buffer is dead."
+  (should-error (kuro-mux-join-pane " *nonexistent-kuro-99*") :type 'user-error))
+
+(ert-deftest kuro-mux-test-join-pane-splits-and-selects ()
+  "`kuro-mux-join-pane' splits the window right and selects the new window."
+  (with-temp-buffer
+    (kuro-mode)
+    (let ((the-buf (current-buffer))
+          (split-called nil)
+          (selected-buf nil))
+      (cl-letf (((symbol-function 'split-window-right)
+                 (lambda () (setq split-called t) (selected-window)))
+                ((symbol-function 'set-window-buffer)
+                 (lambda (_win buf) (setq selected-buf buf)))
+                ((symbol-function 'select-window)
+                 (lambda (_w) nil)))
+        (kuro-mux-join-pane (buffer-name the-buf))
+        (should split-called)
+        (should (eq selected-buf the-buf))))))
+
+;;; Group 26 — kuro-mux-monitor-activity-toggle + kuro-mux-monitor-silence
+
+(ert-deftest kuro-mux-test-monitor-activity-default-nil ()
+  "`kuro-mux--monitor-activity' starts as nil in a fresh kuro buffer."
+  (with-temp-buffer
+    (kuro-mode)
+    (should (null kuro-mux--monitor-activity))))
+
+(ert-deftest kuro-mux-test-monitor-activity-toggle-rejects-non-kuro ()
+  "`kuro-mux-monitor-activity-toggle' signals user-error outside kuro-mode."
+  (with-temp-buffer
+    (should-error (kuro-mux-monitor-activity-toggle) :type 'user-error)))
+
+(ert-deftest kuro-mux-test-monitor-activity-toggle-enables ()
+  "`kuro-mux-monitor-activity-toggle' sets `kuro-mux--monitor-activity' to t."
+  (with-temp-buffer
+    (kuro-mode)
+    (kuro-mux-monitor-activity-toggle)
+    (should kuro-mux--monitor-activity)))
+
+(ert-deftest kuro-mux-test-monitor-activity-toggle-adds-hook ()
+  "`kuro-mux-monitor-activity-toggle' adds watcher to `after-change-functions'."
+  (with-temp-buffer
+    (kuro-mode)
+    (kuro-mux-monitor-activity-toggle)
+    (should (memq #'kuro-mux--activity-watcher after-change-functions))
+    ;; cleanup
+    (kuro-mux-monitor-activity-toggle)))
+
+(ert-deftest kuro-mux-test-monitor-activity-toggle-disables ()
+  "`kuro-mux-monitor-activity-toggle' toggles back to nil on second call."
+  (with-temp-buffer
+    (kuro-mode)
+    (kuro-mux-monitor-activity-toggle)
+    (kuro-mux-monitor-activity-toggle)
+    (should (null kuro-mux--monitor-activity))))
+
+(ert-deftest kuro-mux-test-monitor-activity-toggle-removes-hook ()
+  "`kuro-mux-monitor-activity-toggle' removes watcher from `after-change-functions' on disable."
+  (with-temp-buffer
+    (kuro-mode)
+    (kuro-mux-monitor-activity-toggle)
+    (kuro-mux-monitor-activity-toggle)
+    (should (null (memq #'kuro-mux--activity-watcher after-change-functions)))))
+
+(ert-deftest kuro-mux-test-activity-watcher-noop-when-disabled ()
+  "`kuro-mux--activity-watcher' does not notify when monitoring is off."
+  (with-temp-buffer
+    (kuro-mode)
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'kuro--activity-notify)
+                 (lambda (_title _body) (setq notified t)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf _vis) nil)))
+        (kuro-mux--activity-watcher 1 2 0)
+        (should (null notified))))))
+
+(ert-deftest kuro-mux-test-activity-watcher-notifies-background ()
+  "`kuro-mux--activity-watcher' fires when monitoring on and buffer is not visible."
+  (with-temp-buffer
+    (kuro-mode)
+    (setq kuro-mux--monitor-activity t)
+    (setq kuro-mux--monitor-activity-last-notified 0)
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'kuro--activity-notify)
+                 (lambda (_title _body) (setq notified t)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf _vis) nil)))
+        (kuro-mux--activity-watcher 1 2 0)
+        (should notified)))))
+
+(ert-deftest kuro-mux-test-activity-watcher-skips-visible-buffer ()
+  "`kuro-mux--activity-watcher' does not notify when buffer is visible."
+  (with-temp-buffer
+    (kuro-mode)
+    (setq kuro-mux--monitor-activity t)
+    (setq kuro-mux--monitor-activity-last-notified 0)
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'kuro--activity-notify)
+                 (lambda (_title _body) (setq notified t)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf _vis) (selected-window))))
+        (kuro-mux--activity-watcher 1 2 0)
+        (should (null notified))))))
+
+(ert-deftest kuro-mux-test-monitor-silence-rejects-non-kuro ()
+  "`kuro-mux-monitor-silence' signals user-error outside kuro-mode."
+  (with-temp-buffer
+    (should-error (kuro-mux-monitor-silence 30) :type 'user-error)))
+
+(ert-deftest kuro-mux-test-monitor-silence-sets-seconds ()
+  "`kuro-mux-monitor-silence' sets `kuro-mux--monitor-silence-seconds' to N."
+  (with-temp-buffer
+    (kuro-mode)
+    (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) nil)))
+      (kuro-mux-monitor-silence 30)
+      (should (= kuro-mux--monitor-silence-seconds 30))
+      (kuro-mux-monitor-silence 0))))
+
+(ert-deftest kuro-mux-test-monitor-silence-zero-disables ()
+  "`kuro-mux-monitor-silence' with 0 disables monitoring."
+  (with-temp-buffer
+    (kuro-mode)
+    (setq kuro-mux--monitor-silence-seconds 30)
+    (kuro-mux-monitor-silence 0)
+    (should (null kuro-mux--monitor-silence-seconds))))
+
+(ert-deftest kuro-mux-test-monitor-activity-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds `m' to `kuro-mux-monitor-activity-toggle'."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "m"))
+              #'kuro-mux-monitor-activity-toggle)))
+
+(ert-deftest kuro-mux-test-monitor-silence-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds `M' to `kuro-mux-monitor-silence'."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "M"))
+              #'kuro-mux-monitor-silence)))
+
+(ert-deftest kuro-mux-test-choose-window-in-prefix-map ()
+  "`kuro-mux-prefix-map' binds `w' to `kuro-list-sessions'."
+  (should (eq (lookup-key kuro-mux-prefix-map (kbd "w"))
+              #'kuro-list-sessions)))
+
+(provide 'kuro-mux-test-3)
+;;; kuro-mux-test-3.el ends here

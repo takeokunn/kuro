@@ -378,116 +378,189 @@ fn sgr_0_resets_fg_and_bg_colors() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SGR combining attributes — bold + italic + underline + color
+// SGR bright named colors — foreground (90–97) / background (100–107)
+//
+// These lock down the bright named-color dispatch in `parser/sgr.rs`
+// (`bright_named_color_from_offset`) and `parser/sgr_support.rs`
+// (`NAMED_SGR_COLOR_GROUPS` rows for bases 90 and 100). The parser is already
+// correct; these are regression guards so a future refactor cannot silently
+// downgrade bright colors to their normal variants or to Indexed values.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// SGR bold + italic + underline + RGB foreground in one sequence must all be set.
+/// SGR 90 must set the foreground to the bright-black named color
+/// (`NamedColor::BrightBlack`), not the normal `Black` and not `Indexed(8)`.
 #[test]
-fn sgr_combined_bold_italic_underline_rgb_fg() {
+fn sgr_90_sets_foreground_bright_black() {
     let mut t = TerminalCore::new(24, 80);
-    // bold=1, italic=3, underline=4, then 38;2;255;0;128 for fg
-    t.advance(b"\x1b[1;3;4;38;2;255;0;128m");
-    assert!(t.current_bold(), "bold must be set");
-    assert!(t.current_italic(), "italic must be set");
-    assert!(t.current_underline(), "underline must be set");
+    t.advance(b"\x1b[90m");
     assert_eq!(
         *t.current_foreground(),
-        kuro_core::Color::Rgb(255, 0, 128),
-        "RGB foreground must be set"
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightBlack),
+        "SGR 90 must set foreground to Named(BrightBlack)"
     );
 }
 
-// SGR blink-fast (6) sets the BLINK_FAST flag; SGR 0 clears it.
+/// SGR 97 must set the foreground to the bright-white named color
+/// (the top of the 90–97 range, offset 7).
 #[test]
-fn sgr_6_blink_fast_set_and_cleared_by_reset() {
-    use kuro_core::types::cell::SgrFlags;
-    assert_flag_set_clear!(b"\x1b[6m", b"\x1b[0m", SgrFlags::BLINK_FAST, "BLINK_FAST");
-}
-
-// SGR dim (2) sets the DIM flag; SGR 22 clears it (not SGR 0 only).
-#[test]
-fn sgr_2_dim_set_and_sgr_22_clears_it() {
-    use kuro_core::types::cell::SgrFlags;
+fn sgr_97_sets_foreground_bright_white() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[2m");
-    assert!(
-        t.current_attrs().flags.contains(SgrFlags::DIM),
-        "dim must be set by SGR 2"
-    );
-    t.advance(b"\x1b[22m");
-    assert!(
-        !t.current_attrs().flags.contains(SgrFlags::DIM),
-        "dim must be cleared by SGR 22"
+    t.advance(b"\x1b[97m");
+    assert_eq!(
+        *t.current_foreground(),
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightWhite),
+        "SGR 97 must set foreground to Named(BrightWhite)"
     );
 }
 
-// SGR 0 clears underline color as well as style.
+/// SGR 100 must set the background to the bright-black named color
+/// (base 100, offset 0).
 #[test]
-fn sgr_0_clears_underline_color() {
+fn sgr_100_sets_background_bright_black() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[58:2:10:20:30m");
+    t.advance(b"\x1b[100m");
+    assert_eq!(
+        t.current_attrs().background,
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightBlack),
+        "SGR 100 must set background to Named(BrightBlack)"
+    );
+}
+
+/// SGR 107 must set the background to the bright-white named color
+/// (top of the 100–107 range, offset 7).
+#[test]
+fn sgr_107_sets_background_bright_white() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[107m");
+    assert_eq!(
+        t.current_attrs().background,
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightWhite),
+        "SGR 107 must set background to Named(BrightWhite)"
+    );
+}
+
+/// The full 90–97 range must map to BrightBlack..BrightWhite in offset order.
+#[test]
+fn sgr_90_through_97_map_to_bright_named_foreground_in_order() {
+    use kuro_core::types::NamedColor::{
+        BrightBlack, BrightBlue, BrightCyan, BrightGreen, BrightMagenta, BrightRed, BrightWhite,
+        BrightYellow,
+    };
+    let cases: &[(&[u8], kuro_core::types::NamedColor)] = &[
+        (b"\x1b[90m", BrightBlack),
+        (b"\x1b[91m", BrightRed),
+        (b"\x1b[92m", BrightGreen),
+        (b"\x1b[93m", BrightYellow),
+        (b"\x1b[94m", BrightBlue),
+        (b"\x1b[95m", BrightMagenta),
+        (b"\x1b[96m", BrightCyan),
+        (b"\x1b[97m", BrightWhite),
+    ];
+    for (seq, expected) in cases {
+        let mut t = TerminalCore::new(24, 80);
+        t.advance(seq);
+        assert_eq!(
+            *t.current_foreground(),
+            kuro_core::Color::Named(*expected),
+            "{seq:?} must set foreground to Named({expected:?})"
+        );
+    }
+}
+
+/// The full 100–107 range must map to BrightBlack..BrightWhite in offset order.
+#[test]
+fn sgr_100_through_107_map_to_bright_named_background_in_order() {
+    use kuro_core::types::NamedColor::{
+        BrightBlack, BrightBlue, BrightCyan, BrightGreen, BrightMagenta, BrightRed, BrightWhite,
+        BrightYellow,
+    };
+    let cases: &[(&[u8], kuro_core::types::NamedColor)] = &[
+        (b"\x1b[100m", BrightBlack),
+        (b"\x1b[101m", BrightRed),
+        (b"\x1b[102m", BrightGreen),
+        (b"\x1b[103m", BrightYellow),
+        (b"\x1b[104m", BrightBlue),
+        (b"\x1b[105m", BrightMagenta),
+        (b"\x1b[106m", BrightCyan),
+        (b"\x1b[107m", BrightWhite),
+    ];
+    for (seq, expected) in cases {
+        let mut t = TerminalCore::new(24, 80);
+        t.advance(seq);
+        assert_eq!(
+            t.current_attrs().background,
+            kuro_core::Color::Named(*expected),
+            "{seq:?} must set background to Named({expected:?})"
+        );
+    }
+}
+
+/// SGR 39 must reset a bright foreground (set via SGR 91) back to Default.
+#[test]
+fn sgr_39_resets_bright_foreground_to_default() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[91m"); // bright red foreground
+    assert_eq!(
+        *t.current_foreground(),
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightRed)
+    );
+    t.advance(b"\x1b[39m");
+    assert_eq!(
+        *t.current_foreground(),
+        kuro_core::Color::Default,
+        "SGR 39 must reset a bright foreground to Default"
+    );
+}
+
+/// SGR 49 must reset a bright background (set via SGR 101) back to Default.
+#[test]
+fn sgr_49_resets_bright_background_to_default() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[101m"); // bright red background
+    assert_eq!(
+        t.current_attrs().background,
+        kuro_core::Color::Named(kuro_core::types::NamedColor::BrightRed)
+    );
+    t.advance(b"\x1b[49m");
+    assert_eq!(
+        t.current_attrs().background,
+        kuro_core::Color::Default,
+        "SGR 49 must reset a bright background to Default"
+    );
+}
+
+/// SGR 0 must reset both a bright foreground and a bright background to Default.
+#[test]
+fn sgr_0_resets_bright_fg_and_bg_to_default() {
+    let mut t = TerminalCore::new(24, 80);
+    t.advance(b"\x1b[95m"); // bright magenta foreground
+    t.advance(b"\x1b[106m"); // bright cyan background
     t.advance(b"\x1b[0m");
     assert_eq!(
-        t.current_attrs().underline_color,
+        *t.current_foreground(),
         kuro_core::Color::Default,
-        "SGR 0 must reset underline_color to Default"
+        "SGR 0 must reset a bright foreground to Default"
     );
     assert_eq!(
-        t.current_attrs().underline_style,
-        kuro_core::UnderlineStyle::None,
-        "SGR 0 must reset underline_style to None"
+        t.current_attrs().background,
+        kuro_core::Color::Default,
+        "SGR 0 must reset a bright background to Default"
     );
 }
 
-// SGR 58:2:R:G:B followed by SGR 4 (underline on) — both attributes active.
+/// Colon-indexed `38:5:9` must resolve to palette index 9, which is the
+/// standard bright-red slot in the 256-color palette. The parser stores this
+/// as `Color::Indexed(9)` (the palette layer resolves index 9 to bright red).
 #[test]
-fn sgr_underline_color_and_underline_both_active() {
+fn sgr_38_colon_5_colon_9_maps_to_bright_red_index() {
     let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[4m");
-    t.advance(b"\x1b[58:2:255:165:0m"); // orange underline color
-    assert!(t.current_underline(), "underline must still be set");
+    t.advance(b"\x1b[38:5:9m");
     assert_eq!(
-        t.current_attrs().underline_color,
-        kuro_core::Color::Rgb(255, 165, 0),
-        "underline color must be orange"
+        *t.current_foreground(),
+        kuro_core::Color::Indexed(9),
+        "SGR 38:5:9 (colon form) must set foreground to Indexed(9), the bright-red palette slot"
     );
 }
 
-// SGR 1;3;9 (bold+italic+strikethrough) followed by SGR 22;23;29 clears each.
-#[test]
-fn sgr_individual_clear_codes_for_bold_italic_strikethrough() {
-    use kuro_core::types::cell::SgrFlags;
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[1;3;9m");
-    assert!(t.current_bold(), "precondition: bold must be set");
-    assert!(t.current_italic(), "precondition: italic must be set");
-    assert!(
-        t.current_attrs().flags.contains(SgrFlags::STRIKETHROUGH),
-        "precondition: strikethrough must be set"
-    );
-    // SGR 22 = normal intensity (clears bold/dim), 23 = not italic, 29 = not strikethrough
-    t.advance(b"\x1b[22;23;29m");
-    assert!(!t.current_bold(), "SGR 22 must clear bold");
-    assert!(!t.current_italic(), "SGR 23 must clear italic");
-    assert!(
-        !t.current_attrs().flags.contains(SgrFlags::STRIKETHROUGH),
-        "SGR 29 must clear strikethrough"
-    );
-}
-
-// SGR inverse (7) set and cleared by SGR 27.
-#[test]
-fn sgr_7_inverse_cleared_by_sgr_27() {
-    use kuro_core::types::cell::SgrFlags;
-    let mut t = TerminalCore::new(24, 80);
-    t.advance(b"\x1b[7m");
-    assert!(
-        t.current_attrs().flags.contains(SgrFlags::INVERSE),
-        "SGR 7 must set INVERSE"
-    );
-    t.advance(b"\x1b[27m");
-    assert!(
-        !t.current_attrs().flags.contains(SgrFlags::INVERSE),
-        "SGR 27 must clear INVERSE"
-    );
-}
+#[path = "include/integration_sgr_combining.rs"]
+mod combining;

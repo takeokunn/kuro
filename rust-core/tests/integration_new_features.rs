@@ -21,13 +21,13 @@ use kuro_core::TerminalCore;
 fn osc_data_palette_initialized_to_256_nones() {
     let t = TerminalCore::new(24, 80);
     assert_eq!(
-        t.osc_data().palette.len(),
+        t.osc_data().palette().len(),
         256,
         "OscData.palette must have 256 entries"
     );
     assert!(
         t.osc_data()
-            .palette
+            .palette()
             .iter()
             .all(std::option::Option::is_none),
         "All palette entries must be None initially"
@@ -42,10 +42,10 @@ fn osc_data_palette_initialized_to_256_nones() {
 fn reset_clears_palette_entries() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]4;0;rgb:ff/00/00\x07");
-    assert!(t.osc_data().palette[0].is_some());
+    assert!(t.osc_data().palette()[0].is_some());
     t.advance(b"\x1bc"); // RIS full reset
     assert!(
-        t.osc_data().palette[0].is_none(),
+        t.osc_data().palette()[0].is_none(),
         "RIS reset must clear palette entries"
     );
 }
@@ -54,10 +54,10 @@ fn reset_clears_palette_entries() {
 fn reset_clears_default_colors() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]10;rgb:ff/ff/ff\x07");
-    assert!(t.osc_data().default_fg.is_some());
+    assert!(t.osc_data().default_fg().is_some());
     t.advance(b"\x1bc"); // RIS
     assert!(
-        t.osc_data().default_fg.is_none(),
+        t.osc_data().default_fg().is_none(),
         "RIS reset must clear default_fg"
     );
 }
@@ -119,7 +119,7 @@ fn test_osc4_st_terminator() {
     let mut t = TerminalCore::new(24, 80);
     // OSC 4 ; 1 ; rgb:ff/00/00 ST — same as BEL terminator but uses ESC backslash
     t.advance(b"\x1b]4;1;rgb:ff/00/00\x1b\\");
-    let palette = &t.osc_data().palette;
+    let palette = t.osc_data().palette();
     assert_eq!(
         palette[1],
         Some([0xff, 0x00, 0x00]),
@@ -288,4 +288,5 @@ fn test_app_keypad_toggle_idempotent() {
     }
 }
 
-include!("include/integration_sgr_truecolor.rs");
+#[path = "include/integration_sgr_truecolor.rs"]
+mod sgr_truecolor;

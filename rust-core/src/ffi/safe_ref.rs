@@ -1,38 +1,53 @@
-//! Safe environment reference storage with lifetime management
+//! Callback-scoped environment reference storage with lifetime management
 //!
-//! This module provides a safe abstraction for storing and managing references
-//! to Emacs environment pointers, ensuring proper lifetime management and
-//! preventing use-after-free errors.
+//! Emacs `emacs_env` pointers are callback-scoped capabilities. They must not be
+//! cloned into multiple live handles or moved/shared across threads.
 
 use super::abstraction::emacs_env;
 use crate::{KuroError, Result};
-use std::ptr::NonNull;
+use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
-/// Safe wrapper for Emacs environment pointer
+/// Callback-scoped wrapper for an Emacs environment pointer.
 ///
-/// This struct wraps a raw pointer to an Emacs environment and provides
-/// safe access methods. It ensures the pointer is valid during use and
-/// prevents null pointer dereferences.
-#[repr(C)]
-pub struct SafeEnvRef {
+/// This type is intentionally `!Send` and `!Sync`; an Emacs environment is only
+/// valid for the callback/thread that supplied it.
+///
+/// ```compile_fail
+/// use kuro_core::ffi::{emacs_env, SafeEnvRef};
+///
+/// let env = std::ptr::NonNull::<emacs_env>::dangling().as_ptr();
+/// let safe_env = unsafe { SafeEnvRef::from_raw(env).unwrap() };
+///
+/// std::thread::spawn(move || {
+///     let _ = safe_env.as_ptr();
+/// });
+/// ```
+pub struct SafeEnvRef<'env> {
     /// Non-null pointer to Emacs environment
     env: NonNull<emacs_env>,
+    _scope: PhantomData<&'env mut emacs_env>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
-impl SafeEnvRef {
+impl<'env> SafeEnvRef<'env> {
     /// Create a new safe environment reference from a raw pointer
     ///
     /// # Safety
     /// The caller must ensure that:
     /// - The pointer is valid and points to a properly initialized Emacs environment
-    /// - The environment remains valid for the lifetime of this reference
-    /// - Only one `SafeEnvRef` exists for a given environment at a time
+    /// - The environment remains valid for `'env`
+    /// - `'env` does not outlive the Emacs callback that supplied the pointer
+    /// - Only one live `SafeEnvRef` exists for a given environment at a time
     ///
     /// # Errors
     /// Returns `Err(KuroError::NullPointer)` if `env` is null.
     pub unsafe fn from_raw(env: *mut emacs_env) -> Result<Self> {
         NonNull::new(env)
-            .map(|env| Self { env })
+            .map(|env| Self {
+                env,
+                _scope: PhantomData,
+                _not_send_sync: PhantomData,
+            })
             .ok_or(KuroError::NullPointer)
     }
 
@@ -46,45 +61,7 @@ impl SafeEnvRef {
     pub const fn as_ptr(&self) -> *mut emacs_env {
         self.env.as_ptr()
     }
-
-    /// Check if the environment reference is still valid
-    ///
-    /// This is a basic check - actual validity depends on the Emacs
-    /// runtime ensuring the environment remains valid.
-    ///
-    /// # Returns
-    /// * `true` if the pointer is non-null
-    /// * `false` if the pointer is null (should never happen)
-    #[expect(
-        useless_ptr_null_checks,
-        reason = "runtime guard: Emacs env pointer validity is enforced by the Emacs runtime, not statically provable"
-    )]
-    #[must_use]
-    pub const fn is_valid(&self) -> bool {
-        !self.env.as_ptr().is_null()
-    }
-
-    /// Clone the reference (creates a new handle to the same environment)
-    ///
-    /// # Safety
-    /// This is unsafe because it allows creating multiple handles to the
-    /// same environment, which can lead to undefined behavior if not
-    /// used correctly.
-    ///
-    /// # Returns
-    /// A new `SafeEnvRef` pointing to the same environment
-    #[must_use]
-    pub const unsafe fn clone_ref(&self) -> Self {
-        Self { env: self.env }
-    }
 }
-
-// SAFETY: SafeEnvRef wraps a raw pointer; Send is sound because the Emacs
-// runtime is thread-safe when the caller follows its documented protocol.
-unsafe impl Send for SafeEnvRef {}
-// SAFETY: SafeEnvRef contains only a pointer and provides no interior
-// mutability; Sync is sound under the same protocol guarantees as Send.
-unsafe impl Sync for SafeEnvRef {}
 
 /// Environment reference registry for tracking active references
 ///
@@ -203,19 +180,19 @@ impl Drop for EnvRefGuard {
 /// Scoped environment reference
 ///
 /// This combines a `SafeEnvRef` with automatic lifetime management via `EnvRefGuard`.
-pub struct ScopedEnvRef {
+pub struct ScopedEnvRef<'env> {
     /// The safe environment reference
-    env: SafeEnvRef,
+    env: SafeEnvRef<'env>,
     /// The RAII guard for registration
     _guard: EnvRefGuard,
 }
 
-impl ScopedEnvRef {
+impl<'env> ScopedEnvRef<'env> {
     /// Create a new scoped environment reference from a raw pointer
     ///
     /// # Safety
     /// The caller must ensure the pointer is valid and the environment
-    /// remains valid for the lifetime of this scoped reference.
+    /// remains valid for `'env`.
     ///
     /// # Errors
     /// Returns `Err(KuroError::NullPointer)` if `env` is null.
@@ -232,7 +209,7 @@ impl ScopedEnvRef {
     /// # Returns
     /// Reference to the `SafeEnvRef`
     #[must_use]
-    pub const fn env(&self) -> &SafeEnvRef {
+    pub const fn env(&self) -> &SafeEnvRef<'env> {
         &self.env
     }
 

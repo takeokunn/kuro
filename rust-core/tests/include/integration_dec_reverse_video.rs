@@ -1,3 +1,5 @@
+use super::*;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DA1 / DA2 — device attributes (pre-existing, regression test)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,7 +104,7 @@ fn test_decawm_enable() {
 fn test_decawm_disable_cursor_stays_at_margin() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b[?7l"); // disable auto-wrap
-    // Write exactly 80 chars → cursor is at col 79 (last col, 0-indexed)
+                            // Write exactly 80 chars → cursor is at col 79 (last col, 0-indexed)
     t.advance(&[b'A'; 80]);
     assert_eq!(
         t.cursor_col(),
@@ -382,5 +384,3 @@ fn test_deccolm_disable_does_not_panic() {
     assert!(t.cursor_row() < 24, "cursor row must be in bounds");
     assert!(t.cursor_col() < 80, "cursor col must be in bounds");
 }
-
-include!("integration_dec_focus_events.rs");

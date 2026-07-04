@@ -59,6 +59,40 @@
    (kuro--send-key "echo second_cmd\r")
    (should (kuro-e2e--wait-for-output kuro--session-id "second_cmd"))))
 
+(declare-function kuro--poll-updates-binary-optimised "kuro-binary-decoder" (session-id))
+
+(ert-deftest kuro-e2e-binary-decoder-path-renders ()
+  "Drive the REAL default render path (`kuro--poll-updates-binary-optimised').
+
+Regression guard for the FFI cons-shape bug: the Rust FFI
+`kuro-core-poll-updates-binary-with-strings' must return a TRUE cons
+`(TEXT-STRINGS . BINARY-VECTOR)'.  A regression that returned the 2-element
+list `(TEXT-STRINGS BINARY-VECTOR)' makes `(cdr result)' a list, so the
+decoder throws `wrong-type-argument arrayp' every frame and the terminal
+buffer stays BLANK under the default `kuro-use-binary-ffi' path.
+
+The other E2E text checks only read `(car result)' via
+`kuro-e2e--ffi-poll-texts', never the `cdr', so they cannot catch this.
+This test exercises the decoder end-to-end on the real module."
+  :expected-result kuro-e2e--expected-result
+  (kuro-e2e--with-terminal
+   (kuro--send-key "printf BINDECODE_E2E_4C7\r")
+   (let ((sid kuro--session-id)
+         (deadline (+ (float-time) kuro-e2e--timeout))
+         (found nil))
+     (while (and (not found) (< (float-time) deadline))
+       ;; Must NOT throw arrayp; must decode to a vector of [row text ...] entries.
+       (let ((decoded (kuro--poll-updates-binary-optimised sid)))
+         (when (and decoded (vectorp decoded))
+           (dotimes (i (length decoded))
+             (let ((entry (aref decoded i)))
+               (when (and (vectorp entry) (>= (length entry) 2)
+                          (stringp (aref entry 1))
+                          (string-match-p "BINDECODE_E2E_4C7" (aref entry 1)))
+                 (setq found t))))))
+       (unless found (sleep-for kuro-e2e--poll-interval)))
+     (should found))))
+
 (ert-deftest kuro-e2e-cursor-position ()
   "Verify cursor position is a cons cell of non-negative integers."
   :expected-result kuro-e2e--expected-result

@@ -8,23 +8,21 @@
 
 ;; Bracketed paste mode (DEC mode 2004) support for the Kuro terminal.
 ;;
-;; When bracketed paste is active, yanked text is wrapped with
-;; ESC[200~ / ESC[201~ escape sequences and sanitized to remove
-;; ESC (0x1b) and C1 CSI (0x9b) bytes that could escape the paste
-;; bracket and allow command injection.
+;; Paste delivery is delegated to Rust.  The core checks the current DEC 2004
+;; mode in the same session operation that writes to the PTY, avoiding decisions
+;; based on the render cycle's cached mode snapshot.
 
 ;;; Code:
 
-(require 'subr-x)
 (require 'kuro-ffi)
 
 ;; Forward reference: kuro--schedule-immediate-render is defined in kuro-input.el.
-(declare-function kuro--schedule-immediate-render "kuro-input" ())
+(declare-function kuro--schedule-immediate-render "kuro-input-render" ())
 
 ;;; Bracketed Paste State
 
 (kuro--defvar-permanent-local kuro--bracketed-paste-mode nil
-  "Bracketed paste mode state from Rust (?2004); polled by render cycle.")
+  "Bracketed paste mode state from Rust (?2004); observational cache only.")
 
 (kuro--defvar-permanent-local kuro--keyboard-flags 0
   "Cached Kitty keyboard protocol flags, polled by render cycle.
@@ -36,52 +34,60 @@ This is a bitmask integer:
   Bit 4 (16): Report associated text")
 
 
-;;; Bracketed Paste Sequences
-
-(defconst kuro--paste-open "\e[200~"
-  "Opening sequence for bracketed paste mode (DEC mode 2004).")
-
-(defconst kuro--paste-close "\e[201~"
-  "Closing sequence for bracketed paste mode (DEC mode 2004).")
-
-
 ;;; Paste Functions
 
-(defun kuro--sanitize-paste (text)
-  "Sanitize TEXT before sending as bracketed paste.
-Removes ESC (\\x1b) and C1 CSI (\\x9b) bytes to prevent bracketed paste
-escape injection.  Both \\e[201~ (7-bit) and \\x9b201~ (8-bit C1 CSI) would
-prematurely close the paste bracket and allow command injection."
-  (thread-last text
-    (replace-regexp-in-string "\x1b" "")
-    (replace-regexp-in-string (regexp-quote (string #x9b)) "")))
+(defun kuro--paste-prefix-numeric-value (arg default)
+  "Return numeric prefix value for ARG, using DEFAULT when ARG is nil."
+  (cond
+   ((null arg) default)
+   ((or (integerp arg)
+        (eq arg '-)
+        (and (consp arg)
+             (integerp (car arg))
+             (null (cdr arg))))
+    (prefix-numeric-value arg))
+   (t
+    (signal 'wrong-type-argument
+            (list 'kuro--paste-prefix-argument-p arg)))))
+
+(defun kuro--paste-yank-index (arg)
+  "Return the zero-based kill-ring index for `kuro--yank' ARG."
+  (let ((value (kuro--paste-prefix-numeric-value arg 1)))
+    (unless (> value 0)
+      (user-error "Yank argument must be a positive integer"))
+    (1- value)))
+
+(defun kuro--paste-yank-pop-index (arg)
+  "Return the kill-ring rotation count for `kuro--yank-pop' ARG."
+  (kuro--paste-prefix-numeric-value arg 1))
 
 (defun kuro--send-paste-or-raw (text)
-  "Send TEXT to the PTY, bracketing it when `kuro--bracketed-paste-mode' is set.
-In bracketed mode the text is sanitized and wrapped with `kuro--paste-open' /
-`kuro--paste-close'.  In plain mode it is sent verbatim."
-  (if kuro--bracketed-paste-mode
-      (kuro--send-key (concat kuro--paste-open (kuro--sanitize-paste text) kuro--paste-close))
-    (kuro--send-key text)))
+  "Send TEXT to the PTY through the Rust paste API.
+Rust decides between raw and bracketed paste from the session's current DEC 2004
+state; this function must not use `kuro--bracketed-paste-mode' for safety."
+  (unless (stringp text)
+    (signal 'wrong-type-argument (list 'stringp text)))
+  (kuro--send-paste text))
 
 (defun kuro--yank (&optional arg)
-  "Yank from kill ring, wrapping with bracketed paste sequences when active.
+  "Yank from kill ring through the Rust paste API.
 Optional ARG selects which kill ring entry to use."
   (interactive "P")
-  (let* ((n (if (numberp arg) (1- arg) 0))
+  (let* ((n (kuro--paste-yank-index arg))
          (text (current-kill n)))
     (kuro--send-paste-or-raw text))
   (kuro--schedule-immediate-render))
 
 (defun kuro--yank-pop (&optional arg)
   "Cycle kill ring and yank ARG entries forward.
-Wraps with bracketed paste when active.
+Paste encoding is delegated to Rust at send time.
 Like `yank-pop': signals an error if the previous command was not a yank."
   (interactive "p")
   (unless (memq last-command '(yank kuro--yank kuro--yank-pop))
     (user-error "Previous command was not a yank"))
-  (let ((text (current-kill (or arg 1))))
-    (kuro--send-paste-or-raw text)))
+  (let ((text (current-kill (kuro--paste-yank-pop-index arg))))
+    (kuro--send-paste-or-raw text))
+  (kuro--schedule-immediate-render))
 
 (provide 'kuro-input-paste)
 

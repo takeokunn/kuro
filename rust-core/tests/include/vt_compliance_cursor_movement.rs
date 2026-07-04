@@ -1,3 +1,5 @@
+use super::*;
+
 // === CSI s / CSI u — ANSI Save/Restore Cursor ===
 
 #[test]
@@ -103,7 +105,7 @@ fn vt_irm_ich_inserts_space_before_existing_content() {
     t.advance(b"ABC"); // row 0: A B C
     t.advance(b"\x1b[1;2H"); // cursor to (0, 1) — before 'B'
     t.advance(b"\x1b[1@"); // ICH 1 — insert 1 blank at col 1
-    // After ICH: col 0='A', col 1=' ' (inserted), col 2='B', col 3='C'
+                           // After ICH: col 0='A', col 1=' ' (inserted), col 2='B', col 3='C'
     assert_eq!(
         t.get_cell(0, 0).unwrap().char(),
         'A',
@@ -357,5 +359,3 @@ fn vt_fullwidth_char_is_double_width() {
         "cell (0,0) must hold the fullwidth character"
     );
 }
-
-include!("vt_compliance_save_restore.rs");

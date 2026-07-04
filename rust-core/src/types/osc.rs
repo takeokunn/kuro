@@ -4,6 +4,14 @@ use std::sync::Arc;
 
 use crate::types::color::Color;
 
+/// Default color slots handled by OSC 10/11/12 and resets 110/111/112.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DefaultColorSlot {
+    Foreground,
+    Background,
+    Cursor,
+}
+
 /// Prompt mark type for OSC 133 shell integration
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptMark {
@@ -15,6 +23,19 @@ pub enum PromptMark {
     CommandStart,
     /// D - Command end
     CommandEnd,
+}
+
+impl PromptMark {
+    /// Maps an OSC 133 mark byte to a prompt mark variant.
+    pub(crate) fn from_osc_133_mark(mark: u8) -> Option<Self> {
+        match mark {
+            b'A' => Some(Self::PromptStart),
+            b'B' => Some(Self::PromptEnd),
+            b'C' => Some(Self::CommandStart),
+            b'D' => Some(Self::CommandEnd),
+            _ => None,
+        }
+    }
 }
 
 /// Pending prompt mark with position
@@ -43,52 +64,373 @@ pub struct PromptMarkEvent {
     pub(crate) err_path: Option<String>,
 }
 
+impl PromptMarkEvent {
+    /// Creates a prompt-mark event from the parsed OSC 133 payload and cursor position.
+    pub(crate) fn new(
+        mark: PromptMark,
+        row: usize,
+        col: usize,
+        exit_code: Option<i32>,
+        aid: Option<String>,
+        duration_ms: Option<u64>,
+        err_path: Option<String>,
+    ) -> Self {
+        Self {
+            mark,
+            row,
+            col,
+            exit_code,
+            aid,
+            duration_ms,
+            err_path,
+        }
+    }
+}
+
 /// Active hyperlink state for OSC 8
 #[derive(Debug, Clone, Default)]
 pub struct HyperlinkState {
     /// The URI of the hyperlink, or None if no hyperlink is active
-    /// NOTE: kept pub for integration test access (tests/ crate)
-    pub uri: Option<Arc<str>>,
+    pub(crate) uri: Option<Arc<str>>,
+}
+
+/// Selection target for an OSC 52 clipboard operation.
+///
+/// Carries the validated `Pc` selector parsed from `OSC 52 ; Pc ; Pd ST`.
+/// Only an empty selector and the exact selectors `c`, `p`, and `s` are
+/// accepted. Unsupported selectors are rejected before a clipboard action is
+/// queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionTarget {
+    /// Empty or `c` - system clipboard (CLIPBOARD).
+    Clipboard,
+    /// `p` - primary selection (PRIMARY).
+    Primary,
+    /// `s` - select / secondary (mapped to xterm's "select" buffer).
+    Select,
+}
+
+impl SelectionTarget {
+    /// Parse the OSC 52 `Pc` selector field.
+    pub(crate) fn from_selector(sel: &[u8]) -> Option<Self> {
+        match sel {
+            b"" | b"c" => Some(Self::Clipboard),
+            b"p" => Some(Self::Primary),
+            b"s" => Some(Self::Select),
+            _ => None,
+        }
+    }
 }
 
 /// Clipboard action for OSC 52
 #[derive(Debug, Clone)]
 pub enum ClipboardAction {
-    /// Write text to clipboard
-    Write(String),
-    /// Query clipboard contents
-    Query,
+    /// Write text to the given selection target.
+    Write {
+        /// Selection target parsed from the OSC 52 `Pc` field.
+        target: SelectionTarget,
+        /// The decoded clipboard text.
+        data: String,
+    },
+    /// Query the contents of the given selection target.
+    Query {
+        /// Selection target parsed from the OSC 52 `Pc` field.
+        target: SelectionTarget,
+    },
+}
+
+/// Desktop notification request from OSC 9 (iTerm2) or OSC 777 (`notify`).
+#[derive(Debug, Clone)]
+pub struct Notification {
+    /// Optional title — OSC 777 supplies one; the iTerm2 OSC 9 form does not.
+    pub title: Option<String>,
+    /// Notification body text.
+    pub body: String,
+    /// OSC 99 `i=<id>` notification id, echoed in any action response. `None`
+    /// for the OSC 9 / OSC 777 forms (and OSC 99 without an `i=` field).
+    pub id: Option<String>,
+    /// Whether the OSC 99 metadata requested an activation report (`a=report`).
+    /// When `true`, activating the notification must send an OSC 99 report back
+    /// to the application via [`crate::TerminalCore`]'s pending responses.
+    pub report: bool,
+}
+
+/// ConEmu OSC 9;4 progress report state.
+///
+/// Wire form: `OSC 9 ; 4 ; <state> ; <progress> ST`. `state` selects one of the
+/// variants below; `progress` (0–100) is only meaningful for [`Set`] and
+/// [`Warning`]. The display layer (Emacs mode-line) reads this via FFI.
+///
+/// [`Set`]: ProgressState::Set
+/// [`Warning`]: ProgressState::Warning
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProgressState {
+    /// state 0 — no progress / remove the indicator.
+    #[default]
+    None,
+    /// state 1 — normal progress at the given percent (0–100).
+    Set(u8),
+    /// state 2 — error state (percent retained from the last `Set`, if any).
+    Error(u8),
+    /// state 3 — indeterminate / busy (no percent).
+    Indeterminate,
+    /// state 4 — warning / paused at the given percent (0–100).
+    Warning(u8),
 }
 
 /// OSC data storage
 #[derive(Debug)]
 pub struct OscData {
     /// Current working directory from OSC 7
-    pub cwd: Option<String>,
+    pub(crate) cwd: Option<String>,
     /// Whether cwd has been updated and not yet read
-    pub cwd_dirty: bool,
+    pub(crate) cwd_dirty: bool,
     /// Active hyperlink state from OSC 8
-    pub hyperlink: HyperlinkState,
+    pub(crate) hyperlink: HyperlinkState,
     /// Pending clipboard actions from OSC 52
     pub(crate) clipboard_actions: Vec<ClipboardAction>,
+    /// Pending desktop notifications from OSC 9 (iTerm2) / OSC 777
+    pub(crate) notifications: Vec<Notification>,
     /// Pending prompt mark events from OSC 133
-    pub prompt_marks: Vec<PromptMarkEvent>,
+    pub(crate) prompt_marks: Vec<PromptMarkEvent>,
     /// Whether the color palette needs to be reset (OSC 104)
     pub(crate) palette_dirty: bool,
     /// Default foreground color from OSC 10
-    pub default_fg: Option<Color>,
+    pub(crate) default_fg: Option<Color>,
     /// Default background color from OSC 11
-    pub default_bg: Option<Color>,
+    pub(crate) default_bg: Option<Color>,
     /// Cursor color from OSC 12
-    pub cursor_color: Option<Color>, // NOTE: kept pub for integration test access (tests/ crate)
+    pub(crate) cursor_color: Option<Color>,
     /// 256-color palette overrides from OSC 4 (index → `[R,G,B]` or `None`=unset)
-    pub palette: Vec<Option<[u8; 3]>>,
+    pub(crate) palette: Vec<Option<[u8; 3]>>,
     /// Pending default-color-change notifications for FFI (fg, bg, cursor)
     pub(crate) default_colors_dirty: bool,
-    /// Pending Elisp eval commands from OSC 51 (security: whitelist-filtered on Elisp side)
+    /// Pending strict command payloads from OSC 51 (revalidated on the Elisp side).
     pub(crate) eval_commands: Vec<String>,
     /// Hostname from OSC 7 (None = localhost)
     pub(crate) cwd_host: Option<String>,
+    /// Window pointer cursor shape from OSC 22 (e.g. "default", "pointer", "text").
+    /// None = no override set; Some(name) = application-requested cursor name.
+    pub(crate) pointer_shape: Option<String>,
+    /// Save/restore stack for the 256-color palette (XTPUSHCOLORS / XTPOPCOLORS).
+    /// CSI # P pushes; CSI # Q pops and restores palette_dirty; capped at 10.
+    pub(crate) palette_stack: Vec<Vec<Option<[u8; 3]>>>,
+    /// In-progress OSC 99 (Kitty notification) chunk keyed by the `i=<id>` field.
+    /// `d=0` chunks accumulate here; `d=1` finalizes and pushes to `notifications`.
+    pub(crate) notification_chunk: Option<NotificationChunk>,
+    /// iTerm2 OSC 1337 `SetUserVar=<name>=<base64value>` user variables.
+    /// Stored decoded as `(name, value)`; later sets of the same name overwrite.
+    pub(crate) user_vars: Vec<(String, String)>,
+    /// Whether `user_vars` changed since the last FFI poll.
+    pub(crate) user_vars_dirty: bool,
+    /// iTerm2 OSC 1337 `RemoteHost=<user@host>` remote-host identity.
+    pub(crate) remote_host: Option<String>,
+    /// Whether `remote_host` changed since the last FFI poll.
+    pub(crate) remote_host_dirty: bool,
+    /// ConEmu OSC 9;4 progress report state.
+    pub(crate) progress: ProgressState,
+    /// Whether `progress` changed since the last FFI poll.
+    pub(crate) progress_dirty: bool,
+    /// Cell pixel size `(width, height)` in points, pushed from Emacs via
+    /// `kuro_core_set_cell_pixel_size`. Reported by iTerm2 OSC 1337 `ReportCellSize`.
+    /// `None` means no host metrics set; the OSC handler falls back to a default.
+    pub(crate) cell_pixel_size: Option<(u16, u16)>,
+}
+
+/// Accumulator for a chunked OSC 99 (Kitty desktop notification).
+///
+/// Kitty allows a notification to be sent in multiple `OSC 99` sequences sharing
+/// the same `i=<id>`; intermediate chunks set `d=0` (done=false) and the final
+/// chunk sets `d=1`. Title and body payloads accumulate independently here until
+/// the notification is finalized and pushed to [`OscData::notifications`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NotificationChunk {
+    /// The `i=<id>` value that groups chunks of the same notification.
+    pub(crate) id: String,
+    /// Accumulated `p=title` payload bytes.
+    pub(crate) title: String,
+    /// Accumulated `p=body` payload bytes.
+    pub(crate) body: String,
+    /// Whether `a=report` was requested for this notification (any chunk).
+    pub(crate) report: bool,
+}
+
+impl OscData {
+    /// Returns the current working directory reported by OSC 7.
+    pub fn cwd(&self) -> Option<&str> {
+        self.cwd.as_deref()
+    }
+
+    /// Returns whether the current working directory has changed and is unread.
+    pub fn cwd_dirty(&self) -> bool {
+        self.cwd_dirty
+    }
+
+    /// Returns the active OSC 8 hyperlink URI.
+    pub fn hyperlink_uri(&self) -> Option<&str> {
+        self.hyperlink.uri.as_deref()
+    }
+
+    /// Sets the active OSC 8 hyperlink URI.
+    pub(crate) fn set_hyperlink_uri(&mut self, uri: Option<String>) {
+        self.hyperlink.uri = uri.map(Arc::from);
+    }
+
+    /// Returns the pending OSC 133 prompt marks.
+    pub fn prompt_marks(&self) -> &[PromptMarkEvent] {
+        &self.prompt_marks
+    }
+
+    /// Returns the current OSC 10 default foreground color.
+    pub fn default_fg(&self) -> Option<Color> {
+        self.default_fg
+    }
+
+    /// Returns the current OSC 11 default background color.
+    pub fn default_bg(&self) -> Option<Color> {
+        self.default_bg
+    }
+
+    /// Returns the current OSC 12 cursor color.
+    pub fn cursor_color(&self) -> Option<Color> {
+        self.cursor_color
+    }
+
+    /// Returns the OSC 4 palette overrides.
+    pub fn palette(&self) -> &[Option<[u8; 3]>] {
+        &self.palette
+    }
+
+    /// Stores the OSC 7 current working directory and hostname and marks the value dirty.
+    pub(crate) fn set_cwd(&mut self, cwd_host: Option<String>, cwd: Option<String>) {
+        self.cwd_host = cwd_host;
+        self.cwd = cwd;
+        self.cwd_dirty = true;
+    }
+
+    /// Stores an iTerm2 OSC 1337 `SetUserVar` user variable, overwriting any
+    /// existing entry with the same name, and marks user_vars dirty.
+    pub(crate) fn set_user_var(&mut self, name: String, value: String) {
+        if let Some(existing) = self.user_vars.iter_mut().find(|(n, _)| *n == name) {
+            existing.1 = value;
+        } else {
+            self.user_vars.push((name, value));
+        }
+        self.user_vars_dirty = true;
+    }
+
+    /// Stores the iTerm2 OSC 1337 `RemoteHost` value and marks it dirty.
+    pub(crate) fn set_remote_host(&mut self, host: Option<String>) {
+        self.remote_host = host;
+        self.remote_host_dirty = true;
+    }
+
+    /// Returns the current remote host identity (OSC 1337 RemoteHost).
+    pub fn remote_host(&self) -> Option<&str> {
+        self.remote_host.as_deref()
+    }
+
+    /// Stores the ConEmu OSC 9;4 progress state and marks it dirty.
+    pub(crate) fn set_progress(&mut self, progress: ProgressState) {
+        self.progress = progress;
+        self.progress_dirty = true;
+    }
+
+    /// Returns the current ConEmu OSC 9;4 progress state.
+    pub fn progress(&self) -> ProgressState {
+        self.progress
+    }
+
+    /// Stores the host-pushed cell pixel size `(width, height)` in points.
+    ///
+    /// Set by Emacs via `kuro_core_set_cell_pixel_size` from `default-font-width`
+    /// / `default-font-height`; consumed when iTerm2 OSC 1337 `ReportCellSize` is
+    /// requested.
+    pub(crate) fn set_cell_pixel_size(&mut self, width: u16, height: u16) {
+        self.cell_pixel_size = Some((width, height));
+    }
+
+    /// Returns the host-pushed cell pixel size `(width, height)` in points, if set.
+    pub fn cell_pixel_size(&self) -> Option<(u16, u16)> {
+        self.cell_pixel_size
+    }
+
+    /// Stores the OSC 22 pointer shape override.
+    pub(crate) fn set_pointer_shape(&mut self, pointer_shape: Option<String>) {
+        self.pointer_shape = pointer_shape;
+    }
+
+    /// Resets the entire OSC 4 palette and marks it dirty.
+    pub(crate) fn clear_palette(&mut self) {
+        for entry in &mut self.palette {
+            *entry = None;
+        }
+        self.palette_dirty = true;
+    }
+
+    /// Resets one OSC 4 palette entry and marks the palette dirty.
+    pub(crate) fn clear_palette_entry(&mut self, idx: usize) {
+        if let Some(entry) = self.palette.get_mut(idx) {
+            *entry = None;
+            self.palette_dirty = true;
+        }
+    }
+
+    /// Stores one OSC 4 palette entry and marks the palette dirty.
+    pub(crate) fn set_palette_entry(&mut self, idx: usize, color: [u8; 3]) {
+        if let Some(entry) = self.palette.get_mut(idx) {
+            *entry = Some(color);
+            self.palette_dirty = true;
+        }
+    }
+
+    /// Restores the full OSC 4 palette from a saved snapshot and marks it dirty.
+    pub(crate) fn restore_palette(&mut self, palette: Vec<Option<[u8; 3]>>) {
+        self.palette = palette;
+        self.palette_dirty = true;
+    }
+
+    /// Marks the OSC 4 palette as dirty for FFI/render consumers.
+    pub(crate) fn mark_palette_dirty(&mut self) {
+        self.palette_dirty = true;
+    }
+
+    pub(crate) fn default_color(&self, slot: DefaultColorSlot) -> &Option<Color> {
+        match slot {
+            DefaultColorSlot::Foreground => &self.default_fg,
+            DefaultColorSlot::Background => &self.default_bg,
+            DefaultColorSlot::Cursor => &self.cursor_color,
+        }
+    }
+
+    pub(crate) fn set_default_color(&mut self, slot: DefaultColorSlot, color: Option<Color>) {
+        match slot {
+            DefaultColorSlot::Foreground => self.default_fg = color,
+            DefaultColorSlot::Background => self.default_bg = color,
+            DefaultColorSlot::Cursor => self.cursor_color = color,
+        }
+        self.default_colors_dirty = true;
+    }
+
+    pub(crate) fn reset_default_color(&mut self, slot: DefaultColorSlot) {
+        self.set_default_color(slot, None);
+    }
+
+    pub(crate) fn default_color_rgb(&self, slot: DefaultColorSlot) -> [u8; 3] {
+        match self.default_color(slot) {
+            Some(Color::Rgb(r, g, b)) => [*r, *g, *b],
+            _ => [128, 128, 128],
+        }
+    }
+
+    /// Pushes an OSC 133 prompt mark if the queue has not reached `max_pending`.
+    pub(crate) fn push_prompt_mark(&mut self, event: PromptMarkEvent, max_pending: usize) -> bool {
+        if self.prompt_marks.len() >= max_pending {
+            return false;
+        }
+        self.prompt_marks.push(event);
+        true
+    }
 }
 
 impl Default for OscData {
@@ -98,6 +440,7 @@ impl Default for OscData {
             cwd_dirty: false,
             hyperlink: HyperlinkState::default(),
             clipboard_actions: Vec::new(),
+            notifications: Vec::new(),
             prompt_marks: Vec::new(),
             palette_dirty: false,
             default_fg: None,
@@ -107,358 +450,20 @@ impl Default for OscData {
             default_colors_dirty: false,
             eval_commands: Vec::new(),
             cwd_host: None,
+            pointer_shape: None,
+            palette_stack: Vec::new(),
+            notification_chunk: None,
+            user_vars: Vec::new(),
+            user_vars_dirty: false,
+            remote_host: None,
+            remote_host_dirty: false,
+            progress: ProgressState::None,
+            progress_dirty: false,
+            cell_pixel_size: None,
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::color::Color;
-
-    // -------------------------------------------------------------------------
-    // OscData construction
-    // -------------------------------------------------------------------------
-
-    #[test]
-    // CONSTRUCTION: OscData::default() must initialise cwd_dirty to false.
-    fn osc_data_default_cwd_dirty_false() {
-        assert!(!OscData::default().cwd_dirty);
-    }
-
-    #[test]
-    // CONSTRUCTION: OscData::default() palette must have exactly 256 None entries.
-    fn osc_data_default_palette_len_256_all_none() {
-        let d = OscData::default();
-        assert_eq!(d.palette.len(), 256);
-        assert!(d.palette.iter().all(Option::is_none));
-    }
-
-    #[test]
-    // MUTATION: Writing and reading back a palette entry must round-trip.
-    fn osc_data_palette_write_roundtrip() {
-        let mut d = OscData::default();
-        d.palette[0] = Some([0x00, 0x00, 0x00]);
-        d.palette[255] = Some([0xFF, 0xFF, 0xFF]);
-        assert_eq!(d.palette[0], Some([0x00, 0x00, 0x00]));
-        assert_eq!(d.palette[255], Some([0xFF, 0xFF, 0xFF]));
-    }
-
-    #[test]
-    // MUTATION: Setting cwd stores the path string.
-    fn osc_data_set_cwd_stores_path() {
-        let d = OscData {
-            cwd: Some("/home/user".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(d.cwd.as_deref(), Some("/home/user"));
-    }
-
-    // -------------------------------------------------------------------------
-    // HyperlinkState
-    // -------------------------------------------------------------------------
-
-    #[test]
-    // CONSTRUCTION: HyperlinkState::default() must have uri == None.
-    fn hyperlink_state_default_is_none() {
-        assert!(HyperlinkState::default().uri.is_none());
-    }
-
-    #[test]
-    // MUTATION: Setting uri to Some and back to None round-trips.
-    fn hyperlink_state_set_then_clear_uri() {
-        let mut h = HyperlinkState {
-            uri: Some(Arc::from("https://rust-lang.org")),
-        };
-        assert_eq!(h.uri.as_deref(), Some("https://rust-lang.org"));
-        h.uri = None;
-        assert!(h.uri.is_none());
-    }
-
-    // -------------------------------------------------------------------------
-    // PromptMark / PromptMarkEvent
-    // -------------------------------------------------------------------------
-
-    #[test]
-    // CONSTRUCTION: All four PromptMark variants are distinct.
-    fn prompt_mark_all_variants_distinct() {
-        let variants = [
-            PromptMark::PromptStart,
-            PromptMark::PromptEnd,
-            PromptMark::CommandStart,
-            PromptMark::CommandEnd,
-        ];
-        for (i, a) in variants.iter().enumerate() {
-            for (j, b) in variants.iter().enumerate() {
-                if i == j {
-                    assert_eq!(a, b, "variant must equal itself");
-                } else {
-                    assert_ne!(a, b, "variant {i} must differ from variant {j}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    // CONSTRUCTION: PromptMarkEvent fields are stored and read back correctly.
-    fn prompt_mark_event_field_access() {
-        let ev = PromptMarkEvent {
-            mark: PromptMark::CommandEnd,
-            row: 10,
-            col: 3,
-            exit_code: None,
-            aid: None,
-            duration_ms: None,
-            err_path: None,
-        };
-        assert!(matches!(ev.mark, PromptMark::CommandEnd));
-        assert_eq!(ev.row, 10);
-        assert_eq!(ev.col, 3);
-        assert!(ev.exit_code.is_none());
-    }
-
-    // -------------------------------------------------------------------------
-    // ClipboardAction
-    // -------------------------------------------------------------------------
-
-    #[test]
-    // CONSTRUCTION: ClipboardAction::Write stores its payload.
-    fn clipboard_action_write_payload_stored() {
-        let a = ClipboardAction::Write("clipboard text".to_owned());
-        assert!(matches!(a, ClipboardAction::Write(ref s) if s == "clipboard text"));
-    }
-
-    #[test]
-    // CONSTRUCTION: OscData::default() has no pending clipboard actions.
-    fn osc_data_default_clipboard_actions_empty() {
-        let d = OscData::default();
-        assert!(d.clipboard_actions.is_empty());
-    }
-
-    // -------------------------------------------------------------------------
-    // Color fields
-    // -------------------------------------------------------------------------
-
-    #[test]
-    // CONSTRUCTION: Setting default_fg via struct literal stores the color.
-    fn osc_data_default_fg_rgb_stored() {
-        let d = OscData {
-            default_fg: Some(Color::Rgb(255, 0, 128)),
-            ..Default::default()
-        };
-        assert!(matches!(d.default_fg, Some(Color::Rgb(255, 0, 128))));
-    }
-
-    // -------------------------------------------------------------------------
-    // Merged from tests/unit/types/osc.rs
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn osc_data_default_cwd_is_none() {
-        let d = OscData::default();
-        assert!(d.cwd.is_none(), "cwd must be None on construction");
-    }
-
-    #[test]
-    fn osc_data_default_cwd_dirty_is_false_pbt() {
-        let d = OscData::default();
-        assert!(!d.cwd_dirty, "cwd_dirty must be false on construction");
-    }
-
-    #[test]
-    fn osc_data_default_hyperlink_uri_is_none() {
-        let d = OscData::default();
-        assert!(
-            d.hyperlink.uri.is_none(),
-            "hyperlink.uri must be None on construction"
-        );
-    }
-
-    #[test]
-    fn osc_data_default_colors_are_none() {
-        let d = OscData::default();
-        assert!(d.default_fg.is_none(), "default_fg must be None");
-        assert!(d.default_bg.is_none(), "default_bg must be None");
-        assert!(d.cursor_color.is_none(), "cursor_color must be None");
-    }
-
-    #[test]
-    fn osc_data_default_prompt_marks_empty() {
-        let d = OscData::default();
-        assert!(
-            d.prompt_marks.is_empty(),
-            "prompt_marks must be empty on construction"
-        );
-    }
-
-    #[test]
-    fn osc_data_palette_has_256_entries() {
-        let d = OscData::default();
-        assert_eq!(
-            d.palette.len(),
-            256,
-            "palette must have exactly 256 entries"
-        );
-    }
-
-    #[test]
-    fn osc_data_palette_all_none_on_default() {
-        let d = OscData::default();
-        assert!(
-            d.palette.iter().all(std::option::Option::is_none),
-            "every palette entry must be None on construction"
-        );
-    }
-
-    #[test]
-    fn osc_data_set_palette_entry() {
-        let mut d = OscData::default();
-        d.palette[42] = Some([0xDE, 0xAD, 0xBE]);
-        assert_eq!(d.palette[42], Some([0xDE, 0xAD, 0xBE]));
-        // All others remain None
-        for (i, e) in d.palette.iter().enumerate() {
-            if i != 42 {
-                assert!(e.is_none(), "palette[{i}] must still be None");
-            }
-        }
-    }
-
-    #[test]
-    fn hyperlink_state_default_uri_none() {
-        let h = HyperlinkState::default();
-        assert!(h.uri.is_none());
-    }
-
-    #[test]
-    fn hyperlink_state_set_uri() {
-        let h = HyperlinkState {
-            uri: Some(Arc::from("https://example.com")),
-        };
-        assert_eq!(h.uri.as_deref(), Some("https://example.com"));
-    }
-
-    #[test]
-    fn hyperlink_state_clear_uri() {
-        let mut h = HyperlinkState {
-            uri: Some(Arc::from("https://example.com")),
-        };
-        h.uri = None;
-        assert!(h.uri.is_none());
-    }
-
-    #[test]
-    fn prompt_mark_variants_are_distinct() {
-        assert_ne!(PromptMark::PromptStart, PromptMark::PromptEnd);
-        assert_ne!(PromptMark::CommandStart, PromptMark::CommandEnd);
-        assert_ne!(PromptMark::PromptStart, PromptMark::CommandStart);
-    }
-
-    #[test]
-    fn prompt_mark_event_fields_accessible() {
-        let event = PromptMarkEvent {
-            mark: PromptMark::PromptStart,
-            row: 5,
-            col: 10,
-            exit_code: None,
-            aid: None,
-            duration_ms: None,
-            err_path: None,
-        };
-        assert!(matches!(event.mark, PromptMark::PromptStart));
-        assert_eq!(event.row, 5);
-        assert_eq!(event.col, 10);
-        assert!(event.exit_code.is_none());
-    }
-
-    #[test]
-    fn osc_data_push_prompt_mark() {
-        let mut d = OscData::default();
-        d.prompt_marks.push(PromptMarkEvent {
-            mark: PromptMark::CommandEnd,
-            row: 3,
-            col: 0,
-            exit_code: Some(1),
-            aid: None,
-            duration_ms: None,
-            err_path: None,
-        });
-        assert_eq!(d.prompt_marks.len(), 1);
-        assert!(matches!(d.prompt_marks[0].mark, PromptMark::CommandEnd));
-    }
-
-    #[test]
-    fn clipboard_action_write_stores_text() {
-        let action = ClipboardAction::Write("hello clipboard".to_owned());
-        match action {
-            ClipboardAction::Write(s) => assert_eq!(s, "hello clipboard"),
-            ClipboardAction::Query => panic!("expected Write"),
-        }
-    }
-
-    #[test]
-    fn clipboard_action_query_variant() {
-        let action = ClipboardAction::Query;
-        assert!(matches!(action, ClipboardAction::Query));
-    }
-
-    #[test]
-    fn osc_data_set_default_fg() {
-        let d = OscData {
-            default_fg: Some(Color::Indexed(1)),
-            ..Default::default()
-        };
-        assert!(matches!(d.default_fg, Some(Color::Indexed(1))));
-    }
-
-    #[test]
-    fn osc_data_set_default_bg() {
-        let d = OscData {
-            default_bg: Some(Color::Rgb(255, 128, 0)),
-            ..Default::default()
-        };
-        assert!(matches!(d.default_bg, Some(Color::Rgb(255, 128, 0))));
-    }
-
-    #[test]
-    fn osc_data_set_cursor_color() {
-        let d = OscData {
-            cursor_color: Some(Color::Default),
-            ..Default::default()
-        };
-        assert!(matches!(d.cursor_color, Some(Color::Default)));
-    }
-
-    mod pbt {
-        use super::*;
-        use proptest::prelude::*;
-
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(64))]
-
-            #[test]
-            // INVARIANT: palette always has 256 entries regardless of which index is written
-            fn prop_palette_always_256_entries(idx in 0usize..256usize, r in 0u8..=255u8, g in 0u8..=255u8, b in 0u8..=255u8) {
-                let mut d = OscData::default();
-                d.palette[idx] = Some([r, g, b]);
-                prop_assert_eq!(d.palette.len(), 256);
-            }
-
-            #[test]
-            // INVARIANT: written palette entry is read back correctly
-            fn prop_palette_entry_roundtrip(idx in 0usize..256usize, r in 0u8..=255u8, g in 0u8..=255u8, b in 0u8..=255u8) {
-                let mut d = OscData::default();
-                d.palette[idx] = Some([r, g, b]);
-                prop_assert_eq!(d.palette[idx], Some([r, g, b]));
-            }
-
-            #[test]
-            // INVARIANT: HyperlinkState uri survives clone
-            fn prop_hyperlink_clone_preserves_uri(len in 0usize..128usize) {
-                let uri: String = "x".repeat(len);
-                let h = HyperlinkState { uri: if len == 0 { None } else { Some(Arc::from(uri.as_str())) } };
-                let cloned = h.clone();
-                prop_assert_eq!(cloned.uri, h.uri);
-            }
-        }
-    }
-}
+#[path = "osc/tests.rs"]
+mod tests;

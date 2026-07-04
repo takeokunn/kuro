@@ -5,6 +5,13 @@
 
 use super::MAX_APC_PAYLOAD_BYTES;
 use super::*;
+#[path = "apc/tests_support.rs"]
+mod tests_support;
+pub use tests_support::{
+    assert_no_apc_responses, assert_no_pending_image_notifications,
+    assert_pending_image_notification_count, assert_single_pending_image_notification,
+    single_apc_response_text,
+};
 
 /// Feed raw bytes through the APC pre-scanner (and the VTE parser) using
 /// the public `TerminalCore::advance` method, which delegates to
@@ -63,12 +70,7 @@ fn test_complete_kitty_apc_sequence_produces_response() {
     );
 
     // dispatch_kitty_apc queues a response for Query commands.
-    assert!(
-        !core.meta.pending_responses.is_empty(),
-        "a pending response should be queued after a Kitty query"
-    );
-    let resp =
-        std::str::from_utf8(&core.meta.pending_responses[0]).expect("response must be valid UTF-8");
+    let resp = single_apc_response_text(&core);
     assert!(
         resp.starts_with("\x1b_Ga=q"),
         "Kitty query response must start with ESC _ G a=q, got: {resp:?}"
@@ -148,10 +150,7 @@ fn test_non_kitty_apc_sequence_is_ignored() {
         core.kitty.apc_state == ApcScanState::Idle,
         "state must return to Idle after a non-Kitty APC sequence"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC sequence must not queue any pending response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 /// ESC followed by a byte that is NOT '_' must reset the APC state to Idle
@@ -247,10 +246,7 @@ fn test_empty_apc_payload_no_panic() {
         core.kitty.apc_state == ApcScanState::Idle,
         "state must be Idle after empty APC sequence"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "empty APC payload must not queue any response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 // -------------------------------------------------------------------------
@@ -286,10 +282,7 @@ fn test_apc_payload_exactly_at_limit_dispatches_cleanly() {
         core.kitty.apc_buf.is_empty(),
         "apc_buf must be cleared after dispatch"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC payload must not queue any response"
-    );
+    assert_no_apc_responses(&core);
 }
 
 /// An APC payload of `MAX_APC_PAYLOAD_BYTES + 1` bytes followed by ST must
@@ -324,10 +317,17 @@ fn test_apc_payload_one_byte_over_limit_truncates_and_dispatches() {
         core.kitty.apc_buf.is_empty(),
         "apc_buf must be cleared after dispatch"
     );
-    assert!(
-        core.meta.pending_responses.is_empty(),
-        "non-Kitty APC payload must not queue any response"
-    );
+    assert_no_apc_responses(&core);
 }
 
-include!("apc_binary_payload.rs");
+#[path = "apc/binary_payload.rs"]
+mod binary_payload;
+
+#[path = "apc/dispatch.rs"]
+mod dispatch;
+
+#[path = "apc/delete_targets.rs"]
+mod delete_targets;
+
+#[path = "apc/placeholder.rs"]
+mod placeholder;

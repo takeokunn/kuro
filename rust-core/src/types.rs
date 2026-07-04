@@ -9,7 +9,7 @@ pub mod meta;
 pub mod osc;
 
 // Re-exports
-pub use cell::{Cell, CellExtras, CellWidth, SgrAttributes};
+pub use cell::{Cell, CellExtras, CellWidth, SgrAttributes, TextSize};
 pub use color::{Color, NamedColor};
 pub use cursor::{Cursor, CursorShape};
 pub(crate) use kitty::KittyState;

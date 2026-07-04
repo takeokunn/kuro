@@ -21,4 +21,4 @@ pub use global::{
     attach_session, detach_session, init_session, list_sessions, shutdown_session, with_session,
     with_session_readonly, TERMINAL_SESSIONS,
 };
-pub use session::{SessionState, TerminalSession};
+pub use session::{PasteText, SessionState, TerminalSession};

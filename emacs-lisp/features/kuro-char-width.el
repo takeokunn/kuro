@@ -23,6 +23,7 @@
 ;;; Code:
 
 (require 'seq)
+(require 'kuro-char-width-macros)
 
 ;; set-fontset-font is defined in src/fontset.c (graphical builds only).
 ;; Declare it so the byte-compiler does not warn when compiling in --batch mode.
@@ -97,17 +98,6 @@ width 1, plus Nerd Font PUA ranges.")
   "Unicode ranges with display width 0 (zero-width combining characters).
 Variation Selectors modify the preceding character's rendering (e.g., VS16
 forces emoji presentation) without consuming a grid column themselves.")
-
-;;; Fontset-assignment macro
-
-(defmacro kuro--set-fontset-font-both (range spec)
-  "Register SPEC for RANGE in both the current frame and the default fontset.
-Both nil (current frame) and t (default template) are updated because
-frame creation copies the default fontset — modifying only t would not
-update existing frames, and modifying only nil would not affect new frames."
-  `(progn
-     (set-fontset-font nil ,range ,spec nil 'prepend)
-     (set-fontset-font t   ,range ,spec nil 'prepend)))
 
 ;;; EA-Ambiguous font assignment and glyph-metric refinement
 
@@ -234,7 +224,7 @@ RANGE is the fontset range to apply the rescaled font to — either a cons
 cell (START . END) for a Unicode range, or a single character for per-char
 correction.  CELL-WIDTH and CELL-HEIGHT are the expected pixel dimensions.
 Returns non-nil if a rescaling was applied."
-  (when-let ((metrics (kuro--probe-glyph-metrics probe-char)))
+  (when-let* ((metrics (kuro--probe-glyph-metrics probe-char)))
     (let* ((font-obj     (plist-get metrics :font))
            (glyph-width  (plist-get metrics :width))
            (glyph-height (plist-get metrics :height))
@@ -289,7 +279,7 @@ may still have taller ascent+descent, causing line-height fluctuation
           ;; window-body-height without triggering window-size-change-functions
           ;; (pixel size is unchanged).  Record a pending resize so the next
           ;; render cycle sends the corrected dimensions to the PTY.
-          (when-let ((win (get-buffer-window (current-buffer) t)))
+          (when-let* ((win (get-buffer-window (current-buffer) t)))
             (let ((new-rows (window-body-height win))
                   (new-cols (window-body-width win)))
               (when (and (boundp 'kuro--initialized) kuro--initialized
@@ -339,7 +329,7 @@ Returns nil if no Nerd Font is found."
 Auto-detects available fonts; no-op if no suitable fonts are found.
 Only effective in graphical Emacs frames."
   (when (display-graphic-p)
-    (when-let ((nerd-font (kuro--detect-nerd-font)))
+    (when-let* ((nerd-font (kuro--detect-nerd-font)))
       (set-fontset-font t '(#xE000 . #xF8FF) nerd-font nil 'prepend)
       (set-fontset-font t '(#xF0000 . #xFFFFF) nerd-font nil 'prepend))
     (let ((emoji-font

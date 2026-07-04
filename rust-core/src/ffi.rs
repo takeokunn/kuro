@@ -40,6 +40,7 @@
 //! 4. Future-proofing for alternative FFI implementations
 
 pub mod abstraction;
+pub mod boundary;
 // bridge and test_terminal contain #[defun] registrations (emacs ctor).
 // ASAN instruments those global constructors, and ld64.lld on arm64 macOS 15
 // rejects __mod_init_func cross-section references under -init_offsets.

@@ -3,6 +3,7 @@
 pub mod dirty_set;
 pub mod image;
 pub mod line;
+pub mod placeholder;
 pub mod screen;
 
 pub use dirty_set::{BitVecDirtySet, DirtySet};

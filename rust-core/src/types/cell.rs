@@ -143,9 +143,9 @@ pub enum CellWidth {
 
 /// Underline style for SGR 4:x sub-parameters
 ///
-/// `#[repr(u8)]` with sequential discriminants allows `encode_attrs` in
-/// `ffi/codec.rs` to cast directly to `u64` instead of using a 5-arm match
-/// table.  The discriminant values (0-5) match the wire encoding exactly.
+/// Explicit discriminants document the SGR wire values.  Use
+/// [`UnderlineStyle::wire_code`] at FFI boundaries instead of casting the
+/// discriminant.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnderlineStyle {
@@ -164,6 +164,22 @@ pub enum UnderlineStyle {
     Dashed = 5,
 }
 
+impl UnderlineStyle {
+    /// Return the SGR underline style code used in FFI attribute encoding.
+    #[inline]
+    #[must_use]
+    pub const fn wire_code(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Straight => 1,
+            Self::Double => 2,
+            Self::Curly => 3,
+            Self::Dotted => 4,
+            Self::Dashed => 5,
+        }
+    }
+}
+
 /// SGR (Select Graphic Rendition) attributes for a cell
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SgrAttributes {
@@ -177,6 +193,12 @@ pub struct SgrAttributes {
     pub underline_style: UnderlineStyle,
     /// Underline color (SGR 58/59)
     pub underline_color: Color,
+    /// SGR 53: overline
+    pub overline: bool,
+    /// SGR 73: superscript
+    pub superscript: bool,
+    /// SGR 75: subscript
+    pub subscript: bool,
 }
 
 impl Default for SgrAttributes {
@@ -187,6 +209,9 @@ impl Default for SgrAttributes {
             flags: SgrFlags::default(),
             underline_style: UnderlineStyle::None,
             underline_color: Color::Default,
+            overline: false,
+            superscript: false,
+            subscript: false,
         }
     }
 }
@@ -219,13 +244,86 @@ impl SgrAttributes {
     pub fn is_all_default(&self) -> bool {
         self.flags.is_empty()
             && self.underline_style == UnderlineStyle::None
+            && !self.overline
+            && !self.superscript
+            && !self.subscript
             && self.foreground == Color::Default
             && self.background == Color::Default
             && self.underline_color == Color::Default
     }
 }
 
-/// Extended cell data for rarely-used features (hyperlinks, images).
+/// Kitty text-sizing protocol (OSC 66) per-cell sizing metadata.
+///
+/// Wire format: `OSC 66 ; key=value : key=value ... ; text ST`.
+/// Each field is clamped to the documented range when parsed:
+/// - `scale`: overall scale 1..=7 (default 1)
+/// - `width`: width in cells 0..=7 (0 => normal width)
+/// - `numerator`: fractional numerator 0..=15 (default 0)
+/// - `denominator`: fractional denominator 0..=15 (must be > numerator when non-zero)
+/// - `valign`: vertical align 0=top 1=bottom 2=center
+/// - `halign`: horizontal align 0=left 1=right 2=center
+///
+/// `TextSize::default()` is the "normal" sizing (scale 1, no fraction, no
+/// alignment) and is treated as the absence of sizing — it never allocates
+/// `CellExtras`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextSize {
+    /// Overall integer scale 1..=7.
+    pub scale: u8,
+    /// Width in cells 0..=7 (0 = normal width).
+    pub width: u8,
+    /// Fractional numerator 0..=15.
+    pub numerator: u8,
+    /// Fractional denominator 0..=15 (must be > numerator when non-zero).
+    pub denominator: u8,
+    /// Vertical alignment 0=top 1=bottom 2=center.
+    pub valign: u8,
+    /// Horizontal alignment 0=left 1=right 2=center.
+    pub halign: u8,
+}
+
+impl Default for TextSize {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            scale: 1,
+            width: 0,
+            numerator: 0,
+            denominator: 0,
+            valign: 0,
+            halign: 0,
+        }
+    }
+}
+
+impl TextSize {
+    /// Returns `true` when this is the normal/default sizing (scale 1, no
+    /// fraction, no width override, no alignment).  Default-sized cells must
+    /// never allocate [`CellExtras`].
+    #[inline]
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Effective size multiplier expressed in permille (×1000).
+    ///
+    /// `scale * max(numerator, 1) / max(denominator, 1)` scaled by 1000 and
+    /// rounded.  This is the stable integer representation exposed to Emacs:
+    /// e.g. `scale=2` → 2000, `numerator=1 denominator=2` → 500 (half size).
+    #[inline]
+    #[must_use]
+    pub fn scaled_permille(&self) -> u32 {
+        let num = u32::from(self.numerator.max(1));
+        let den = u32::from(self.denominator.max(1));
+        let scale = u32::from(self.scale.max(1));
+        // round(1000 * scale * num / den)
+        (1000 * scale * num + den / 2) / den
+    }
+}
+
+/// Extended cell data for rarely-used features (hyperlinks, images, text size).
 /// Stored behind `Option<Box<CellExtras>>` to keep the common Cell small.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellExtras {
@@ -233,6 +331,8 @@ pub struct CellExtras {
     pub hyperlink_id: Option<Arc<str>>,
     /// Image ID for Kitty Graphics Protocol (if any)
     pub image_id: Option<u32>,
+    /// Kitty text-sizing metadata (OSC 66), `None` for normal-sized cells.
+    pub text_size: Option<TextSize>,
 }
 
 /// A single cell in the terminal grid
@@ -249,14 +349,43 @@ pub struct Cell {
 }
 
 impl Cell {
+    #[inline]
+    fn grapheme_from_char(c: char) -> CompactString {
+        let mut buf = [0u8; 4];
+        CompactString::new(c.encode_utf8(&mut buf))
+    }
+
+    #[inline]
+    fn empty_extras() -> Box<CellExtras> {
+        Box::new(CellExtras {
+            hyperlink_id: None,
+            image_id: None,
+            text_size: None,
+        })
+    }
+
+    #[inline]
+    fn update_extras<T>(
+        extras: &mut Option<Box<CellExtras>>,
+        id: Option<T>,
+        can_clear: impl FnOnce(&CellExtras) -> bool,
+        set_field: impl FnOnce(&mut CellExtras, Option<T>),
+    ) {
+        if id.is_none() && extras.as_ref().is_none_or(|e| can_clear(e)) {
+            *extras = None;
+            return;
+        }
+
+        let extras = extras.get_or_insert_with(Self::empty_extras);
+        set_field(extras, id);
+    }
+
     /// Create a new cell with the given character
     #[inline]
     #[must_use]
     pub fn new(c: char) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs: SgrAttributes::default(),
             width: CellWidth::Half,
             extras: None,
@@ -267,10 +396,8 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_char_and_width(c: char, attrs: SgrAttributes, width: CellWidth) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs,
             width,
             extras: None,
@@ -281,10 +408,8 @@ impl Cell {
     #[inline]
     #[must_use]
     pub fn with_attrs(c: char, attrs: SgrAttributes) -> Self {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
         Self {
-            grapheme: CompactString::new(s),
+            grapheme: Self::grapheme_from_char(c),
             attrs,
             width: CellWidth::Half,
             extras: None,
@@ -313,41 +438,65 @@ impl Cell {
         self.extras.as_ref().and_then(|e| e.image_id)
     }
 
+    /// Get text-size metadata (if any). Returns `None` for normal-sized cells.
+    #[inline]
+    #[must_use]
+    pub fn text_size(&self) -> Option<TextSize> {
+        self.extras.as_ref().and_then(|e| e.text_size)
+    }
+
     /// Set hyperlink ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_hyperlink_id(&mut self, id: Option<Arc<str>>) {
-        if id.is_none() && self.extras.as_ref().is_none_or(|e| e.image_id.is_none()) {
-            self.extras = None;
-        } else {
-            let extras = self.extras.get_or_insert_with(|| {
-                Box::new(CellExtras {
-                    hyperlink_id: None,
-                    image_id: None,
-                })
-            });
-            extras.hyperlink_id = id;
-        }
+        Self::update_extras(
+            &mut self.extras,
+            id,
+            |e| e.image_id.is_none() && e.text_size.is_none(),
+            |extras, id| {
+                extras.hyperlink_id = id;
+            },
+        );
     }
 
     /// Set image ID, allocating or deallocating extras as needed
     #[inline]
     pub fn set_image_id(&mut self, id: Option<u32>) {
-        if id.is_none()
-            && self
-                .extras
-                .as_ref()
-                .is_none_or(|e| e.hyperlink_id.is_none())
-        {
-            self.extras = None;
-        } else {
-            let extras = self.extras.get_or_insert_with(|| {
-                Box::new(CellExtras {
-                    hyperlink_id: None,
-                    image_id: None,
-                })
-            });
-            extras.image_id = id;
-        }
+        Self::update_extras(
+            &mut self.extras,
+            id,
+            |e| e.hyperlink_id.is_none() && e.text_size.is_none(),
+            |extras, id| {
+                extras.image_id = id;
+            },
+        );
+    }
+
+    /// Set text-size metadata, allocating or deallocating extras as needed.
+    ///
+    /// A `None` or default ([`TextSize::is_default`]) text size never allocates
+    /// `CellExtras`; passing such a value clears the field and frees extras when
+    /// no other extended data remains.
+    #[inline]
+    pub fn set_text_size(&mut self, ts: Option<TextSize>) {
+        // Treat the normal/default sizing as "no text size" so default-sized
+        // cells stay cheap (no extras allocation).
+        let ts = ts.filter(|t| !t.is_default());
+        Self::update_extras(
+            &mut self.extras,
+            ts,
+            |e| e.hyperlink_id.is_none() && e.image_id.is_none(),
+            |extras, ts| {
+                extras.text_size = ts;
+            },
+        );
+    }
+
+    /// Builder: set text-size metadata.
+    #[inline]
+    #[must_use]
+    pub fn with_text_size(mut self, ts: TextSize) -> Self {
+        self.set_text_size(Some(ts));
+        self
     }
 
     /// Append a combining character to this cell's grapheme cluster.
@@ -405,620 +554,5 @@ impl PartialEq for Cell {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-
-    #[test]
-    fn test_cell_default() {
-        let cell = Cell::default();
-        assert_eq!(cell.grapheme.as_str(), " ");
-        assert_eq!(cell.attrs.foreground, Color::Default);
-    }
-
-    #[test]
-    fn test_cell_new() {
-        let cell = Cell::new('A');
-        assert_eq!(cell.grapheme.as_str(), "A");
-        assert!(!cell.attrs.flags.contains(SgrFlags::BOLD));
-    }
-
-    #[test]
-    fn test_cell_with_attrs() {
-        let attrs = SgrAttributes {
-            flags: SgrFlags::BOLD,
-            foreground: Color::Rgb(255, 0, 0),
-            ..Default::default()
-        };
-
-        let cell = Cell::with_attrs('B', attrs);
-        assert_eq!(cell.grapheme.as_str(), "B");
-        assert!(cell.attrs.flags.contains(SgrFlags::BOLD));
-        assert_eq!(cell.attrs.foreground, Color::Rgb(255, 0, 0));
-    }
-
-    #[test]
-    fn test_sgr_reset() {
-        let mut attrs = SgrAttributes {
-            flags: SgrFlags::BOLD | SgrFlags::ITALIC,
-            ..Default::default()
-        };
-
-        attrs.reset();
-        assert!(!attrs.flags.contains(SgrFlags::BOLD));
-        assert!(!attrs.flags.contains(SgrFlags::ITALIC));
-        assert_eq!(attrs.foreground, Color::Default);
-    }
-
-    #[test]
-    fn test_cell_image_id_defaults_to_none() {
-        let cell_default = Cell::default();
-        assert_eq!(cell_default.image_id(), None);
-
-        let cell_new = Cell::new('X');
-        assert_eq!(cell_new.image_id(), None);
-    }
-
-    #[test]
-    fn test_cell_equality() {
-        let cell1 = Cell::new('A');
-        let cell2 = Cell::new('A');
-        assert_eq!(cell1, cell2);
-
-        let attrs = SgrAttributes {
-            flags: SgrFlags::BOLD,
-            ..Default::default()
-        };
-        let cell3 = Cell::with_attrs('A', attrs);
-        assert_ne!(cell1, cell3);
-    }
-
-    #[test]
-    fn test_cell_with_hyperlink() {
-        // A freshly created cell has no hyperlink
-        let cell = Cell::new('A');
-        assert_eq!(cell.hyperlink_id(), None);
-
-        // with_hyperlink sets the hyperlink_id to the given String
-        let linked_cell = cell.with_hyperlink(Arc::from("https://example.com"));
-        assert_eq!(linked_cell.hyperlink_id(), Some("https://example.com"));
-
-        // Replacing an existing hyperlink with a different one works correctly
-        let relinked = linked_cell.with_hyperlink(Arc::from("https://other.com"));
-        assert_eq!(relinked.hyperlink_id(), Some("https://other.com"));
-
-        // Other fields are preserved after setting a hyperlink
-        assert_eq!(relinked.char(), 'A');
-        assert_eq!(relinked.width, CellWidth::Half);
-        assert!(!relinked.attrs.flags.contains(SgrFlags::BOLD));
-    }
-
-    #[test]
-    fn test_underline_style_default_is_none() {
-        let attrs = SgrAttributes::default();
-        assert_eq!(attrs.underline_style, UnderlineStyle::None);
-        assert!(!attrs.underline());
-    }
-
-    #[test]
-    fn test_underline_helper_method() {
-        let mut attrs = SgrAttributes::default();
-        assert!(!attrs.underline());
-        attrs.underline_style = UnderlineStyle::Straight;
-        assert!(attrs.underline());
-        attrs.underline_style = UnderlineStyle::Curly;
-        assert!(attrs.underline());
-        attrs.underline_style = UnderlineStyle::None;
-        assert!(!attrs.underline());
-    }
-
-    #[test]
-    fn test_underline_color_default() {
-        let attrs = SgrAttributes::default();
-        assert_eq!(attrs.underline_color, Color::Default);
-    }
-
-    #[test]
-    fn test_cell_default_is_space_with_half_width() {
-        let cell = Cell::default();
-        assert_eq!(cell.char(), ' ');
-        assert_eq!(cell.width, CellWidth::Half);
-        assert!(cell.extras.is_none());
-        assert_eq!(cell.attrs, SgrAttributes::default());
-    }
-
-    #[test]
-    fn test_cell_new_ascii_stores_char_and_no_extras() {
-        let cell = Cell::new('Z');
-        assert_eq!(cell.char(), 'Z');
-        assert_eq!(cell.grapheme.as_str(), "Z");
-        assert!(cell.extras.is_none());
-    }
-
-    #[test]
-    fn test_cell_new_cjk_wide_char() {
-        // '中' is a wide CJK character; Cell::new does NOT auto-detect width,
-        // but with_char_and_width can be used.  Test that the char is stored.
-        let cell = Cell::with_char_and_width('中', SgrAttributes::default(), CellWidth::Full);
-        assert_eq!(cell.char(), '中');
-        assert_eq!(cell.width, CellWidth::Full);
-    }
-
-    #[test]
-    fn test_cell_char_getter_roundtrip() {
-        for ch in ['a', 'Z', '!', '\u{1F600}'] {
-            let cell = Cell::new(ch);
-            assert_eq!(cell.char(), ch);
-        }
-    }
-
-    #[test]
-    fn test_set_hyperlink_id_some_stores_id() {
-        let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        assert_eq!(cell.hyperlink_id(), Some("https://example.com"));
-    }
-
-    #[test]
-    fn test_set_hyperlink_id_none_clears_but_keeps_image() {
-        let mut cell = Cell::new('A');
-        // Set both ids
-        cell.set_hyperlink_id(Some(Arc::from("link")));
-        cell.set_image_id(Some(42));
-        // Clear hyperlink — image should survive
-        cell.set_hyperlink_id(None);
-        assert_eq!(cell.hyperlink_id(), None);
-        assert_eq!(cell.image_id(), Some(42));
-    }
-
-    #[test]
-    fn test_set_image_id_some_stores_id() {
-        let mut cell = Cell::new('A');
-        cell.set_image_id(Some(99));
-        assert_eq!(cell.image_id(), Some(99));
-    }
-
-    #[test]
-    fn test_set_image_id_none_clears_but_keeps_hyperlink() {
-        let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(Some(Arc::from("link")));
-        cell.set_image_id(Some(7));
-        // Clear image — hyperlink should survive
-        cell.set_image_id(None);
-        assert_eq!(cell.image_id(), None);
-        assert_eq!(cell.hyperlink_id(), Some("link"));
-    }
-
-    #[test]
-    fn test_cell_extras_none_when_no_ids() {
-        let cell = Cell::new('A');
-        // Neither hyperlink nor image set → extras must be None
-        assert!(cell.extras.is_none());
-        assert_eq!(cell.hyperlink_id(), None);
-        assert_eq!(cell.image_id(), None);
-    }
-
-    #[test]
-    fn test_sgr_reset_clears_all_fields() {
-        let mut attrs = SgrAttributes {
-            foreground: Color::Rgb(1, 2, 3),
-            background: Color::Indexed(5),
-            flags: SgrFlags::BOLD | SgrFlags::ITALIC | SgrFlags::STRIKETHROUGH,
-            underline_style: UnderlineStyle::Curly,
-            underline_color: Color::Rgb(0, 0, 0),
-        };
-        attrs.reset();
-        assert_eq!(attrs, SgrAttributes::default());
-        assert!(attrs.flags.is_empty());
-        assert_eq!(attrs.foreground, Color::Default);
-        assert_eq!(attrs.background, Color::Default);
-        assert_eq!(attrs.underline_style, UnderlineStyle::None);
-        assert_eq!(attrs.underline_color, Color::Default);
-    }
-
-    // SGR attribute tests (logically belong to SgrAttributes in cell.rs)
-
-    #[test]
-    fn test_sgr_attributes_default_has_no_flags() {
-        let attrs = SgrAttributes::default();
-        assert!(attrs.flags.is_empty());
-        assert_eq!(attrs.foreground, Color::Default);
-        assert_eq!(attrs.background, Color::Default);
-    }
-
-    #[test]
-    fn test_sgr_attributes_bold_flag() {
-        let attrs = SgrAttributes {
-            flags: SgrFlags::BOLD,
-            ..Default::default()
-        };
-        assert!(attrs.flags.contains(SgrFlags::BOLD));
-        assert!(!attrs.flags.contains(SgrFlags::ITALIC));
-    }
-
-    #[test]
-    fn test_sgr_attributes_bold_and_italic() {
-        let attrs = SgrAttributes {
-            flags: SgrFlags::BOLD | SgrFlags::ITALIC,
-            ..Default::default()
-        };
-        assert!(attrs.flags.contains(SgrFlags::BOLD));
-        assert!(attrs.flags.contains(SgrFlags::ITALIC));
-    }
-
-    #[test]
-    fn test_sgr_attributes_256_color_fg() {
-        let attrs = SgrAttributes {
-            foreground: Color::Indexed(200),
-            ..Default::default()
-        };
-        assert_eq!(attrs.foreground, Color::Indexed(200));
-    }
-
-    #[test]
-    fn test_sgr_attributes_rgb_fg_stores_components() {
-        let attrs = SgrAttributes {
-            foreground: Color::Rgb(10, 20, 30),
-            ..Default::default()
-        };
-        assert_eq!(attrs.foreground, Color::Rgb(10, 20, 30));
-        if let Color::Rgb(r, g, b) = attrs.foreground {
-            assert_eq!(r, 10);
-            assert_eq!(g, 20);
-            assert_eq!(b, 30);
-        } else {
-            panic!("expected Color::Rgb");
-        }
-    }
-
-    #[test]
-    fn test_underline_style_default_is_none_variant() {
-        let attrs = SgrAttributes::default();
-        assert_eq!(attrs.underline_style, UnderlineStyle::None);
-    }
-
-    #[test]
-    fn test_sgr_attributes_equality() {
-        let a = SgrAttributes {
-            flags: SgrFlags::BOLD,
-            foreground: Color::Rgb(1, 2, 3),
-            ..Default::default()
-        };
-        let b = SgrAttributes {
-            flags: SgrFlags::BOLD,
-            foreground: Color::Rgb(1, 2, 3),
-            ..Default::default()
-        };
-        assert_eq!(a, b);
-        let c = SgrAttributes {
-            flags: SgrFlags::DIM,
-            ..Default::default()
-        };
-        assert_ne!(a, c);
-    }
-
-    // -------------------------------------------------------------------------
-    // Merged from tests/unit/types/cell.rs
-    // -------------------------------------------------------------------------
-
-    // --- Arbitrary generators ---
-
-    mod pbt {
-        use super::*;
-        use proptest::prelude::*;
-
-        prop_compose! {
-            /// Generate an SgrAttributes with randomised boolean fields.
-            fn arb_sgr_attrs()(
-                bold        in proptest::bool::ANY,
-                dim         in proptest::bool::ANY,
-                italic      in proptest::bool::ANY,
-                blink_slow  in proptest::bool::ANY,
-                blink_fast  in proptest::bool::ANY,
-                inverse     in proptest::bool::ANY,
-                hidden      in proptest::bool::ANY,
-                strikethrough in proptest::bool::ANY,
-            ) -> SgrAttributes {
-                let mut flags = SgrFlags::default();
-                flags.set(SgrFlags::BOLD, bold);
-                flags.set(SgrFlags::DIM, dim);
-                flags.set(SgrFlags::ITALIC, italic);
-                flags.set(SgrFlags::BLINK_SLOW, blink_slow);
-                flags.set(SgrFlags::BLINK_FAST, blink_fast);
-                flags.set(SgrFlags::INVERSE, inverse);
-                flags.set(SgrFlags::HIDDEN, hidden);
-                flags.set(SgrFlags::STRIKETHROUGH, strikethrough);
-                SgrAttributes { flags, ..Default::default() }
-            }
-        }
-
-        /// Strategy that picks one of the six `UnderlineStyle` variants.
-        fn arb_underline_style() -> impl Strategy<Value = UnderlineStyle> {
-            prop_oneof![
-                Just(UnderlineStyle::None),
-                Just(UnderlineStyle::Straight),
-                Just(UnderlineStyle::Double),
-                Just(UnderlineStyle::Curly),
-                Just(UnderlineStyle::Dotted),
-                Just(UnderlineStyle::Dashed),
-            ]
-        }
-
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(500))]
-
-            #[test]
-            // IDEMPOTENCE: Resetting SgrAttributes twice produces the same result as
-            // resetting once.
-            fn prop_sgr_reset_idempotent(mut attrs in arb_sgr_attrs()) {
-                attrs.reset();
-                let after_first = attrs;
-                attrs.reset();
-                let after_second = attrs;
-                prop_assert_eq!(after_first, SgrAttributes::default());
-                prop_assert_eq!(after_second, SgrAttributes::default());
-                prop_assert_eq!(after_first, after_second);
-            }
-
-            #[test]
-            // BOUNDARY: push_combining enforces a 32-byte grapheme cap.
-            fn prop_push_combining_32_byte_cap(
-                count in 0usize..=50usize,
-                combining in proptest::collection::vec(
-                    prop::char::range('\u{0300}', '\u{036F}'),
-                    0..=50,
-                )
-            ) {
-                let mut cell = Cell::new('a');
-                for c in combining.iter().take(count) {
-                    cell.push_combining(*c);
-                }
-                prop_assert!(
-                    cell.grapheme.len() <= 32,
-                    "grapheme exceeded 32 bytes: len={}",
-                    cell.grapheme.len()
-                );
-            }
-
-            #[test]
-            // INVARIANT: attrs.underline() must return true iff underline_style != None.
-            fn prop_underline_helper_consistent(style in arb_underline_style()) {
-                let attrs = SgrAttributes {
-                    underline_style: style,
-                    ..Default::default()
-                };
-                let expected = style != UnderlineStyle::None;
-                prop_assert_eq!(
-                    attrs.underline(),
-                    expected,
-                    "underline() must be true iff style != None (style={:?})",
-                    style
-                );
-            }
-
-            #[test]
-            // INVARIANT: Cell::new(c) always sets width == CellWidth::Half.
-            fn prop_cell_new_width_is_half(c in prop::char::range('\u{0020}', '\u{007E}')) {
-                let cell = Cell::new(c);
-                prop_assert_eq!(
-                    cell.width,
-                    CellWidth::Half,
-                    "Cell::new must always produce CellWidth::Half, got {:?}",
-                    c
-                );
-            }
-
-            #[test]
-            // CHAINING: After calling with_hyperlink(a) and then with_hyperlink(b),
-            // the cell must retain only the last hyperlink id (b).
-            fn prop_hyperlink_replaces_previous(
-                a in "[a-z]{1,20}",
-                b in "[a-z]{1,20}",
-            ) {
-                let cell = Cell::new('X')
-                    .with_hyperlink(Arc::from(a.as_str()))
-                    .with_hyperlink(Arc::from(b.as_str()));
-                prop_assert_eq!(
-                    cell.hyperlink_id(),
-                    Some(b.as_str()),
-                    "second with_hyperlink must overwrite first: a={:?} b={:?}",
-                    a,
-                    b
-                );
-            }
-        }
-    }
-
-    // --- CellExtras allocation / deallocation ---
-
-    #[test]
-    // INVARIANT: set_hyperlink_id(None) on a default cell (no extras) must be a
-    // no-op: no extras allocated, hyperlink_id remains None.
-    fn test_set_hyperlink_id_none_when_no_extras() {
-        let mut cell = Cell::new('A');
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "set_hyperlink_id(None) on bare cell must leave hyperlink_id as None"
-        );
-        assert_eq!(cell.image_id(), None);
-    }
-
-    #[test]
-    // ALLOCATION: set_hyperlink_id(Some(...)) must allocate extras and store the id.
-    fn test_set_hyperlink_id_some_allocates_extras() {
-        let mut cell = Cell::new('B');
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        assert_eq!(
-            cell.hyperlink_id(),
-            Some("https://example.com"),
-            "set_hyperlink_id(Some(...)) must store the hyperlink id"
-        );
-    }
-
-    #[test]
-    // DEALLOCATION: after setting a hyperlink, clearing it while image_id is None
-    // must deallocate extras entirely.
-    fn test_set_hyperlink_id_none_clears_extras_when_image_none() {
-        let mut cell = Cell::new('C');
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must remain None (extras deallocated)"
-        );
-    }
-
-    #[test]
-    // RETENTION: clearing hyperlink_id while image_id is Some must keep extras alive.
-    fn test_set_hyperlink_id_none_keeps_extras_when_image_some() {
-        let mut cell = Cell::new('D');
-        cell.set_image_id(Some(7));
-        cell.set_hyperlink_id(Some(Arc::from("https://example.com")));
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.image_id(),
-            Some(7),
-            "image_id must remain Some(7) — extras must not be deallocated"
-        );
-    }
-
-    #[test]
-    // DEALLOCATION (symmetric): clearing image_id while hyperlink_id is None must
-    // deallocate extras entirely.
-    fn test_set_image_id_none_clears_extras_when_hyperlink_none() {
-        let mut cell = Cell::new('E');
-        cell.set_image_id(Some(42));
-        cell.set_image_id(None);
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must be None after clearing"
-        );
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must remain None (extras deallocated)"
-        );
-    }
-
-    #[test]
-    // ALLOCATION: set_image_id(Some(...)) must allocate extras and store the id.
-    fn test_set_image_id_some_allocates_extras() {
-        let mut cell = Cell::new('F');
-        cell.set_image_id(Some(99));
-        assert_eq!(
-            cell.image_id(),
-            Some(99),
-            "set_image_id(Some(99)) must store the image id"
-        );
-    }
-
-    #[test]
-    // COMBINED CLEAR: set both hyperlink_id and image_id, then clear both.
-    fn test_cell_with_hyperlink_and_image_both_cleared() {
-        let mut cell = Cell::new('G');
-        cell.set_hyperlink_id(Some(Arc::from("https://a.com")));
-        cell.set_image_id(Some(5));
-        cell.set_image_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            Some("https://a.com"),
-            "hyperlink_id must survive clearing image_id"
-        );
-        cell.set_hyperlink_id(None);
-        assert_eq!(
-            cell.hyperlink_id(),
-            None,
-            "hyperlink_id must be None after final clear"
-        );
-        assert_eq!(
-            cell.image_id(),
-            None,
-            "image_id must be None after both cleared"
-        );
-    }
-
-    #[test]
-    // ENCODING: Cell::new with a multi-byte UTF-8 character must store and
-    // retrieve it correctly via char().
-    fn test_cell_new_multibyte_utf8() {
-        let cell = Cell::new('\u{2192}'); // U+2192, 3 bytes in UTF-8
-        assert_eq!(
-            cell.char(),
-            '\u{2192}',
-            "Cell::new must store and return the correct char"
-        );
-        assert_eq!(
-            cell.width,
-            CellWidth::Half,
-            "Cell::new must produce CellWidth::Half"
-        );
-    }
-
-    #[test]
-    // IDEMPOTENCE: reset() on an already-default SgrAttributes must be a no-op.
-    fn test_sgr_attributes_reset_idempotent() {
-        let mut attrs = SgrAttributes::default();
-        attrs.reset();
-        assert_eq!(
-            attrs,
-            SgrAttributes::default(),
-            "reset() on default attrs must be idempotent"
-        );
-    }
-
-    #[test]
-    // MAPPING: Each UnderlineStyle variant must produce the correct underline()
-    // boolean.
-    fn underline_style_all_variants_correct_bool() {
-        let cases: &[(UnderlineStyle, bool)] = &[
-            (UnderlineStyle::None, false),
-            (UnderlineStyle::Straight, true),
-            (UnderlineStyle::Double, true),
-            (UnderlineStyle::Curly, true),
-            (UnderlineStyle::Dotted, true),
-            (UnderlineStyle::Dashed, true),
-        ];
-        for (style, expected) in cases {
-            let attrs = SgrAttributes {
-                underline_style: *style,
-                ..Default::default()
-            };
-            assert_eq!(
-                attrs.underline(),
-                *expected,
-                "underline() wrong for {style:?}: expected {expected}"
-            );
-        }
-    }
-
-    #[test]
-    // INVARIANT: SgrAttributes::default() must have all booleans false and
-    // both color fields equal to Color::Default.
-    fn sgr_default_all_false() {
-        let attrs = SgrAttributes::default();
-        assert_eq!(
-            attrs.flags,
-            SgrFlags::default(),
-            "all boolean flags must be clear in default attrs"
-        );
-        assert!(!attrs.underline());
-        assert_eq!(attrs.underline_style, UnderlineStyle::None);
-        assert_eq!(attrs.foreground, Color::Default);
-        assert_eq!(attrs.background, Color::Default);
-    }
-}
+#[path = "cell/tests.rs"]
+mod tests;

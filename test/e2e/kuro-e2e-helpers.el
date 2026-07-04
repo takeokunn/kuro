@@ -15,8 +15,6 @@
 ;;
 ;; This bypasses the full render pipeline (`kuro--render-cycle') for shell-ready
 ;; detection and assertion, avoiding the buffer-state initialization complexity.
-;; The render-pipeline path (`kuro-e2e--wait-for-text') is still available for
-;; tests that specifically verify buffer rendering correctness.
 ;;
 ;; # No unconditional sleep-for
 ;; All waiting uses condition-based polling with explicit timeouts.
@@ -103,7 +101,6 @@
 (declare-function kuro--resize          "kuro-ffi"       (rows cols))
 (declare-function kuro--send-key        "kuro-ffi"       (data))
 (declare-function kuro--shutdown        "kuro-ffi"       ())
-(declare-function kuro--render-cycle    "kuro-renderer"  ())
 (declare-function kuro--get-cursor      "kuro-ffi"       ())
 
 ;;; Buffer management
@@ -206,31 +203,11 @@ Returns t if found, nil on timeout."
       (message "[kuro-e2e] TIMEOUT waiting for pattern: %S" pattern))
     found))
 
-;;; Secondary text detection: render buffer (uses production render pipeline)
-
-(defun kuro-e2e--render (buf)
-  "Run one render cycle in BUF."
-  (with-current-buffer buf (kuro--render-cycle)))
-
-(defun kuro-e2e--wait-for-text (buf pattern &optional timeout)
-  "Render BUF in a loop until PATTERN matches buffer content or TIMEOUT.
-Uses the production render pipeline (`kuro--render-cycle') to update the
-buffer, then checks `buffer-string' for PATTERN.
-
-TIMEOUT defaults to `kuro-e2e--timeout'.
-Returns t if found, nil on timeout."
-  (let ((deadline (+ (float-time) (or timeout kuro-e2e--timeout)))
-        (found nil))
-    (while (and (not found) (< (float-time) deadline))
-      (kuro-e2e--render buf)
-      (with-current-buffer buf
-        (when (string-match-p pattern (buffer-string))
-          (setq found t)))
-      (unless found (sleep-for kuro-e2e--poll-interval)))
-    (unless found
-      (message "[kuro-e2e] TIMEOUT waiting for render pattern: %S\nBuffer:\n%s"
-               pattern (with-current-buffer buf (buffer-string))))
-    found))
+(defun kuro-e2e--send-command-and-wait (session-id command pattern &optional timeout)
+  "Send COMMAND to SESSION-ID and wait for PATTERN.
+This keeps the test shape consistent across command-driven E2E cases."
+  (kuro--send-key command)
+  (kuro-e2e--wait-for-output session-id pattern timeout))
 
 ;;; Terminal setup/teardown macro
 
@@ -298,6 +275,11 @@ Cleanup via `unwind-protect' always shuts down the PTY and kills the buffer."
          (with-current-buffer buf
            (condition-case nil (kuro--shutdown) (error nil)))
          (kill-buffer buf)))))
+
+(defmacro kuro-e2e--with-session (session-id &rest body)
+  "Bind SESSION-ID to the current E2E terminal session."
+  `(let ((,session-id kuro--session-id))
+     ,@body))
 
 (provide 'kuro-e2e-helpers)
 

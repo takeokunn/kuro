@@ -1,33 +1,31 @@
-;;; kuro-input-test.el --- Unit tests for kuro-input.el  -*- lexical-binding: t; -*-
+;;; kuro-input-test.el --- Unit tests for kuro-input.el — Groups 1-13  -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; Unit tests for kuro-input.el (key sequence encoding, mouse encoding,
-;; bracketed paste, yank).
+;; bracketed paste, yank) — Groups 1-13.
+;; Groups 14-15 (named-key-sequences, encode-key-event) are in kuro-input-encode-test.el.
 ;; These tests are pure Emacs Lisp and do NOT require the Rust dynamic module.
 ;; All kuro--send-key calls are intercepted with cl-letf stubs.
 
 ;;; Code:
+(require 'kuro-input-test-support)
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-input)
 
-;; Ensure kuro--keymap is populated before Groups 10-13 run their lookup-key tests.
-;; kuro--keymap is nil until kuro--build-keymap is called explicitly; the keymap
-;; is not built at require time (it is normally built during kuro-mode activation).
-(when (fboundp 'kuro--build-keymap)
-  (kuro--build-keymap))
 
-;;; Helper
+;;; Helpers
 
-(defmacro kuro-input-test--capture-sent (&rest body)
-  "Execute BODY with kuro--send-key stubbed; return list of sent strings."
-  `(let ((sent nil)
-         (kuro--initialized t))
-     (cl-letf (((symbol-function 'kuro--send-key)
-                (lambda (s) (push s sent))))
-       ,@body)
-     (nreverse sent)))
+(defmacro kuro-input-test--deftest-cases (cases)
+  `(progn
+     ,@(mapcar
+        (lambda (case)
+          (pcase-let ((`(,name ,doc ,assert-form) case))
+            `(ert-deftest ,name ()
+               ,doc
+               ,assert-form)))
+        (pcase cases
+          ((pred symbolp) (symbol-value cases))
+          (`(quote ,value) value)
+          (_ cases)))))
 
 ;;; Group 1: kuro--send-key-sequence (normal vs. application cursor mode)
 
@@ -49,192 +47,131 @@
       (should (equal sent '("\eOA"))))))
 
 ;;; Group 2: Arrow keys
+(defconst kuro-input-test--arrow-key-cases
+  '((kuro-input-arrow-up-normal
+     "Arrow up in normal mode sends CSI A."
+     (kuro-input-test--assert-sends-in-buffer-mode nil (kuro--arrow-up) '("\e[A")))
+    (kuro-input-arrow-up-application
+     "Arrow up in application mode sends SS3 A."
+     (kuro-input-test--assert-sends-in-buffer-mode t (kuro--arrow-up) '("\eOA")))
+    (kuro-input-arrow-down-normal
+     "Arrow down in normal mode sends CSI B."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-down) '("\e[B")))
+    (kuro-input-arrow-left-normal
+     "Arrow left in normal mode sends CSI D."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-left) '("\e[D")))
+     (kuro-input-arrow-right-normal
+     "Arrow right in normal mode sends CSI C."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--arrow-right) '("\e[C")))))
 
-(ert-deftest kuro-input-arrow-up-normal ()
-  "Arrow up in normal mode sends CSI A."
-  (with-temp-buffer
-    (setq-local kuro--application-cursor-keys-mode nil)
-    (let ((sent (kuro-input-test--capture-sent (kuro--arrow-up))))
-      (should (equal sent '("\e[A"))))))
-
-(ert-deftest kuro-input-arrow-up-application ()
-  "Arrow up in application mode sends SS3 A."
-  (with-temp-buffer
-    (setq-local kuro--application-cursor-keys-mode t)
-    (let ((sent (kuro-input-test--capture-sent (kuro--arrow-up))))
-      (should (equal sent '("\eOA"))))))
-
-(ert-deftest kuro-input-arrow-down-normal ()
-  "Arrow down in normal mode sends CSI B."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--arrow-down))))
-    (should (equal sent '("\e[B")))))
-
-(ert-deftest kuro-input-arrow-left-normal ()
-  "Arrow left in normal mode sends CSI D."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--arrow-left))))
-    (should (equal sent '("\e[D")))))
-
-(ert-deftest kuro-input-arrow-right-normal ()
-  "Arrow right in normal mode sends CSI C."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--arrow-right))))
-    (should (equal sent '("\e[C")))))
+(kuro-input-test--deftest-cases kuro-input-test--arrow-key-cases)
 
 ;;; Group 3: Special keys
+(defconst kuro-input-test--special-key-cases
+  '((kuro-input-RET-sends-cr
+     "kuro--RET sends a carriage return (0x0D)."
+     (kuro-input-test--assert-sends (kuro--RET) (list (string ?\r))))
+    (kuro-input-TAB-sends-tab
+     "kuro--TAB sends a horizontal tab (0x09)."
+     (kuro-input-test--assert-sends (kuro--TAB) (list (string ?\t))))
+    (kuro-input-DEL-sends-delete
+     "kuro--DEL sends DEL (0x7F)."
+     (kuro-input-test--assert-sends (kuro--DEL) (list (string ?\x7f))))))
 
-(ert-deftest kuro-input-RET-sends-cr ()
-  "kuro--RET sends a carriage return (0x0D)."
-  (let ((sent (kuro-input-test--capture-sent (kuro--RET))))
-    (should (equal sent (list (string ?\r))))))
-
-(ert-deftest kuro-input-TAB-sends-tab ()
-  "kuro--TAB sends a horizontal tab (0x09)."
-  (let ((sent (kuro-input-test--capture-sent (kuro--TAB))))
-    (should (equal sent (list (string ?\t))))))
-
-(ert-deftest kuro-input-DEL-sends-delete ()
-  "kuro--DEL sends DEL (0x7F)."
-  (let ((sent (kuro-input-test--capture-sent (kuro--DEL))))
-    (should (equal sent (list (string ?\x7f))))))
+(kuro-input-test--deftest-cases kuro-input-test--special-key-cases)
 
 ;;; Group 4: Function keys
+(defconst kuro-input-test--function-key-cases
+  '((kuro-input-F1-sends-ss3-P
+     "F1 sends SS3 P (\\eOP)."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F1) '("\eOP")))
+    (kuro-input-F5-sends-csi-15
+     "F5 sends CSI 15~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F5) '("\e[15~")))
+    (kuro-input-F12-sends-csi-24
+     "F12 sends CSI 24~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--F12) '("\e[24~")))))
 
-(ert-deftest kuro-input-F1-sends-ss3-P ()
-  "F1 sends SS3 P (\\eOP)."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--F1))))
-    (should (equal sent '("\eOP")))))
-
-(ert-deftest kuro-input-F5-sends-csi-15 ()
-  "F5 sends CSI 15~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--F5))))
-    (should (equal sent '("\e[15~")))))
-
-(ert-deftest kuro-input-F12-sends-csi-24 ()
-  "F12 sends CSI 24~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--F12))))
-    (should (equal sent '("\e[24~")))))
+(kuro-input-test--deftest-cases kuro-input-test--function-key-cases)
 
 ;;; Group 5: Home/End/Page keys
+(defconst kuro-input-test--navigation-key-cases
+  '((kuro-input-HOME-normal-sends-csi-H
+     "HOME in normal mode sends CSI H."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--HOME) '("\e[H")))
+    (kuro-input-END-normal-sends-csi-F
+     "END in normal mode sends CSI F."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--END) '("\e[F")))
+    (kuro-input-PAGE-UP-sends-csi-5
+     "Page Up sends CSI 5~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-UP) '("\e[5~")))
+    (kuro-input-PAGE-DOWN-sends-csi-6
+     "Page Down sends CSI 6~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--PAGE-DOWN) '("\e[6~")))
+    (kuro-input-INSERT-sends-csi-2
+     "Insert key sends CSI 2~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--INSERT) '("\e[2~")))
+    (kuro-input-DELETE-sends-csi-3
+     "Delete key sends CSI 3~."
+     (kuro-input-test--assert-sends-in-mode nil (kuro--DELETE) '("\e[3~")))))
 
-(ert-deftest kuro-input-HOME-normal-sends-csi-H ()
-  "HOME in normal mode sends CSI H."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--HOME))))
-    (should (equal sent '("\e[H")))))
+(kuro-input-test--deftest-cases kuro-input-test--navigation-key-cases)
 
-(ert-deftest kuro-input-END-normal-sends-csi-F ()
-  "END in normal mode sends CSI F."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--END))))
-    (should (equal sent '("\e[F")))))
+;;; Group 6: Paste dispatch boundary
 
-(ert-deftest kuro-input-PAGE-UP-sends-csi-5 ()
-  "Page Up sends CSI 5~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--PAGE-UP))))
-    (should (equal sent '("\e[5~")))))
+(ert-deftest kuro-input-send-paste-or-raw-rejects-non-string ()
+  "`kuro--send-paste-or-raw' rejects non-string values before FFI dispatch."
+  (should-error (kuro--send-paste-or-raw 42) :type 'wrong-type-argument))
 
-(ert-deftest kuro-input-PAGE-DOWN-sends-csi-6 ()
-  "Page Down sends CSI 6~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--PAGE-DOWN))))
-    (should (equal sent '("\e[6~")))))
+(ert-deftest kuro-input-send-paste-or-raw-passes-esc-verbatim ()
+  "`kuro--send-paste-or-raw' delegates escape-containing text to Rust verbatim."
+  (let ((sent nil)
+        (esc (string #x1b)))
+    (cl-letf (((symbol-function 'kuro--send-paste)
+               (lambda (s) (push s sent))))
+      (kuro--send-paste-or-raw (concat "hello" esc "world")))
+    (should (equal sent (list (concat "hello" esc "world"))))))
 
-(ert-deftest kuro-input-INSERT-sends-csi-2 ()
-  "Insert key sends CSI 2~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--INSERT))))
-    (should (equal sent '("\e[2~")))))
+(ert-deftest kuro-input-send-paste-or-raw-ignores-cached-bracketed-mode ()
+  "`kuro--send-paste-or-raw' does not branch on the render-cycle DEC 2004 cache."
+  (let ((sent nil)
+        (kuro--bracketed-paste-mode t))
+    (cl-letf (((symbol-function 'kuro--send-paste)
+               (lambda (s) (push s sent))))
+      (kuro--send-paste-or-raw "pasted text"))
+    (should (equal sent '("pasted text")))))
 
-(ert-deftest kuro-input-DELETE-sends-csi-3 ()
-  "Delete key sends CSI 3~."
-  (let ((kuro--application-cursor-keys-mode nil)
-        (sent (kuro-input-test--capture-sent (kuro--DELETE))))
-    (should (equal sent '("\e[3~")))))
+;;; Group 7: kuro--yank paste dispatch
 
-;;; Group 6: kuro--sanitize-paste
-
-(ert-deftest kuro-input-sanitize-paste-removes-esc ()
-  "kuro--sanitize-paste strips ESC (0x1B) bytes."
-  (let ((esc (string #x1b)))
-    (should (equal (kuro--sanitize-paste (concat "hello" esc "world")) "helloworld"))))
-
-(ert-deftest kuro-input-sanitize-paste-clean-string-unchanged ()
-  "kuro--sanitize-paste leaves strings without ESC bytes unchanged."
-  (should (equal (kuro--sanitize-paste "hello world") "hello world")))
-
-(ert-deftest kuro-input-sanitize-paste-multiple-escapes ()
-  "kuro--sanitize-paste removes all ESC bytes."
-  (let ((esc (string #x1b)))
-    (should (equal (kuro--sanitize-paste (concat esc "a" esc "b" esc "c")) "abc"))))
-
-(ert-deftest kuro-input-sanitize-paste-empty-string ()
-  "kuro--sanitize-paste handles empty strings."
-  (should (equal (kuro--sanitize-paste "") "")))
-
-;;; Group 7: kuro--yank (bracketed paste mode)
-
-(ert-deftest kuro-input-yank-plain-without-bracketed-paste ()
-  "kuro--yank sends text directly when bracketed paste mode is off."
+(ert-deftest kuro-input-yank-sends-kill-ring-through-paste-api ()
+  "`kuro--yank' sends kill-ring text through `kuro--send-paste'."
   (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode nil)
-        (kuro--initialized t))
+        (sent nil)
+        (render-called nil))
     (with-temp-buffer
       (kill-new "clipboard text")
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (equal sent '("clipboard text")))))))
+      (cl-letf (((symbol-function 'kuro--send-paste)
+                 (lambda (s) (push s sent)))
+                ((symbol-function 'kuro--schedule-immediate-render)
+                 (lambda () (setq render-called t))))
+        (kuro--yank))
+      (should (equal sent '("clipboard text")))
+      (should render-called))))
 
-(ert-deftest kuro-input-yank-wraps-with-bracketed-paste ()
-  "kuro--yank wraps with ESC[200~ / ESC[201~ when bracketed paste mode is on."
+(ert-deftest kuro-input-yank-preserves-esc-for-rust-paste-boundary ()
+  "`kuro--yank' leaves escape-containing text to Rust paste sanitization."
   (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode t)
-        (kuro--initialized t))
-    (with-temp-buffer
-      (kill-new "pasted text")
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (= (length sent) 1))
-        (let ((payload (car sent)))
-          (should (string-prefix-p "\e[200~" payload))
-          (should (string-suffix-p "\e[201~" payload))
-          (should (string-match-p "pasted text" payload)))))))
-
-(ert-deftest kuro-input-yank-strips-esc-in-bracketed-paste ()
-  "kuro--yank sanitizes ESC bytes from clipboard content in bracketed paste mode.
-The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ remain."
-  (let ((kill-ring nil)
-        (kuro--bracketed-paste-mode t)
-        (kuro--initialized t)
+        (sent nil)
         (esc (string #x1b)))
     (with-temp-buffer
-      ;; Clipboard: "evil" + ESC + "[201~injection"
       (kill-new (concat "evil" esc "[201~injection"))
-      (let ((sent nil))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent))))
-          (kuro--yank))
-        (should (= (length sent) 1))
-        (let ((payload (car sent)))
-          ;; The payload starts with the open bracket
-          (should (string-prefix-p (concat esc "[200~") payload))
-          ;; The payload ends with the close bracket
-          (should (string-suffix-p (concat esc "[201~") payload))
-          ;; The user content should NOT contain ESC (injection neutralized)
-          (let* ((open-len (length (concat esc "[200~")))
-                 (close-len (length (concat esc "[201~")))
-                 (content (substring payload open-len
-                                     (- (length payload) close-len))))
-            (should-not (string-match-p esc content))))))))
+      (let ((kuro--bracketed-paste-mode t))
+        (cl-letf (((symbol-function 'kuro--send-paste)
+                   (lambda (s) (push s sent)))
+                  ((symbol-function 'kuro--schedule-immediate-render)
+                   (lambda () nil)))
+          (kuro--yank)))
+      (should (equal sent (list (concat "evil" esc "[201~injection")))))))
 
 ;;; Group 8: Mouse encoding (kuro--encode-mouse)
 
@@ -287,19 +224,6 @@ The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ rema
       (kill-buffer buf2))))
 
 ;;; Group 18: kuro-scroll-up / kuro-scroll-down / kuro-scroll-bottom
-
-(defmacro kuro-input-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
-                                              get-offset-fn &rest body)
-  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
-  (declare (indent 3))
-  `(with-temp-buffer
-     (setq-local kuro--initialized t
-                 kuro--scroll-offset 0)
-     (cl-letf (((symbol-function 'kuro--scroll-up)    ,scroll-up-fn)
-               ((symbol-function 'kuro--scroll-down)  ,scroll-down-fn)
-               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
-               ((symbol-function 'kuro--render-cycle) #'ignore))
-       ,@body)))
 
 (ert-deftest kuro-input-scroll-up-calls-ffi ()
   "kuro-scroll-up calls kuro--scroll-up with window-body-height lines."
@@ -376,886 +300,5 @@ The user content ESC is stripped; only the wrap sequences ESC[200~/ESC[201~ rema
         (kuro-scroll-bottom))
       (should-not down-called))))
 
-;;; Group 14: kuro--named-key-sequences data table
-
-(ert-deftest kuro-input-named-key-sequences-is-alist ()
-  "kuro--named-key-sequences is a non-empty alist of (symbol . string) pairs."
-  (should (consp kuro--named-key-sequences))
-  (dolist (entry kuro--named-key-sequences)
-    (should (symbolp (car entry)))
-    (should (stringp (cdr entry)))))
-
-(ert-deftest kuro-input-named-key-return-maps-to-cr ()
-  "kuro--named-key-sequences maps `return' to carriage return."
-  (should (equal (cdr (assq 'return kuro--named-key-sequences)) "\r")))
-
-(ert-deftest kuro-input-named-key-tab-maps-to-ht ()
-  "kuro--named-key-sequences maps `tab' to horizontal tab."
-  (should (equal (cdr (assq 'tab kuro--named-key-sequences)) "\t")))
-
-(ert-deftest kuro-input-named-key-backspace-maps-to-del ()
-  "kuro--named-key-sequences maps `backspace' to DEL (\\x7f)."
-  (should (equal (cdr (assq 'backspace kuro--named-key-sequences)) "\x7f")))
-
-(ert-deftest kuro-input-named-key-escape-maps-to-esc ()
-  "kuro--named-key-sequences maps `escape' to ESC (\\e)."
-  (should (equal (cdr (assq 'escape kuro--named-key-sequences)) "\e")))
-
-;;; Group 15: kuro--encode-key-event
-
-(ert-deftest kuro-input-encode-key-ctrl-meta-char ()
-  "Control+Meta+char encodes as ESC + control byte (C-M-a → ESC ^A)."
-  ;; Simulate C-M-a: modifiers=(control meta), base=?a
-  (let ((event (list 'C-M-a)))
-    (cl-letf (((symbol-function 'event-modifiers)
-               (lambda (_ev) '(control meta)))
-              ((symbol-function 'event-basic-type)
-               (lambda (_ev) ?a)))
-      (should (equal (kuro--encode-key-event event)
-                     (string ?\e (logand ?a 31)))))))
-
-(ert-deftest kuro-input-encode-key-ctrl-char ()
-  "Control+char encodes as a single control byte (C-a → ^A = \\x01)."
-  (let ((event 'C-a))
-    (cl-letf (((symbol-function 'event-modifiers)
-               (lambda (_ev) '(control)))
-              ((symbol-function 'event-basic-type)
-               (lambda (_ev) ?a)))
-      (should (equal (kuro--encode-key-event event)
-                     (string (logand ?a 31)))))))
-
-(ert-deftest kuro-input-encode-key-meta-char ()
-  "Meta+char encodes as ESC + the base character (M-a → ESC a)."
-  (let ((event 'M-a))
-    (cl-letf (((symbol-function 'event-modifiers)
-               (lambda (_ev) '(meta)))
-              ((symbol-function 'event-basic-type)
-               (lambda (_ev) ?a)))
-      (should (equal (kuro--encode-key-event event)
-                     (string ?\e ?a))))))
-
-(ert-deftest kuro-input-encode-key-plain-char ()
-  "Plain character encodes as itself."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) ?z)))
-    (should (equal (kuro--encode-key-event 'z) (string ?z)))))
-
-(ert-deftest kuro-input-encode-key-return ()
-  "Named key `return' encodes as carriage return."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) 'return)))
-    (should (equal (kuro--encode-key-event 'return) "\r"))))
-
-(ert-deftest kuro-input-encode-key-tab ()
-  "Named key `tab' encodes as horizontal tab."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) 'tab)))
-    (should (equal (kuro--encode-key-event 'tab) "\t"))))
-
-(ert-deftest kuro-input-encode-key-backspace ()
-  "Named key `backspace' encodes as DEL (\\x7f)."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) 'backspace)))
-    (should (equal (kuro--encode-key-event 'backspace) "\x7f"))))
-
-(ert-deftest kuro-input-encode-key-escape ()
-  "Named key `escape' encodes as ESC."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) 'escape)))
-    (should (equal (kuro--encode-key-event 'escape) "\e"))))
-
-(ert-deftest kuro-input-encode-key-unsupported-returns-nil ()
-  "An unrecognised key symbol encodes as nil."
-  (cl-letf (((symbol-function 'event-modifiers) (lambda (_ev) nil))
-            ((symbol-function 'event-basic-type) (lambda (_ev) 'f13)))
-    (should-not (kuro--encode-key-event 'f13))))
-
-;;; Group 19: kuro--schedule-immediate-render — timer coalescing and creation
-
-(ert-deftest kuro-input-schedule-immediate-render-cancels-existing-timer ()
-  "kuro--schedule-immediate-render cancels any existing pending-render-timer first.
-If kuro--pending-render-timer is already a timer, cancel-timer must be called
-before the new idle timer is created."
-  (with-temp-buffer
-    (let ((cancel-called-with nil)
-          (fake-old (cons 'fake-timer nil)))
-      (setq-local kuro--pending-render-timer fake-old)
-      ;; Make timerp return t for our fake timer
-      (cl-letf (((symbol-function 'timerp)
-                 (lambda (x) (eq x fake-old)))
-                ((symbol-function 'cancel-timer)
-                 (lambda (x) (setq cancel-called-with x)))
-                ((symbol-function 'run-with-idle-timer)
-                 (lambda (_delay _repeat _fn &rest _args) 'new-fake-timer)))
-        (kuro--schedule-immediate-render)
-        (should (eq cancel-called-with fake-old))))))
-
-(ert-deftest kuro-input-schedule-immediate-render-sets-pending-timer ()
-  "kuro--schedule-immediate-render stores the new timer in kuro--pending-render-timer."
-  (with-temp-buffer
-    (setq-local kuro--pending-render-timer nil)
-    (cl-letf (((symbol-function 'timerp) (lambda (_x) nil))
-              ((symbol-function 'run-with-idle-timer)
-               (lambda (_delay _repeat _fn &rest _args) 'created-timer)))
-      (kuro--schedule-immediate-render)
-      (should (eq kuro--pending-render-timer 'created-timer)))))
-
-(ert-deftest kuro-input-schedule-immediate-render-uses-echo-delay ()
-  "kuro--schedule-immediate-render passes kuro-input-echo-delay to run-with-idle-timer."
-  (with-temp-buffer
-    (setq-local kuro--pending-render-timer nil)
-    (let ((kuro-input-echo-delay 0.042)
-          (captured-delay nil))
-      (cl-letf (((symbol-function 'timerp) (lambda (_x) nil))
-                ((symbol-function 'run-with-idle-timer)
-                 (lambda (delay _repeat _fn &rest _args)
-                   (setq captured-delay delay)
-                   'fake)))
-        (kuro--schedule-immediate-render)
-        (should (= captured-delay 0.042))))))
-
-;;; Group 20: kuro--encode-key-event — edge cases not yet covered
-
-(ert-deftest kuro-input-encode-key-ctrl-non-char-base-returns-nil ()
-  "kuro--encode-key-event returns nil when modifier is control but base is a symbol.
-The control branch requires (characterp base); if base is e.g. 'f15 (non-char),
-none of the character branches match and assq lookup also fails → nil."
-  (cl-letf (((symbol-function 'event-modifiers)
-             (lambda (_ev) '(control)))
-            ((symbol-function 'event-basic-type)
-             (lambda (_ev) 'f15)))
-    (should-not (kuro--encode-key-event 'C-f15))))
-
-(ert-deftest kuro-input-encode-key-meta-non-char-base-returns-nil ()
-  "kuro--encode-key-event returns nil when modifier is meta but base is a symbol.
-The meta branch requires (characterp base); non-character symbols fall through
-all cond branches and produce nil."
-  (cl-letf (((symbol-function 'event-modifiers)
-             (lambda (_ev) '(meta)))
-            ((symbol-function 'event-basic-type)
-             (lambda (_ev) 'f15)))
-    (should-not (kuro--encode-key-event 'M-f15))))
-
-(ert-deftest kuro-input-encode-key-ctrl-meta-non-char-base-returns-nil ()
-  "kuro--encode-key-event returns nil when both control+meta are set but base is a symbol."
-  (cl-letf (((symbol-function 'event-modifiers)
-             (lambda (_ev) '(control meta)))
-            ((symbol-function 'event-basic-type)
-             (lambda (_ev) 'home)))
-    (should-not (kuro--encode-key-event 'C-M-home))))
-
-;;; Group 21: kuro--kitty-modifier-offset constant and Kitty encoding invariants
-
-(ert-deftest kuro-input-kitty-modifier-offset-value ()
-  "kuro--kitty-modifier-offset is 1 (the +1 added to the wire modifier bitmask)."
-  (should (= kuro--kitty-modifier-offset 1)))
-
-(ert-deftest kuro-input-encode-kitty-key-shift-modifier ()
-  "kuro--encode-kitty-key with shift (bitmask 1) produces modifier param 2."
-  ;; shift=1 → wire = 1 + kuro--kitty-modifier-offset = 2
-  (should (equal (kuro--encode-kitty-key 65 1) "\e[65;2u")))
-
-(ert-deftest kuro-input-encode-kitty-key-all-common-modifiers ()
-  "kuro--encode-kitty-key with ctrl+alt (bitmask 6) produces modifier param 7."
-  ;; ctrl=4, alt=2 → bitmask = 6 → wire = 6 + 1 = 7
-  (should (equal (kuro--encode-kitty-key 65 6) "\e[65;7u")))
-
-;;; Group 22: scroll offset fallback (kuro--get-scroll-offset returns nil)
-
-(ert-deftest kuro-input-scroll-up-offset-fallback-when-ffi-returns-nil ()
-  "kuro-scroll-up uses (+ scroll-offset lines) when kuro--get-scroll-offset returns nil."
-  (kuro-input-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () nil)            ; FFI returns nil → fallback arithmetic
-    (setq kuro--scroll-offset 10)
-    (cl-letf (((symbol-function 'window-body-height) (lambda () 5)))
-      (kuro-scroll-up))
-    ;; Fallback: 10 + 5 = 15
-    (should (= kuro--scroll-offset 15))))
-
-(ert-deftest kuro-input-scroll-down-offset-fallback-when-ffi-returns-nil ()
-  "kuro-scroll-down uses max(0, scroll-offset - lines) when kuro--get-scroll-offset returns nil."
-  (kuro-input-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () nil)            ; FFI returns nil → fallback arithmetic
-    (setq kuro--scroll-offset 10)
-    (cl-letf (((symbol-function 'window-body-height) (lambda () 3)))
-      (kuro-scroll-down))
-    ;; Fallback: max(0, 10 - 3) = 7
-    (should (= kuro--scroll-offset 7))))
-
-(ert-deftest kuro-input-scroll-down-offset-fallback-clamps-to-zero ()
-  "kuro-scroll-down fallback clamps offset to 0 when lines > current offset."
-  (kuro-input-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () nil)
-    (setq kuro--scroll-offset 2)
-    (cl-letf (((symbol-function 'window-body-height) (lambda () 10)))
-      (kuro-scroll-down))
-    ;; max(0, 2 - 10) = max(0, -8) = 0
-    (should (= kuro--scroll-offset 0))))
-
-;;; Group 10: Regression — Ctrl+letter keybindings are registered with correct descriptors
-;;
-;; Root cause of the C-b/C-f/C-e bug:
-;;   (vector (list 'control ?b)) is NOT equivalent to (kbd "C-b") in GUI Emacs.
-;;   The vector form is invisible to the event dispatcher; global-map bindings
-;;   (backward-char, forward-char, etc.) win instead.  We must use (kbd "C-x")
-;;   descriptors.  These tests verify that lookup-key on kuro--keymap resolves
-;;   every critical Ctrl+letter to a non-nil (our PTY-forwarding) binding.
-;;
-;; Note: keys in `kuro-keymap-exceptions' (default: C-c C-x C-u C-g C-h C-l
-;;   M-x M-o C-y M-y) are intentionally NOT bound in kuro--keymap so they fall
-;;   through to the Emacs global keymap.  The tests below reflect this.
-
-(defun kuro-input-test--keymap-bound-p (key)
-  "Return non-nil if KEY is bound in kuro--keymap."
-  (let ((binding (lookup-key kuro--keymap (kbd key))))
-    (and binding (not (numberp binding)))))  ; numberp = key sequence prefix
-
-(defmacro kuro-input-test--with-empty-exceptions (&rest body)
-  "Run BODY with `kuro--keymap' temporarily rebuilt without any exceptions.
-Saves and restores `kuro--keymap' via `unwind-protect' (which wraps the
-build call too) so the test leaves the global keymap in its original state
-regardless of whether the build or BODY signals an error."
-  `(let ((orig-keymap kuro--keymap))
-     (unwind-protect
-         (progn
-           ;; Rebuild inside a nested let so kuro-keymap-exceptions reverts
-           ;; after the let exits, before unwind-protect cleanup runs.
-           (let ((kuro-keymap-exceptions nil))
-             (kuro--build-keymap))
-           ,@body)
-       ;; Restore the original keymap directly.
-       (setq kuro--keymap orig-keymap))))
-
-(ert-deftest kuro-input-keymap-c-a-bound ()
-  "C-a (readline: beginning-of-line) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-a")))
-
-(ert-deftest kuro-input-keymap-c-b-bound ()
-  "C-b (readline: backward-char) is bound in kuro--keymap.
-Regression: was missing, causing global-map backward-char to shadow it."
-  (should (kuro-input-test--keymap-bound-p "C-b")))
-
-(ert-deftest kuro-input-keymap-c-d-bound ()
-  "C-d (readline: delete-char / EOF) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-d")))
-
-(ert-deftest kuro-input-keymap-c-e-bound ()
-  "C-e (readline: end-of-line) is bound in kuro--keymap.
-Regression: was missing, causing C-e to have no effect in bash."
-  (should (kuro-input-test--keymap-bound-p "C-e")))
-
-(ert-deftest kuro-input-keymap-c-f-bound ()
-  "C-f (readline: forward-char) is bound in kuro--keymap.
-Regression: was missing, causing global-map forward-char to shadow it."
-  (should (kuro-input-test--keymap-bound-p "C-f")))
-
-(ert-deftest kuro-input-keymap-c-k-bound ()
-  "C-k (readline: kill-line) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-k")))
-
-(ert-deftest kuro-input-keymap-c-l-not-bound-by-default ()
-  "C-l is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
-C-l falls through to the Emacs global keymap (recenter-top-bottom)."
-  (should-not (kuro-input-test--keymap-bound-p "C-l")))
-
-(ert-deftest kuro-input-keymap-c-l-bound-without-exceptions ()
-  "C-l IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
-  (kuro-input-test--with-empty-exceptions
-   (should (kuro-input-test--keymap-bound-p "C-l"))))
-
-(ert-deftest kuro-input-keymap-c-n-bound ()
-  "C-n (readline: next-history) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-n")))
-
-(ert-deftest kuro-input-keymap-c-p-bound ()
-  "C-p (readline: previous-history) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-p")))
-
-(ert-deftest kuro-input-keymap-c-r-bound ()
-  "C-r (readline: reverse-search-history) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-r")))
-
-(ert-deftest kuro-input-keymap-c-s-bound ()
-  "C-s (readline: forward-search-history) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-s")))
-
-(ert-deftest kuro-input-keymap-c-t-bound ()
-  "C-t (readline: transpose-chars) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-t")))
-
-(ert-deftest kuro-input-keymap-c-u-not-bound-by-default ()
-  "C-u is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
-C-u falls through to the Emacs global keymap (universal-argument)."
-  (should-not (kuro-input-test--keymap-bound-p "C-u")))
-
-(ert-deftest kuro-input-keymap-c-u-bound-without-exceptions ()
-  "C-u IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
-  (kuro-input-test--with-empty-exceptions
-   (should (kuro-input-test--keymap-bound-p "C-u"))))
-
-(ert-deftest kuro-input-keymap-c-w-bound ()
-  "C-w (readline: unix-word-rubout) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-w")))
-
-(ert-deftest kuro-input-keymap-c-x-not-bound-by-default ()
-  "C-x is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
-C-x falls through to the Emacs global keymap (C-x prefix)."
-  (should-not (kuro-input-test--keymap-bound-p "C-x")))
-
-(ert-deftest kuro-input-keymap-c-x-bound-without-exceptions ()
-  "C-x IS bound in kuro--keymap when kuro-keymap-exceptions is empty."
-  (kuro-input-test--with-empty-exceptions
-   (should (kuro-input-test--keymap-bound-p "C-x"))))
-
-(ert-deftest kuro-input-keymap-c-z-bound ()
-  "C-z (SIGTSTP) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "C-z")))
-
-(ert-deftest kuro-input-keymap-m-x-not-bound-by-default ()
-  "M-x is NOT bound in kuro--keymap by default (it is in kuro-keymap-exceptions).
-M-x falls through to execute-extended-command."
-  (should-not (kuro-input-test--keymap-bound-p "M-x")))
-
-(ert-deftest kuro-input-keymap-m-x-bound-without-exceptions ()
-  "M-x IS bound (sends ESC+x to PTY) when kuro-keymap-exceptions is empty."
-  (kuro-input-test--with-empty-exceptions
-   (should (kuro-input-test--keymap-bound-p "M-x"))))
-
-;;; Group 11: Regression — Alt/Meta keybindings use correct (kbd) descriptors
-;;
-;; (vector (list 'meta ?b)) is NOT equivalent to (kbd "M-b") in GUI Emacs.
-
-(ert-deftest kuro-input-keymap-m-b-bound ()
-  "M-b (readline: backward-word) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-b")))
-
-(ert-deftest kuro-input-keymap-m-f-bound ()
-  "M-f (readline: forward-word) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-f")))
-
-(ert-deftest kuro-input-keymap-m-d-bound ()
-  "M-d (readline: delete-word) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-d")))
-
-(ert-deftest kuro-input-keymap-m-dot-bound ()
-  "M-. (readline: yank-last-arg) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-.")))
-
-(ert-deftest kuro-input-keymap-m-r-bound ()
-  "M-r (readline: revert-line) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-r")))
-
-(ert-deftest kuro-input-keymap-m-u-bound ()
-  "M-u (readline: upcase-word) is bound in kuro--keymap."
-  (should (kuro-input-test--keymap-bound-p "M-u")))
-
-;;; Group 12: Ctrl+letter sends correct control bytes to PTY
-;;
-;; Keys that are in kuro-keymap-exceptions by default (C-l=12, C-u=21) are
-;; tested using kuro-input-test--with-empty-exceptions so the binding exists.
-
-(defmacro kuro-input-test--ctrl-sends (key expected-byte)
-  "Assert that KEY (kbd string) in kuro--keymap sends EXPECTED-BYTE to the PTY."
-  `(ert-deftest ,(intern (format "kuro-input-ctrl-%d-sends-byte" expected-byte)) ()
-     ,(format "Pressing %s sends control byte %d (^%c) to the PTY." key expected-byte
-              (+ expected-byte 64))
-     (let* ((binding (lookup-key kuro--keymap (kbd ,key)))
-            (sent nil))
-       (should (functionp binding))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (push s sent)))
-                 ((symbol-function 'kuro--schedule-immediate-render)
-                  (lambda () nil)))
-         (funcall binding))
-       (should (equal sent (list (string ,expected-byte)))))))
-
-(defmacro kuro-input-test--ctrl-sends-no-exc (key expected-byte)
-  "Like `kuro-input-test--ctrl-sends' but runs with empty exceptions."
-  `(ert-deftest ,(intern (format "kuro-input-ctrl-%d-sends-byte-no-exc" expected-byte)) ()
-     ,(format "Pressing %s sends control byte %d (^%c) to PTY (exceptions cleared)."
-              key expected-byte (+ expected-byte 64))
-     (kuro-input-test--with-empty-exceptions
-      (let* ((binding (lookup-key kuro--keymap (kbd ,key)))
-             (sent nil))
-        (should (functionp binding))
-        (cl-letf (((symbol-function 'kuro--send-key)
-                   (lambda (s) (push s sent)))
-                  ((symbol-function 'kuro--schedule-immediate-render)
-                   (lambda () nil)))
-          (funcall binding))
-        (should (equal sent (list (string ,expected-byte))))))))
-
-(kuro-input-test--ctrl-sends "C-a" 1)
-(kuro-input-test--ctrl-sends "C-b" 2)
-(kuro-input-test--ctrl-sends "C-d" 4)
-(kuro-input-test--ctrl-sends "C-e" 5)
-(kuro-input-test--ctrl-sends "C-f" 6)
-(kuro-input-test--ctrl-sends "C-k" 11)
-;; C-l (12) is in kuro-keymap-exceptions by default; test with empty exceptions.
-(kuro-input-test--ctrl-sends-no-exc "C-l" 12)
-(kuro-input-test--ctrl-sends "C-n" 14)
-(kuro-input-test--ctrl-sends "C-p" 16)
-(kuro-input-test--ctrl-sends "C-r" 18)
-(kuro-input-test--ctrl-sends "C-t" 20)
-;; C-u (21) is in kuro-keymap-exceptions by default; test with empty exceptions.
-(kuro-input-test--ctrl-sends-no-exc "C-u" 21)
-(kuro-input-test--ctrl-sends "C-w" 23)
-(kuro-input-test--ctrl-sends "C-z" 26)
-
-;;; Group 13: Alt+letter sends correct ESC+char sequences to PTY
-
-(defmacro kuro-input-test--meta-sends (key expected-char)
-  "Assert that KEY (kbd string) in kuro--keymap sends ESC+EXPECTED-CHAR to PTY."
-  `(ert-deftest ,(intern (format "kuro-input-meta-%c-sends-esc-seq" expected-char)) ()
-     ,(format "Pressing %s sends ESC + %c (readline Alt prefix) to the PTY." key expected-char)
-     (let* ((binding (lookup-key kuro--keymap (kbd ,key)))
-            (sent nil))
-       (should (functionp binding))
-       (cl-letf (((symbol-function 'kuro--send-key)
-                  (lambda (s) (push s sent)))
-                 ((symbol-function 'kuro--schedule-immediate-render)
-                  (lambda () nil)))
-         (funcall binding))
-       (should (equal sent (list (string ?\e ,expected-char)))))))
-
-(kuro-input-test--meta-sends "M-b" ?b)
-(kuro-input-test--meta-sends "M-f" ?f)
-(kuro-input-test--meta-sends "M-d" ?d)
-(kuro-input-test--meta-sends "M-r" ?r)
-(kuro-input-test--meta-sends "M-u" ?u)
-(kuro-input-test--meta-sends "M-l" ?l)
-
-;;; Group 14: kuro--send-meta-backspace sends correct ESC+DEL sequence
-
-(ert-deftest kuro-send-meta-backspace-sends-correct-sequence ()
-  "kuro--send-meta-backspace sends ESC+DEL (readline backward-kill-word)."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (key) (push key sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro--send-meta-backspace)
-      (should (equal sent (list (string ?\e ?\x7f)))))))
-
-;;; Group 15: kuro--send-special
-
-(ert-deftest kuro-input-send-special-sends-byte ()
-  "kuro--send-special sends the given byte as a single-char string to the PTY."
-  (let ((sent (kuro-input-test--capture-sent
-               (kuro--send-special ?\C-c))))
-    (should (equal sent (list (string ?\C-c))))))
-
-(ert-deftest kuro-input-send-special-sends-escape ()
-  "kuro--send-special sends ESC (0x1B) correctly."
-  (let ((sent (kuro-input-test--capture-sent
-               (kuro--send-special ?\e))))
-    (should (equal sent (list (string ?\e))))))
-
-(ert-deftest kuro-input-send-special-delegates-to-send-key-regardless-of-init ()
-  "kuro--send-special always delegates to kuro--send-key regardless of kuro--initialized."
-  (let ((sent nil)
-        (kuro--initialized nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      ;; kuro--send-special does not guard on kuro--initialized itself;
-      ;; the guard is inside kuro--send-key (the real FFI wrapper).
-      ;; We verify the byte is still passed through to kuro--send-key
-      ;; (the guard is in the stub layer, not in kuro--send-special).
-      ;; This test confirms kuro--send-special always calls kuro--send-key.
-      (kuro--send-special ?a)
-      (should (equal sent (list (string ?a)))))))
-
-;;; Group 16: kuro--self-insert
-
-(ert-deftest kuro-input-self-insert-sends-char ()
-  "kuro--self-insert sends last-command-event as a UTF-8 string."
-  (let ((last-command-event ?a))
-    (let ((sent (kuro-input-test--capture-sent
-                 (kuro--self-insert))))
-      (should (equal sent (list "a"))))))
-
-(ert-deftest kuro-input-self-insert-sends-space ()
-  "kuro--self-insert sends SPC correctly."
-  (let ((last-command-event ?\s))
-    (let ((sent (kuro-input-test--capture-sent
-                 (kuro--self-insert))))
-      (should (equal sent (list " "))))))
-
-(ert-deftest kuro-input-self-insert-sends-multibyte-char ()
-  "kuro--self-insert sends a multibyte (non-ASCII) character."
-  (let ((last-command-event ?あ))
-    (let ((sent (kuro-input-test--capture-sent
-                 (kuro--self-insert))))
-      (should (equal sent (list (string ?あ)))))))
-
-(ert-deftest kuro-input-self-insert-noop-for-non-character ()
-  "kuro--self-insert is a no-op when last-command-event is not a character."
-  (let ((last-command-event 'mouse-1))
-    (let ((sent (kuro-input-test--capture-sent
-                 (kuro--self-insert))))
-      (should (null sent)))))
-
-;;; Group 17: kuro--ctrl-alt-modified
-
-(ert-deftest kuro-input-ctrl-alt-modified-sends-esc-ctrl-byte ()
-  "kuro--ctrl-alt-modified sends ESC followed by the ctrl byte (char & 31)."
-  ;; char=?a (97), 97 & 31 = 1 (^A), so sequence is ESC + ^A
-  (let ((sent (kuro-input-test--capture-sent
-               (kuro--ctrl-alt-modified ?a 0))))
-    (should (equal sent (list (concat (string ?\e) (string (logand ?a 31))))))))
-
-(ert-deftest kuro-input-ctrl-alt-modified-sends-esc-ctrl-c ()
-  "kuro--ctrl-alt-modified for 'c' sends ESC + ^C (Ctrl+C = 3)."
-  (let ((sent (kuro-input-test--capture-sent
-               (kuro--ctrl-alt-modified ?c 0))))
-    (should (equal sent (list (string ?\e ?\C-c))))))
-
-(ert-deftest kuro-input-ctrl-alt-modified-ignores-modifier-arg ()
-  "kuro--ctrl-alt-modified ignores the MODIFIER argument (always ESC+ctrl-byte)."
-  (let ((sent-no-mod (kuro-input-test--capture-sent
-                      (kuro--ctrl-alt-modified ?b 0)))
-        (sent-with-mod (kuro-input-test--capture-sent
-                        (kuro--ctrl-alt-modified ?b 7))))
-    (should (equal sent-no-mod sent-with-mod))))
-
-;;; Group 23: kuro--send-ctrl and kuro--send-meta (kuro--def-key-sender generated fns)
-
-(ert-deftest kuro-input-send-ctrl-sends-byte ()
-  "kuro--send-ctrl sends the given control byte as a single-char string."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro--send-ctrl 1)   ; ^A
-      (should (equal sent (list (string 1)))))))
-
-(ert-deftest kuro-input-send-ctrl-sends-ctrl-c ()
-  "kuro--send-ctrl with byte 3 sends the ETX (Ctrl+C) byte."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro--send-ctrl 3)
-      (should (equal sent (list (string 3)))))))
-
-(ert-deftest kuro-input-send-meta-sends-esc-plus-char ()
-  "kuro--send-meta sends ESC followed by the given character."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro--send-meta ?b)
-      (should (equal sent (list (string ?\e ?b)))))))
-
-(ert-deftest kuro-input-send-meta-sends-esc-plus-f ()
-  "kuro--send-meta ?f sends ESC f (readline forward-word)."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro--send-meta ?f)
-      (should (equal sent (list (string ?\e ?f)))))))
-
-(ert-deftest kuro-input-send-ctrl-schedules-render ()
-  "kuro--send-ctrl calls kuro--schedule-immediate-render."
-  (let ((render-called nil))
-    (cl-letf (((symbol-function 'kuro--send-key) #'ignore)
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () (setq render-called t))))
-      (kuro--send-ctrl 1)
-      (should render-called))))
-
-(ert-deftest kuro-input-send-meta-schedules-render ()
-  "kuro--send-meta calls kuro--schedule-immediate-render."
-  (let ((render-called nil))
-    (cl-letf (((symbol-function 'kuro--send-key) #'ignore)
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () (setq render-called t))))
-      (kuro--send-meta ?a)
-      (should render-called))))
-
-;;; Group 24: kuro--scroll-to-bottom-sentinel constant and FFI offset adoption
-
-(ert-deftest kuro-input-scroll-to-bottom-sentinel-value ()
-  "kuro--scroll-to-bottom-sentinel is a large positive integer used to scroll past all content."
-  (should (integerp kuro--scroll-to-bottom-sentinel))
-  (should (> kuro--scroll-to-bottom-sentinel 10000)))
-
-(defmacro kuro-input-ext2-test--with-scroll-stubs (scroll-up-fn scroll-down-fn
-                                             get-offset-fn &rest body)
-  "Run BODY with scroll FFI functions stubbed and kuro--initialized=t."
-  (declare (indent 3))
-  `(with-temp-buffer
-     (setq-local kuro--initialized t
-                 kuro--scroll-offset 0)
-     (cl-letf (((symbol-function 'kuro--scroll-up)    ,scroll-up-fn)
-               ((symbol-function 'kuro--scroll-down)  ,scroll-down-fn)
-               ((symbol-function 'kuro--get-scroll-offset) ,get-offset-fn)
-               ((symbol-function 'kuro--render-cycle) #'ignore))
-       ,@body)))
-
-(ert-deftest kuro-input-scroll-up-adopts-ffi-offset ()
-  "kuro-scroll-up stores the value returned by kuro--get-scroll-offset (non-nil case)."
-  (kuro-input-ext2-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () 37)           ; FFI returns the actual offset
-    (setq kuro--scroll-offset 0)
-    (cl-letf (((symbol-function 'window-body-height) (lambda () 10)))
-      (kuro-scroll-up))
-    ;; kuro--get-scroll-offset returned 37 → offset must be 37
-    (should (= kuro--scroll-offset 37))))
-
-(ert-deftest kuro-input-scroll-down-adopts-ffi-offset ()
-  "kuro-scroll-down stores the value returned by kuro--get-scroll-offset (non-nil case)."
-  (kuro-input-ext2-test--with-scroll-stubs
-      #'ignore
-      #'ignore
-      (lambda () 5)            ; FFI returns the actual offset
-    (setq kuro--scroll-offset 20)
-    (cl-letf (((symbol-function 'window-body-height) (lambda () 10)))
-      (kuro-scroll-down))
-    ;; kuro--get-scroll-offset returned 5 → offset must be 5
-    (should (= kuro--scroll-offset 5))))
-
-;;; Group 25: HOME / END application-cursor-mode sequences
-
-(ert-deftest kuro-input-HOME-application-sends-csi-1 ()
-  "HOME in application cursor mode sends CSI 1~ (application variant)."
-  (with-temp-buffer
-    (setq-local kuro--application-cursor-keys-mode t)
-    (let ((sent (kuro-input-test--capture-sent (kuro--HOME))))
-      (should (equal sent '("\e[1~"))))))
-
-(ert-deftest kuro-input-END-application-sends-csi-4 ()
-  "END in application cursor mode sends CSI 4~ (application variant)."
-  (with-temp-buffer
-    (setq-local kuro--application-cursor-keys-mode t)
-    (let ((sent (kuro-input-test--capture-sent (kuro--END))))
-      (should (equal sent '("\e[4~"))))))
-
-;;; Group 26: kuro-send-next-key — dispatch via kuro--encode-key-event
-
-(ert-deftest kuro-input-send-next-key-dispatches-supported-event ()
-  "kuro-send-next-key sends the encoded string when the key is supported."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'read-event)
-               (lambda () ?a))
-              ((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil))
-              ((symbol-function 'message) #'ignore))
-      (kuro-send-next-key)
-      ;; Plain 'a' with no modifiers encodes as "a"
-      (should (equal sent (list "a"))))))
-
-(ert-deftest kuro-input-send-next-key-shows-message-for-unsupported-event ()
-  "kuro-send-next-key shows a message and does not call kuro--send-key for unsupported keys."
-  (let ((sent nil)
-        (msg nil))
-    (cl-letf (((symbol-function 'read-event)
-               ;; Return a synthetic event whose basic-type is an unknown symbol
-               (lambda () 'f99))
-              ((symbol-function 'kuro--encode-key-event)
-               (lambda (_ev) nil))
-              ((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'message)
-               (lambda (fmt &rest _args)
-                 (setq msg fmt)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil)))
-      (kuro-send-next-key)
-      (should (null sent))
-      (should (stringp msg)))))
-
-(ert-deftest kuro-input-send-next-key-ctrl-char-encodes-control-byte ()
-  "kuro-send-next-key with a Ctrl+letter event sends the control byte."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'read-event)
-               (lambda () ?\C-c))
-              ((symbol-function 'kuro--send-key)
-               (lambda (s) (push s sent)))
-              ((symbol-function 'kuro--schedule-immediate-render)
-               (lambda () nil))
-              ((symbol-function 'message) #'ignore))
-      (kuro-send-next-key)
-      ;; ?\C-c = 3; encoded as (string (logand ?c 31)) = (string 3)
-      (should (equal sent (list (string (logand ?c 31))))))))
-
-;;; Group 27: kuro--app-keypad-mode and kuro--pending-render-timer — buffer-local vars
-
-(ert-deftest kuro-input-app-keypad-mode-is-buffer-local ()
-  "kuro--app-keypad-mode is buffer-local (each kuro buffer manages its own state)."
-  (let ((buf1 (get-buffer-create " *kuro-input-kpd-1*"))
-        (buf2 (get-buffer-create " *kuro-input-kpd-2*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf1 (setq kuro--app-keypad-mode t))
-          (with-current-buffer buf2 (setq kuro--app-keypad-mode nil))
-          (should (with-current-buffer buf1 kuro--app-keypad-mode))
-          (should-not (with-current-buffer buf2 kuro--app-keypad-mode)))
-      (kill-buffer buf1)
-      (kill-buffer buf2))))
-
-(ert-deftest kuro-input-pending-render-timer-is-buffer-local ()
-  "kuro--pending-render-timer is buffer-local."
-  (let ((buf1 (get-buffer-create " *kuro-input-timer-1*"))
-        (buf2 (get-buffer-create " *kuro-input-timer-2*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf1 (setq kuro--pending-render-timer 'fake-timer))
-          (with-current-buffer buf2 (setq kuro--pending-render-timer nil))
-          (should (eq (with-current-buffer buf1 kuro--pending-render-timer) 'fake-timer))
-          (should (null (with-current-buffer buf2 kuro--pending-render-timer))))
-      (kill-buffer buf1)
-      (kill-buffer buf2))))
-
-(ert-deftest kuro-input-application-cursor-keys-mode-is-buffer-local ()
-  "kuro--application-cursor-keys-mode is buffer-local."
-  (let ((buf1 (get-buffer-create " *kuro-input-ackm-1*"))
-        (buf2 (get-buffer-create " *kuro-input-ackm-2*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf1 (setq kuro--application-cursor-keys-mode t))
-          (with-current-buffer buf2 (setq kuro--application-cursor-keys-mode nil))
-          (should (with-current-buffer buf1 kuro--application-cursor-keys-mode))
-          (should-not (with-current-buffer buf2 kuro--application-cursor-keys-mode)))
-      (kill-buffer buf1)
-      (kill-buffer buf2))))
-
-;;; Group 28: kuro--encode-kitty-key — extended modifier bitmasks
-
-(ert-deftest kuro-input-encode-kitty-key-super-modifier ()
-  "kuro--encode-kitty-key with super (bitmask 8) produces modifier param 9."
-  ;; super=8 → wire = 8 + kuro--kitty-modifier-offset (1) = 9
-  (should (equal (kuro--encode-kitty-key 65 8) "\e[65;9u")))
-
-(ert-deftest kuro-input-encode-kitty-key-hyper-modifier ()
-  "kuro--encode-kitty-key with hyper (bitmask 16) produces modifier param 17."
-  (should (equal (kuro--encode-kitty-key 65 16) "\e[65;17u")))
-
-(ert-deftest kuro-input-encode-kitty-key-meta-modifier ()
-  "kuro--encode-kitty-key with meta (bitmask 32) produces modifier param 33."
-  (should (equal (kuro--encode-kitty-key 65 32) "\e[65;33u")))
-
-(ert-deftest kuro-input-encode-kitty-key-shift-ctrl-combination ()
-  "kuro--encode-kitty-key with shift+ctrl (bitmask 5) produces modifier param 6."
-  ;; shift=1, ctrl=4 → bitmask=5 → wire = 5 + 1 = 6
-  (should (equal (kuro--encode-kitty-key 65 5) "\e[65;6u")))
-
-(ert-deftest kuro-input-encode-kitty-key-unicode-codepoint ()
-  "kuro--encode-kitty-key encodes a non-ASCII Unicode codepoint correctly."
-  ;; U+3042 (HIRAGANA LETTER A) with no modifiers
-  (should (equal (kuro--encode-kitty-key #x3042 0) "\e[12354u")))
-
-(ert-deftest kuro-input-encode-kitty-key-space-codepoint ()
-  "kuro--encode-kitty-key with space codepoint (32) and no modifiers."
-  (should (equal (kuro--encode-kitty-key 32 0) "\e[32u")))
-
-(ert-deftest kuro-input-encode-kitty-key-all-modifiers-combined ()
-  "kuro--encode-kitty-key with all common modifiers (shift+alt+ctrl = 7) produces param 8."
-  ;; shift=1, alt=2, ctrl=4 → bitmask=7 → wire = 7 + 1 = 8
-  (should (equal (kuro--encode-kitty-key 65 7) "\e[65;8u")))
-
-;;; Group 29: kuro--scroll-aware-ctrl-v and kuro--scroll-aware-meta-v
-
-(ert-deftest kuro-input-scroll-aware-ctrl-v-at-live-sends-ctrl-byte ()
-  "kuro--scroll-aware-ctrl-v sends ctrl byte 22 when scroll-offset is 0."
-  (let ((kuro--scroll-offset 0)
-        sent)
-    (cl-letf (((symbol-function 'kuro--send-ctrl)
-               (lambda (byte) (setq sent byte)))
-              ((symbol-function 'kuro-scroll-down) (lambda () (error "must not scroll"))))
-      (kuro--scroll-aware-ctrl-v)
-      (should (= sent 22)))))
-
-(ert-deftest kuro-input-scroll-aware-ctrl-v-in-scrollback-scrolls-down ()
-  "kuro--scroll-aware-ctrl-v calls kuro-scroll-down when scroll-offset > 0."
-  (let ((kuro--scroll-offset 5)
-        scrolled)
-    (cl-letf (((symbol-function 'kuro-scroll-down) (lambda () (setq scrolled t)))
-              ((symbol-function 'kuro--send-ctrl) (lambda (_) (error "must not send"))))
-      (kuro--scroll-aware-ctrl-v)
-      (should scrolled))))
-
-(ert-deftest kuro-input-scroll-aware-meta-v-at-live-sends-esc-v ()
-  "kuro--scroll-aware-meta-v sends ESC+v when scroll-offset is 0."
-  (let ((kuro--scroll-offset 0)
-        sent)
-    (cl-letf (((symbol-function 'kuro--send-meta)
-               (lambda (char) (setq sent char)))
-              ((symbol-function 'kuro-scroll-up) (lambda () (error "must not scroll"))))
-      (kuro--scroll-aware-meta-v)
-      (should (= sent ?v)))))
-
-(ert-deftest kuro-input-scroll-aware-meta-v-in-scrollback-scrolls-up ()
-  "kuro--scroll-aware-meta-v calls kuro-scroll-up when scroll-offset > 0."
-  (let ((kuro--scroll-offset 3)
-        scrolled)
-    (cl-letf (((symbol-function 'kuro-scroll-up) (lambda () (setq scrolled t)))
-              ((symbol-function 'kuro--send-meta) (lambda (_) (error "must not send"))))
-      (kuro--scroll-aware-meta-v)
-      (should scrolled))))
-
-;;; Group 30: kuro--send-char and kuro--def-special-key
-
-(ert-deftest kuro-input-send-char-calls-send-key-with-string ()
-  "kuro--send-char passes (string char) to kuro--send-key."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s))))
-      (kuro--send-char ?A)
-      (should (equal sent "A")))))
-
-(ert-deftest kuro-input-send-char-unicode-codepoint ()
-  "kuro--send-char encodes a unicode codepoint correctly."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s))))
-      (kuro--send-char ?€)
-      (should (equal sent "€")))))
-
-(ert-deftest kuro-input-def-special-key-macro-generates-command ()
-  "kuro--def-special-key generates an interactive command that calls kuro--send-special."
-  (should (fboundp 'kuro--RET))
-  (should (fboundp 'kuro--TAB))
-  (should (fboundp 'kuro--DEL))
-  (should (commandp 'kuro--RET))
-  (should (commandp 'kuro--TAB))
-  (should (commandp 'kuro--DEL)))
-
-(ert-deftest kuro-input-ret-sends-carriage-return ()
-  "kuro--RET sends \\r to the PTY."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-      (kuro--RET)
-      (should (equal sent "\r")))))
-
-(ert-deftest kuro-input-del-sends-backspace-byte ()
-  "kuro--DEL sends \\x7f to the PTY."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'kuro--send-key)
-               (lambda (s) (setq sent s)))
-              ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-      (kuro--DEL)
-      (should (equal sent "\x7f")))))
-
 (provide 'kuro-input-test)
-
 ;;; kuro-input-test.el ends here

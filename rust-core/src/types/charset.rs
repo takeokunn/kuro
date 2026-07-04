@@ -51,9 +51,10 @@ pub const DEC_LINE_DRAWING_TABLE: [char; 31] = [
 /// Only translates bytes in 0x60..=0x7E range; all others pass through.
 #[inline]
 pub fn translate_dec_line_drawing(c: char) -> char {
-    let b = c as u32;
+    let b = u32::from(c);
     if (0x60..=0x7E).contains(&b) {
-        DEC_LINE_DRAWING_TABLE[(b - 0x60) as usize]
+        let index = usize::try_from(b - 0x60).expect("DEC line drawing index fits usize");
+        DEC_LINE_DRAWING_TABLE[index]
     } else {
         c
     }
@@ -71,7 +72,8 @@ mod tests {
     #[test]
     fn translate_all_31_entries() {
         for (i, &expected) in DEC_LINE_DRAWING_TABLE.iter().enumerate() {
-            let ascii = char::from(0x60 + i as u8);
+            let index = u8::try_from(i).expect("DEC line drawing table index fits u8");
+            let ascii = char::from(0x60 + index);
             assert_eq!(
                 translate_dec_line_drawing(ascii),
                 expected,

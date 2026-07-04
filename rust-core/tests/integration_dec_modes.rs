@@ -411,5 +411,53 @@ fn test_sync_output_cursor_movement_inside_batch() {
     term.advance(b"\x1b[?2026l");
 }
 
-include!("include/integration_dec_sync_output.rs");
-include!("include/integration_dec_reverse_video.rs");
+// ── XTSAVE / XTRESTORE — CSI ? Pm s / CSI ? Pm r ─────────────────────────────
+
+#[test]
+fn test_xtsave_xtrestore_round_trip() {
+    // INTENT: set modes 1049 + 2004, save (CSI ? s), reset them, restore
+    // (CSI ? r) — both modes return to their saved (enabled) state.
+    let mut term = common::new_terminal();
+    term.advance(b"\x1b[?1049h\x1b[?2004h");
+    assert!(term.dec_modes().alternate_screen);
+    assert!(term.dec_modes().bracketed_paste);
+
+    term.advance(b"\x1b[?1049;2004s"); // XTSAVE
+    term.advance(b"\x1b[?1049l\x1b[?2004l");
+    assert!(!term.dec_modes().alternate_screen);
+    assert!(!term.dec_modes().bracketed_paste);
+
+    term.advance(b"\x1b[?1049;2004r"); // XTRESTORE
+    assert!(
+        term.dec_modes().alternate_screen,
+        "1049 must be restored after CSI ? r"
+    );
+    assert!(
+        term.dec_modes().bracketed_paste,
+        "2004 must be restored after CSI ? r"
+    );
+}
+
+#[test]
+fn test_xtrestore_empty_stack_is_no_op() {
+    // INTENT: CSI ? r with nothing saved leaves modes unchanged.
+    let mut term = common::new_terminal();
+    term.advance(b"\x1b[?2004h");
+    term.advance(b"\x1b[?r");
+    assert!(
+        term.dec_modes().bracketed_paste,
+        "empty-stack restore must be a no-op"
+    );
+}
+
+#[path = "include/integration_dec_inband_resize.rs"]
+mod inband_resize;
+
+#[path = "include/integration_dec_sync_output.rs"]
+mod sync_output;
+
+#[path = "include/integration_dec_reverse_video.rs"]
+mod reverse_video;
+
+#[path = "include/integration_dec_focus_events.rs"]
+mod focus_events;

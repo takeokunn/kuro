@@ -83,15 +83,15 @@ fn test_encode_line_preserves_trailing_spaces_for_cursor() {
     assert_eq!(cursor_col, 2);
 
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let encoded = encode_line(&line.cells);
 
     // The encoded text must be at least cursor_col characters long so that
     // `(+ line-start cursor_col)` never exceeds `line-end-position`.
     assert!(
-        text.len() >= cursor_col,
+        encoded.text.len() >= cursor_col,
         "encoded text length ({}) must be >= cursor_col ({}) — \
          trimming trailing spaces would break kuro--update-cursor",
-        text.len(),
+        encoded.text.len(),
         cursor_col
     );
 }
@@ -105,10 +105,10 @@ fn test_encode_line_preserves_trailing_spaces_for_cursor() {
 fn test_blank_line_is_not_empty_after_encode() {
     let term = super::make_term();
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let encoded = encode_line(&line.cells);
     // A blank 80-column line: encoded text must be 80 spaces, not "".
     assert_eq!(
-        text.len(),
+        encoded.text.len(),
         80,
         "a blank 80-col line must encode to 80 spaces, not an empty string"
     );
@@ -176,11 +176,11 @@ fn test_internal_spaces_preserved() {
         "space at col 3 in 'foo   bar' must be stored in the grid"
     );
     let line = term.screen.get_line(0).expect("line 0 must exist");
-    let (text, _, _) = encode_line(&line.cells);
+    let encoded = encode_line(&line.cells);
     assert!(
-        text.starts_with("foo   bar"),
+        encoded.text.starts_with("foo   bar"),
         "encoded text must start with 'foo   bar' (spaces preserved), got: {:?}",
-        &text[..text.len().min(20)]
+        &encoded.text[..encoded.text.len().min(20)]
     );
 }
 

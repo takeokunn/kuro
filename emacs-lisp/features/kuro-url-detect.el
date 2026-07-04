@@ -1,4 +1,4 @@
-;;; kuro-url-detect.el --- URL and file:line detection for Kuro  -*- lexical-binding: t; -*-
+;;; kuro-url-detect.el --- URL detection for Kuro  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
 
@@ -6,24 +6,20 @@
 
 ;;; Commentary:
 
-;; Idle-timer-based detection of clickable URLs and file:line references
-;; in the Kuro terminal buffer.  URLs are highlighted and clickable via
-;; mouse or RET.  File:line patterns open the file at the specified line.
+;; Idle-timer-based detection of clickable HTTP(S) URLs in the Kuro
+;; terminal buffer.  URLs are highlighted and clickable via mouse or RET.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'kuro-ffi)
+(require 'kuro-keymap)
+(require 'kuro-url-safety)
 
 ;;; Customization
 
 (defcustom kuro-url-detection t
   "When non-nil, detect and highlight URLs in terminal output."
-  :type 'boolean
-  :group 'kuro)
-
-(defcustom kuro-file-line-detection t
-  "When non-nil, detect file:line patterns and make them clickable."
   :type 'boolean
   :group 'kuro)
 
@@ -35,7 +31,7 @@
 ;;; Internal state
 
 (kuro--defvar-permanent-local kuro--url-overlays nil
-  "List of active URL/file-reference overlays in this buffer.")
+  "List of active URL overlays in this buffer.")
 
 (kuro--defvar-permanent-local kuro--url-detect-timer nil
   "Idle timer for URL detection in this buffer.")
@@ -43,24 +39,16 @@
 ;;; URL regex
 
 (defconst kuro--url-regexp
-  "https?://[^] \t\n\r\"'`>)}<|]*[^] \t\n\r\"'`>)}<|.,;:!?]"
+  "https?://[^ \t\n\r\"'`>)}<|]*[^ \t\n\r\"'`>)}<|.,;:!?]"
   "Regexp matching HTTP(S) URLs in terminal output.
 Greedily matches URL characters but excludes trailing punctuation.")
-
-;;; File:line regex (FR-005)
-
-(defconst kuro--file-line-regexp
-  "\\(/[^ \t\n\r:\"']+\\):\\([0-9]+\\)"
-  "Regexp matching /path/to/file:LINE patterns.
-Group 1 is the file path, group 2 is the line number.")
 
 ;;; Keymap (defined before functions that reference it)
 
 (defvar kuro--url-keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'kuro-open-url-at-point)
-    (define-key map (kbd "RET") #'kuro-open-url-at-point)
-    map)
+  (kuro--define-keymap
+    ([mouse-1] . kuro-open-url-at-point)
+    ((kbd "RET") . kuro-open-url-at-point))
   "Keymap active on URL overlays.")
 
 ;;; Overlay management
@@ -72,8 +60,20 @@ Group 1 is the file path, group 2 is the line number.")
       (delete-overlay ov)))
   (setq kuro--url-overlays nil))
 
+(defun kuro--url-detect-range-p (beg end)
+  "Return non-nil when BEG and END are a strict in-buffer range."
+  (and (integerp beg)
+       (integerp end)
+       (<= (point-min) beg)
+       (< beg end)
+       (<= end (point-max))))
+
 (defun kuro--make-url-overlay (beg end url)
   "Create a clickable overlay from BEG to END for URL."
+  (unless (kuro--url-detect-range-p beg end)
+    (error "Invalid URL overlay range: %S..%S" beg end))
+  (unless (kuro--terminal-web-url-valid-p url)
+    (error "Invalid URL target: %S" url))
   (let ((ov (make-overlay beg end nil t nil)))
     (overlay-put ov 'kuro-url t)
     (overlay-put ov 'kuro-url-target url)
@@ -84,42 +84,29 @@ Group 1 is the file path, group 2 is the line number.")
     (push ov kuro--url-overlays)
     ov))
 
-(defun kuro--make-file-line-overlay (beg end file line)
-  "Create a clickable overlay from BEG to END for FILE at LINE."
-  (let ((ov (make-overlay beg end nil t nil)))
-    (overlay-put ov 'kuro-url t)
-    (overlay-put ov 'kuro-file-target file)
-    (overlay-put ov 'kuro-line-target line)
-    (overlay-put ov 'face 'link)
-    (overlay-put ov 'mouse-face 'highlight)
-    (overlay-put ov 'help-echo (format "%s:%d" file line))
-    (overlay-put ov 'keymap kuro--url-keymap)
-    (push ov kuro--url-overlays)
-    ov))
-
 ;;; Actions
 
 (defun kuro-open-url-at-point ()
-  "Open the URL or file reference at point."
+  "Open the URL overlay at point."
   (interactive)
-  (let ((ov (car (overlays-at (point)))))
-    (when ov
-      (cond
-       ((overlay-get ov 'kuro-url-target)
-        (browse-url (overlay-get ov 'kuro-url-target)))
-       ((overlay-get ov 'kuro-file-target)
-        (let ((file (overlay-get ov 'kuro-file-target))
-              (line (overlay-get ov 'kuro-line-target)))
-          (when (file-exists-p file)
-            (find-file-other-window file)
-            (when line
-              (goto-char (point-min))
-              (forward-line (1- line))))))))))
+  (let ((url (cl-some
+              (lambda (ov)
+                (let ((target (and (overlay-get ov 'kuro-url)
+                                   (overlay-get ov 'kuro-url-target))))
+                  (and (kuro--terminal-web-url-valid-p target) target)))
+              (overlays-at (point)))))
+    (when url
+      (browse-url url))))
 
 ;;; Scanner
 
+(defun kuro--overlay-with-marker-p (pos marker)
+  "Return non-nil when an overlay at POS has MARKER set."
+  (cl-some (lambda (ov) (overlay-get ov marker))
+           (overlays-at pos)))
+
 (defun kuro--scan-urls-in-region (beg end)
-  "Scan region BEG to END for URLs and file:line patterns, creating overlays."
+  "Scan region BEG to END for URLs, creating overlays."
   (save-excursion
     (when kuro-url-detection
       (goto-char beg)
@@ -127,26 +114,15 @@ Group 1 is the file path, group 2 is the line number.")
         (let ((url-beg (match-beginning 0))
               (url-end (match-end 0))
               (url (match-string-no-properties 0)))
-          (unless (cl-some (lambda (ov) (overlay-get ov 'kuro-url))
-                           (overlays-at url-beg))
-            (kuro--make-url-overlay url-beg url-end url)))))
-    (when kuro-file-line-detection
-      (goto-char beg)
-      (while (re-search-forward kuro--file-line-regexp end t)
-        (let ((file-beg (match-beginning 0))
-              (file-end (match-end 0))
-              (file (match-string-no-properties 1))
-              (line (string-to-number (match-string-no-properties 2))))
-          (unless (cl-some (lambda (ov) (overlay-get ov 'kuro-url))
-                           (overlays-at file-beg))
-            (when (file-exists-p file)
-              (kuro--make-file-line-overlay file-beg file-end file line))))))))
+          (unless (kuro--overlay-with-marker-p url-beg 'kuro-url)
+            (when (kuro--terminal-web-url-valid-p url)
+              (kuro--make-url-overlay url-beg url-end url))))))))
 
 (defun kuro--url-detect-visible ()
-  "Scan the visible portion of the buffer for URLs and file references.
+  "Scan the visible portion of the buffer for URLs.
 Called from the idle timer."
   (when (and (derived-mode-p 'kuro-mode)
-             (or kuro-url-detection kuro-file-line-detection))
+             kuro-url-detection)
     (let ((win-start (window-start))
           (win-end (window-end nil t)))
       (dolist (ov kuro--url-overlays)

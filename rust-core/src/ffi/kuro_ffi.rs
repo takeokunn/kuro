@@ -30,7 +30,7 @@ pub trait KuroFFI {
     ///
     /// # Arguments
     /// * `env` - Pointer to the Emacs environment
-    /// * `command` - Shell command to execute (e.g., "bash" or "zsh")
+    /// * `command` - Absolute shell path to execute (e.g., "/bin/bash" or "/bin/zsh")
     /// * `rows` - Number of rows in the terminal
     /// * `cols` - Number of columns in the terminal
     ///

@@ -39,7 +39,8 @@
 
 (kuro--defvar-permanent-local kuro--typewriter-queue nil
   "Queue of (ROW . TEXT) pairs waiting to be displayed by the typewriter effect.
-Each entry is a cons cell (row . text) from `kuro--poll-updates-with-faces'.
+Each entry is normalized by `kuro--typewriter-enqueue' before it enters this
+queue; FFI poll results are not stored here directly.
 The typewriter timer drains this queue character-by-character.")
 
 (kuro--defvar-permanent-local kuro--typewriter-timer nil

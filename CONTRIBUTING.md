@@ -4,301 +4,165 @@ Thank you for your interest in contributing!
 
 ## Development Setup
 
-### Prerequisites
+### With Nix (recommended)
 
-1. **Rust** (version 1.75.0 or later)
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-
-2. **Emacs** (version 29.1 or later with module support)
-   - **macOS**: `brew install emacs`
-   - **Ubuntu/Debian**: `sudo apt install emacs`
-   - **Arch Linux**: `sudo pacman -S emacs`
-   - **From source**: Ensure you build with `--with-modules` flag
-
-3. **Build dependencies**
-   - Ubuntu/Debian: `sudo apt install build-essential`
-   - macOS: `xcode-select --install`
-   - Fedora: `sudo dnf install gcc make`
-
-### Verification
-
-Verify your installation:
-```bash
-# Check Rust version
-rustc --version
-
-# Check Emacs has module support
-emacs --batch --eval "(if (fboundp 'module-load) (message \"Module support: YES\") (error \"Module support: NO\"))"
-```
-
-### Build from Source
+Kuro uses a full [Nix](https://nixos.org/download)-based workflow. The dev shell
+provides the pinned Rust toolchain, Emacs, and all tooling:
 
 ```bash
-# Clone repository
 git clone https://github.com/takeokunn/kuro.git
 cd kuro
+nix develop            # Rust toolchain + Emacs + cargo-tarpaulin on PATH
+```
 
-# Development build (faster compilation, less optimized)
+### Without Nix
+
+- **Rust** 1.84.0 or later (MSRV): https://rustup.rs
+- **Emacs** 29.4 or later, built with module support
+  (`brew install emacs`, `apt install emacs`, `pacman -S emacs`, …)
+- A C toolchain (`build-essential` / `xcode-select --install`)
+
+Verify Emacs has module support:
+
+```bash
+emacs --batch --eval "(unless (fboundp 'module-load) (error \"No module support\"))"
+```
+
+### Build from source
+
+```bash
+# Development build (faster, less optimized)
 cargo build --workspace
 
-# Release build (optimized, for production)
+# Release build (optimized)
 cargo build --release --workspace
 
-# The compiled dynamic module will be at:
-# - Linux: target/release/libkuro_core.so
-# - macOS: target/release/libkuro_core.dylib
-# - Windows: target/release/kuro_core.dll
+# Output lands in the workspace target dir at the repo root:
+#   target/release/libkuro_core.so      (Linux)
+#   target/release/libkuro_core.dylib   (macOS)
 
-# Run tests
-cargo test --workspace
-
-# Format code
-cargo fmt --all
-
-# Lint
-cargo clippy --workspace -- -D warnings
+# Or, with Nix — build + install to ~/.local/share/kuro:
+nix run .#install
 ```
 
-### Module Loading
+### Loading the module in Emacs
 
-There are two ways to load the Kuro module in Emacs:
-
-**Option 1: Using module-load (recommended for development)**
 ```elisp
-;; Add to your Emacs config
-(add-to-list 'load-path "~/path/to/kuro/emacs-lisp")
-
-;; Load the Elisp files
-(require 'kuro)
-
-;; The Rust module will be loaded automatically when needed
+(add-to-list 'load-path "~/path/to/kuro/emacs-lisp/core")
+(require 'kuro)        ; pulls in the sibling modules and the native module
+(kuro-create "bash")
 ```
 
-**Option 2: Manual module loading**
-```elisp
-;; Load the Rust module explicitly
-(module-load "~/path/to/kuro/target/release/libkuro_core.dylib")  ; macOS
-;; or
-(module-load "~/path/to/kuro/target/release/libkuro_core.so")  ; Linux
+`M-x kuro-module-build` compiles the native module from source via cargo;
+`M-x kuro-module-download` fetches a prebuilt binary for your platform.
 
-;; Then load Elisp
-(require 'kuro)
-```
+### Hot-reload workflow
 
-### Hot-Reload Workflow for Development
+- **Elisp change**: re-evaluate the file (`M-x eval-buffer`, or
+  `M-x load-file`).
+- **Rust change**: rebuild, then reload the module in Emacs:
 
-For rapid development, use this workflow:
+  ```bash
+  cargo build --release --workspace
+  ```
+  ```elisp
+  (unload-feature 'kuro t)
+  (require 'kuro)
+  ```
 
-1. **Initial setup:**
-   ```bash
-   # Build once
-   cargo build --release
-   ```
+## Testing
 
-2. **For Rust changes:**
-   ```bash
-   # Rebuild
-   cargo build --release
-
-   # In Emacs, reload the module
-   (unload-feature 'kuro)
-   (require 'kuro)
-   ```
-
-3. **For Elisp changes:**
-   ```elisp
-   ; In Emacs, just eval the buffer
-   M-x eval-buffer
-   ; or
-   M-x load-file RET ~/path/to/kuro/emacs-lisp/kuro.el
-   ```
-
-4. **Quick test loop:**
-   ```bash
-   # Terminal 1: Watch for changes and rebuild
-   cargo watch -x 'build --release'
-
-   # Emacs: Reload module when build completes
-   M-x kuro-reload
-   ```
-
-### Development Workflow
-
-1. Create feature branch: `git checkout -b feature/your-feature`
-2. Write tests alongside code
-3. Ensure >80% code coverage
-4. Run `make ci` to verify all checks pass
-5. Submit PR with descriptive title and description
-
-### Code Style
-
-- Rust: Follow `rustfmt` formatting
-- Elisp: Follow Elisp style guide (`M-x elisp-lint-mode`)
-- Commit messages: Conventional Commits format
-
-### Testing
-
-#### Elisp Tests (ERT)
-
-Kuro uses Emacs Lisp's built-in testing framework (ERT) for testing the Elisp components.
+Run the full check suite exactly as CI does:
 
 ```bash
-# Run all Elisp tests (unit + E2E)
-make test-e2e
-
-# Run specific test file
-emacs --batch -L emacs-lisp -L test \
-  --eval "(require 'kuro-renderer-unit-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
-
-# Run all tests including Rust
-make test-all
-
-# Run only Rust tests
-make test
+nix flake check        # Rust tests + ERT (Emacs 29.4 & 30.1) + byte-compile
+                       # + clippy -D warnings + fmt + package-lint + audit
 ```
 
-**Test Files:**
-- `test/kuro-renderer-unit-test.el` - Unit tests for kuro-renderer.el (pure Elisp, no Rust module needed)
-- `test/kuro-e2e-test.el` - End-to-end tests requiring Rust module and PTY
-- `test/kuro-config-test.el` - Unit tests for kuro-config.el
-
-**Running Specific Test Categories:**
+Or run pieces directly:
 
 ```bash
-# Run only E2E tests (requires built module)
-emacs --batch -L emacs-lisp -L test \
-  --eval "(require 'kuro)" \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"kuro-e2e\")"
+# Rust unit + integration tests
+cargo test --manifest-path rust-core/Cargo.toml
 
-# Run only config unit tests
-emacs --batch -L emacs-lisp -L test \
-  --eval "(require 'kuro-config)" \
-  --eval "(require 'kuro-config-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"test-kuro\")"
+# Elisp ERT unit suite (pure Elisp, no native module) — see test/README.md
+# for the canonical multi-`-L` invocation.
 
-# Run only unit tests from kuro-e2e-test.el
-emacs --batch -L emacs-lisp -L test \
-  --eval "(require 'kuro)" \
-  --eval "(require 'kuro-e2e-test)" \
-  --eval "(ert-run-tests-batch-and-exit \"kuro-unit\")"
+# End-to-end tests (spawn a PTY — run outside the Nix sandbox)
+nix develop --command bash test/scripts/runners/run-e2e.sh
 ```
 
-For more detailed test documentation, see [test/README.md](test/README.md).
+See [test/README.md](test/README.md) for the test layout, the exact ERT
+command, and conventions. New code should keep coverage high and must not
+regress existing tests.
 
-#### Rust Tests
+## Code style
 
 ```bash
-# Unit tests
-make test
-
-# Integration tests
-make test-integration
-
-# Benchmarks
-make test-bench
-
-# Coverage report
-make coverage
+cargo fmt --all                                              # Rust formatting
+cargo clippy --manifest-path rust-core/Cargo.toml --workspace -- -D warnings
+nix fmt                                                       # Rust + Nix (treefmt)
 ```
 
-### Debugging
+- **Rust**: `rustfmt` + clippy clean (`-D warnings`); prefer
+  `#[expect(lint, reason = "…")]` over `#[allow]`.
+- **Elisp**: byte-compiles cleanly (`nix flake check` enforces zero warnings)
+  and passes `package-lint`.
+- **Commits**: [Conventional Commits](https://www.conventionalcommits.org/).
 
-See [docs/development/debugging.md](docs/development/debugging.md)
+## Development workflow
 
-### Troubleshooting
+1. Branch: `git checkout -b feat/your-feature`
+2. Write tests alongside the code.
+3. Run `nix flake check` until green.
+4. Open a PR with a descriptive title and summary.
 
-#### Module Load Failures
+## Troubleshooting
 
-**Error: "Cannot open shared object file"**
-- Check module file exists: `ls -la target/release/libkuro_core.*`
-- Verify Emacs was built with module support
-- Check file permissions: `chmod +x target/release/libkuro_core.so`
+**"Cannot open shared object file"**
+- Confirm the module exists: `ls -la target/release/libkuro_core.*`
+- Verify Emacs was built with module support (`(fboundp 'module-load)`).
 
-**Error: "Function not defined"**
-- Verify module is loaded: `(featurep 'kuro-module)` should return `t`
-- List exported functions: `M-x apropos RET kuro-`
+**"Function not defined" / FFI symbol missing**
+- Confirm the module loaded: `(featurep 'kuro-module)` should be `t`.
+- Rebuild after Rust changes and reload (`unload-feature` then `require`).
 
-**Error: "Version mismatch"**
-- Check Emacs version: `emacs --version`
-- Minimum required: Emacs 29.1
-- Upgrade Emacs if needed
+**"Failed to spawn PTY"**
+- Verify the shell exists (`which bash`) and you can allocate a PTY.
 
-#### PTY Spawn Issues
+**Module works once, then fails**
+- Global state wasn't reset — `(unload-feature 'kuro t)` before reloading.
 
-**Error: "Failed to spawn PTY"**
-- Verify shell command exists: `which bash`
-- Check permissions: User must have permission to create PTY
-- On WSL2, ensure WSL is properly configured
-
-**Error: "PTY operation failed: Broken pipe"**
-- Check if shell process has exited
-- Verify PTY is still open: `ls /proc/self/fd` (Linux)
-- Restart terminal: `(kuro-kill)` then `(kuro-create "bash")`
-
-#### Emacs Version Compatibility
-
-**Issue: Module loads but functions crash**
-- Verify Emacs 29.1+ is installed
-- Check for module support: `(fboundp 'module-load)`
-- Rebuild module after Emacs upgrade
-
-**Issue: Performance issues on older Emacs**
-- Upgrade to latest stable Emacs
-- Emacs 31+ has improved module performance
-- Check `kuro-frame-rate` setting
-
-#### Common Error Patterns
-
-**Pattern: Module works once, then fails**
-- Cause: Global state not reset properly
-- Solution: `(unload-feature 'kuro)` before reloading
-
-**Pattern: Intermittent crashes on resize**
-- Cause: Race condition in PTY
-- Solution: Increase debounce timeout in kuro-resize
-
-**Pattern: Garbage characters in buffer**
-- Cause: UTF-8 decode error or binary data
-- Solution: Check terminal settings, ensure UTF-8 locale
-
-## Project Structure
+## Project structure
 
 ```
 kuro/
-├── rust-core/          # Rust library
+├── rust-core/             # Rust cdylib (the terminal core)
 │   ├── src/
-│   │   ├── types/      # Color, Cell types
-│   │   ├── grid/       # Line, Screen
-│   │   ├── parser/     # VTE parsing
-│   │   ├── pty/        # PTY management
-│   │   └── ffi/        # Emacs FFI
-│   ├── tests/          # Integration tests
-│   └── benches/        # Benchmarks
-├── emacs-lisp/         # Emacs Lisp UI
-│   ├── kuro.el         # Main entry point
-│   ├── kuro-ffi.el     # FFI wrappers
-│   └── kuro-renderer.el # Render loop
-├── docs/               # Documentation
-└── test/               # Elisp tests
+│   │   ├── types/         # Color, Cell, Cursor, SGR, OSC types
+│   │   ├── grid/          # Screen, Line, scrollback
+│   │   ├── parser/        # VT100/CSI/OSC/DCS/Sixel/Kitty parsing
+│   │   ├── pty/           # POSIX PTY management
+│   │   └── ffi/           # Emacs module bridge + session management
+│   └── tests/             # Integration tests (external crate)
+├── emacs-lisp/            # Emacs Lisp display layer
+│   ├── core/              # kuro.el, kuro-config, kuro-lifecycle, kuro-module
+│   ├── ffi/               # FFI bridge, binary decoder, OSC plumbing
+│   ├── rendering/         # renderer pipeline, overlays, render-buffer
+│   ├── input/             # keymap, mouse, input dispatch
+│   ├── faces/             # face construction, palette, attributes
+│   └── features/          # stream, sessions, navigation, prompt-status
+├── test/                  # Elisp ERT tests (see test/README.md)
+└── nix/                   # flake checks, apps, formatter config
 ```
 
-## Architecture Decisions
+## Getting help
 
-See [docs/explanation/design-decisions.md](docs/explanation/design-decisions.md)
+- **Issues**: bug reports and feature requests
+- **Discussions**: questions and ideas
 
-## Getting Help
+## Code review
 
-- GitHub Issues: Bug reports and feature requests
-- Discussions: General questions and ideas
-- Docs: [docs/](docs/) directory
-
-## Code Review Process
-
-1. All PRs require CI to pass
-2. At least one maintainer approval
-3. Code coverage must not decrease
-4. All tests must pass
+1. CI (`nix flake check`) must pass.
+2. At least one maintainer approval.
+3. Tests must pass and coverage must not regress.

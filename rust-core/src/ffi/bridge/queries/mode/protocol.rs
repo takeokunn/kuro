@@ -3,25 +3,31 @@
 use emacs::defun;
 use emacs::{Env, Result as EmacsResult, Value};
 
-use super::super::super::{query_session, query_session_mut};
+use super::super::super::{define_session_query_default, query_session, query_session_mut};
 
-/// Get bracketed paste mode state (t if active, nil if not)
-#[defun]
-fn kuro_core_get_bracketed_paste(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, false, |s| Ok(s.get_bracketed_paste()))
-}
+define_session_query_default!(
+    /// Get bracketed paste mode state (t if active, nil if not)
+    kuro_core_get_bracketed_paste,
+    false,
+    query_session,
+    |s| s.get_bracketed_paste()
+);
 
-/// Get focus events mode state (t if active, nil if not)
-#[defun]
-fn kuro_core_get_focus_events(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, false, |s| Ok(s.get_focus_events()))
-}
+define_session_query_default!(
+    /// Get focus events mode state (t if active, nil if not)
+    kuro_core_get_focus_events,
+    false,
+    query_session,
+    |s| s.get_focus_events()
+);
 
-/// Get synchronized output mode state (t if active, nil if not)
-#[defun]
-fn kuro_core_get_sync_output(env: &Env, session_id: u64) -> EmacsResult<Value<'_>> {
-    query_session(env, session_id, false, |s| Ok(s.get_synchronized_output()))
-}
+define_session_query_default!(
+    /// Get synchronized output mode state (t if active, nil if not)
+    kuro_core_get_sync_output,
+    false,
+    query_session,
+    |s| s.get_synchronized_output()
+);
 
 /// Update the stored Emacs color scheme.
 ///
@@ -39,10 +45,10 @@ fn kuro_core_get_sync_output(env: &Env, session_id: u64) -> EmacsResult<Value<'_
 fn kuro_core_set_color_scheme<'e>(
     env: &'e Env,
     session_id: u64,
-    is_dark: Value<'_>,
+    is_dark: Value<'e>,
 ) -> EmacsResult<Value<'e>> {
-    let dark = is_dark.is_not_nil();
-    query_session_mut(env, session_id, false, move |session| {
-        Ok(session.set_color_scheme(dark))
+    let is_dark = is_dark.is_not_nil();
+    query_session_mut(env, session_id, false, |session| {
+        Ok(session.set_color_scheme(is_dark))
     })
 }

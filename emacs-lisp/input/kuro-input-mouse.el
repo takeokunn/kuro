@@ -10,21 +10,16 @@
 ;;
 ;; Supports three mouse coordinate modes: X10 (legacy 8-bit encoding),
 ;; SGR extended coordinates (mode 1006), and pixel coordinates
-;; (mode 1016).  Provides press/release/scroll handlers that dispatch
-;; through `kuro--encode-mouse' or `kuro--encode-mouse-sgr'.
-;;
-;; Also defines `kuro--def-scroll-command', a macro for scroll commands
-;; shared with `kuro-input.el'.
+;; (mode 1016).  Provides press/release handlers that dispatch through
+;; `kuro--encode-mouse' or `kuro--encode-mouse-sgr'.
 
 ;;; Code:
 
 (require 'kuro-ffi)
 (require 'kuro-ffi-osc)
+(require 'kuro-input-mouse-macros)
 
 (declare-function kuro--send-key "kuro-ffi" (data))
-(declare-function kuro--render-cycle "kuro-renderer" ())
-(declare-function kuro--update-scroll-indicator "kuro-render-buffer" ())
-
 ;;; Mouse Tracking State
 
 (kuro--defvar-permanent-local kuro--mouse-mode 0
@@ -75,108 +70,17 @@ Returns the encoded string, or nil if mouse mode is off or position overflows."
     (format "\e[<%d;%d;%d%s" button col1 row1 (if press "M" "m"))))
 
 
-;;; Mouse Event Dispatch
-
-(defmacro kuro--dispatch-mouse-event (btn press)
-  "When mouse tracking is active and BTN is non-nil, encode and forward it.
-BTN is an integer button index (0/1/2/64/65) or nil to skip.
-PRESS is non-nil for press, nil for release.
-Routes through `kuro--encode-mouse-sgr' or `kuro--encode-mouse' based on mode."
-  `(when (and (> kuro--mouse-mode 0) ,btn)
-     (let ((seq (if kuro--mouse-sgr
-                    (kuro--encode-mouse-sgr last-input-event ,btn ,press)
-                  (kuro--encode-mouse last-input-event ,btn ,press))))
-       (when seq (kuro--send-key seq)))))
-
-
-;;; Mouse Event Handler Macro
-
-(defmacro kuro--def-mouse-cmd (name btn-form press doc)
-  "Define interactive mouse command NAME dispatching BTN-FORM / PRESS to PTY.
-BTN-FORM is evaluated at call time: a literal integer for scroll commands, or a
-pcase expression over `event-basic-type' for button commands.
-PRESS is t for press events, nil for release.
-DOC is the docstring for the generated command."
-  `(defun ,name ()
-     ,doc
-     (interactive)
-     (let ((btn ,btn-form))
-       (kuro--dispatch-mouse-event btn ,press))))
-
-
 ;;; Mouse Event Handlers
 
 (kuro--def-mouse-cmd kuro--mouse-press
-  (pcase (event-basic-type last-input-event)
-    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  (alist-get (event-basic-type last-input-event) kuro--mouse-button-alist)
   t
   "Handle mouse button press and forward to PTY.")
 
 (kuro--def-mouse-cmd kuro--mouse-release
-  (pcase (event-basic-type last-input-event)
-    ('mouse-1 0) ('mouse-2 1) ('mouse-3 2) (_ nil))
+  (alist-get (event-basic-type last-input-event) kuro--mouse-button-alist)
   nil
   "Handle mouse button release and forward to PTY.")
-
-(defconst kuro--mouse-scroll-lines 5
-  "Number of lines to scroll per mouse wheel event when mouse tracking is off.")
-
-(defvar kuro--initialized nil
-  "Forward reference; defined in kuro-lifecycle.el.")
-(defvar kuro--scroll-offset 0
-  "Forward reference; defined in kuro-input.el.")
-
-;;; Scroll-command macro
-;; Defined here (not in kuro-input.el) so that this file is self-contained at
-;; byte-compile time.  kuro-input-keymap.el → kuro-input-mouse.el is compiled
-;; before kuro-input.el in alphabetical order, so the macro must be present in
-;; this file.  kuro-input.el requires this file at the top to inherit the macro.
-
-(defmacro kuro--def-scroll-command (name doc scroll-form offset-form)
-  "Define interactive scroll command NAME with docstring DOC.
-SCROLL-FORM is the FFI call (e.g. `(kuro--scroll-up lines)').
-OFFSET-FORM is the expression assigned to `kuro--scroll-offset' after the
-call.  The generated function is guarded by `kuro--initialized', calls
-`kuro--render-cycle', and calls `kuro--update-scroll-indicator'."
-  (declare (indent 1))
-  `(defun ,name ()
-     ,doc
-     (interactive)
-     (when kuro--initialized
-       ,scroll-form
-       (setq kuro--scroll-offset ,offset-form)
-       (kuro--render-cycle)
-       (kuro--update-scroll-indicator))))
-
-(kuro--def-scroll-command kuro--mouse-scroll-up--scrollback
-  "Scroll terminal scrollback up by `kuro--mouse-scroll-lines' lines."
-  (kuro--scroll-up kuro--mouse-scroll-lines)
-  (max 0 (or (kuro--get-scroll-offset) (+ kuro--scroll-offset kuro--mouse-scroll-lines))))
-
-(defun kuro--mouse-scroll-up ()
-  "Handle wheel-up mouse scroll event.
-When mouse tracking is active, forward to PTY as button 64.
-Otherwise, scroll the terminal scrollback up by `kuro--mouse-scroll-lines'."
-  (interactive)
-  (if (> kuro--mouse-mode 0)
-      (let ((btn 64))
-        (kuro--dispatch-mouse-event btn t))
-    (kuro--mouse-scroll-up--scrollback)))
-
-(kuro--def-scroll-command kuro--mouse-scroll-down--scrollback
-  "Scroll terminal scrollback down by `kuro--mouse-scroll-lines' lines."
-  (kuro--scroll-down kuro--mouse-scroll-lines)
-  (max 0 (or (kuro--get-scroll-offset) (- kuro--scroll-offset kuro--mouse-scroll-lines))))
-
-(defun kuro--mouse-scroll-down ()
-  "Handle wheel-down mouse scroll event.
-When mouse tracking is active, forward to PTY as button 65.
-Otherwise, scroll the terminal scrollback down by `kuro--mouse-scroll-lines'."
-  (interactive)
-  (if (> kuro--mouse-mode 0)
-      (let ((btn 65))
-        (kuro--dispatch-mouse-event btn t))
-    (kuro--mouse-scroll-down--scrollback)))
 
 (provide 'kuro-input-mouse)
 

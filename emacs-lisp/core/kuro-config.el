@@ -1,4 +1,4 @@
-;;; kuro-config.el --- User configuration for Kuro terminal emulator  -*- lexical-binding: t; -*-
+;;; kuro-config.el --- Entry point for Kuro configuration  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 takeokunn
 
@@ -6,21 +6,14 @@
 
 ;;; Commentary:
 
-;; Central configuration module for the Kuro terminal emulator.
-;; All user-facing defcustom variables are defined here.
-;;
-;; This file has no dependencies on other kuro modules and must be
-;; loaded before kuro-renderer.el.
+;; Compatibility entry point for Kuro configuration.
+;; User-facing defcustom values live here; runtime validation lives in
+;; `kuro-config-logic'.
 
 ;;; Code:
 
+(require 'kuro-config-logic)
 (require 'kuro-colors)
-
-;; Forward declaration for kuro--keymap, defined in kuro-input-keymap.el.
-(defvar kuro--keymap nil
-  "Forward reference; defvar in kuro-input-keymap.el.")
-
-;;; Customization Groups
 
 (defgroup kuro nil
   "Kuro terminal emulator."
@@ -31,121 +24,6 @@
   "Display settings for Kuro terminal emulator."
   :group 'kuro
   :prefix "kuro-")
-
-;;; Internal buffer iterator
-
-(defun kuro--kuro-buffers ()
-  "Return a list of all live Kuro terminal buffers."
-  (when (fboundp 'kuro-mode)
-    (let (result)
-      (dolist (buf (buffer-list))
-        (when (and (buffer-live-p buf)
-                   (with-current-buffer buf
-                     (derived-mode-p 'kuro-mode)))
-          (push buf result)))
-      (nreverse result))))
-
-;;; Validation Primitives
-
-(defsubst kuro--positive-integer-p (val)
-  "Return non-nil if VAL is a positive integer (> 0)."
-  (and (integerp val) (> val 0)))
-
-(defmacro kuro--broadcast-to-buffers (fn &rest args)
-  "When FN is bound, call (FN ARGS...) in every live kuro-mode buffer."
-  `(when (fboundp ',fn)
-     (dolist (buf (kuro--kuro-buffers))
-       (with-current-buffer buf
-         (,fn ,@args)))))
-
-(defmacro kuro--in-all-buffers (&rest body)
-  "Evaluate BODY with each live kuro buffer current."
-  `(dolist (buf (kuro--kuro-buffers))
-     (with-current-buffer buf
-       ,@body)))
-
-(defmacro kuro--check-positive-integer (var errors)
-  "Push an error string onto ERRORS if VAR is not a positive integer."
-  `(unless (kuro--positive-integer-p ,var)
-     (push (format "%s: must be a positive integer, got: %s" ',var ,var) ,errors)))
-
-(defmacro kuro--check-hex-color (var errors)
-  "Push an error string onto ERRORS if VAR is not a 6-digit hex color string."
-  `(let ((val (symbol-value ,var)))
-     (unless (and (stringp val)
-                  (string-match-p "^#[0-9a-fA-F]\\{6\\}$" val))
-       (push (format "%s: must be a 6-digit hex string like #rrggbb, got: %s"
-                     ,var val)
-             ,errors))))
-
-(defmacro kuro--def-positive-int-setter (name err-msg doc &rest body)
-  "Define a defcustom :set handler NAME for a positive-integer setting.
-ERR-MSG is the user-error format string (receives VALUE as %s argument).
-DOC is the function docstring.
-Validates VALUE, sets SYMBOL via `set-default', then evaluates BODY.
-SYMBOL and VALUE are bound within BODY."
-  (declare (indent 3) (doc-string 3))
-  `(defun ,name (symbol value)
-     ,doc
-     (unless (kuro--positive-integer-p value)
-       (user-error ,err-msg value))
-     (set-default symbol value)
-     ,@body))
-
-;;; :set handler functions
-
-(defun kuro--set-shell (symbol value)
-  "Validate and set SYMBOL to VALUE for `kuro-shell'."
-  (unless (or (null value) (string-empty-p value) (executable-find value))
-    (user-error "Kuro: shell executable not found: %s" value))
-  (set-default symbol value))
-
-(kuro--def-positive-int-setter kuro--set-scrollback-size
-    "kuro: scrollback-size must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and propagate to all live Kuro buffers."
-  (kuro--broadcast-to-buffers kuro--set-scrollback-max-lines value))
-
-(kuro--def-positive-int-setter kuro--set-frame-rate
-    "kuro: frame-rate must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and restart render loops in all active Kuro buffers."
-  (when (and (fboundp 'kuro--stop-render-loop)
-             (fboundp 'kuro--start-render-loop))
-    (kuro--in-all-buffers
-      (kuro--stop-render-loop)
-      (kuro--start-render-loop))))
-
-(kuro--def-positive-int-setter kuro--set-tui-frame-rate
-    "kuro: tui-frame-rate must be a positive integer, got: %s"
-    "Set SYMBOL to VALUE and switch render timer in TUI-mode Kuro buffers."
-  (when (fboundp 'kuro--switch-render-timer)
-    (kuro--in-all-buffers
-      (when (bound-and-true-p kuro--tui-mode-active)
-        (kuro--switch-render-timer value)))))
-
-(defun kuro--set-font (symbol value)
-  "Set SYMBOL to VALUE and apply font remap to all active Kuro buffers."
-  (set-default symbol value)
-  (kuro--broadcast-to-buffers kuro--apply-font-to-buffer buf))
-
-(defun kuro--set-keymap-exceptions (symbol value)
-  "Set SYMBOL to VALUE and rebuild the Kuro input keymap.
-Propagates the new keymap to all live `kuro-mode' buffers by updating
-the parent of their local `kuro-mode-map'."
-  (set-default-toplevel-value symbol value)
-  (when (fboundp 'kuro--build-keymap)
-    (kuro--build-keymap)
-    (kuro--in-all-buffers
-      (when (boundp 'kuro-mode-map)
-        (set-keymap-parent kuro-mode-map kuro--keymap)))))
-
-(defun kuro--set-input-echo-delay (symbol value)
-  "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.
-VALUE must be a non-negative number."
-  (unless (numberp value)
-    (user-error "Kuro-input-echo-delay must be a number"))
-  (when (< value 0)
-    (user-error "Kuro-input-echo-delay must be non-negative"))
-  (set-default symbol value))
 
 ;;; Color variable enumeration
 
@@ -241,6 +119,56 @@ Changes take effect immediately in all running Kuro buffers."
   :type '(choice (const :tag "Write only (safest)" write-only)
                  (const :tag "Allow read and write" allow)
                  (const :tag "Prompt for each access" prompt))
+  :group 'kuro)
+
+(defcustom kuro-notifications-enabled t
+  "Whether to surface terminal desktop notifications (OSC 9 / OSC 777).
+When non-nil, notifications emitted by terminal applications are displayed
+via `kuro-notification-function'.  Pending notifications are always drained
+from the Rust core regardless of this setting, so they cannot accumulate."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-notification-function 'kuro--default-notify
+  "Function that displays a terminal desktop notification.
+Called with four arguments: TITLE (a string or nil), BODY (a string), ID
+\(the OSC 99 `i=<id>' notification id string, or nil) and REPORT (non-nil
+when the application requested an `a=report' activation round-trip).  A
+function that only cares about TITLE and BODY may declare the last two as
+`&optional'.
+The default, `kuro--default-notify', prefers `notifications-notify' (D-Bus)
+when available and otherwise falls back to the echo area; when REPORT and ID
+are present it wires a D-Bus `:on-action' callback that sends an OSC 99 report
+back to the terminal application."
+  :type 'function
+  :group 'kuro)
+
+(defcustom kuro-progress-enabled t
+  "Whether to surface ConEmu OSC 9;4 progress reports in the mode line.
+When non-nil, a progress indicator built with `kuro-progress-format' is shown
+in the mode line of kuro-mode buffers while a foreground task reports
+progress, and cleared when the task reports state 0 (done/removed).
+Pending progress is always drained from the Rust core regardless of this
+setting, so it cannot accumulate."
+  :type 'boolean
+  :group 'kuro)
+
+(defcustom kuro-progress-format " %s%d%% "
+  "Format string for the OSC 9;4 progress mode-line indicator.
+Receives two arguments via `format': a state-glyph string (see
+`kuro-progress-state-glyphs') and the integer percentage (0-100).
+Set to nil to suppress the textual indicator entirely (the underlying state
+is still tracked in `kuro--progress-state')."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'kuro)
+
+(defcustom kuro-progress-state-glyphs
+  '((1 . "⏳") (2 . "❌") (3 . "…") (4 . "⚠"))
+  "Alist mapping OSC 9;4 progress state codes to mode-line glyph strings.
+Keys are the state integers: 1=set (normal), 2=error, 3=indeterminate,
+4=warning.  State 0 (none) clears the indicator and is never looked up here.
+A state with no entry falls back to the empty string."
+  :type '(alist :key-type integer :value-type string)
   :group 'kuro)
 
 ;;; Display Settings
@@ -351,40 +279,15 @@ The value is converted to Emacs face :height units (* 10 value)."
 
 ;;; Validation
 
-(defun kuro--validate-config ()
-  "Validate all Kuro configuration settings.
-Returns a list of error description strings.
-An empty list indicates that all settings are valid."
-  (let ((errors nil))
-    (unless (or (null kuro-shell)
-                (string-empty-p kuro-shell)
-                (executable-find kuro-shell))
-      (push (format "kuro-shell: executable not found: %s" kuro-shell) errors))
-    (kuro--check-positive-integer kuro-scrollback-size errors)
-    (kuro--check-positive-integer kuro-frame-rate errors)
-    (kuro--check-positive-integer kuro-tui-frame-rate errors)
-    (when kuro-font-size
-      (kuro--check-positive-integer kuro-font-size errors))
-    (dolist (color-var kuro--color-defcustom-vars)
-      (kuro--check-hex-color color-var errors))
-    (nreverse errors)))
+(defconst kuro--positive-integer-config-vars
+  '(kuro-scrollback-size
+    kuro-frame-rate
+    kuro-tui-frame-rate)
+  "Kuro config variables that must always hold positive integers.")
 
-;;;###autoload
-(defun kuro-validate-config ()
-  "Check Kuro configuration and report any validation errors.
-Displays results in the echo area."
-  (interactive)
-  (let ((errors (kuro--validate-config)))
-    (if errors
-        (message "Kuro configuration errors (%d):\n%s"
-                 (length errors)
-                 (mapconcat #'identity errors "\n"))
-      (message "Kuro: all configuration settings are valid."))))
-
-;; The color table is initialized lazily from `kuro-mode' (see kuro.el)
-;; rather than at load time, so that requiring kuro-config does not
-;; trigger global side effects.  The defcustom :set handler also
-;; rebuilds it whenever a color is customised.
+(defconst kuro--optional-positive-integer-config-vars
+  '(kuro-font-size)
+  "Kuro config variables that may be nil or a positive integer.")
 
 (provide 'kuro-config)
 

@@ -38,6 +38,7 @@
 (require 'kuro-ffi-osc)
 (require 'kuro-faces-color)
 (require 'kuro-faces-attrs)
+(require 'kuro-faces-macros)
 (require 'kuro-char-width)
 
 ;; Core Emacs face remapping functions (provided by C core; suppress warnings)
@@ -73,22 +74,6 @@ or when the buffer is killed.  Internal state; do not set directly.")
 `kuro--get-cached-face-raw' to avoid one cons allocation per cache hit.
 A fresh vector is created only on cache miss (when puthash is called),
 so the stored key is never the same object as this lookup vector.")
-
-;;; Face remap lifecycle macro
-
-(defmacro kuro--with-face-remap (cookie-var &rest remap-body)
-  "Remove the face-remap cookie in COOKIE-VAR, then evaluate REMAP-BODY.
-COOKIE-VAR is a symbol whose value holds the cookie returned by
-`face-remap-add-relative', or nil when no remap is active.
-The old cookie is removed and COOKIE-VAR set to nil before REMAP-BODY runs.
-REMAP-BODY is typically a `setq' form that stores the new cookie back into
-COOKIE-VAR.  When REMAP-BODY is empty the macro acts as a pure remove."
-  (declare (indent 1))
-  `(progn
-     (when ,cookie-var
-       (face-remap-remove-relative ,cookie-var)
-       (setq ,cookie-var nil))
-     ,@remap-body))
 
 ;;; Font remapping
 
@@ -166,14 +151,13 @@ vector is created for puthash so stored keys are stable across future calls.
 Hot/cold split: this defsubst is inlined at all call sites so the 99%+
 cache-hit path executes with no function-call dispatch overhead.  The cold
 miss path is a separate defun to keep the inlined body small."
-  ;; Normalize ul-enc: both 0 and #xFF000000 mean "no underline color".
+  ;; Normalize ul-enc: both 0 and `kuro--ffi-color-default' mean no color.
   ;; Canonicalizing to 0 prevents duplicate cache entries for the common case.
   ;; ul-enc is always a fixnum from kuro--read-u32-le or the v1 padding value 0;
   ;; the former (null ul-enc) guard is removed — it was dead weight at 28,800/sec.
-  ;; zerop bytecode (1 instruction) replaces `(= ul-enc 0)' (2 instructions);
-  ;; nested if avoids the `or' short-circuit machinery for the uncommon branch.
-  (let ((ul-normalized (if (zerop ul-enc) 0
-                         (if (= ul-enc #xFF000000) 0 ul-enc))))
+  ;; Keep the hot-path canonicalization in one helper so the sentinel contract
+  ;; stays shared with other raw FFI color consumers.
+  (let ((ul-normalized (kuro--normalize-ffi-color-enc ul-enc)))
     ;; Mutate the pre-allocated key vector in-place; no cons on cache hits.
     (aset kuro--face-cache-lookup-key 0 fg-enc)
     (aset kuro--face-cache-lookup-key 1 bg-enc)
@@ -237,22 +221,27 @@ Returns non-nil if the color for IDX actually changed, nil otherwise."
         (puthash name new-color kuro--named-colors)
         t))))
 
+(defun kuro--apply-palette-update-entry (entry)
+  "Apply one OSC 4 palette update ENTRY."
+  (pcase-let ((`(,idx ,r ,g ,b) entry))
+    (kuro--apply-palette-entry idx r g b)))
+
+(defun kuro--apply-palette-update-entries (entries)
+  "Apply OSC 4 palette update ENTRIES.
+Returns non-nil if at least one entry changed."
+  (let ((changed nil))
+    (dolist (entry entries changed)
+      (when (kuro--apply-palette-update-entry entry)
+        (setq changed t)))))
+
 (defun kuro--apply-palette-updates ()
   "Apply any pending OSC 4 palette overrides from the Rust core.
 Fetches all pending updates, applies each via `kuro--apply-palette-entry',
 then flushes the face cache if at least one entry actually changed."
   (when kuro--initialized
-    (when-let ((updates (kuro--get-palette-updates)))
-      (let ((changed nil))
-        (dolist (entry updates)
-          (let* ((e1 (cdr entry))
-                 (e2 (cdr e1))
-                 (e3 (cdr e2)))
-            (when (kuro--apply-palette-entry
-                   (car entry) (car e1) (car e2) (car e3))
-              (setq changed t))))
-        (when changed
-          (kuro--clear-face-cache))))))
+    (when-let* ((updates (kuro--get-palette-updates)))
+      (when (kuro--apply-palette-update-entries updates)
+        (kuro--clear-face-cache)))))
 
 (provide 'kuro-faces)
 

@@ -12,53 +12,9 @@
 
 use super::*;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Fill every cell in every row of `term` with a character derived from `base`:
-/// row 0 gets `base`, row 1 gets `base + 1`, etc.  The terminal must have
-/// fewer than 26 rows so the cast never overflows.
-macro_rules! fill_rows {
-    ($term:expr, rows $n:expr, base $base:expr) => {{
-        for r in 0..$n {
-            if let Some(line) = $term.screen.get_line_mut(r) {
-                let ch = ($base as u8 + r as u8) as char;
-                let cols = line.cells.len();
-                for c in 0..cols {
-                    line.update_cell_with(c, crate::types::Cell::new(ch));
-                }
-            }
-        }
-    }};
-    // Convenience: fill all rows with a single fixed character
-    ($term:expr, rows $n:expr, char $ch:expr) => {{
-        for r in 0..$n {
-            if let Some(line) = $term.screen.get_line_mut(r) {
-                let cols = line.cells.len();
-                for c in 0..cols {
-                    line.update_cell_with(c, crate::types::Cell::new($ch));
-                }
-            }
-        }
-    }};
-}
-
-/// Assert that every cell in every row still holds the character that
-/// `fill_rows!(term, rows N, base BASE)` would have written, i.e. `base + r`.
-macro_rules! assert_rows_unchanged {
-    ($term:expr, rows $n:expr, base $base:expr) => {{
-        for r in 0..$n {
-            let ch = ($base as u8 + r as u8) as char;
-            assert_eq!(
-                $term
-                    .screen
-                    .get_cell(r, 0)
-                    .map_or(' ', crate::types::cell::Cell::char),
-                ch,
-                "row {r} should be unchanged"
-            );
-        }
-    }};
-}
+#[macro_use]
+#[path = "scroll/support.rs"]
+mod support;
 
 // ── DECSTBM ───────────────────────────────────────────────────────────────────
 
@@ -265,8 +221,17 @@ fn test_sd_respects_scroll_region() {
     assert_eq!(term.screen.get_line(7).unwrap().cells[0].char(), '6');
 }
 
-include!("scroll_su_sd.rs");
-include!("scroll_edge_cases.rs");
+#[path = "scroll/su_sd.rs"]
+mod su_sd;
+
+#[path = "scroll/edge_cases.rs"]
+mod edge_cases;
+
+#[path = "scroll/edge_cases_extra.rs"]
+mod edge_cases_extra;
+
+#[path = "scroll/sl_sr.rs"]
+mod sl_sr;
 
 use proptest::prelude::*;
 

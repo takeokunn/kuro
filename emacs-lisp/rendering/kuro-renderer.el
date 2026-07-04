@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'kuro-renderer-pipeline)
+(require 'kuro-renderer-macros)
 (require 'kuro-input)
 (require 'kuro-config)
 (require 'kuro-faces)
@@ -95,7 +96,75 @@ Pre-computed to avoid a float multiply per rendered frame in
 `kuro--poll-within-budget'.  Updated in `kuro--start-render-loop',
 `kuro--switch-render-timer', and `kuro--update-frame-budget-ratio'.")
 
+(defconst kuro--frame-duration-ring-size 10
+  "Number of frame durations tracked for budget averaging.")
+
+(defvar kuro--frame-budget-ratio 0.8
+  "Fraction of frame interval available for render work before yielding.
+When dirty-line updates consume more than this fraction of the frame
+interval, mode polling is deferred to the next frame.  This prevents
+high-throughput TUI apps (cmatrix, btop) from starving the Emacs event
+loop.  Process-exit detection is always performed regardless of budget.")
+
+(defvar kuro--frame-duration-ring (make-vector kuro--frame-duration-ring-size 0.0)
+  "Ring buffer of recent frame durations in seconds.
+Length is `kuro--frame-duration-ring-size'.")
+
+(defvar kuro--frame-duration-ring-index 0
+  "Current write index into `kuro--frame-duration-ring'.")
+
+(defvar kuro--frame-duration-ring-sum 0.0
+  "Running sum of all entries in `kuro--frame-duration-ring'.
+Maintained incrementally (subtract old, add new) so the per-frame average
+is O(1) - a single division - instead of a `dotimes'-10 scan.")
+
 ;;; Render loop lifecycle
+
+(defsubst kuro--frame-budget-ring-next-index ()
+  "Return the next write index for the frame-duration ring."
+  (let ((n (1+ kuro--frame-duration-ring-index)))
+    (if (= n kuro--frame-duration-ring-size) 0 n)))
+
+(defsubst kuro--frame-budget-ring-record (duration)
+  "Record DURATION in the frame-duration ring and return the new average.
+The average is computed in O(1) via the running sum."
+  (let ((old (aref kuro--frame-duration-ring kuro--frame-duration-ring-index)))
+    (aset kuro--frame-duration-ring kuro--frame-duration-ring-index duration)
+    ;; O(1) running sum: subtract evicted entry, add new entry.
+    (setq kuro--frame-duration-ring-sum
+          (+ (- kuro--frame-duration-ring-sum old) duration))
+    (setq kuro--frame-duration-ring-index (kuro--frame-budget-ring-next-index))
+    ;; Divide by the fixed ring size while keeping float arithmetic.
+    (/ kuro--frame-duration-ring-sum kuro--frame-duration-ring-size)))
+
+(defsubst kuro--frame-budget-refresh-absolute-seconds ()
+  "Refresh `kuro--budget-absolute-seconds' from the current ratio."
+  (setq kuro--budget-absolute-seconds
+        (* kuro--frame-budget-ratio kuro--frame-budget-seconds)))
+
+(defsubst kuro--frame-budget-set-ratio (ratio)
+  "Update `kuro--frame-budget-ratio' with RATIO and its derived absolute seconds."
+  (setq kuro--frame-budget-ratio ratio)
+  (kuro--frame-budget-refresh-absolute-seconds))
+
+(defsubst kuro--frame-budget-apply-average (avg)
+  "Nudge `kuro--frame-budget-ratio' based on AVG frame duration."
+  (cond
+   ((> avg kuro--budget-threshold-high)
+    (kuro--frame-budget-set-ratio (max 0.5 (- kuro--frame-budget-ratio 0.05))))
+   ((< avg kuro--budget-threshold-low)
+    (kuro--frame-budget-set-ratio (min 0.8 (+ kuro--frame-budget-ratio 0.02))))))
+
+(defun kuro--update-frame-budget-ratio (duration)
+  "Record frame DURATION and adjust `kuro--frame-budget-ratio'.
+Maintains a rolling average of the last 10 frame durations.  When
+consistently over-budget the ratio is nudged down; when consistently
+under-budget it is nudged back toward 0.8.
+
+The average is computed in O(1) via a running sum: subtract the slot
+being overwritten, add the new value, divide by 10.  This replaces the
+previous `dotimes'-10 scan (21 ops/frame) with 3 float ops/frame."
+  (kuro--frame-budget-apply-average (kuro--frame-budget-ring-record duration)))
 
 (defun kuro--install-render-timer (rate)
   "Cancel any existing render timer and install a new one firing at RATE fps.
@@ -116,15 +185,9 @@ after any `with-current-buffer' context switches."
   "Start the render loop targeting the current buffer.
 Also starts the low-latency streaming idle timer when
 `kuro-streaming-latency-mode' is non-nil."
-  ;; Recompute cached blink intervals in case kuro-frame-rate changed.
   (kuro--recompute-blink-frame-intervals)
-  (setq kuro--half-frame-interval    (/ 0.5 kuro-frame-rate))
-  (setq kuro--frame-budget-seconds   (/ 1.0 kuro-frame-rate))
-  (setq kuro--budget-threshold-high  (* 0.9 kuro--frame-budget-seconds))
-  (setq kuro--budget-threshold-low   (* 0.5 kuro--frame-budget-seconds))
-  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
+  (kuro--recompute-budget-vars kuro-frame-rate)
   (kuro--install-render-timer kuro-frame-rate)
-  ;; Start the zero-delay idle timer for streaming latency reduction
   (kuro--start-stream-idle-timer))
 
 (defun kuro--stop-render-loop ()
@@ -134,37 +197,12 @@ Also starts the low-latency streaming idle timer when
     (setq kuro--timer nil))
   (kuro--stop-stream-idle-timer))
 
-;;; Frame coalescing
-
-(defmacro kuro--with-frame-coalescing (&rest body)
-  "Execute BODY only when enough time has elapsed since the last render frame.
-Implements frame coalescing: when multiple timer sources (120fps periodic,
-streaming idle, input echo delay) all fire within the same frame period,
-only the first call executes BODY.  Subsequent calls within half a frame
-period are skipped, preventing redundant partial-screen redraws.
-
-At 120fps, the half-frame threshold is 4.2ms — sufficient to coalesce
-the input echo timer (10ms) and streaming idle timer into the next tick.
-
-Updates `kuro--last-render-time' on the first non-coalesced call, so that
-`kuro--update-tui-streaming-timer' (which runs outside this guard) always
-observes the dirty count from the most recently rendered frame."
-  (declare (indent 0))
-  `(let ((now (float-time)))
-     (when (>= (- now kuro--last-render-time) kuro--half-frame-interval)
-       (setq kuro--last-render-time now)
-       ,@body)))
-
 ;;; Render cycle utilities
 
 (defun kuro--switch-render-timer (new-rate)
   "Cancel the current render timer and recreate it at NEW-RATE fps."
   (kuro--install-render-timer new-rate)
-  (setq kuro--half-frame-interval  (/ 0.5 new-rate))
-  (setq kuro--frame-budget-seconds (/ 1.0 new-rate))
-  (setq kuro--budget-threshold-high   (* 0.9 kuro--frame-budget-seconds))
-  (setq kuro--budget-threshold-low    (* 0.5 kuro--frame-budget-seconds))
-  (setq kuro--budget-absolute-seconds (* kuro--frame-budget-ratio kuro--frame-budget-seconds))
+  (kuro--recompute-budget-vars new-rate)
   (kuro--recompute-blink-frame-intervals))
 
 (defun kuro--ring-pending-bell ()
@@ -176,6 +214,13 @@ observes the dirty count from the most recently rendered frame."
   "Tick blink overlays if any are registered for the current buffer."
   (when kuro--blink-overlays
     (kuro--tick-blink-overlays)))
+
+(defun kuro--render-cycle-stage-2 (frame-start)
+  "Run the coalesced Stage 2 render work for FRAME-START."
+  (kuro--ring-pending-bell)
+  (kuro--apply-dirty-updates)
+  (kuro--poll-within-budget frame-start)
+  (kuro--tick-blink-if-active))
 
 ;;; Top-level render cycle
 
@@ -198,16 +243,8 @@ Stage 3 -- TUI detection (unconditional): must run on every timer
   (kuro--handle-pending-resize)
   ;; Stage 2: Coalesced render pipeline.
   (kuro--with-frame-coalescing
-    (when (buffer-live-p (current-buffer))
-      (let ((frame-start (float-time)))
-        ;; 2a. Bell
-        (kuro--ring-pending-bell)
-        ;; 2b. Dirty updates (heaviest work; must complete first)
-        (kuro--apply-dirty-updates)
-        ;; 2c. Mode poll (budget-gated to protect event loop)
-        (kuro--poll-within-budget frame-start)
-        ;; 2d. Blink (after dirty so all rows share the same blink phase)
-        (kuro--tick-blink-if-active))))
+    (kuro--with-live-render-frame
+      (kuro--render-cycle-stage-2 frame-start)))
   ;; Stage 3: TUI detection -- always, never gated.
   (kuro--update-tui-streaming-timer))
 

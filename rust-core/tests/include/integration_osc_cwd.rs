@@ -1,3 +1,5 @@
+use super::*;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OSC 7 — CWD edge cases
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9,7 +11,7 @@ fn osc7_cwd_trailing_slash_stored_verbatim() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;file://localhost/home/user/projects/\x07");
     assert_eq!(
-        t.osc_data().cwd.as_deref(),
+        t.osc_data().cwd(),
         Some("/home/user/projects/"),
         "OSC 7 must store trailing slash verbatim"
     );
@@ -21,12 +23,12 @@ fn osc7_cwd_empty_hostname_stores_path() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;file:///home/user\x07");
     assert_eq!(
-        t.osc_data().cwd.as_deref(),
+        t.osc_data().cwd(),
         Some("/home/user"),
         "OSC 7 with empty hostname must extract absolute path"
     );
     assert!(
-        t.osc_data().cwd_dirty,
+        t.osc_data().cwd_dirty(),
         "cwd_dirty must be set after OSC 7 with empty hostname"
     );
 }
@@ -37,7 +39,7 @@ fn osc7_ftp_scheme_is_rejected() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;ftp://host/path\x07");
     assert!(
-        t.osc_data().cwd.is_none(),
+        t.osc_data().cwd().is_none(),
         "OSC 7 with ftp:// scheme must not be stored"
     );
 }
@@ -48,7 +50,7 @@ fn osc7_no_scheme_is_rejected() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;/home/user/noslash\x07");
     assert!(
-        t.osc_data().cwd.is_none(),
+        t.osc_data().cwd().is_none(),
         "OSC 7 with no file:// scheme must not be stored"
     );
 }
@@ -59,10 +61,10 @@ fn osc7_no_scheme_is_rejected() {
 fn osc7_cwd_can_be_overwritten() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]7;file://localhost/first\x07");
-    assert_eq!(t.osc_data().cwd.as_deref(), Some("/first"));
+    assert_eq!(t.osc_data().cwd(), Some("/first"));
     t.advance(b"\x1b]7;file://localhost/second\x07");
     assert_eq!(
-        t.osc_data().cwd.as_deref(),
+        t.osc_data().cwd(),
         Some("/second"),
         "Second OSC 7 must overwrite the previous CWD"
     );
@@ -79,14 +81,14 @@ fn osc8_hyperlink_open_then_close() {
     // Open hyperlink: OSC 8 ; ; https://example.com ST
     t.advance(b"\x1b]8;;https://example.com\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
+        t.osc_data().hyperlink_uri(),
         Some("https://example.com"),
         "hyperlink URI must be set after OSC 8 open"
     );
     // Close hyperlink: OSC 8 ; ; ST (empty URI)
     t.advance(b"\x1b]8;;\x07");
     assert!(
-        t.osc_data().hyperlink.uri.is_none(),
+        t.osc_data().hyperlink_uri().is_none(),
         "hyperlink URI must be None after OSC 8 close"
     );
 }
@@ -97,14 +99,14 @@ fn osc8_hyperlink_sequential_links_update_uri() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]8;;https://first.example.com\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
+        t.osc_data().hyperlink_uri(),
         Some("https://first.example.com"),
         "first hyperlink must be stored"
     );
     // Open a second link directly without closing the first
     t.advance(b"\x1b]8;;https://second.example.com\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
+        t.osc_data().hyperlink_uri(),
         Some("https://second.example.com"),
         "second hyperlink must overwrite the first"
     );
@@ -117,7 +119,7 @@ fn osc8_hyperlink_with_id_param_stores_uri() {
     // OSC 8 ; id=mylink ; https://docs.rs ST
     t.advance(b"\x1b]8;id=mylink;https://docs.rs\x07");
     assert_eq!(
-        t.osc_data().hyperlink.uri.as_deref(),
+        t.osc_data().hyperlink_uri(),
         Some("https://docs.rs"),
         "OSC 8 with id= parameter must store the URI"
     );
@@ -132,7 +134,7 @@ fn osc8_hyperlink_text_between_open_and_close() {
     t.advance(b"click here");
     t.advance(b"\x1b]8;;\x07");
     assert!(
-        t.osc_data().hyperlink.uri.is_none(),
+        t.osc_data().hyperlink_uri().is_none(),
         "hyperlink must be closed after final OSC 8 empty-URI"
     );
     assert!(t.cursor_row() < 24);
@@ -166,7 +168,7 @@ fn osc11_hash_color_format() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]11;#1e1e2e\x07");
     assert_eq!(
-        t.osc_data().default_bg,
+        t.osc_data().default_bg(),
         Some(kuro_core::Color::Rgb(0x1e, 0x1e, 0x2e)),
         "#RRGGBB format must be accepted for OSC 11"
     );
@@ -178,7 +180,7 @@ fn osc12_hash_color_format() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]12;#cdd6f4\x07");
     assert_eq!(
-        t.osc_data().cursor_color,
+        t.osc_data().cursor_color(),
         Some(kuro_core::Color::Rgb(0xcd, 0xd6, 0xf4)),
         "#RRGGBB format must be accepted for OSC 12"
     );
@@ -220,11 +222,11 @@ fn osc104_reset_specific_leaves_others_intact() {
     t.advance(b"\x1b]4;2;rgb:00/ff/00\x07"); // set index 2 to green
     t.advance(b"\x1b]104;1\x07"); // reset only index 1
     assert!(
-        t.osc_data().palette[1].is_none(),
+        t.osc_data().palette()[1].is_none(),
         "index 1 must be reset by OSC 104;1"
     );
     assert_eq!(
-        t.osc_data().palette[2],
+        t.osc_data().palette()[2],
         Some([0x00, 0xff, 0x00]),
         "index 2 must remain untouched after OSC 104;1"
     );
@@ -240,7 +242,7 @@ fn osc133_single_prompt_start_records_one_mark() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]133;A\x07");
     assert_eq!(
-        t.osc_data().prompt_marks.len(),
+        t.osc_data().prompt_marks().len(),
         1,
         "One OSC 133;A must produce exactly one prompt mark"
     );
@@ -263,7 +265,7 @@ fn osc133_unknown_letter_is_ignored() {
     let mut t = TerminalCore::new(24, 80);
     t.advance(b"\x1b]133;Z\x07");
     assert_eq!(
-        t.osc_data().prompt_marks.len(),
+        t.osc_data().prompt_marks().len(),
         0,
         "Unknown OSC 133 letter must not add a prompt mark"
     );

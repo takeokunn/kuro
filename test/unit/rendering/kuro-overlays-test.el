@@ -7,71 +7,11 @@
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
-(require 'kuro-overlays)
-(require 'kuro-faces-attrs)
-
-;;; Helpers
-
-(defmacro kuro-overlays-test--with-buffer (&rest body)
-  "Run BODY in a temp buffer with overlay state initialized to defaults.
-Sets the following buffer-local variables:
-  `kuro--blink-overlays' nil (no active blink overlays)
-  `kuro--blink-visible-slow' t (slow blink phase starts visible)
-  `kuro--blink-visible-fast' t (fast blink phase starts visible)
-  `kuro--image-overlays' nil (no active image overlays)
-  `kuro--prompt-positions' nil (no known prompt positions)
-  `kuro--blink-frame-count' 0 (frame counter reset)
-  `inhibit-read-only' t (allows buffer modification in tests)"
-  `(with-temp-buffer
-     (let ((inhibit-read-only t)
-           (kuro--blink-overlays nil)
-           (kuro--image-overlays nil)
-           (kuro--prompt-positions nil)
-           (kuro--blink-frame-count 0)
-           (kuro--blink-visible-slow t)
-           (kuro--blink-visible-fast t))
-       ,@body)))
+(require 'kuro-overlays-test-support)
 
 ;;; Group 1: Blink overlays
 
-(ert-deftest kuro-overlays-apply-blink-slow-creates-overlay ()
-  "kuro--apply-blink-overlay creates a blink overlay with correct properties."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (kuro--apply-blink-overlay 1 6 'slow)
-    (should (= (length kuro--blink-overlays) 1))
-    (let ((ov (car kuro--blink-overlays)))
-      (should (overlay-get ov 'kuro-blink))
-      (should (eq (overlay-get ov 'kuro-blink-type) 'slow)))))
-
-(ert-deftest kuro-overlays-apply-blink-fast-creates-overlay ()
-  "Fast blink overlay has kuro-blink-type = fast."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (kuro--apply-blink-overlay 1 6 'fast)
-    (let ((ov (car kuro--blink-overlays)))
-      (should (eq (overlay-get ov 'kuro-blink-type) 'fast)))))
-
-(ert-deftest kuro-overlays-apply-blink-visible-when-visible ()
-  "Blink overlay is visible (invisible=nil) when blink state is visible."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (setq kuro--blink-visible-slow t)
-    (kuro--apply-blink-overlay 1 6 'slow)
-    (let ((ov (car kuro--blink-overlays)))
-      ;; visible-slow=t → invisible should be nil (= not invisible = visible)
-      (should-not (overlay-get ov 'invisible)))))
-
-(ert-deftest kuro-overlays-apply-blink-invisible-when-hidden ()
-  "Blink overlay is invisible when blink state is hidden."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (setq kuro--blink-visible-slow nil)
-    (kuro--apply-blink-overlay 1 6 'slow)
-    (let ((ov (car kuro--blink-overlays)))
-      (should (overlay-get ov 'invisible)))))
+(kuro-overlays-test--deftest-apply-blink-cases)
 
 ;;; Group 2: kuro--tick-blink-overlays
 
@@ -82,27 +22,7 @@ Sets the following buffer-local variables:
     (kuro--tick-blink-overlays)
     (should (= kuro--blink-frame-count 1))))
 
-(ert-deftest kuro-overlays-tick-blink-slow-toggles-at-interval ()
-  "Slow blink state toggles when frame count reaches multiple of slow-frames.
-At the default 120 fps, `kuro--blink-slow-frames' returns 60."
-  (kuro-overlays-test--with-buffer
-    (let ((slow (kuro--blink-slow-frames)))
-      (setq kuro--blink-frame-count (1- slow)
-            kuro--blink-visible-slow t)
-      (kuro--tick-blink-overlays)
-      (should (= kuro--blink-frame-count slow))
-      (should-not kuro--blink-visible-slow))))
-
-(ert-deftest kuro-overlays-tick-blink-fast-toggles-at-interval ()
-  "Fast blink state toggles when frame count reaches multiple of fast-frames.
-At the default 120 fps, `kuro--blink-fast-frames' returns 20."
-  (kuro-overlays-test--with-buffer
-    (let ((fast (kuro--blink-fast-frames)))
-      (setq kuro--blink-frame-count (1- fast)
-            kuro--blink-visible-fast t)
-      (kuro--tick-blink-overlays)
-      (should (= kuro--blink-frame-count fast))
-      (should-not kuro--blink-visible-fast))))
+(kuro-overlays-test--deftest-tick-blink-boundary-cases)
 
 (ert-deftest kuro-overlays-tick-blink-adapts-to-frame-rate ()
   "Blink intervals scale with `kuro-frame-rate' for correct real-time timing.
@@ -127,16 +47,6 @@ must be called to update the cached values."
     ;; Restore default
     (let ((kuro-frame-rate 60))
       (kuro--recompute-blink-frame-intervals))))
-
-(ert-deftest kuro-overlays-tick-blink-no-toggle-at-non-boundary ()
-  "Slow/fast blink states do NOT toggle at non-boundary frame counts."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-frame-count 5
-          kuro--blink-visible-slow t
-          kuro--blink-visible-fast t)
-    (kuro--tick-blink-overlays)  ; count becomes 6
-    (should kuro--blink-visible-slow)
-    (should kuro--blink-visible-fast)))
 
 ;;; Group 3: Image overlays
 
@@ -224,46 +134,14 @@ must be called to update the cached values."
 
 ;;; Group 5: kuro--apply-ffi-face-at (overlay and text-property side effects)
 
-(ert-deftest kuro-overlays-apply-ffi-face-at-blink-slow-creates-overlay ()
-  "kuro--apply-ffi-face-at creates a slow blink overlay when flags include blink-slow."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; kuro--sgr-flag-blink-slow (bit 4) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-slow 0)
-    (should (> (length kuro--blink-overlays) 0))
-    (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'slow))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-blink-fast-creates-overlay ()
-  "kuro--apply-ffi-face-at creates a fast blink overlay when flags include blink-fast."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; kuro--sgr-flag-blink-fast (bit 5) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-blink-fast 0)
-    (should (> (length kuro--blink-overlays) 0))
-    (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'fast))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-hidden-sets-invisible ()
-  "kuro--apply-ffi-face-at sets invisible text property when flags include hidden."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; kuro--sgr-flag-hidden (bit 7) bypasses the all-default fast-path
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden 0)
-    (should (get-text-property 1 'invisible))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-no-blink-no-overlay ()
-  "kuro--apply-ffi-face-at creates no blink overlay when no blink flags set."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; flags=0, fg/bg both default — fast-path skips everything
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 0 0)
-    (should (null kuro--blink-overlays))))
+(kuro-overlays-test--deftest-apply-ffi-face-cases)
 
 (ert-deftest kuro-overlays-call-with-normalized-ffi-face-range-calls-continuation ()
   "Normalized face ranges invoke the continuation with clamped positions."
   (let (captured)
     (should
      (kuro--call-with-normalized-ffi-face-range
-      [1 99 10 20 30 40] 5 10
+      [1 99 10 20 30 40] 0 5 10
       (lambda (&rest args)
         (setq captured args))))
     (should (equal captured '(6 10 10 20 30 40)))))
@@ -273,9 +151,18 @@ must be called to update the cached values."
   (let ((called nil))
     (should-not
      (kuro--call-with-normalized-ffi-face-range
-      [3 3 10 20 30 40] 5 10
+      [3 3 10 20 30 40] 0 5 10
       (lambda (&rest _args)
         (setq called t))))
+    (should-not called)))
+
+(ert-deftest kuro-overlays-call-with-normalized-ffi-face-range-all-clamped-to-line-end ()
+  "Range starting beyond line-end clamps both positions to line-end, skipping continuation."
+  (let ((called nil))
+    (should-not
+     (kuro--call-with-normalized-ffi-face-range
+      [10 20 10 20 30 40] 0 5 10
+      (lambda (&rest _args) (setq called t))))
     (should-not called)))
 
 ;;; Group 6: kuro--render-image-notification
@@ -340,21 +227,7 @@ must be called to update the cached values."
 
 ;;; Group 8: kuro--toggle-blink-phase
 
-(ert-deftest kuro-overlays-toggle-blink-phase-slow-flips-state ()
-  "kuro--toggle-blink-phase 'slow toggles kuro--blink-visible-slow."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t)
-    (kuro--toggle-blink-phase 'slow)
-    (should-not kuro--blink-visible-slow)
-    (kuro--toggle-blink-phase 'slow)
-    (should kuro--blink-visible-slow)))
-
-(ert-deftest kuro-overlays-toggle-blink-phase-fast-flips-state ()
-  "kuro--toggle-blink-phase 'fast toggles kuro--blink-visible-fast."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-fast t)
-    (kuro--toggle-blink-phase 'fast)
-    (should-not kuro--blink-visible-fast)))
+(kuro-overlays-test--deftest-toggle-blink-phase-cases)
 
 (ert-deftest kuro-overlays-toggle-blink-phase-updates-matching-overlays ()
   "kuro--toggle-blink-phase sets `invisible' on overlays of the matching type."
@@ -384,289 +257,5 @@ must be called to update the cached values."
       ;; slow toggle must not touch the fast overlay
       (should-not (overlay-get fast-ov 'invisible)))))
 
-;;; Group 9: kuro--blink-visible and kuro--toggle-blink-state
-
-(ert-deftest kuro-overlays-blink-visible-returns-slow-state ()
-  "kuro--blink-visible 'slow returns kuro--blink-visible-slow."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t
-          kuro--blink-visible-fast nil)
-    (should (eq t   (kuro--blink-visible 'slow)))
-    (should (eq nil (kuro--blink-visible 'fast)))))
-
-(ert-deftest kuro-overlays-blink-visible-returns-fast-state ()
-  "kuro--blink-visible 'fast returns kuro--blink-visible-fast."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow nil
-          kuro--blink-visible-fast t)
-    (should (eq nil (kuro--blink-visible 'slow)))
-    (should (eq t   (kuro--blink-visible 'fast)))))
-
-(ert-deftest kuro-overlays-toggle-blink-state-flips-slow ()
-  "kuro--toggle-blink-state 'slow toggles kuro--blink-visible-slow."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t)
-    (kuro--toggle-blink-state 'slow)
-    (should-not kuro--blink-visible-slow)
-    (kuro--toggle-blink-state 'slow)
-    (should kuro--blink-visible-slow)))
-
-(ert-deftest kuro-overlays-toggle-blink-state-flips-fast ()
-  "kuro--toggle-blink-state 'fast toggles kuro--blink-visible-fast."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-fast t)
-    (kuro--toggle-blink-state 'fast)
-    (should-not kuro--blink-visible-fast)))
-
-(ert-deftest kuro-overlays-toggle-blink-state-returns-new-value ()
-  "kuro--toggle-blink-state returns the new (toggled) value."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t)
-    (should-not (kuro--toggle-blink-state 'slow))
-    (should (kuro--toggle-blink-state 'slow))))
-
-(ert-deftest kuro-overlays-toggle-blink-state-does-not-affect-other-type ()
-  "kuro--toggle-blink-state 'slow does not modify kuro--blink-visible-fast."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-visible-slow t
-          kuro--blink-visible-fast t)
-    (kuro--toggle-blink-state 'slow)
-    (should kuro--blink-visible-fast)))
-
-;;; Group 11: kuro--clear-all-image-overlays — edge cases
-
-(ert-deftest kuro-overlays-clear-all-image-overlays-noop-when-empty ()
-  "kuro--clear-all-image-overlays is a no-op and leaves list nil when already nil."
-  (kuro-overlays-test--with-buffer
-    (should (null kuro--image-overlays))
-    (kuro--clear-all-image-overlays)
-    (should (null kuro--image-overlays))))
-
-(ert-deftest kuro-overlays-clear-all-image-overlays-removes-multiple ()
-  "kuro--clear-all-image-overlays removes all overlays from a list of many."
-  (kuro-overlays-test--with-buffer
-    (insert "row0\nrow1\nrow2\n")
-    (dotimes (i 3)
-      (let ((ov (make-overlay (1+ i) (+ 2 i))))
-        (overlay-put ov 'kuro-image t)
-        (push ov kuro--image-overlays)))
-    (should (= (length kuro--image-overlays) 3))
-    (kuro--clear-all-image-overlays)
-    (should (null kuro--image-overlays))))
-
-;;; Group 12: kuro--render-image-notification — valid image path
-
-(ert-deftest kuro-overlays-render-image-notification-places-overlay-when-valid ()
-  "kuro--render-image-notification creates an image overlay when data is valid."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\n")
-    (let* ((fake-b64 (base64-encode-string "PNG"))
-           (place-called nil))
-      (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
-                ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img))
-                ((symbol-function 'kuro--place-image-overlay)
-                 (lambda (_img _row _col _w) (setq place-called t))))
-        (kuro--render-image-notification '(1 0 0 2 1))
-        (should place-called)))))
-
-(ert-deftest kuro-overlays-render-image-notification-raw-width-zero-uses-one ()
-  "kuro--render-image-notification clamps raw-width 0 to 1 via (max 1 raw-width)."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\n")
-    (let* ((fake-b64 (base64-encode-string "PNG"))
-           (received-width nil))
-      (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
-                ((symbol-function 'kuro--decode-png-image) (lambda (_b64) 'fake-img))
-                ((symbol-function 'kuro--place-image-overlay)
-                 (lambda (_img _row _col w) (setq received-width w))))
-        (kuro--render-image-notification '(1 0 0 0 1))
-        (should (= received-width 1))))))
-
-;;; Group 13: kuro--tick-blink-overlays — blink both slow and fast at their boundary
-
-(ert-deftest kuro-overlays-tick-blink-both-toggle-at-shared-boundary ()
-  "When frame count reaches lcm(slow-frames, fast-frames), both phases toggle."
-  (kuro-overlays-test--with-buffer
-    (let* ((slow (kuro--blink-slow-frames))
-           (fast (kuro--blink-fast-frames))
-           (lcm-val (/ (* slow fast) (cl-gcd slow fast))))
-      (setq kuro--blink-frame-count (1- lcm-val)
-            kuro--blink-visible-slow t
-            kuro--blink-visible-fast t)
-      (kuro--tick-blink-overlays)
-      ;; Both should have toggled (from t to nil) at the lcm boundary.
-      (should-not kuro--blink-visible-slow)
-      (should-not kuro--blink-visible-fast))))
-
-(ert-deftest kuro-overlays-tick-blink-counter-keeps-increasing ()
-  "kuro--blink-frame-count increments monotonically with each tick."
-  (kuro-overlays-test--with-buffer
-    (setq kuro--blink-frame-count 0)
-    (dotimes (_ 5) (kuro--tick-blink-overlays))
-    (should (= kuro--blink-frame-count 5))))
-
-;;; Group 14: kuro--apply-ffi-face-at — fast-path and combined flags
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-fastpath-no-properties ()
-  "kuro--apply-ffi-face-at is a no-op when fg, bg, and flags are all default."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; All three args are at their default zero/default-color values.
-    (kuro--apply-ffi-face-at 1 6 kuro--ffi-color-default kuro--ffi-color-default 0 0)
-    (should (null kuro--blink-overlays))
-    (should (null (get-text-property 1 'face)))
-    (should (null (get-text-property 1 'invisible)))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-face-prop-set ()
-  "kuro--apply-ffi-face-at sets the face text property when color/flags differ from default."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; 0 is pure black (#x00000000), distinct from kuro--ffi-color-default (#xFF000000).
-    ;; Passing a non-default fg forces the face-apply branch.
-    (kuro--apply-ffi-face-at 1 6 0 kuro--ffi-color-default 0 0)
-    (should (get-text-property 1 'face))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-blink-fast-takes-priority-over-slow ()
-  "When both blink-fast and blink-slow flags are set, blink-fast overlay wins."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (let ((flags (logior kuro--sgr-flag-blink-fast kuro--sgr-flag-blink-slow)))
-      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags 0))
-    (should (= (length kuro--blink-overlays) 1))
-    ;; The cond checks blink-fast first, so type must be 'fast.
-    (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'fast))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-hidden-and-blink-slow-combined ()
-  "kuro--apply-ffi-face-at applies both blink overlay and invisible property together."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (let ((flags (logior kuro--sgr-flag-blink-slow kuro--sgr-flag-hidden)))
-      (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 flags 0))
-    ;; A slow blink overlay must exist.
-    (should (= (length kuro--blink-overlays) 1))
-    (should (eq (overlay-get (car kuro--blink-overlays) 'kuro-blink-type) 'slow))
-    ;; The invisible text property must also be set.
-    (should (get-text-property 1 'invisible))))
-
-(ert-deftest kuro-overlays-apply-ffi-face-at-hidden-only-no-blink-overlay ()
-  "kuro--apply-ffi-face-at sets invisible but creates no blink overlay for hidden-only."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    (kuro--apply-ffi-face-at 1 6 #xFF000000 #xFF000000 kuro--sgr-flag-hidden 0)
-    (should (null kuro--blink-overlays))
-    (should (get-text-property 1 'invisible))))
-
-;;; Group 15: kuro--toggle-blink-phase — dead overlay handling
-
-(ert-deftest kuro-overlays-toggle-blink-phase-skips-dead-overlay ()
-  "kuro--toggle-blink-phase silently skips overlays that no longer have a buffer."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello\n")
-    ;; Create a slow blink overlay, then delete it to make it dead.
-    (kuro--apply-blink-overlay 1 6 'slow)
-    (let ((ov (car kuro--blink-overlays)))
-      (delete-overlay ov)
-      ;; kuro--blink-overlays still holds the (dead) reference.
-      (should (= (length kuro--blink-overlays) 1))
-      ;; Toggle must not signal an error even with a dead overlay.
-      (should-not
-       (condition-case err
-           (progn (kuro--toggle-blink-phase 'slow) nil)
-         (error err))))))
-
-(ert-deftest kuro-overlays-toggle-blink-phase-slow-does-not-touch-fast-overlay ()
-  "kuro--toggle-blink-phase 'slow leaves fast-type overlay invisible prop unchanged."
-  (kuro-overlays-test--with-buffer
-    (insert "Hello World\n")
-    (setq kuro--blink-visible-fast t)
-    (kuro--apply-blink-overlay 1 6 'fast)
-    (let ((fast-ov (car kuro--blink-overlays)))
-      ;; fast overlay starts visible (invisible = nil)
-      (should-not (overlay-get fast-ov 'invisible))
-      ;; Toggle slow — must NOT change the fast overlay
-      (kuro--toggle-blink-phase 'slow)
-      (should-not (overlay-get fast-ov 'invisible)))))
-
-;;; Group 16: kuro--clear-all-image-overlays — dead overlay pruning
-
-(ert-deftest kuro-overlays-clear-all-image-overlays-handles-dead-overlay ()
-  "kuro--clear-all-image-overlays does not error when list contains a dead overlay."
-  (kuro-overlays-test--with-buffer
-    (insert "line\n")
-    (let ((ov (make-overlay 1 5)))
-      (overlay-put ov 'kuro-image t)
-      (delete-overlay ov)  ; make it dead before clearing
-      (push ov kuro--image-overlays))
-    (should-not
-     (condition-case err
-         (progn (kuro--clear-all-image-overlays) nil)
-       (error err)))
-    (should (null kuro--image-overlays))))
-
-(ert-deftest kuro-overlays-clear-all-image-overlays-deletes-live-overlays ()
-  "kuro--clear-all-image-overlays makes all live overlays dead (no buffer)."
-  (kuro-overlays-test--with-buffer
-    (insert "row0\nrow1\n")
-    (let ((ovs nil))
-      (dotimes (i 2)
-        (let ((ov (make-overlay (1+ i) (+ 2 i))))
-          (overlay-put ov 'kuro-image t)
-          (push ov kuro--image-overlays)
-          (push ov ovs)))
-      (kuro--clear-all-image-overlays)
-      ;; After clearing, every overlay must have no buffer (i.e., be dead).
-      (should (cl-every (lambda (ov) (null (overlay-buffer ov))) ovs)))))
-
-(ert-deftest kuro-overlays-clear-row-image-overlays-empty-list-is-noop ()
-  "kuro--clear-row-image-overlays is a no-op when kuro--image-overlays is nil."
-  (kuro-overlays-test--with-buffer
-    (insert "row0\nrow1\n")
-    (should (null kuro--image-overlays))
-    (kuro--clear-row-image-overlays 0)
-    (should (null kuro--image-overlays))))
-
-;;; Group 17: kuro--render-image-notification — error handling paths
-
-(ert-deftest kuro-overlays-ext-render-image-notification-handles-bad-base64 ()
-  "kuro--render-image-notification catches errors from malformed base64 without propagating.
-The condition-case in `kuro--render-image-notification' must swallow the error
-that `kuro--decode-png-image' signals when base64-decode-string fails."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\n")
-    (cl-letf (((symbol-function 'kuro--get-image)
-               (lambda (_id) "not-valid-base64!!!!")))
-      ;; No error must escape — condition-case catches and messages it
-      (should-not
-       (condition-case err
-           (progn (kuro--render-image-notification '(1 0 0 2 1)) nil)
-         (error err))))))
-
-(ert-deftest kuro-overlays-ext-render-image-notification-handles-create-image-error ()
-  "kuro--render-image-notification catches errors from create-image failing.
-When `kuro--decode-png-image' signals because `create-image' errors, the
-outer condition-case must absorb it and leave no overlay."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\n")
-    (let* ((fake-b64 (base64-encode-string "PNG")))
-      (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) fake-b64))
-                ((symbol-function 'create-image)
-                 (lambda (_data _type _inline) (error "create-image: unsupported format"))))
-        (should-not
-         (condition-case err
-             (progn (kuro--render-image-notification '(1 0 0 2 1)) nil)
-           (error err)))
-        ;; No overlay should have been placed
-        (should (null kuro--image-overlays))))))
-
-(ert-deftest kuro-overlays-ext-render-image-notification-noop-when-no-image ()
-  "kuro--render-image-notification is a no-op when kuro--get-image returns nil.
-The `when (and b64 ...)' guard must short-circuit and leave the overlay list empty."
-  (kuro-overlays-test--with-buffer
-    (insert "line0\nline1\n")
-    (cl-letf (((symbol-function 'kuro--get-image) (lambda (_id) nil)))
-      (kuro--render-image-notification '(1 0 0 2 1))
-      (should (null kuro--image-overlays)))))
-
 (provide 'kuro-overlays-test)
-
 ;;; kuro-overlays-test.el ends here

@@ -184,17 +184,30 @@ after each keypress, so input echo is not limited by this rate."
   :group 'kuro-display
   :set #'kuro--set-frame-rate)
 
-(defcustom kuro-tui-frame-rate 5
+(defcustom kuro-tui-frame-rate 30
   "Frame rate used when a full-screen TUI app is detected.
 When the renderer detects that a TUI application (cmatrix, htop, vim, etc.)
 is running — identified by >= `kuro--tui-dirty-threshold' of terminal rows
 being dirty for several consecutive frames — it switches the render timer
-to this lower rate.  This reduces CPU usage significantly during sustained
-full-screen redraws.  The normal `kuro-frame-rate' is restored immediately
-when the TUI app exits."
+to this lower rate.  This reduces CPU usage during sustained full-screen
+redraws while keeping motion fluid.  The normal `kuro-frame-rate' is
+restored immediately when the TUI app exits.
+
+30 fps is the floor of perceptually smooth motion; the previous default
+of 5 fps made every sustained full-screen redraw — including vim
+scrolling and htop refreshes — visibly stutter, and starved the
+per-poll PTY parse budget so fast producers fell behind."
   :type '(integer :tag "Positive integer (> 0)")
   :group 'kuro-display
   :set #'kuro--set-tui-frame-rate)
+
+;; Migration guard (same rationale as `kuro-use-binary-ffi' below): daemons
+;; that loaded an older kuro-config.el retain the old 5 fps default because
+;; `defcustom' does not override a bound variable on reload.  Lift them to
+;; the new default unless the user explicitly customised the rate.
+(when (and (equal kuro-tui-frame-rate 5)
+           (null (get 'kuro-tui-frame-rate 'saved-value)))
+  (setq kuro-tui-frame-rate 30))
 
 (defcustom kuro-streaming-latency-mode t
   "When non-nil, enable low-latency mode for AI agent streaming output.

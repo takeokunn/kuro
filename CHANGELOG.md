@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-06
+
+### Added
+
+- Binary frame protocol v3: the frame header now carries `scroll_up`/`scroll_down` alongside dirty rows, consumed atomically under one FFI call. Emacs replays the shift as a buffer-level line insert/delete before applying dirty rows, so a full-screen scroll costs a handful of changed rows instead of a full-buffer repaint. Opposite-direction scroll interleaves within a frame safely degrade to a full repaint (aggregate counters can't replay them); same-direction shifts accumulate.
+
+### Changed
+
+- **Breaking for downstream tooling reading raw binary frames**: the frame header grew from 12 to 16 bytes (`[version][num_rows][scroll_up][scroll_down]`). Code parsing `kuro-core-get-dirty-lines-binary-direct` output directly (rather than through the shipped Elisp decoder) must account for the new fields.
+- `kuro-tui-frame-rate` default raised from 5 to 30 fps — the previous full-screen-scroll-triggers-full-repaint bug made low-fps fallback necessary to bound CPU use; with scroll shifts now cheap, the TUI-detection fallback rate no longer needs to sacrifice motion fluidity. A migration guard lifts existing daemons that loaded the old 5 fps default onto the new default unless the user explicitly customized the rate (same pattern as the existing `kuro-use-binary-ffi` guard).
+- DEC private mode 2026 (synchronized output) suppression now holds pending dirty rows and scroll shifts instead of discarding them; the eventual reset flushes only the rows actually touched during suppression, rather than forcing a full repaint.
+- Parse budget per render-loop poll raised from 4 KB to 32 KB, matching the higher sustainable throughput once scroll no longer forces full repaints.
+- Keymap-exception changes (`kuro-keymap-exceptions` customization, input-mode switches) now reinstall each buffer's own composed input keymap instead of mutating the shared `kuro-mode-map` object, eliminating a cross-buffer keymap-aliasing bug where customizing exceptions in one Kuro buffer could leak into others.
+
+### Fixed
+
+- Full-screen scroll no longer marks the entire screen dirty, which previously tripped TUI-mode detection (≥80% dirty rows for several consecutive frames) and dropped the render rate to 5 fps — the root cause of choppy rendering during fast, scrolling output (e.g. AI coding agent streams).
+- Legacy (non-binary-v3) dirty-line FFI paths degrade scroll shifts to a full repaint explicitly, preserving prior behavior for any caller not yet on the v3 decoder.
+
 ### Added
 
 - Desktop notifications (OSC 9 / OSC 777): terminal applications can raise native desktop notifications. `OSC 9 ; <body> ST` (iTerm2) and `OSC 777 ; notify ; <title> ; <body> ST` (urxvt) are parsed in the Rust core, surfaced to Emacs via the new `kuro-core-poll-notifications` FFI, and shown through `notifications-notify` (D-Bus) with an echo-area fallback. The ConEmu `OSC 9 ; <n> ; …` progress form is deliberately ignored, and oversized fields (>4 KiB) are dropped. Gated by `kuro-notifications-enabled` (default t) with a customizable `kuro-notification-function` (FR-129).

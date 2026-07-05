@@ -6,7 +6,10 @@
 
 ;;; Commentary:
 
-;; Builds `kuro--keymap', the parent keymap of `kuro-mode-map'.
+;; Builds `kuro--keymap', the PTY-forwarding keymap composed together with
+;; `kuro-mode-map' (via `make-composed-keymap') into each buffer's effective
+;; keymap by `kuro--install-input-mode-keymap'.  `kuro-mode-map' itself is
+;; never mutated or given `kuro--keymap' as a parent.
 ;;
 ;; Key categories are split into per-function setup helpers:
 ;; `kuro--keymap-setup-special' (RET/TAB/DEL/ESC),

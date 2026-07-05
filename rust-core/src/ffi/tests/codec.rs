@@ -142,14 +142,20 @@ macro_rules! assert_binary_face {
 }
 
 /// Assert the shared frame header fields in an `encode_screen_binary` result.
+///
+/// The version-3 header is 16 bytes: format_version, num_rows, scroll_up,
+/// scroll_down.  The legacy `encode_screen_binary` path never carries a
+/// scroll shift, so both scroll fields must be zero.
 macro_rules! assert_binary_header {
     ($buf:expr, rows $rows:expr) => {{
-        assert_eq!(read_u32_le($buf, 0), 2, "format_version must be 2");
+        assert_eq!(read_u32_le($buf, 0), 3, "format_version must be 3");
         assert_eq!(
             read_u32_le($buf, 4),
             test_usize_to_u32($rows, "num_rows test value fits u32"),
             "num_rows must match"
         );
+        assert_eq!(read_u32_le($buf, 8), 0, "scroll_up must be 0");
+        assert_eq!(read_u32_le($buf, 12), 0, "scroll_down must be 0");
     }};
 }
 

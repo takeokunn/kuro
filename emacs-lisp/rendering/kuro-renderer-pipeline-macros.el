@@ -79,12 +79,19 @@ the per-entry logic at the call site."
 
 (defmacro kuro--with-core-render-pipeline-body (&rest body)
   "Run BODY inside the shared core render pipeline envelope.
-The envelope handles render-env setup, title refresh, scroll-event
-processing, and scroll-indicator updates in one place so the timed and
-untimed pipelines can share the same structure."
+The envelope handles render-env setup, title refresh, and
+scroll-indicator updates in one place so the timed and untimed
+pipelines can share the same structure.
+
+Scroll shifts are NOT handled here: they travel inside the binary poll
+frame (v3 header) and are applied by `kuro--apply-decoded-scroll-shift'
+between the poll and the dirty-row rewrite, inside BODY.  Consuming
+them in a separate pre-poll FFI call (the retired
+`kuro--process-scroll-events' design) allowed the poll's parse to
+generate new shifts after the consume, so shift and rewrite could
+disagree — the display corruption that once forced full repaints."
   `(kuro--with-render-env
      (kuro--apply-title-update)
-     (kuro--process-scroll-events)
      ,@body
      (kuro--update-scroll-indicator)))
 

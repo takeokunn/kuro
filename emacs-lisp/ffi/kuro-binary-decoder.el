@@ -55,6 +55,14 @@
   "Binary frame format version 2: 8-byte header, 28-byte face ranges.
 Adds underline_color field compared to v1.")
 
+(defconst kuro--binary-format-version-v3 3
+  "Binary frame format version 3: 16-byte header, 28-byte face ranges.
+Appends scroll_up(u32) and scroll_down(u32) to the header: the
+full-screen scroll shift consumed atomically with the dirty rows.
+The renderer applies the shift as a buffer-level delete+insert BEFORE
+rewriting dirty rows, so a scrolling stream (AI agent output) costs
+O(newly exposed rows) per frame instead of a full-screen repaint.")
+
 ;;; Scratch variable for decoder position advancement
 
 (defvar kuro--decode-pos 0
@@ -63,6 +71,22 @@ Adds underline_color field compared to v1.")
 byte offset immediately after the decoded section, eliminating the cons
 cell that would otherwise allocate a (RESULT . NEW-POS) pair at 3,600+
 calls/sec in the hot decode path.")
+
+(defvar kuro--decode-scroll-up 0
+  "Scroll-up shift decoded from the last version-3 binary frame header.
+Number of full-screen upward scrolls to replay as a buffer edit (delete
+the first N lines, append N blanks) BEFORE applying the frame's dirty
+rows.  Zero for v1/v2 frames and frames without a shift.  A scratch
+defvar rather than a return value, matching the `kuro--decode-pos'
+pattern: the poll path runs at up to 120 calls/sec and the extra cons
+of a richer return shape is measurable there.")
+
+(defvar kuro--decode-scroll-down 0
+  "Scroll-down shift decoded from the last version-3 binary frame header.
+See `kuro--decode-scroll-up'; the Rust core guarantees at most one of
+the two shift fields is non-zero per frame (opposite-direction scroll
+interleaves degrade to a full repaint on the Rust side because they
+cannot be replayed from aggregate counts).")
 
 ;;; Low-level byte readers
 
@@ -232,16 +256,28 @@ At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
   (kuro--binary-require-available vec 0 8 "header")
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
-                (= format-version kuro--binary-format-version-v2))
+                (= format-version kuro--binary-format-version-v2)
+                (= format-version kuro--binary-format-version-v3))
       (error "Kuro: unsupported binary format version %d" format-version))
-    (let* ((num-rows         (kuro--read-u32-le vec 4))
-           (pos              8)
+    (let* ((v3-p             (>= format-version kuro--binary-format-version-v3))
+           (num-rows         (kuro--read-u32-le vec 4))
+           (pos              (if v3-p 16 8))
            (face-ranges-v2-p (>= format-version 2)))
+      ;; v3: scroll shift fields occupy header bytes 8..16.  v1/v2 frames
+      ;; (and old .so modules) never carry a shift, so the scratch vars are
+      ;; explicitly zeroed for them.
+      (if v3-p
+          (progn
+            (kuro--binary-require-available vec 8 8 "scroll shift header")
+            (setq kuro--decode-scroll-up   (kuro--read-u32-le vec 8)
+                  kuro--decode-scroll-down (kuro--read-u32-le vec 12)))
+        (setq kuro--decode-scroll-up 0
+              kuro--decode-scroll-down 0))
       (kuro--binary-require-text-strings text-strings num-rows)
       ;; Every row must at least contain row-index, face-count, text-byte-len,
       ;; and col-to-buf-len.  This prevents huge count fields from allocating
       ;; the result vector before the frame can possibly contain that many rows.
-      (kuro--binary-require-available vec 8 (* num-rows 16) "minimum row data")
+      (kuro--binary-require-available vec pos (* num-rows 16) "minimum row data")
       ;; `while' with explicit counter produces tighter bytecode than `dotimes'
       ;; (consistent with kuro--apply-dirty-lines, kuro--decode-face-ranges, etc.)
       (let ((i 0)
@@ -282,7 +318,14 @@ cell `(TEXT-STRINGS . BINARY-DATA)', then decodes it with
 
 Returns nil when there are no dirty lines (FFI returned nil).
 Otherwise returns the decoded dirty-line list in the same format as
-the render pipeline expects."
+the render pipeline expects.
+
+Side effect: `kuro--decode-scroll-up' and `kuro--decode-scroll-down'
+are set to the frame's scroll shift (v3 header) or zeroed when the FFI
+returned nil or an older frame version.  The render pipeline reads them
+immediately after this call, before applying the dirty rows."
+  (setq kuro--decode-scroll-up 0
+        kuro--decode-scroll-down 0)
   (let ((result (kuro-core-poll-updates-binary-with-strings session-id)))
     (cond
      ((null result) nil)

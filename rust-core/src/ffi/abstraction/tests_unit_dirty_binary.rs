@@ -1,6 +1,6 @@
 use super::dirty_binary_support::{
-    binary_num_rows, consume_initial_dirty, enable_sync_output, enter_alt_screen, fill_scrollback,
-    make_binary_session,
+    binary_num_rows, binary_scroll_shift, consume_initial_dirty, enable_sync_output,
+    enter_alt_screen, fill_screen_and_drain, fill_scrollback, make_binary_session,
 };
 
 // ---------------------------------------------------------------------------
@@ -15,6 +15,7 @@ use super::dirty_binary_support::{
 //   5. Scroll offset suppression → (vec![], vec![])
 //   6. Scrollback viewport (scroll_dirty + scroll_offset > 0) → all rows
 
+use super::TerminalSession;
 use crate::ffi::codec::BINARY_FORMAT_VERSION;
 
 /// With no dirty rows (fresh call after a prior clear), `get_dirty_lines_binary_direct`
@@ -222,5 +223,140 @@ fn test_binary_direct_reemits_same_width_text_change() {
     assert!(
         frame.bytes.len() > 8,
         "same-width overwrite must produce binary row data"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Version-3 scroll shift transport — unit tests
+// ---------------------------------------------------------------------------
+
+/// A full-screen scroll travels in the frame header as `scroll_up`, and only
+/// the rows the scroll actually touched are re-encoded — NOT all 24 rows.
+/// This is the core smooth-streaming property: per-scroll render cost is
+/// O(exposed rows), not O(screen).
+#[test]
+fn test_binary_direct_scroll_shift_in_header_not_full_repaint() {
+    let mut session = make_binary_session();
+    fill_screen_and_drain(&mut session);
+
+    // Two more lines at the bottom margin → two full-screen scrolls.
+    session.core.advance(b"new line A\n");
+    session.core.advance(b"new line B\n");
+
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("scroll frame must fit binary u32 fields");
+    assert!(!frame.bytes.is_empty(), "scroll frame must not be empty");
+    assert_eq!(
+        binary_scroll_shift(&frame.bytes),
+        (2, 0),
+        "the two scrolls must travel as scroll_up in the frame header"
+    );
+    assert!(
+        frame.texts.len() < 24,
+        "a scroll must not force a full repaint; got {} rows",
+        frame.texts.len()
+    );
+    assert_eq!(
+        frame.texts.len() as u32,
+        binary_num_rows(&frame.bytes),
+        "num_rows header must match the text vector"
+    );
+}
+
+/// After a scroll frame is drained, a poll with no new output must be empty:
+/// the rotated row-hash cache stays aligned with the shifted viewport.
+#[test]
+fn test_binary_direct_after_scroll_drain_next_poll_is_empty() {
+    let mut session = make_binary_session();
+    fill_screen_and_drain(&mut session);
+    session.core.advance(b"new line\n");
+    let _ = session.get_dirty_lines_binary_direct();
+
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("idle frame must fit binary u32 fields");
+    assert!(
+        frame.texts.is_empty() && frame.bytes.is_empty(),
+        "no new output → the frame after a drained scroll must be empty"
+    );
+}
+
+/// `mark_all_dirty` (resize, alt-screen switch, live-view return) discards
+/// pending scroll shifts: a full repaint supersedes the buffer shift.
+#[test]
+fn test_binary_direct_full_dirty_discards_scroll_shift() {
+    let mut session = make_binary_session();
+    fill_screen_and_drain(&mut session);
+    session.core.advance(b"new line\n"); // one pending scroll_up
+    session.core.screen.mark_all_dirty();
+
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("full dirty frame must fit binary u32 fields");
+    assert_eq!(
+        binary_scroll_shift(&frame.bytes),
+        (0, 0),
+        "full_dirty must discard the pending scroll shift"
+    );
+    assert_eq!(
+        binary_num_rows(&frame.bytes),
+        24,
+        "full_dirty must re-encode all rows"
+    );
+}
+
+/// Synchronized output holds dirty rows AND scroll shifts; the closing
+/// `?2026 l` flushes both in one atomic frame.
+#[test]
+fn test_binary_direct_sync_holds_scroll_then_flushes_atomically() {
+    let mut session = make_binary_session();
+    fill_screen_and_drain(&mut session);
+
+    enable_sync_output(&mut session);
+    session.core.advance(b"inside batch\n");
+    let held = session
+        .get_dirty_lines_binary_direct()
+        .expect("held frame must fit binary u32 fields");
+    assert!(held.bytes.is_empty(), "open sync batch must hold the frame");
+
+    session.core.advance(b"\x1b[?2026l");
+    let flushed = session
+        .get_dirty_lines_binary_direct()
+        .expect("flushed frame must fit binary u32 fields");
+    assert_eq!(
+        binary_scroll_shift(&flushed.bytes),
+        (1, 0),
+        "the scroll from inside the batch must flush with the batch"
+    );
+    assert!(
+        binary_num_rows(&flushed.bytes) < 24,
+        "closing a sync batch must not force a full repaint"
+    );
+}
+
+/// A stuck `?2026 h` (no closing `l`) stops suppressing after
+/// `SYNC_SUPPRESS_MAX_POLLS` polls so the display cannot freeze forever.
+#[test]
+fn test_binary_direct_sync_suppression_times_out() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+    enable_sync_output(&mut session);
+    session.core.advance(b"stuck batch");
+
+    let mut released = false;
+    // One poll beyond the cap must render live again.
+    for _ in 0..=TerminalSession::SYNC_SUPPRESS_MAX_POLLS {
+        let frame = session
+            .get_dirty_lines_binary_direct()
+            .expect("suppressed frame must fit binary u32 fields");
+        if !frame.texts.is_empty() {
+            released = true;
+            break;
+        }
+    }
+    assert!(
+        released,
+        "a stuck sync batch must stop suppressing after the poll cap"
     );
 }

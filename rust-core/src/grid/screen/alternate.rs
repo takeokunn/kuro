@@ -36,8 +36,14 @@ impl Screen {
 
         self.is_alternate_active = false;
 
-        // Mark all lines dirty
+        // Mark all lines dirty.  Also discard any scroll shift the primary
+        // screen accumulated before the alternate screen was entered: the
+        // full repaint rewrites every row, so replaying a stale shift on
+        // the Emacs side would corrupt the display (full_dirty invariant,
+        // see `mark_all_dirty`).
         self.full_dirty = true;
+        self.pending_scroll_up = 0;
+        self.pending_scroll_down = 0;
 
         // Restore saved cursor if available
         if let Some(cursor) = self.saved_primary_cursor.take() {

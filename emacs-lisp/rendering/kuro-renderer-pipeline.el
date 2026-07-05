@@ -45,6 +45,7 @@
 ;; Functions provided by kuro-render-buffer.el (loaded via (require 'kuro-render-buffer)).
 (declare-function kuro--update-cursor         "kuro-render-buffer" ())
 (declare-function kuro--update-scroll-indicator "kuro-render-buffer" ())
+(declare-function kuro--shift-blink-overlay-rows "kuro-overlays" (up down rows))
 (declare-function kuro--update-line-full      "kuro-render-buffer" (row text face-ranges col-to-buf))
 (declare-function kuro--apply-buffer-scroll   "kuro-render-buffer" (up down))
 (declare-function kuro--init-row-positions    "kuro-render-buffer" (rows))
@@ -181,17 +182,31 @@ Renames the current buffer and the containing frame to the sanitized title."
           (when win
             (set-frame-parameter (window-frame win) 'name safe-title)))))))
 
-(defun kuro--process-scroll-events ()
-  "Consume pending full-screen scroll events and apply them to the buffer.
-Must be called before polling dirty lines so that buffer-level
-delete+insert happens before per-row text rewrites.
-No-op when the user is viewing scrollback (`kuro--scroll-offset' > 0)
-because the Rust side also suppresses events in that state, and applying
-scroll shifts to a frozen scrollback view would corrupt the display."
-  (unless (> kuro--scroll-offset 0)
-    (let ((scroll-ev (kuro--consume-scroll-events)))
-      (when (and scroll-ev (> kuro--last-rows 0))
-        (kuro--apply-buffer-scroll (car scroll-ev) (cdr scroll-ev))))))
+(defun kuro--apply-decoded-scroll-shift ()
+  "Apply the scroll shift carried by the last decoded binary frame.
+Reads `kuro--decode-scroll-up' / `kuro--decode-scroll-down' (set by
+`kuro--poll-updates-binary-optimised' from the v3 frame header) and
+replays the shift as a buffer-level edit via `kuro--apply-buffer-scroll'.
+Must run AFTER the poll (the shift is part of the frame) and BEFORE
+`kuro--apply-dirty-lines' (the frame's row indices are post-shift
+positions).  Shift and rows are drained atomically under one FFI call
+on the Rust side, so applying them in that order inside the same
+`inhibit-redisplay' block reproduces the grid exactly.
+
+Also re-keys the blink-overlay row index and resets the cursor cache:
+the buffer edit moved the cursor marker along with the text, so the
+cached (row . col) no longer maps to the marker position."
+  (let ((up kuro--decode-scroll-up)
+        (down kuro--decode-scroll-down))
+    ;; Zero the scratch vars once read: the legacy cons-cell poll path never
+    ;; writes them, so a stale shift must not survive a `kuro-use-binary-ffi'
+    ;; toggle and replay on a later frame.
+    (setq kuro--decode-scroll-up 0
+          kuro--decode-scroll-down 0)
+    (when (and (> (+ up down) 0) (> kuro--last-rows 0))
+      (kuro--apply-buffer-scroll up down)
+      (kuro--shift-blink-overlay-rows up down kuro--last-rows)
+      (kuro--reset-cursor-cache))))
 
 ;;; col-to-buf cache eviction
 
@@ -336,6 +351,8 @@ GC is suppressed during the render to reduce pause jitter."
     (setq updates (if kuro-use-binary-ffi
                       (kuro--poll-updates-binary-optimised kuro--session-id)
                     (kuro--poll-updates-with-faces)))
+    ;; Shift before rewrite: the frame's dirty rows are post-shift positions.
+    (kuro--apply-decoded-scroll-shift)
     (when updates
       (kuro--apply-dirty-lines updates))
     (kuro--update-cursor)))
@@ -348,7 +365,10 @@ Return the update list.  Appends one timing line to *kuro-perf* per
     (kuro--timed ffi-ms    (setq updates (if kuro-use-binary-ffi
                                              (kuro--poll-updates-binary-optimised kuro--session-id)
                                            (kuro--poll-updates-with-faces))))
-    (kuro--timed apply-ms  (when updates (kuro--apply-dirty-lines updates)))
+    (kuro--timed apply-ms  (progn
+                             ;; Shift before rewrite: dirty rows are post-shift.
+                             (kuro--apply-decoded-scroll-shift)
+                             (when updates (kuro--apply-dirty-lines updates))))
     (kuro--timed cursor-ms (kuro--update-cursor))))
 
 (defun kuro--finalize-dirty-updates (update-list)

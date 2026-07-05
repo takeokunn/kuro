@@ -28,20 +28,6 @@ macro_rules! assert_drain_once {
     }};
 }
 
-/// Assert that a session's `core.screen.take_dirty_lines()` returns exactly `$count` rows.
-macro_rules! assert_dirty_count {
-    ($session:expr, $count:expr) => {{
-        let dirty = $session.core.screen.take_dirty_lines();
-        assert_eq!(
-            dirty.len(),
-            $count,
-            "expected {} dirty rows, got {}",
-            $count,
-            dirty.len()
-        );
-    }};
-}
-
 /// Advance a session, then assert all listed row indices are present in `get_dirty_lines`.
 macro_rules! assert_rows_dirty {
     ($session:expr, advance $bytes:expr, rows [$($row:literal),+]) => {{
@@ -74,5 +60,6 @@ pub(crate) fn make_session() -> TerminalSession {
         dirty_scratch: Vec::new(),
         texts_scratch: Vec::new(),
         buf_scratch: Vec::new(),
+        sync_suppressed_polls: 0,
     }
 }

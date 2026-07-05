@@ -34,12 +34,24 @@
     (should (lookup-key (current-local-map) "\C-c\C-t"))))
 
 (ert-deftest kuro-el-test--exit-copy-mode-restores-kuro-mode-map ()
-  "kuro--exit-copy-mode restores kuro-mode-map as the local map."
+  "kuro--exit-copy-mode restores the PTY-forwarding keymap without mutating
+the shared `kuro-mode-map', and re-registers
+`kuro--emulation-mode-map-alist'."
   (kuro-el-test--with-kuro-mode-buffer
     (kuro--enter-copy-mode)
     (cl-letf (((symbol-function 'kuro--render-cycle) #'ignore))
       (kuro--exit-copy-mode))
-    (should (eq (current-local-map) kuro-mode-map))))
+    ;; kuro-mode-map is the shared, invariant object across all Kuro buffers --
+    ;; the restored local map is a buffer-local composed keymap that includes
+    ;; it, never `kuro-mode-map' itself.
+    (should-not (eq (current-local-map) kuro-mode-map))
+    ;; kuro-mode-map's own bindings (e.g. C-c C-t) remain reachable through
+    ;; the composed keymap.
+    (should (eq (lookup-key (current-local-map) "\C-c\C-t") #'kuro-copy-mode))
+    ;; The emulation-mode-map-alists entry is refreshed to the same map, so
+    ;; PTY-forwarding keeps precedence over evil-mode/god-mode/etc.
+    (should (eq (caar kuro--emulation-mode-map-alist) t))
+    (should (eq (cdar kuro--emulation-mode-map-alist) (current-local-map)))))
 
 (ert-deftest kuro-el-test--exit-copy-mode-noop-render-when-not-fboundp ()
   "kuro--exit-copy-mode does not error when kuro--render-cycle is not fboundp."

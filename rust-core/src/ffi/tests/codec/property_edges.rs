@@ -11,10 +11,10 @@ fn test_pbt_encode_screen_binary_row_index_and_text_len() {
     }];
     let out = encode_screen_binary_ok(lines);
 
-    let next = assert_binary_row!(&out, 8, row 42, text "Hello", faces 0, ctb []);
+    let next = assert_binary_row!(&out, 16, row 42, text "Hello", faces 0, ctb []);
     assert_eq!(
         next,
-        8 + binary_row_len(5, 0, 0),
+        16 + binary_row_len(5, 0, 0),
         "row payload length mismatch"
     );
 }
@@ -37,12 +37,12 @@ fn test_pbt_encode_screen_binary_one_face_range() {
     }];
     let out = encode_screen_binary_ok(lines);
 
-    let next = assert_binary_row!(&out, 8, row 0, text "AB", faces 1, ctb []);
-    let fr_base = 8 + 12 + 2;
+    let next = assert_binary_row!(&out, 16, row 0, text "AB", faces 1, ctb []);
+    let fr_base = 16 + 12 + 2;
     assert_binary_face!(&out, fr_base, buf 0, 2, fg 1, bg 2, flags 3, ul 4);
     assert_eq!(
         next,
-        8 + binary_row_len(2, 1, 0),
+        16 + binary_row_len(2, 1, 0),
         "row payload length mismatch"
     );
 }
@@ -58,11 +58,11 @@ fn test_pbt_encode_screen_binary_col_to_buf_entries() {
     }];
     let out = encode_screen_binary_ok(lines);
 
-    let next = assert_binary_row!(&out, 8, row 0, text "X", faces 0, ctb [0, 0, 1]);
+    let next = assert_binary_row!(&out, 16, row 0, text "X", faces 0, ctb [0, 0, 1]);
     assert_eq!(next, out.len(), "row payload length mismatch");
     assert_eq!(
         out.len(),
-        8 + binary_row_len(1, 0, 3),
+        16 + binary_row_len(1, 0, 3),
         "total byte count mismatch"
     );
 }
@@ -87,12 +87,12 @@ fn test_pbt_encode_screen_binary_two_rows() {
     let out = encode_screen_binary_ok(lines);
 
     assert_binary_header!(&out, rows 2);
-    let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb []);
+    let next = assert_binary_row!(&out, 16, row 0, text "A", faces 0, ctb []);
     let next = assert_binary_row!(&out, next, row 1, text "B", faces 0, ctb []);
     assert_eq!(next, out.len(), "row payload length mismatch");
     assert_eq!(
         out.len(),
-        8 + 2 * binary_row_len(1, 0, 0),
+        16 + 2 * binary_row_len(1, 0, 0),
         "total byte count mismatch"
     );
 }
@@ -110,7 +110,7 @@ fn test_pbt_encode_screen_binary_unicode_text() {
     }];
     let out = encode_screen_binary_ok(lines);
 
-    let next = assert_binary_row!(&out, 8, row 0, text arrow, faces 0, ctb []);
+    let next = assert_binary_row!(&out, 16, row 0, text arrow, faces 0, ctb []);
     assert_eq!(next, out.len(), "row payload length mismatch");
 }
 

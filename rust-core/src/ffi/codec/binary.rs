@@ -32,16 +32,25 @@ impl HashedEncodedText {
 ///
 /// Version 2: extends each face range to 28 bytes by appending a 4-byte
 /// `underline_color` field: `start_buf(u32) end_buf(u32) fg(u32) bg(u32) flags(u64) ul_color(u32)`.
-pub(crate) const BINARY_FORMAT_VERSION: u32 = 2;
+///
+/// Version 3: extends the header to 16 bytes by appending
+/// `[scroll_up: u32 LE][scroll_down: u32 LE]` — the full-screen scroll shift
+/// consumed atomically with the dirty rows.  Emacs applies the shift
+/// (delete N edge lines + insert N blanks at the opposite edge) before
+/// rewriting the dirty rows, turning per-scroll render cost from O(rows)
+/// into O(newly-exposed rows).  Row payload layout is unchanged from v2.
+pub(crate) const BINARY_FORMAT_VERSION: u32 = 3;
 
 /// Encode a list of dirty lines into a flat binary frame for FFI transfer.
 ///
 /// # Binary frame format
 ///
 /// ```text
-/// Header (8 bytes):
-///   [0..4]  format_version: u32 LE  (always BINARY_FORMAT_VERSION = 2)
-///   [4..8]  num_rows: u32 LE
+/// Header (16 bytes):
+///   [0..4]   format_version: u32 LE  (always BINARY_FORMAT_VERSION = 3)
+///   [4..8]   num_rows: u32 LE
+///   [8..12]  scroll_up: u32 LE    (always 0 on this legacy encode path)
+///   [12..16] scroll_down: u32 LE  (always 0 on this legacy encode path)
 ///
 /// Per row:
 ///   [0..4]   row_index: u32 LE
@@ -72,7 +81,7 @@ pub(crate) const BINARY_FORMAT_VERSION: u32 = 2;
 pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> BinaryFrameResult<Vec<u8>> {
     // Pre-compute total capacity to avoid repeated reallocation.
     let capacity = {
-        let mut cap = 8usize; // format_version + num_rows header
+        let mut cap = 16usize; // format_version + num_rows + scroll_up + scroll_down header
         for line in lines {
             cap += 12; // row_index + num_face_ranges + text_byte_len
             cap += line.text.len();
@@ -84,9 +93,13 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> BinaryFrameResult<V
     };
     let mut buf = Vec::with_capacity(capacity);
 
-    // Header: format_version + num_rows
+    // Header: format_version + num_rows + scroll shift (always zero here:
+    // this encode path is fed by the legacy drains, which degrade pending
+    // scroll shifts to a full repaint instead of transmitting them).
     buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
     BinaryFrameU32::from_usize(lines.len(), BinaryFrameU32Field::RowCount)?.write_le(&mut buf);
+    buf.extend_from_slice(&0u32.to_le_bytes());
+    buf.extend_from_slice(&0u32.to_le_bytes());
 
     for line in lines {
         // row_index

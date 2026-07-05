@@ -12,7 +12,7 @@
 ;;     Group 3:  kuro--update-cursor
 ;;     Group 5:  render loop lifecycle
 ;;     Group 6:  kuro--apply-title-update
-;;     Group 7:  kuro--process-scroll-events
+;;     Group 7:  kuro--apply-decoded-scroll-shift
 ;;     Group 8:  kuro--detect-tui-mode
 ;;     Group 9:  kuro--update-tui-streaming-timer
 ;;     Group 10: kuro--handle-clipboard-actions
@@ -133,57 +133,74 @@
 
 (kuro-renderer-test--deftest-apply-title-update-cases)
 
-;;; Group 7: kuro--process-scroll-events
+;;; Group 7: kuro--apply-decoded-scroll-shift
 
-(ert-deftest kuro-renderer-process-scroll-events-calls-apply-buffer-scroll ()
-  "kuro--process-scroll-events calls kuro--apply-buffer-scroll with FFI values."
+(ert-deftest kuro-renderer-apply-decoded-scroll-shift-calls-apply-buffer-scroll ()
+  "kuro--apply-decoded-scroll-shift applies the decoded v3 frame shift."
   (kuro-renderer-helpers-test--with-buffer
     (insert (make-string 24 ?\n))  ; 24 lines matching kuro--last-rows
-    (let ((apply-args nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () '(2 . 0)))
-                ((symbol-function 'kuro--apply-buffer-scroll)
-                 (lambda (up down) (push (cons up down) apply-args))))
-        (kuro--process-scroll-events)
+    (let ((apply-args nil)
+          (kuro--decode-scroll-up 2)
+          (kuro--decode-scroll-down 0))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (up down) (push (cons up down) apply-args)))
+                ((symbol-function 'kuro--shift-blink-overlay-rows) #'ignore))
+        (kuro--apply-decoded-scroll-shift)
         (should (= (length apply-args) 1))
         (should (equal (car apply-args) '(2 . 0)))))))
 
-(ert-deftest kuro-renderer-process-scroll-events-noop-on-nil ()
-  "kuro--process-scroll-events does nothing when FFI returns nil."
+(ert-deftest kuro-renderer-apply-decoded-scroll-shift-noop-on-zero ()
+  "kuro--apply-decoded-scroll-shift does nothing when the frame had no shift."
   (kuro-renderer-helpers-test--with-buffer
-    (let ((apply-called nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () nil))
-                ((symbol-function 'kuro--apply-buffer-scroll)
+    (let ((apply-called nil)
+          (kuro--decode-scroll-up 0)
+          (kuro--decode-scroll-down 0))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll)
                  (lambda (_up _down) (setq apply-called t))))
-        (kuro--process-scroll-events)
+        (kuro--apply-decoded-scroll-shift)
         (should-not apply-called)))))
 
-(ert-deftest kuro-renderer-process-scroll-events-noop-when-last-rows-zero ()
-  "kuro--process-scroll-events does nothing when kuro--last-rows is 0."
+(ert-deftest kuro-renderer-apply-decoded-scroll-shift-noop-when-last-rows-zero ()
+  "kuro--apply-decoded-scroll-shift does nothing when kuro--last-rows is 0."
   (kuro-renderer-helpers-test--with-buffer
     (setq kuro--last-rows 0)
-    (let ((apply-called nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () '(1 . 0)))
-                ((symbol-function 'kuro--apply-buffer-scroll)
+    (let ((apply-called nil)
+          (kuro--decode-scroll-up 1)
+          (kuro--decode-scroll-down 0))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll)
                  (lambda (_up _down) (setq apply-called t))))
-        (kuro--process-scroll-events)
+        (kuro--apply-decoded-scroll-shift)
         (should-not apply-called)))))
 
-(ert-deftest kuro-renderer-process-scroll-events-noop-when-scrollback-active ()
-  "kuro--process-scroll-events is a no-op when kuro--scroll-offset is positive."
+(ert-deftest kuro-renderer-apply-decoded-scroll-shift-zeroes-scratch-vars ()
+  "The decode scratch vars are zeroed once read, applied or not.
+A stale shift must not replay on a later frame (e.g. after toggling
+`kuro-use-binary-ffi', whose legacy path never writes the vars)."
   (kuro-renderer-helpers-test--with-buffer
-    (setq kuro--scroll-offset 5)
-    (let ((apply-called nil)
-          (consume-called nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () (setq consume-called t) '(3 . 0)))
-                ((symbol-function 'kuro--apply-buffer-scroll)
-                 (lambda (_up _down) (setq apply-called t))))
-        (kuro--process-scroll-events)
-        (should-not consume-called)
-        (should-not apply-called)))))
+    (insert (make-string 24 ?\n))
+    (setq kuro--decode-scroll-up 3
+          kuro--decode-scroll-down 0)
+    (cl-letf (((symbol-function 'kuro--apply-buffer-scroll) #'ignore)
+              ((symbol-function 'kuro--shift-blink-overlay-rows) #'ignore))
+      (kuro--apply-decoded-scroll-shift))
+    (should (= kuro--decode-scroll-up 0))
+    (should (= kuro--decode-scroll-down 0))))
+
+(ert-deftest kuro-renderer-apply-decoded-scroll-shift-resets-cursor-cache ()
+  "Applying a shift invalidates the cached cursor state.
+The buffer edit moves the cursor marker with the text, so the cached
+grid position no longer corresponds to the marker."
+  (kuro-renderer-helpers-test--with-buffer
+    (insert (make-string 24 ?\n))
+    (setq kuro--last-cursor-row 5
+          kuro--last-cursor-col 3)
+    (let ((kuro--decode-scroll-up 1)
+          (kuro--decode-scroll-down 0))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll) #'ignore)
+                ((symbol-function 'kuro--shift-blink-overlay-rows) #'ignore))
+        (kuro--apply-decoded-scroll-shift)))
+    (should-not kuro--last-cursor-row)
+    (should-not kuro--last-cursor-col)))
 
 ;;; Group 9: kuro--update-tui-streaming-timer (TUI streaming timer management)
 

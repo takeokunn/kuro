@@ -104,47 +104,46 @@ fn test_scrollback_not_dirty_suppresses_live_lines() {
     );
 }
 
-/// Full-screen `scroll_up` uses `full_dirty` instead of `pending_scroll_up`.
+/// Full-screen `scroll_up` accumulates `pending_scroll_up` shift events.
 ///
-/// After the scroll-accumulation fix, the full-screen fast path sets
-/// `full_dirty = true` and does NOT increment `pending_scroll_up`, so
-/// `consume_scroll_events` returns (0, 0).  The Emacs render cycle uses
-/// `take_dirty_lines` (which returns all rows when `full_dirty` is set)
-/// instead of the buffer-level shift.
+/// The binary drain transmits the shift in the same frame as the dirty rows
+/// (atomically, under one FFI call), so Emacs replays the scroll as a cheap
+/// buffer edit and only the newly exposed rows are repainted.
 #[test]
-fn test_consume_scroll_events_returns_zero_after_full_screen_scroll() {
+fn test_consume_scroll_events_accumulates_after_full_screen_scroll() {
     let mut session = make_session();
 
-    // Advance content that causes a full-screen scroll (write 25 lines on a
-    // 24-row terminal — the 25th line triggers one scroll_up event).
-    for _ in 0..25 {
+    // Fill the screen so the cursor sits at the bottom margin, then drain
+    // whatever scrolls the fill produced to establish a clean baseline.
+    for _ in 0..24 {
         session.core.advance(b"line\n");
     }
+    session.consume_scroll_events();
 
-    // Full-screen scroll now uses full_dirty, not pending_scroll_up.
+    // Each further line feed at the bottom margin is one full-screen scroll.
+    session.core.advance(b"line\n");
+    session.core.advance(b"line\n");
+
     let (up, down) = session.consume_scroll_events();
     assert_eq!(
-        up, 0,
-        "full-screen scroll should not accumulate pending_scroll_up"
+        up, 2,
+        "each full-screen scroll must accumulate pending_scroll_up"
     );
     assert_eq!(down, 0, "no scroll-down events expected");
 
-    // Verify full_dirty was set instead.
-    let dirty = session.core.screen.take_dirty_lines();
-    assert_eq!(
-        dirty.len(),
-        24,
-        "full_dirty should cause take_dirty_lines to return all 24 rows"
+    // full_dirty must NOT be set: only the shifted-in rows are dirty.
+    assert!(
+        !session.core.screen.is_full_dirty(),
+        "full-screen scroll must not force a full repaint"
     );
 }
 
-/// Full-screen `scroll_down` uses `full_dirty` instead of `pending_scroll_down`.
+/// Full-screen `scroll_down` accumulates `pending_scroll_down` shift events.
 ///
-/// After the scroll-accumulation fix, reverse index (RI) on a full-screen
-/// scroll region sets `full_dirty = true` and does NOT increment
-/// `pending_scroll_down`.
+/// Reverse index (RI) at the top margin on a full-screen scroll region
+/// records a downward shift; the exposed top rows are the only dirty rows.
 #[test]
-fn test_consume_scroll_events_scroll_down_returns_zero() {
+fn test_consume_scroll_events_accumulates_scroll_down() {
     let mut session = make_session();
 
     // ESC [ r        — DECSTBM: scroll region = full screen
@@ -152,20 +151,17 @@ fn test_consume_scroll_events_scroll_down_returns_zero() {
     // ESC M          — RI: reverse index — scrolls content down at top margin
     session.core.advance(b"\x1b[r\x1b[1;1H\x1bM\x1bM\x1bM");
 
-    // Full-screen scroll_down now uses full_dirty, not pending_scroll_down.
     let (up, down) = session.consume_scroll_events();
     assert_eq!(up, 0, "no scroll-up events expected after RI-only input");
     assert_eq!(
-        down, 0,
-        "full-screen scroll should not accumulate pending_scroll_down"
+        down, 3,
+        "each RI-driven full-screen scroll must accumulate pending_scroll_down"
     );
 
-    // Verify full_dirty was set instead.
-    let dirty = session.core.screen.take_dirty_lines();
-    assert_eq!(
-        dirty.len(),
-        24,
-        "full_dirty should cause take_dirty_lines to return all 24 rows"
+    // full_dirty must NOT be set: only the shifted-in rows are dirty.
+    assert!(
+        !session.core.screen.is_full_dirty(),
+        "full-screen scroll-down must not force a full repaint"
     );
 }
 

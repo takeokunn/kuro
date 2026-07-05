@@ -36,19 +36,35 @@ proptest! {
     }
 
     #[test]
-    fn prop_full_screen_scroll_up_sets_full_dirty(n in 1usize..10usize) {
+    fn prop_full_screen_scroll_up_marks_only_exposed_rows_dirty(n in 1usize..10usize) {
         let mut screen = screen();
         prop_assert_eq!(screen.get_scroll_region().top, 0);
         prop_assert_eq!(screen.get_scroll_region().bottom, ROWS as usize);
         screen.scroll_up(n, Color::Default);
-        prop_assert_eq!(dirty_count_after(screen), ROWS as usize);
+        // The viewport shift is transmitted via pending_scroll_up; only the
+        // blank rows exposed at the bottom need a repaint.
+        prop_assert_eq!(dirty_count_after(screen), n);
     }
 
     #[test]
-    fn prop_full_screen_scroll_down_sets_full_dirty(n in 1usize..10usize) {
+    fn prop_full_screen_scroll_up_accumulates_pending_events(n in 1usize..10usize) {
+        let mut screen = screen();
+        screen.scroll_up(n, Color::Default);
+        prop_assert_eq!(screen.consume_scroll_events(), (n as u32, 0));
+    }
+
+    #[test]
+    fn prop_full_screen_scroll_down_marks_only_exposed_rows_dirty(n in 1usize..10usize) {
         let mut screen = screen();
         screen.scroll_down(n, Color::Default);
-        prop_assert_eq!(dirty_count_after(screen), ROWS as usize);
+        prop_assert_eq!(dirty_count_after(screen), n);
+    }
+
+    #[test]
+    fn prop_full_screen_scroll_down_accumulates_pending_events(n in 1usize..10usize) {
+        let mut screen = screen();
+        screen.scroll_down(n, Color::Default);
+        prop_assert_eq!(screen.consume_scroll_events(), (0, n as u32));
     }
 
     #[test]
@@ -133,11 +149,35 @@ fn scroll_down_adds_blank_line_at_top() {
 }
 
 #[test]
-fn consume_scroll_events_returns_zero_zero() {
+fn consume_scroll_events_returns_accumulated_full_screen_scroll_up() {
     let mut screen = screen();
     screen.scroll_up(5, Color::Default);
 
+    assert_eq!(screen.consume_scroll_events(), (5, 0));
+}
+
+/// Opposite-direction scrolls cannot be replayed from aggregate counters
+/// (the blank-row edge depends on the order), so an interleave degrades to
+/// a full repaint with both counters discarded.
+#[test]
+fn consume_scroll_events_opposite_directions_degrade_to_full_dirty() {
+    let mut screen = screen();
+    screen.scroll_up(2, Color::Default);
+    screen.scroll_down(1, Color::Default);
+
     assert_eq!(screen.consume_scroll_events(), (0, 0));
+    assert!(screen.is_full_dirty());
+}
+
+/// Same-direction scrolls accumulate additively across calls.
+#[test]
+fn consume_scroll_events_same_direction_accumulates() {
+    let mut screen = screen();
+    screen.scroll_up(2, Color::Default);
+    screen.scroll_up(3, Color::Default);
+
+    assert_eq!(screen.consume_scroll_events(), (5, 0));
+    assert!(!screen.is_full_dirty());
 }
 
 #[test]
@@ -225,20 +265,22 @@ fn partial_region_scroll_down_clamps_huge_count() {
 }
 
 #[test]
-fn full_dirty_is_set_after_full_screen_scroll_up() {
+fn full_screen_scroll_up_marks_exposed_bottom_row_dirty() {
     let mut screen = screen();
     assert_eq!(screen.take_dirty_lines().len(), 0);
 
     screen.scroll_up(1, Color::Default);
 
-    assert_eq!(screen.take_dirty_lines().len(), ROWS as usize);
+    // Only the newly exposed blank bottom row is dirty; the viewport shift
+    // itself travels via pending_scroll_up (see consume_scroll_events).
+    assert_eq!(screen.take_dirty_lines(), vec![ROWS as usize - 1]);
 }
 
 #[test]
-fn full_dirty_cleared_by_take_dirty_lines() {
+fn scroll_dirty_rows_cleared_by_take_dirty_lines() {
     let mut screen = screen();
     screen.scroll_up(1, Color::Default);
 
-    assert_eq!(screen.take_dirty_lines().len(), ROWS as usize);
+    assert_eq!(screen.take_dirty_lines().len(), 1);
     assert!(screen.take_dirty_lines().is_empty());
 }

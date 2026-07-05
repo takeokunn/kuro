@@ -398,10 +398,12 @@ fn test_pbt_encode_screen_binary_empty() {
     assert_eq!(
         out,
         [
-            2u8, 0, 0, 0, // format_version = 2 LE
-            0u8, 0, 0, 0
-        ], // num_rows = 0 LE
-        "empty input must produce 8-byte header (version=2, num_rows=0)"
+            3u8, 0, 0, 0, // format_version = 3 LE
+            0u8, 0, 0, 0, // num_rows = 0 LE
+            0u8, 0, 0, 0, // scroll_up = 0 LE
+            0u8, 0, 0, 0, // scroll_down = 0 LE
+        ],
+        "empty input must produce 16-byte header (version=3, num_rows=0, no scroll shift)"
     );
 }
 
@@ -416,10 +418,10 @@ fn test_pbt_encode_screen_binary_one_row_no_faces() {
     }];
     let out = encode_screen_binary_ok(lines);
 
-    let next = assert_binary_row!(&out, 8, row 0, text "A", faces 0, ctb [0]);
+    let next = assert_binary_row!(&out, 16, row 0, text "A", faces 0, ctb [0]);
     assert_eq!(
         out.len(),
-        8 + binary_row_len(1, 0, 1),
+        16 + binary_row_len(1, 0, 1),
         "total byte count mismatch"
     );
     assert_eq!(next, out.len(), "row payload length mismatch");

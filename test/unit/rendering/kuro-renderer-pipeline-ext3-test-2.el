@@ -4,32 +4,31 @@
 
 (require 'kuro-renderer-pipeline-test-support)
 
-;;; Group 27: kuro--process-scroll-events suppression paths and kuro--apply-title-update
+;;; Group 27: kuro--apply-decoded-scroll-shift edge cases and kuro--apply-title-update
 
-(ert-deftest kuro-renderer-pipeline-process-scroll-events-suppressed-when-scrolled ()
-  "kuro--process-scroll-events does nothing when kuro--scroll-offset > 0 (scrollback active)."
+(ert-deftest kuro-renderer-pipeline-decoded-scroll-shift-applies-down-shift ()
+  "kuro--apply-decoded-scroll-shift forwards a scroll-down shift verbatim."
   (kuro-renderer-pipeline-test--with-buffer
-    (setq kuro--scroll-offset 3)
-    (let ((consume-called nil)
-          (apply-called nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () (setq consume-called t) '(1 . 0)))
-                ((symbol-function 'kuro--apply-buffer-scroll)
-                 (lambda (_up _down) (setq apply-called t))))
-        (kuro--process-scroll-events)
-        (should-not consume-called)
-        (should-not apply-called)))))
+    (let ((apply-args nil)
+          (kuro--decode-scroll-up 0)
+          (kuro--decode-scroll-down 2))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll)
+                 (lambda (up down) (push (cons up down) apply-args)))
+                ((symbol-function 'kuro--shift-blink-overlay-rows) #'ignore))
+        (kuro--apply-decoded-scroll-shift)
+        (should (equal apply-args '((0 . 2))))))))
 
-(ert-deftest kuro-renderer-pipeline-process-scroll-events-runs-at-scroll-offset-zero ()
-  "kuro--process-scroll-events calls kuro--consume-scroll-events when offset is 0."
+(ert-deftest kuro-renderer-pipeline-decoded-scroll-shift-rekeys-blink-rows ()
+  "kuro--apply-decoded-scroll-shift re-keys the blink-overlay row index."
   (kuro-renderer-pipeline-test--with-buffer
-    (setq kuro--scroll-offset 0)
-    (let ((consume-called nil))
-      (cl-letf (((symbol-function 'kuro--consume-scroll-events)
-                 (lambda () (setq consume-called t) nil))
-                ((symbol-function 'kuro--apply-buffer-scroll) #'ignore))
-        (kuro--process-scroll-events)
-        (should consume-called)))))
+    (let ((shift-args nil)
+          (kuro--decode-scroll-up 3)
+          (kuro--decode-scroll-down 0))
+      (cl-letf (((symbol-function 'kuro--apply-buffer-scroll) #'ignore)
+                ((symbol-function 'kuro--shift-blink-overlay-rows)
+                 (lambda (up down rows) (push (list up down rows) shift-args))))
+        (kuro--apply-decoded-scroll-shift)
+        (should (equal shift-args (list (list 3 0 kuro--last-rows))))))))
 
 (ert-deftest kuro-renderer-pipeline-apply-title-update-no-window-skips-frame-rename ()
   "kuro--apply-title-update does not call set-frame-parameter when no window shows the buffer."

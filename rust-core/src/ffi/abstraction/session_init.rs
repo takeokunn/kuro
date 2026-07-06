@@ -92,6 +92,7 @@ impl TerminalSession {
             dirty_scratch: Vec::new(),
             texts_scratch: Vec::new(),
             buf_scratch: Vec::new(),
+            sync_suppressed_polls: 0,
         })
     }
 

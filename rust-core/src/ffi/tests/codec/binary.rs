@@ -6,26 +6,26 @@ use crate::ffi::codec::binary::compute_row_hash_from_pool;
 // -------------------------------------------------------------------------
 
 #[test]
-fn encode_screen_binary_empty_input_produces_8_byte_header() {
+fn encode_screen_binary_empty_input_produces_16_byte_header() {
     let result = encode_screen_binary_ok(&[]);
     assert_eq!(
         result.len(),
-        8,
-        "empty input must produce an 8-byte header only (format_version + num_rows)"
+        16,
+        "empty input must produce a 16-byte header only (format_version + num_rows + scroll shift)"
     );
     assert_binary_header!(&result, rows 0);
 }
 
-/// An explicit empty `Vec` (0 rows) must also produce only the 8-byte header,
+/// An explicit empty `Vec` (0 rows) must also produce only the 16-byte header,
 /// identical to passing an empty slice.  This covers the `Vec::new()` call site.
 #[test]
-fn encode_screen_binary_explicit_empty_vec_produces_8_byte_header() {
+fn encode_screen_binary_explicit_empty_vec_produces_16_byte_header() {
     let lines: Vec<EncodedLine> = Vec::new();
     let result = encode_screen_binary_ok(&lines);
     assert_eq!(
         result.len(),
-        8,
-        "explicit empty Vec must produce an 8-byte header only (format_version + num_rows)"
+        16,
+        "explicit empty Vec must produce a 16-byte header only (format_version + num_rows + scroll shift)"
     );
     assert_binary_header!(&result, rows 0);
 }
@@ -41,14 +41,14 @@ fn encode_screen_binary_single_row_no_text_no_faces_no_col_to_buf() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + col_to_buf_len (4) = 24 bytes total
-    assert_eq!(result.len(), 24);
+    // Header (16) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + col_to_buf_len (4) = 32 bytes total
+    assert_eq!(result.len(), 32);
     assert_binary_header!(&result, rows 1);
-    assert_eq!(read_u32_le(&result, 8), 0, "row_index must be 0");
-    assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
-    assert_eq!(read_u32_le(&result, 16), 0, "text_byte_len must be 0");
-    assert_eq!(read_u32_le(&result, 20), 0, "col_to_buf_len must be 0");
+    assert_eq!(read_u32_le(&result, 16), 0, "row_index must be 0");
+    assert_eq!(read_u32_le(&result, 20), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32_le(&result, 24), 0, "text_byte_len must be 0");
+    assert_eq!(read_u32_le(&result, 28), 0, "col_to_buf_len must be 0");
 }
 
 #[test]
@@ -64,19 +64,19 @@ fn encode_screen_binary_single_row_ascii_text_byte_layout() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text_bytes (5) + col_to_buf_len (4) = 29 bytes total
-    assert_eq!(result.len(), 29);
+    // Header (16) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text_bytes (5) + col_to_buf_len (4) = 37 bytes total
+    assert_eq!(result.len(), 37);
     assert_binary_header!(&result, rows 1);
-    assert_eq!(read_u32_le(&result, 8), 3, "row_index must be 3");
-    assert_eq!(read_u32_le(&result, 12), 0, "num_face_ranges must be 0");
+    assert_eq!(read_u32_le(&result, 16), 3, "row_index must be 3");
+    assert_eq!(read_u32_le(&result, 20), 0, "num_face_ranges must be 0");
     assert_eq!(
-        read_u32_le(&result, 16),
+        read_u32_le(&result, 24),
         test_usize_to_u32(text_len, "text length test value fits u32"),
         "text_byte_len must match"
     );
-    assert_eq!(&result[20..25], b"Hello", "raw text bytes must be correct");
-    assert_eq!(read_u32_le(&result, 25), 0, "col_to_buf_len must be 0");
+    assert_eq!(&result[28..33], b"Hello", "raw text bytes must be correct");
+    assert_eq!(read_u32_le(&result, 33), 0, "col_to_buf_len must be 0");
 }
 
 #[test]
@@ -102,14 +102,14 @@ fn encode_screen_binary_single_row_one_face_range_28_byte_encoding() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text (5) + face_range (28) + col_to_buf_len (4) = 57 bytes
-    assert_eq!(result.len(), 57);
+    // Header (16) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text (5) + face_range (28) + col_to_buf_len (4) = 65 bytes
+    assert_eq!(result.len(), 65);
     assert_binary_header!(&result, rows 1);
-    assert_eq!(read_u32_le(&result, 12), 1, "num_face_ranges must be 1");
+    assert_eq!(read_u32_le(&result, 20), 1, "num_face_ranges must be 1");
 
-    // Face range starts at offset 8(header)+4(row_idx)+4(num_fr)+4(text_len)+5(text) = 25
-    let face_base = 25usize;
+    // Face range starts at offset 16(header)+4(row_idx)+4(num_fr)+4(text_len)+5(text) = 33
+    let face_base = 33usize;
     assert_binary_face!(&result, face_base, buf 0, 5, fg fg, bg bg, flags flags, ul ul_color);
 
     // col_to_buf_len follows at face_base + 28
@@ -132,12 +132,12 @@ fn encode_screen_binary_single_row_nonempty_col_to_buf() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // Header (8) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
-    // + text (2) + col_to_buf_len (4) + col_to_buf_entries (3*4=12) = 38 bytes
-    assert_eq!(result.len(), 38);
+    // Header (16) + row_index (4) + num_face_ranges (4) + text_byte_len (4)
+    // + text (2) + col_to_buf_len (4) + col_to_buf_entries (3*4=12) = 46 bytes
+    assert_eq!(result.len(), 46);
 
-    // col_to_buf_len is at offset 8+4+4+4+2 = 22
-    let ctb_base = 22usize;
+    // col_to_buf_len is at offset 16+4+4+4+2 = 30
+    let ctb_base = 30usize;
     assert_eq!(
         read_u32_le(&result, ctb_base),
         3,

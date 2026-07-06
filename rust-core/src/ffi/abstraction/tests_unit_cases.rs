@@ -90,14 +90,30 @@ fn test_sync_output_suppresses_dirty_lines() {
     );
 }
 
-/// When ?2026l resets synchronized output, all rows must be marked dirty.
+/// While ?2026h is active the drain returns nothing but RETAINS the dirty
+/// rows; ?2026l then flushes exactly the rows the batch touched — not a
+/// full-screen repaint (the old design cleared the set during suppression
+/// and compensated with mark_all_dirty on reset, repainting all rows).
 #[test]
-fn test_sync_output_reset_marks_all_dirty() {
+fn test_sync_output_holds_dirty_and_flushes_touched_rows_on_reset() {
     let mut session = make_session();
     session.core.advance(b"\x1b[?2026hHello sync world");
-    session.core.screen.take_dirty_lines();
+
+    // Mid-batch: suppressed, and the dirty rows are held, not discarded.
+    assert!(
+        session.get_dirty_lines_with_faces().is_empty(),
+        "no rows may reach the renderer while the sync batch is open"
+    );
+
     session.core.advance(b"\x1b[?2026l");
-    assert_dirty_count!(session, 24);
+    let flushed = session.get_dirty_lines_with_faces();
+    assert_eq!(
+        flushed.len(),
+        1,
+        "closing the batch must flush exactly the touched rows, got {}",
+        flushed.len()
+    );
+    assert_eq!(flushed[0].row_index, 0, "the batch only touched row 0");
 }
 
 // ---------------------------------------------------------------------------

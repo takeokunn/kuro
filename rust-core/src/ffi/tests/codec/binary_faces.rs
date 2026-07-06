@@ -27,8 +27,8 @@ fn encode_screen_binary_face_range_bold_verified_with_macro() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // header(8) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 23; face range starts at 23
-    assert_binary_face!(&result, 23, buf 0, 3, fg fg, bg bg, flags flags, ul ul_color);
+    // header(16) + row_idx(4) + num_fr(4) + text_len(4) + text(3) = 31; face range starts at 31
+    assert_binary_face!(&result, 31, buf 0, 3, fg fg, bg bg, flags flags, ul ul_color);
 }
 
 /// Two consecutive rows in one binary frame: row indices are written in order.
@@ -49,12 +49,12 @@ fn encode_screen_binary_two_rows_row_indices_in_order() {
         },
     ];
     let result = encode_screen_binary_ok(&lines);
-    // format_version at offset 0, num_rows at offset 4
+    // format_version at offset 0, num_rows at offset 4, scroll shift at 8..16
     assert_binary_header!(&result, rows 2);
-    // First row header at offset 8: row_index = 7
-    assert_eq!(read_u32_le(&result, 8), 7, "first row_index must be 7");
-    // First row: 4(idx) + 4(ranges) + 4(text_len) + 1(text) + 4(ctb_len) = 17 bytes; next at 8+17=25
-    let row2_offset = 8 + binary_row_len(1, 0, 0);
+    // First row header at offset 16: row_index = 7
+    assert_eq!(read_u32_le(&result, 16), 7, "first row_index must be 7");
+    // First row: 4(idx) + 4(ranges) + 4(text_len) + 1(text) + 4(ctb_len) = 17 bytes; next at 16+17=33
+    let row2_offset = 16 + binary_row_len(1, 0, 0);
     assert_eq!(
         read_u32_le(&result, row2_offset),
         15,
@@ -254,9 +254,9 @@ fn encode_screen_binary_wide_char_row_col_to_buf_section() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // Header(8) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 35
-    assert_eq!(result.len(), 35);
-    let ctb_offset = 8 + binary_row_len(text_len, 0, 0) - 4;
+    // Header(16) + row_idx(4) + num_face_ranges(4) + text_byte_len(4) + text(3) + ctb_len(4) + ctb[0](4) + ctb[1](4) = 43
+    assert_eq!(result.len(), 43);
+    let ctb_offset = 16 + binary_row_len(text_len, 0, 0) - 4;
     assert_eq!(
         read_u32_le(&result, ctb_offset),
         2,
@@ -312,15 +312,15 @@ fn encode_screen_binary_two_face_ranges_same_row() {
     }];
     let result = encode_screen_binary_ok(lines);
 
-    // num_face_ranges header (at byte 12 = header[8]+row_idx[4]) must be 2.
-    assert_eq!(read_u32_le(&result, 12), 2, "num_face_ranges must be 2");
+    // num_face_ranges header (at byte 20 = header[16]+row_idx[4]) must be 2.
+    assert_eq!(read_u32_le(&result, 20), 2, "num_face_ranges must be 2");
 
-    // First face range: header(8) + row_idx(4) + num_face(4) + text_len(4) + text(4) = offset 24
+    // First face range: header(16) + row_idx(4) + num_face(4) + text_len(4) + text(4) = offset 32
     // Layout: start_buf(4) + end_buf(4) + fg(4) + bg(4) + flags(8) + ul_color(4) = 28 bytes per face range
-    assert_binary_face!(&result, 24, buf 0, 2, fg fg1, bg bg1, flags flags1, ul ul1);
+    assert_binary_face!(&result, 32, buf 0, 2, fg fg1, bg bg1, flags flags1, ul ul1);
 
-    // Second face range starts at 24 + 28 = 52.
-    assert_binary_face!(&result, 52, buf 2, 4, fg fg2, bg bg2, flags flags2, ul ul2);
+    // Second face range starts at 32 + 28 = 60.
+    assert_binary_face!(&result, 60, buf 2, 4, fg fg2, bg bg2, flags flags2, ul ul2);
 }
 
 /// `compute_row_hash` must differ when only the underline color changes, because

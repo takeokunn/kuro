@@ -40,6 +40,34 @@ impl Screen {
         }
     }
 
+    /// Record a full-screen scroll shift for the render drain.
+    ///
+    /// Same-direction shifts accumulate: Emacs replays `up` scrolls as one
+    /// delete-top-N + append-N-blanks edit, which composes additively, so the
+    /// aggregate count reproduces the grid state exactly (the rows exposed by
+    /// the shift are marked dirty by the caller and rewritten from Rust
+    /// state).  Opposite-direction shifts do NOT compose from aggregate
+    /// counters — `up(1)` then `down(1)` blanks the top row, while `down(1)`
+    /// then `up(1)` blanks the bottom row — so any interleave degrades to a
+    /// full repaint.  This is the correctness condition the original
+    /// pending-scroll design lacked (it also drained the counters in a
+    /// separate FFI call from the dirty rows, so shift and rewrite could
+    /// never be applied atomically; the drain now consumes both together).
+    fn record_scroll_shift(&mut self, n_actual: usize, opposite_pending: bool, up: bool) {
+        if opposite_pending {
+            self.pending_scroll_up = 0;
+            self.pending_scroll_down = 0;
+            self.full_dirty = true;
+        } else if !self.full_dirty {
+            let n = u32::try_from(n_actual).unwrap_or(u32::MAX);
+            if up {
+                self.pending_scroll_up = self.pending_scroll_up.saturating_add(n);
+            } else {
+                self.pending_scroll_down = self.pending_scroll_down.saturating_add(n);
+            }
+        }
+    }
+
     fn scroll_up_full_screen(&mut self, n: usize, bg: Color) {
         let rows = usize::from(self.rows);
         let cols = usize::from(self.cols);
@@ -65,21 +93,15 @@ impl Screen {
         // Shift dirty bits to match the rotated content.
         self.dirty_set.shift_left(n_actual);
 
-        // Mark ALL lines dirty so Emacs rewrites every row from Rust state.
-        //
-        // The original design marked only the new blank rows dirty and used
-        // pending_scroll_up to let Emacs shift the buffer content via
-        // delete-top + append-blank.  This fails when multiple scroll_up
-        // calls accumulate between render frames: the Emacs buffer scroll
-        // shifts blank rows (inserted by the previous frame's scroll) into
-        // the content region, then the dirty-line rewrite only updates the
-        // bottom rows — leaving stale blanks in the middle of the display.
-        //
-        // Setting full_dirty = true and NOT accumulating pending_scroll_up
-        // bypasses the Emacs buffer scroll entirely, forcing a full repaint.
-        // This is still O(rows) per frame (same as the number of lines to
-        // rewrite) and eliminates the scroll-accumulation display corruption.
-        self.full_dirty = true;
+        // Only the blank rows exposed at the bottom need a repaint; the
+        // rest of the viewport is reproduced on the Emacs side by the
+        // pending-scroll shift (delete top N lines + append N blanks)
+        // recorded below.  This keeps per-scroll render cost O(n) instead
+        // of the O(rows) full repaint the previous full_dirty design
+        // required, which is what kept AI-agent streaming output smooth.
+        self.mark_dirty_range(rows - n_actual, rows);
+
+        self.record_scroll_shift(n_actual, self.pending_scroll_down > 0, true);
         self.graphics.scroll_up(n_actual);
     }
 
@@ -138,10 +160,12 @@ impl Screen {
             }
         }
 
-        // Mark ALL lines dirty (same rationale as scroll_up: avoids
-        // stale-blank corruption when scroll events accumulate between
-        // render frames).
-        self.full_dirty = true;
+        // Only the blank rows exposed at the top need a repaint; the rest
+        // of the viewport is reproduced by the pending-scroll shift (see
+        // `record_scroll_shift` and `scroll_up_full_screen`).
+        self.mark_dirty_range(0, n_actual);
+
+        self.record_scroll_shift(n_actual, self.pending_scroll_up > 0, false);
         self.graphics.scroll_down(n_actual, rows);
     }
 

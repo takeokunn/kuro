@@ -95,14 +95,19 @@ offsets into absolute buffer positions."
 
 ;;; Scroll event application
 
-(defun kuro--scroll-lines (direction n _last-rows)
+(defun kuro--scroll-lines (direction n last-rows)
   "Move N terminal lines in DIRECTION (\\='up or \\='down) in the buffer.
-_LAST-ROWS is accepted for interface symmetry but not used; N is applied as-is.
+N is clamped to LAST-ROWS: a shift of the full viewport height already
+blanks every row, so larger counts carry no extra information and would
+make the delete+insert edit overshoot the buffer (the Rust core clamps
+before transmitting; this is defence in depth).
 For \\='up: delete the first N lines and insert N blank lines at bottom.
 For \\='down: delete the last N lines and insert N blank lines at top.
 Must be called with `inhibit-read-only' and `inhibit-modification-hooks'
 already bound non-nil by the caller.  The outer `kuro--with-buffer-edit' already
 provides `save-excursion', so no inner `save-excursion' is needed here."
+  (when (> last-rows 0)
+    (setq n (min n last-rows)))
   (if (eq direction 'up)
       ;; Scroll-up: delete first N lines then append N blank lines.
       (progn
@@ -119,13 +124,12 @@ provides `save-excursion', so no inner `save-excursion' is needed here."
   (kuro--invalidate-row-positions))
 
 (defun kuro--apply-buffer-scroll (up down)
-  "Apply pending full-screen scroll events to the Emacs buffer.
-UP and DOWN are the number of full-screen `scroll-up' and `scroll-down' steps
-accumulated in the Rust core since the last call.
-
-NOTE: Currently `pending_scroll_up'/`pending_scroll_down' in Rust are never
-incremented — full-screen scrolls use `full_dirty = true' instead.  This
-function exists for a potential future two-path scroll design.
+  "Apply a full-screen scroll shift of UP and DOWN lines to the buffer.
+UP and DOWN come from the version-3 binary frame header
+\(`kuro--decode-scroll-up' / `kuro--decode-scroll-down'), where the Rust
+core drained them atomically with the frame's dirty rows.  Replaying the
+shift as a buffer edit means only the newly exposed rows need a per-row
+rewrite — the smooth-streaming fast path for scrolling output.
 
 For each upward-scroll step: delete the first buffer line and append a blank.
 For each downward-scroll step: delete the last buffer line and prepend a blank.

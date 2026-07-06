@@ -591,6 +591,32 @@ operation instead of two separate `=' comparisons."
           kuro--blink-overlays-slow (nreverse remaining-slow)
           kuro--blink-overlays-fast (nreverse remaining-fast))))
 
+(defun kuro--shift-blink-overlay-rows (up down rows)
+  "Re-key `kuro--blink-overlays-by-row' after a buffer scroll shift.
+UP and DOWN are the scroll counts just applied by
+`kuro--apply-buffer-scroll'; content previously on row R now lives on
+row R - UP + DOWN.  The overlays themselves moved with the buffer text,
+so only the row-index bookkeeping needs adjusting.  Entries shifted
+outside [0, ROWS) correspond to text the buffer edit deleted; their
+overlays are removed from all blink collections.  Image overlays need
+no equivalent treatment: `kuro--clear-row-image-overlays' filters by
+buffer position, which the edit already relocated."
+  (when (and kuro--blink-overlays
+             (hash-table-p kuro--blink-overlays-by-row)
+             (> (hash-table-count kuro--blink-overlays-by-row) 0))
+    (let ((delta (- down up))
+          (new (make-hash-table :test 'eql)))
+      (maphash
+       (lambda (row ovs)
+         (let ((new-row (+ row delta)))
+           (if (and (>= new-row 0) (< new-row rows))
+               (puthash new-row ovs new)
+             (dolist (ov ovs)
+               (delete-overlay ov)
+               (kuro--remove-blink-overlay-from-lists ov)))))
+       kuro--blink-overlays-by-row)
+      (setq kuro--blink-overlays-by-row new))))
+
 (defsubst kuro--call-with-normalized-ffi-face-range (face-ranges base line-start line-end continuation)
   "Normalize a FACE-RANGES chunk at BASE, then call CONTINUATION.
 FACE-RANGES is a flat stride-6 vector with layout

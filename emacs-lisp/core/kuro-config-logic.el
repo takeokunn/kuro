@@ -33,6 +33,11 @@
 ;; core->faces load cycle).
 (declare-function kuro--apply-font-to-buffer "kuro-faces" (buf))
 
+;; Forward declaration for the unified keymap installer defined in
+;; kuro-input-mode-ext2-keymap.el; called from `kuro--set-keymap-exceptions'
+;; without a compile-time `require' (avoids a core->input load cycle).
+(declare-function kuro--install-input-mode-keymap "kuro-input-mode-ext2-keymap" ())
+
 ;;; Internal buffer iterator
 
 (defun kuro--kuro-buffers ()
@@ -94,14 +99,15 @@
 
 (defun kuro--set-keymap-exceptions (symbol value)
   "Set SYMBOL to VALUE and rebuild the Kuro input keymap.
-Propagates the new keymap to all live `kuro-mode' buffers by updating
-the parent of their local `kuro-mode-map'."
+Propagates the new keymap to all live `kuro-mode' buffers by reinstalling
+each buffer's own effective keymap (respecting that buffer's own
+`kuro--input-mode'), not by mutating a shared keymap object."
   (set-default-toplevel-value symbol value)
   (when (fboundp 'kuro--build-keymap)
     (kuro--build-keymap)
     (kuro--in-all-buffers
-      (when (boundp 'kuro-mode-map)
-        (set-keymap-parent kuro-mode-map kuro--keymap)))))
+      (when (fboundp 'kuro--install-input-mode-keymap)
+        (kuro--install-input-mode-keymap)))))
 
 (defun kuro--set-input-echo-delay (symbol value)
   "Validate and set SYMBOL to VALUE for `kuro-input-echo-delay'.

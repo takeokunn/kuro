@@ -193,8 +193,10 @@ When PREV is a function it is called at the end; nil is ignored."
   ;; undo ring grows unboundedly and `undo-boundary' calls inside buffer operations
   ;; add measurable overhead to every redraw tick.
   (buffer-disable-undo)
-  ;; Install terminal input keymap as parent so all key presses reach the PTY
-  (set-keymap-parent kuro-mode-map kuro--keymap)
+  ;; Install this buffer's PTY-forwarding keymap (buffer-local composed map,
+  ;; never mutates the shared `kuro-mode-map') and register it into
+  ;; `emulation-mode-map-alists' so it outranks evil-mode/god-mode/etc.
+  (kuro--install-input-mode-keymap)
   ;; Focus event reporting (mode 1004): forward Emacs focus events to PTY.
   ;; Use after-focus-change-function (Emacs 27+) instead of the obsolete
   ;; focus-in-hook / focus-out-hook hooks.  after-focus-change-function

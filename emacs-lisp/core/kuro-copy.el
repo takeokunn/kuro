@@ -20,16 +20,23 @@
 
 ;; kuro-mode-map is defined in kuro.el (required before kuro-copy.el).
 (defvar kuro-mode-map)
+;; kuro--emulation-mode-map-alist is defined in kuro-input-mode-ext2-keymap.el,
+;; loaded (transitively, via kuro-input-mode) before kuro-copy.el in kuro.el's
+;; require order, for the same reason kuro-mode-map is forward-declared above.
+(defvar kuro--emulation-mode-map-alist)
 
 (declare-function rectangle-mark-mode "rect" (&optional arg))
+(declare-function kuro--install-input-mode-keymap "kuro-input-mode-ext2-keymap" ())
 
 
 ;;;; Buffer-local state
 
 (kuro--defvar-permanent-local kuro--copy-mode nil
   "Non-nil when Kuro copy mode is active.
-In copy mode the PTY keymap parent is detached so standard Emacs
-navigation and text-selection commands work in the terminal buffer.")
+In copy mode `kuro--emulation-mode-map-alist' is set to nil, suspending
+the PTY-forwarding override so standard Emacs navigation and
+text-selection commands (and any modal-editing package's own bindings)
+work in the terminal buffer.")
 
 (kuro--defvar-permanent-local kuro--copy-mode-saved-window-start nil
   "Window start position at the time copy mode was entered.
@@ -290,6 +297,10 @@ Uses `use-local-map' so only the current buffer is affected; other Kuro
 buffers keep their normal terminal keymaps.
 Saves the current window start in `kuro--copy-mode-saved-window-start'."
   (setq-local kuro--copy-mode t)
+  ;; Suspend the emulation-mode-map-alists PTY-forwarding override so
+  ;; copy-mode's own keymap (and any modal-editing package's normal
+  ;; bindings) apply as usual while copy mode is active.
+  (setq kuro--emulation-mode-map-alist nil)
   ;; Save the window start so callers can interrogate the entry position.
   (setq kuro--copy-mode-saved-window-start
         (when-let* ((win (get-buffer-window (current-buffer))))
@@ -306,8 +317,9 @@ Saves the current window start in `kuro--copy-mode-saved-window-start'."
 (defun kuro--exit-copy-mode ()
   "Exit Kuro copy mode: restore PTY input keymap."
   (setq-local kuro--copy-mode nil)
-  ;; Restore the standard kuro-mode-map (includes kuro--keymap as parent).
-  (use-local-map kuro-mode-map)
+  ;; Restore this buffer's PTY-forwarding keymap and re-register it into
+  ;; `emulation-mode-map-alists' (both were suspended on copy-mode entry).
+  (kuro--install-input-mode-keymap)
   ;; Clear any lingering rectangle / line-wise selection so it cannot leak
   ;; into terminal mode.
   (kuro--copy-clear-selection-state (bound-and-true-p rectangle-mark-mode))

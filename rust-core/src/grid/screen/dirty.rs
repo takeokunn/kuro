@@ -96,9 +96,17 @@ impl Screen {
     }
 
     /// Mark all lines as dirty at once (more efficient than inserting every row)
+    ///
+    /// Also discards any pending full-screen scroll shift counters: a full
+    /// repaint rewrites every row from Rust state, so replaying a buffer
+    /// shift on the Emacs side would be redundant at best and, if the
+    /// repaint reaches Emacs first, corrupting.  Maintains the invariant
+    /// `full_dirty == true ⇒ pending_scroll_{up,down} == 0`.
     pub fn mark_all_dirty(&mut self) {
         self.with_active_screen_mut(|screen| {
             screen.full_dirty = true;
+            screen.pending_scroll_up = 0;
+            screen.pending_scroll_down = 0;
         });
     }
 

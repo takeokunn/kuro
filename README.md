@@ -102,9 +102,11 @@ M-x kuro-module-build
 | `C-c C-q` | Send next key directly (bypass exceptions) |
 | `M-w` | Copy region and exit copy mode (copy mode only) |
 
+These bindings forward to the PTY even if you run evil-mode, god-mode, meow, or a similar modal-editing package: Kuro installs its keymap at the same `emulation-mode-map-alists` precedence tier those packages use, and re-asserts its entry at the head of that list every time the input keymap is (re)installed — on initial setup, on every input-mode switch, and on every `kuro-keymap-exceptions` change — so a package that registers its own `emulation-mode-map-alists` entry later in the session (e.g. evil-mode enabled after Kuro) does not end up shadowing Kuro's keys either. This does not apply while copy mode is active, since copy mode intentionally hands control back to Emacs-native navigation. If you want a specific key to bypass PTY forwarding and reach your own bindings instead, add it to `kuro-keymap-exceptions` rather than relying on another package's precedence.
+
 ## Status
 
-Kuro is feature-complete at v1.0.0. The Rust core passes 2543 tests (2113 unit + 430 integration) and the Emacs Lisp layer passes 2550 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS; the Elisp checks run on Emacs 30 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is feature-complete at v1.1.0. The Rust core passes 3220 tests (2678 unit + 542 integration) and the Emacs Lisp layer passes 4459 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS; the Elisp checks run on Emacs 30 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
 
 ## Architecture
 

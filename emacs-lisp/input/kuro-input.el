@@ -45,7 +45,9 @@
 (require 'kuro-input-encode)
 
 ;; Build kuro--keymap at load time so it is available immediately for tests
-;; and for any kuro-mode buffer that calls (set-keymap-parent kuro-mode-map kuro--keymap).
+;; and for any kuro-mode buffer that calls `kuro--install-input-mode-keymap'
+;; (see kuro-input-mode-ext2-keymap.el), which composes it with
+;; `kuro-mode-map' rather than mutating either keymap.
 (kuro--build-keymap)
 
 (provide 'kuro-input)

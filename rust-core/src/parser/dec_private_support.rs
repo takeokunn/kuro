@@ -160,11 +160,15 @@ pub fn apply_mode_reset(term: &mut crate::TerminalCore, mode: u16) {
         // DECOM (?6): cursor returns to absolute home position.
         6 => term.screen.move_cursor(0, 0),
         47 | 1047 | 1049 => apply_alternate_screen_reset(term, mode),
-        // Synchronized output (?2026): force a full redraw to flush the batch.
-        // Guard on the flag still being set so mark_all_dirty fires exactly once.
-        2026 if term.dec_modes.synchronized_output => {
-            term.screen.mark_all_dirty();
-        }
+        // Synchronized output (?2026): nothing to do here.  While the batch
+        // was open, the render drain HELD dirty rows and pending scroll
+        // shifts instead of discarding them (see
+        // `suppress_live_dirty_if_scrolled_or_sync` in ffi/abstraction/dirty.rs),
+        // so clearing the flag is enough — the next poll flushes exactly the
+        // rows the batch touched.  The previous `mark_all_dirty()` here
+        // forced a full-screen repaint per synchronized frame, which made
+        // Ink-based AI agents (one ?2026 batch per repaint) redraw every row
+        // on every frame and trip the TUI-mode throttle.
         _ => {}
     }
     term.dec_modes.reset_mode(mode);

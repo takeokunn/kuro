@@ -16,13 +16,20 @@
   (define-derived-mode kuro-mode fundamental-mode "Kuro-test"))
 
 (defmacro kuro-input-mode-test--with-buffer (&rest body)
-  "Run BODY in a fresh `kuro-mode' buffer with stubs active."
+  "Run BODY in a fresh `kuro-mode' buffer with stubs active.
+Does not call `set-keymap-parent' on `kuro-mode-map': that mutated the
+shared, global keymap object in place under the pre-rewrite architecture,
+a side effect that outlives this macro invocation and leaks into any
+other test that runs later in the same batch Emacs process (e.g.
+`kuro-keymap-precedence-test.el', which asserts real precedence behavior
+against a pristine `kuro-mode-map'). The current architecture never sets
+`kuro-mode-map's parent at all — `kuro--install-input-mode-keymap' composes
+it with the forwarding map via `make-composed-keymap' and installs the
+result with `use-local-map' instead."
   `(with-temp-buffer
      (kuro-mode)
      ;; Ensure both keymaps are built before each test
      (kuro--build-keymap)
-     ;; kuro-mode-map must have kuro--keymap as parent for mode switches to work
-     (set-keymap-parent kuro-mode-map kuro--keymap)
      (use-local-map kuro-mode-map)
      ,@body))
 

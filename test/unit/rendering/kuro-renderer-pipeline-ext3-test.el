@@ -141,7 +141,7 @@
     (let ((fake-updates '((((0 . "text") . nil) . nil)))
           (kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--apply-title-update)      #'ignore)
-                ((symbol-function 'kuro--process-scroll-events)   #'ignore)
+                ((symbol-function 'kuro--apply-decoded-scroll-shift)   #'ignore)
                 ((symbol-function 'kuro--poll-updates-with-faces) (lambda () fake-updates))
                 ((symbol-function 'kuro--apply-dirty-lines)       #'ignore)
                 ((symbol-function 'kuro--update-cursor)           #'ignore))
@@ -152,24 +152,26 @@
   (kuro-renderer-pipeline-test--with-buffer
     (let ((kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--apply-title-update)      #'ignore)
-                ((symbol-function 'kuro--process-scroll-events)   #'ignore)
+                ((symbol-function 'kuro--apply-decoded-scroll-shift)   #'ignore)
                 ((symbol-function 'kuro--poll-updates-with-faces) (lambda () nil))
                 ((symbol-function 'kuro--apply-dirty-lines)       #'ignore)
                 ((symbol-function 'kuro--update-cursor)           #'ignore))
         (should-not (kuro--core-render-pipeline))))))
 
 (ert-deftest kuro-renderer-pipeline-ext3-core-pipeline-calls-all-steps ()
-  "kuro--core-render-pipeline calls all 5 pipeline steps in order."
+  "kuro--core-render-pipeline calls all 5 pipeline steps in order.
+The scroll shift is applied AFTER the poll (it arrives inside the poll
+frame) and BEFORE the dirty-row rewrite (row indices are post-shift)."
   (kuro-renderer-pipeline-test--with-buffer
     (let (log
           (kuro-use-binary-ffi nil))
       (cl-letf (((symbol-function 'kuro--apply-title-update)      (lambda () (push 'title log)))
-                ((symbol-function 'kuro--process-scroll-events)   (lambda () (push 'scroll log)))
+                ((symbol-function 'kuro--apply-decoded-scroll-shift) (lambda () (push 'scroll log)))
                 ((symbol-function 'kuro--poll-updates-with-faces) (lambda () (push 'poll log) '(x)))
                 ((symbol-function 'kuro--apply-dirty-lines)       (lambda (_) (push 'dirty log)))
                 ((symbol-function 'kuro--update-cursor)           (lambda () (push 'cursor log))))
         (kuro--core-render-pipeline)
-        (should (equal (nreverse log) '(title scroll poll dirty cursor)))))))
+        (should (equal (nreverse log) '(title poll scroll dirty cursor)))))))
 
 (provide 'kuro-renderer-pipeline-ext3-test)
 

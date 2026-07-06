@@ -101,6 +101,17 @@ because the last inserted line is the partial line at point-max."
     ;; After scroll-up by 1, line0 is gone and line1 is now first
     (should (looking-at "line1\n"))))
 
+(ert-deftest kuro-render-buffer-scroll-up-clamps-to-viewport-height ()
+  "kuro--apply-buffer-scroll clamps the shift to `kuro--last-rows'.
+A shift of the full viewport height already blanks every row; a larger
+count must not make the delete+insert edit grow the buffer."
+  (kuro-render-buffer-test--with-buffer
+    (setq kuro--last-rows 3)
+    (insert "a\nb\nc\n")
+    (let ((count-before (count-lines (point-min) (point-max))))
+      (kuro--apply-buffer-scroll 100 0)
+      (should (= (count-lines (point-min) (point-max)) count-before)))))
+
 (ert-deftest kuro-render-buffer-scroll-up-preserves-line-count ()
   "kuro--apply-buffer-scroll with up=1 keeps the total line count unchanged."
   (kuro-render-buffer-test--with-buffer

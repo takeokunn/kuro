@@ -13,7 +13,7 @@
           (faces-called nil)
           (kuro-use-binary-ffi t))
       (cl-letf (((symbol-function 'kuro--apply-title-update)    #'ignore)
-                ((symbol-function 'kuro--process-scroll-events) #'ignore)
+                ((symbol-function 'kuro--apply-decoded-scroll-shift) #'ignore)
                 ((symbol-function 'kuro--poll-updates-binary-optimised)
                  (lambda (_session-id) (setq binary-called t) nil))
                 ((symbol-function 'kuro--poll-updates-with-faces)

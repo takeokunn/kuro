@@ -37,6 +37,9 @@ impl TerminalSession {
     /// the rows reported by the dirty tracker.
     #[must_use]
     pub fn get_dirty_lines(&mut self) -> Vec<(usize, String)> {
+        // Plain-text drain cannot transmit a scroll shift; degrade any
+        // pending shift to a full repaint (see `dirty.rs`).
+        self.degrade_scroll_shift_to_full_repaint();
         let rows = usize::from(self.core.screen.rows());
         if self.core.screen.is_full_dirty() {
             self.core.screen.clear_dirty();

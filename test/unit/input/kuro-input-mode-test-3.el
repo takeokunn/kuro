@@ -187,31 +187,46 @@
 ;;; Group 17 — kuro--apply-input-mode keymap dispatch
 
 (ert-deftest kuro-input-mode-test-apply-char-mode-uses-char-keymap ()
-  "`kuro--apply-input-mode' sets `kuro--char-keymap' as the parent and activates kuro-mode-map in char mode."
+  "`kuro--apply-input-mode' composes `kuro-mode-map' with `kuro--char-keymap' in char mode.
+`kuro-mode-map' is listed first (so its own C-c-prefixed commands are
+never shadowed by the forwarding map's `kuro-keymap-exceptions' entry for
+\"C-c\" — see `kuro--install-input-mode-keymap''s docstring) and is never
+mutated in place (no `set-keymap-parent' call); a fresh buffer-local
+composed keymap is installed instead."
   (kuro-input-mode-test--with-buffer
-   (let ((parent-set-to nil)
-         (local-map-set-to nil))
+   (let (base-arg forward-arg local-map-set-to)
      (cl-letf (((symbol-function 'set-keymap-parent)
-                (lambda (_map parent) (setq parent-set-to parent)))
+                (lambda (&rest _) (error "set-keymap-parent must not be called on kuro-mode-map")))
+               ((symbol-function 'make-composed-keymap)
+                (lambda (base fwd)
+                  (setq base-arg base forward-arg fwd)
+                  (make-sparse-keymap)))
                ((symbol-function 'use-local-map)
                 (lambda (m) (setq local-map-set-to m)))
                ((symbol-function 'force-mode-line-update) #'ignore))
        (setq kuro--input-mode 'char)
        (kuro--apply-input-mode)
-       (should (eq parent-set-to kuro--char-keymap))
-       (should (eq local-map-set-to kuro-mode-map))))))
+       (should (eq base-arg kuro-mode-map))
+       (should (eq forward-arg kuro--char-keymap))
+       (should local-map-set-to)))))
 
 (ert-deftest kuro-input-mode-test-apply-semi-char-mode-uses-base-keymap ()
-  "`kuro--apply-input-mode' sets `kuro--keymap' as the parent in semi-char mode."
+  "`kuro--apply-input-mode' composes `kuro-mode-map' with `kuro--keymap' in semi-char mode.
+`kuro-mode-map' itself is never mutated (no `set-keymap-parent' call)."
   (kuro-input-mode-test--with-buffer
-   (let ((parent-set-to nil))
+   (let (base-arg forward-arg)
      (cl-letf (((symbol-function 'set-keymap-parent)
-                (lambda (_map parent) (setq parent-set-to parent)))
+                (lambda (&rest _) (error "set-keymap-parent must not be called on kuro-mode-map")))
+               ((symbol-function 'make-composed-keymap)
+                (lambda (base fwd)
+                  (setq base-arg base forward-arg fwd)
+                  (make-sparse-keymap)))
                ((symbol-function 'use-local-map) #'ignore)
                ((symbol-function 'force-mode-line-update) #'ignore))
        (setq kuro--input-mode 'semi-char)
        (kuro--apply-input-mode)
-       (should (eq parent-set-to kuro--keymap))))))
+       (should (eq base-arg kuro-mode-map))
+       (should (eq forward-arg kuro--keymap))))))
 
 (ert-deftest kuro-input-mode-test-apply-line-mode-builds-keymap ()
   "`kuro--apply-input-mode' calls `kuro--build-line-mode-keymap' in line mode."

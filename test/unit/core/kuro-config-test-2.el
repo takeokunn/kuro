@@ -165,7 +165,7 @@
     (test-kuro-default-cols-constant    const     kuro--default-cols    80)
     (test-kuro-scrollback-size-default  defcustom kuro-scrollback-size  10000)
     (test-kuro-frame-rate-default       defcustom kuro-frame-rate       120)
-    (test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   5)
+    (test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   30)
     (test-kuro-input-echo-delay-default defcustom kuro-input-echo-delay 0.01))
   "Table of (test-name type var-sym expected) for constant and defcustom default value checks.")
 
@@ -180,7 +180,7 @@
 (kuro-config-test--def-constant test-kuro-default-cols-constant    const     kuro--default-cols    80)
 (kuro-config-test--def-constant test-kuro-scrollback-size-default  defcustom kuro-scrollback-size  10000)
 (kuro-config-test--def-constant test-kuro-frame-rate-default       defcustom kuro-frame-rate       120)
-(kuro-config-test--def-constant test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   5)
+(kuro-config-test--def-constant test-kuro-tui-frame-rate-default   defcustom kuro-tui-frame-rate   30)
 (kuro-config-test--def-constant test-kuro-input-echo-delay-default defcustom kuro-input-echo-delay 0.01)
 
 (ert-deftest kuro-config-test--all-constant-values-correct ()

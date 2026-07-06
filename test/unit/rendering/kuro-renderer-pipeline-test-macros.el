@@ -69,7 +69,7 @@
   "Run BODY with the core timing pipeline stubbed and return value captured in UPDATES-VAR."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'kuro--apply-title-update) #'ignore)
-             ((symbol-function 'kuro--process-scroll-events) #'ignore)
+             ((symbol-function 'kuro--apply-decoded-scroll-shift) #'ignore)
              ((symbol-function 'kuro--poll-updates-with-faces)
               (lambda () ,updates-var))
              ((symbol-function 'kuro--apply-dirty-lines) #'ignore)

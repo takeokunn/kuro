@@ -28,7 +28,14 @@ pub enum SessionState {
 /// preventing high-throughput TUI apps (cmatrix, btop) from starving the
 /// Emacs event loop.  Any excess data is held in `pending_input` and
 /// processed on the next frame.
-const MAX_BYTES_PER_POLL: usize = 4 * 1024;
+///
+/// 32 KB parses in well under a millisecond (the vte state machine plus
+/// grid writes run at hundreds of MB/s) while sustaining ~4 MB/s of PTY
+/// throughput at the 120 fps poll rate.  The previous 4 KB budget capped
+/// throughput at ~480 KB/s — and a mere ~20 KB/s once the TUI-mode
+/// throttle dropped polling to 5 fps — so AI-agent output bursts fell
+/// progressively behind and rendered as visible chunks.
+const MAX_BYTES_PER_POLL: usize = 32 * 1024;
 
 /// Cached render identity for one visible row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +124,11 @@ pub struct TerminalSession {
     /// frame is typically 2–50 KB; persisting the allocation eliminates one
     /// `Vec<u8>` heap allocation per frame on both the live and scrollback paths.
     pub(super) buf_scratch: Vec<u8>,
+    /// Consecutive polls suppressed by an open synchronized-output batch
+    /// (DEC 2026).  Guards against an application that sets `?2026 h` and
+    /// never sends the closing `l` freezing the display forever; see
+    /// `suppress_live_dirty_if_scrolled_or_sync` in `dirty.rs`.
+    pub(super) sync_suppressed_polls: u32,
 }
 
 /// Feed `data` into the terminal parser, limited by `budget`.

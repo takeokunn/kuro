@@ -90,11 +90,102 @@ impl TerminalSession {
     }
 
     fn suppress_live_dirty_if_scrolled_or_sync(&mut self) -> bool {
-        if self.core.screen.scroll_offset() > 0 || self.core.dec_modes.synchronized_output {
+        if self.core.screen.scroll_offset() > 0 {
+            // Scrollback viewing: live dirty state is discarded outright —
+            // returning to the live view forces a full repaint
+            // (`reset_live_view_scroll_state`), so nothing is lost.
             self.core.screen.clear_dirty();
             return true;
         }
+        if self.core.dec_modes.synchronized_output {
+            // Synchronized output (DEC 2026): HOLD updates without discarding
+            // them.  Dirty bits and pending scroll shifts keep accumulating
+            // while the frame is suppressed; when the application sends the
+            // closing `?2026 l` the next poll drains exactly the rows that
+            // changed during the batch.  The previous design cleared the
+            // dirty set here and compensated with `mark_all_dirty()` on
+            // reset, which turned every synchronized frame (one per repaint
+            // for Ink-based apps like Claude Code) into a full-screen
+            // repaint on the Emacs side.
+            //
+            // The poll counter caps how long a stuck `?2026 h` (application
+            // crash mid-batch) can freeze the display, mirroring the timeout
+            // kitty/wezterm apply.  Past the cap we render live again.
+            if self.sync_suppressed_polls < Self::SYNC_SUPPRESS_MAX_POLLS {
+                self.sync_suppressed_polls += 1;
+                return true;
+            }
+            return false;
+        }
+        self.sync_suppressed_polls = 0;
         false
+    }
+
+    /// Discard pending scroll shifts by degrading them to a full repaint.
+    ///
+    /// The legacy drain paths (`get_dirty_lines`, `get_dirty_lines_with_faces`,
+    /// and the cons-cell FFI wrappers built on them) predate the atomic
+    /// shift-in-frame protocol and have no way to tell Emacs to shift its
+    /// buffer, so a pending shift must become "repaint everything" for them.
+    pub(super) fn degrade_scroll_shift_to_full_repaint(&mut self) {
+        let (up, down) = self.core.screen.consume_scroll_events();
+        if up > 0 || down > 0 {
+            self.core.screen.mark_all_dirty();
+        }
+    }
+
+    /// Rotate `row_hashes` to track a viewport shift of `up`/`down` rows.
+    ///
+    /// After Emacs applies the shift (delete N edge lines + insert N blanks
+    /// at the opposite edge), the content previously rendered at row `i`
+    /// lives at row `i - up + down`; rotating the cache the same way keeps
+    /// the skip-unchanged-rows optimisation valid across scrolls.  Slots
+    /// vacated by the rotation are cleared: they now describe rows whose
+    /// Emacs-side content is a fresh blank, which must not match any hash.
+    fn rotate_row_hashes_for_shift(&mut self, up: usize, down: usize) {
+        let len = self.row_hashes.len();
+        if len == 0 {
+            return;
+        }
+        if up > 0 {
+            if up >= len {
+                self.row_hashes.fill(None);
+            } else {
+                self.row_hashes.rotate_left(up);
+                self.row_hashes[len - up..].fill(None);
+            }
+        }
+        if down > 0 {
+            if down >= len {
+                self.row_hashes.fill(None);
+            } else {
+                self.row_hashes.rotate_right(down);
+                self.row_hashes[..down].fill(None);
+            }
+        }
+    }
+
+    /// Atomically consume the pending full-screen scroll shift for a drain
+    /// that transmits it in-frame (the binary v3 protocol).
+    ///
+    /// Returns `(up, down)` clamped to the screen height (a shift of ≥ rows
+    /// blanks the whole viewport, so larger counts carry no extra
+    /// information and would make the Emacs buffer edit overshoot).  When
+    /// `full_dirty` is set the counters have already been discarded
+    /// (`mark_all_dirty` invariant); the guard here is defensive.
+    fn consume_scroll_shift(&mut self) -> (u32, u32) {
+        let (up, down) = self.core.screen.consume_scroll_events();
+        if (up == 0 && down == 0) || self.core.screen.is_full_dirty() {
+            return (0, 0);
+        }
+        let rows = u32::from(self.core.screen.rows());
+        let up = up.min(rows);
+        let down = down.min(rows);
+        self.rotate_row_hashes_for_shift(
+            usize::try_from(up).unwrap_or(usize::MAX),
+            usize::try_from(down).unwrap_or(usize::MAX),
+        );
+        (up, down)
     }
 
     fn for_each_scrollback_viewport_row<F>(&mut self, mut visit_row: F)
@@ -343,13 +434,29 @@ impl TerminalSession {
         Ok(result)
     }
 
-    fn begin_binary_dirty_frame(&mut self) -> usize {
+    /// Number of consecutive suppressed polls after which a stuck
+    /// synchronized-output batch (`?2026 h` with no matching `l`) stops
+    /// freezing the display.  At the 120 fps render rate this is ≈1 s —
+    /// far above any legitimate batch, in line with the ~150 ms timeouts
+    /// kitty and wezterm apply.
+    pub(super) const SYNC_SUPPRESS_MAX_POLLS: u32 = 120;
+
+    fn begin_binary_dirty_frame(&mut self, scroll_up: u32, scroll_down: u32) -> usize {
         self.texts_scratch.clear();
         self.buf_scratch.clear();
         self.buf_scratch
             .extend_from_slice(&crate::ffi::codec::BINARY_FORMAT_VERSION.to_le_bytes());
         let num_rows_offset = self.buf_scratch.len();
         self.buf_scratch.extend_from_slice(&0u32.to_le_bytes());
+        // Version 3: the scroll shift travels in the same frame as the dirty
+        // rows so Emacs can apply "shift buffer, then rewrite rows" as one
+        // atomic edit.  Draining the shift through a separate FFI call (the
+        // retired `consume_scroll_events` protocol) allowed a parse to run
+        // between the two drains, which is what corrupted the display and
+        // forced the interim full-repaint-per-scroll design.
+        self.buf_scratch.extend_from_slice(&scroll_up.to_le_bytes());
+        self.buf_scratch
+            .extend_from_slice(&scroll_down.to_le_bytes());
         num_rows_offset
     }
 
@@ -374,7 +481,7 @@ impl TerminalSession {
     pub(crate) fn get_dirty_lines_binary_direct(&mut self) -> BinaryFrameResult<BinaryDirtyFrame> {
         // Scrollback viewport path: when scroll_dirty, encode all scrollback rows.
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
-            let num_rows_offset = self.begin_binary_dirty_frame();
+            let num_rows_offset = self.begin_binary_dirty_frame(0, 0);
             self.texts_scratch = self.try_collect_scrollback_viewport_rows(|this, row| {
                 if let Some(line) = this.core.screen.get_scrollback_viewport_line(row) {
                     crate::ffi::codec::encode_line_into_buf(
@@ -403,10 +510,15 @@ impl TerminalSession {
 
         let epoch = self.refresh_render_epoch();
 
+        // Consume the pending scroll shift atomically with the dirty rows:
+        // both were produced by the parse that ran earlier in this same FFI
+        // call, and both are applied by Emacs inside one render block.
+        let (scroll_up, scroll_down) = self.consume_scroll_shift();
+
         // Reuse persistent scratch allocations: both the text-strings Vec and the
         // serialised binary frame buffer are cleared (retaining capacity) and
         // mem::take'd on return — eliminating two heap allocations per frame at 120fps.
-        let num_rows_offset = self.begin_binary_dirty_frame();
+        let num_rows_offset = self.begin_binary_dirty_frame(scroll_up, scroll_down);
 
         if self.core.screen.is_full_dirty() {
             self.texts_scratch =
@@ -442,7 +554,9 @@ impl TerminalSession {
             self.texts_scratch.extend(rows);
         }
 
-        if self.texts_scratch.is_empty() {
+        // A frame carrying only a scroll shift (no dirty rows survived the
+        // hash skip) must still reach Emacs so the buffer shift is applied.
+        if self.texts_scratch.is_empty() && scroll_up == 0 && scroll_down == 0 {
             return Ok(BinaryDirtyFrame::empty());
         }
 
@@ -479,6 +593,11 @@ impl TerminalSession {
         if self.suppress_live_dirty_if_scrolled_or_sync() {
             return vec![];
         }
+
+        // This legacy cons-cell path cannot transmit a scroll shift; any
+        // pending shift becomes a full repaint (same behaviour this path
+        // has always had for scrolls).
+        self.degrade_scroll_shift_to_full_repaint();
 
         let epoch = self.refresh_render_epoch();
 

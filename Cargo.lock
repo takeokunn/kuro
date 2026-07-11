@@ -538,6 +538,7 @@ dependencies = [
  "criterion",
  "emacs",
  "libc",
+ "memchr",
  "nix",
  "png",
  "proptest",

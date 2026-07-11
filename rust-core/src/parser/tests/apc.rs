@@ -212,24 +212,62 @@ fn test_false_esc_at_capacity_is_dropped() {
     );
 }
 
-/// A bare ESC with no '_' byte in the same chunk is handled by the fast-path
-/// memchr guard in `advance_with_apc`: when there is no '_' in the buffer and
-/// we are not already in an APC sequence, the byte-by-byte APC scanner is
-/// skipped entirely, so the state stays `Idle`.
+/// A chunk ending in a bare ESC must enter the APC scanner and record
+/// `AfterEsc`: the matching `_` may arrive in the next chunk.  The former
+/// "ESC anywhere AND `_` anywhere" gate skipped the scanner here, silently
+/// dropping any Kitty Graphics APC whose `ESC _` introducer straddled a
+/// PTY read boundary.
 ///
-/// State path exercised: fast-path bypass — APC scanner not entered.
+/// State path exercised: trailing-ESC gate — scanner entered, Idle → AfterEsc.
 #[test]
-fn test_lone_esc_no_underscore_stays_idle() {
+fn test_trailing_esc_records_after_esc_for_next_chunk() {
     let mut core = crate::TerminalCore::new(24, 80);
 
-    // Feed ESC only — no '_' byte means the fast-path skips the APC scanner.
+    // Feed ESC only — a `_` may follow in the next chunk.
     feed(&mut core, b"\x1b");
 
     assert!(
-        core.kitty.apc_state == ApcScanState::Idle,
-        "state must stay Idle when ESC is fed without a '_' in the same chunk"
+        core.kitty.apc_state == ApcScanState::AfterEsc,
+        "state must be AfterEsc so a next-chunk '_' can start an APC"
     );
     assert!(core.kitty.apc_buf.is_empty(), "apc_buf must remain empty");
+}
+
+/// An ESC with no adjacent `_` (and not at the chunk end) never enters the
+/// APC scanner: ordinary CSI-colored output containing underscores stays on
+/// the fast gate.
+///
+/// State path exercised: adjacency gate — APC scanner not entered.
+#[test]
+fn test_esc_without_adjacent_underscore_stays_idle() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    // ESC [ 3 1 m + text containing '_' — no `ESC _` pair, no trailing ESC.
+    feed(&mut core, b"\x1b[31msnake_case_text");
+
+    assert!(
+        core.kitty.apc_state == ApcScanState::Idle,
+        "state must stay Idle when no `ESC _` pair exists"
+    );
+    assert!(core.kitty.apc_buf.is_empty(), "apc_buf must remain empty");
+}
+
+/// An `ESC _` introducer split across two chunks must still start an APC
+/// sequence and accumulate its payload.
+///
+/// State path exercised: Idle → AfterEsc (chunk 1), AfterEsc → InApc (chunk 2).
+#[test]
+fn test_apc_introducer_straddling_chunk_boundary() {
+    let mut core = crate::TerminalCore::new(24, 80);
+
+    feed(&mut core, b"\x1b");
+    feed(&mut core, b"_Gi=1;payload");
+
+    assert!(
+        core.kitty.apc_state == ApcScanState::InApc,
+        "chunk-straddling ESC _ must enter InApc"
+    );
+    assert_eq!(core.kitty.apc_buf, b"Gi=1;payload");
 }
 
 /// An APC sequence with an empty payload (ESC _ ESC \\) must run cleanly

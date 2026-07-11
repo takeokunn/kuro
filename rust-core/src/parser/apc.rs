@@ -47,10 +47,23 @@ pub(crate) fn advance_with_apc(core: &mut TerminalCore, bytes: &[u8]) {
 }
 
 fn should_scan_apc_bytes(core: &TerminalCore, bytes: &[u8]) -> bool {
-    let has_esc = bytes.contains(&0x1B);
-    let in_apc_sequence = core.kitty.apc_state != ApcScanState::Idle;
-
-    in_apc_sequence || (has_esc && bytes.contains(&b'_'))
+    if core.kitty.apc_state != ApcScanState::Idle {
+        return true;
+    }
+    // An APC starts with the exact pair `ESC _`.  Gating on the adjacent pair
+    // (instead of the former "ESC anywhere AND `_` anywhere" heuristic) keeps
+    // colored shell output containing underscores — extremely common — off the
+    // per-byte APC state machine.  A trailing ESC must still enter the scanner
+    // so `AfterEsc` is recorded: the matching `_` may arrive in the next chunk,
+    // which the old heuristic silently missed (dropping a chunk-straddling
+    // Kitty Graphics command).
+    //
+    // `memchr_iter` SIMD-skips to each ESC candidate instead of comparing a
+    // 2-byte window at every position: for a 32 KB parse-budget chunk of
+    // ESC-free text this is one vectorised sweep, and for CSI-colored output
+    // it touches only the (few) ESC positions.
+    memchr::memchr_iter(0x1B, bytes).any(|i| bytes.get(i + 1) == Some(&b'_'))
+        || bytes.last() == Some(&0x1B)
 }
 
 fn scan_apc_bytes(core: &mut TerminalCore, bytes: &[u8]) {

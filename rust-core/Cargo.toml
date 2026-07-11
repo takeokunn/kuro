@@ -20,6 +20,7 @@ nix.workspace = true
 png.workspace = true
 compact_str = "0.8"
 ahash.workspace = true
+memchr.workspace = true
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]

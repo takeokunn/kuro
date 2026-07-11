@@ -21,6 +21,7 @@ criterion = "0.5"
 nix = { version = "0.29", features = ["process", "term", "signal"] }
 png = "0.17"
 ahash = "0.8"
+memchr = "2"
 
 [workspace.lints.rust]
 # cargo-fuzz injects --cfg fuzzing; declare it workspace-wide so rustc/clippy

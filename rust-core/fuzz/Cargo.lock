@@ -167,6 +167,7 @@ dependencies = [
  "ahash",
  "compact_str",
  "libc",
+ "memchr",
  "nix",
  "png",
  "unicode-width",

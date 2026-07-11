@@ -381,6 +381,14 @@ impl Screen {
     /// output, this avoids the overhead of VTE state machine dispatch,
     /// `UnicodeWidthChar` lookups, and per-character `Cell` construction.
     ///
+    /// The run is processed in **row-sized chunks**: for each chunk the
+    /// pending-wrap check, `lines.get_mut(row)` lookup, cursor advance, and
+    /// DECAWM clamp run once instead of once per byte, and the cell writes
+    /// iterate a checked sub-slice (`cells[col..col + chunk_len]`) so the
+    /// per-byte indexing bounds check disappears.  An 80-column line of
+    /// streamed output thus pays 1 wrap check + 1 cursor advance instead
+    /// of 80 of each.
+    ///
     /// The `PrintableAsciiRun` type ensures all bytes are in the range
     /// 0x20..=0x7E before this fast path can be called.
     /// This method must only be called when the VTE parser is in Ground state.
@@ -394,45 +402,53 @@ impl Screen {
         if run.is_empty() {
             return;
         }
-        let bytes = run.as_bytes();
+        let mut bytes = run.as_bytes();
 
         // Pre-compute before borrowing self through active_screen_mut()
         let is_primary = !self.is_alternate_active;
         let cols = usize::from(self.cols);
 
-        // Hoist active_screen_mut() outside the per-byte loop.
-        // Previously called per byte, adding a branch + Option unwrap per iteration.
+        // Hoist active_screen_mut() outside the loop.
         let Some(screen) = self.active_screen_mut() else {
             return;
         };
 
-        // Track the last row we marked dirty to avoid redundant dirty_set.insert +
-        // version.wrapping_add inside the per-byte loop.  On an 80-col ASCII run,
-        // these would otherwise fire 80 times for the same row; after the first cell
-        // changes the row, subsequent writes to the same row are already captured
-        // by the next re-encode cycle.  Saves ~80× dirty_set.insert per run.
+        // Track the last row we marked dirty so a row is marked at most once
+        // per run: dirty_set.insert + version bump are idempotent per encode
+        // cycle, so the first changed cell on a row suffices.
         let mut last_marked_dirty_row = usize::MAX;
 
-        for &byte in bytes {
-            // Handle pending wrap from previous print
+        while !bytes.is_empty() {
+            // Handle the deferred wrap from the previous chunk (or a previous
+            // print).  Fires at most once per row chunk instead of per byte.
             if screen.consume_pending_wrap(attrs.background, is_primary, auto_wrap) {
-                // Row changed by line_feed — allow dirty-mark on the new row.
+                // Row changed by line_feed — or scrolled, reusing the same
+                // bottom-row index — so allow dirty-mark on the new row.
                 last_marked_dirty_row = usize::MAX;
             }
 
             let row = screen.cursor.row;
             let col = screen.cursor.col;
+            if col >= cols {
+                // Unreachable: clamp keeps col < cols.  Defensive bail-out
+                // rather than a panic in the streaming hot path.
+                return;
+            }
 
-            // ASCII is always width 1, always fits (col + 1 <= cols)
-            if col < cols {
-                if let Some(line) = screen.lines.get_mut(row) {
-                    // Direct cell write: avoid Cell construction + PartialEq comparison
-                    let cell = &mut line.cells[col];
-                    // Direct byte comparison: avoid encode_utf8 + str compare overhead.
-                    // For ASCII bytes, checking the raw byte is faster than encoding
-                    // to UTF-8 and comparing &str slices.
-                    // Bind the byte slice once to share the fat-pointer load
-                    // across both .len() and [0] accesses.
+            // Largest prefix that fits on the current row.  With DECAWM off
+            // the cursor re-clamps to the last column, so the tail degrades
+            // to 1-byte chunks overwriting the last cell — matching the
+            // former per-byte loop's behaviour.
+            let chunk_len = bytes.len().min(cols - col);
+            let (chunk, rest) = bytes.split_at(chunk_len);
+            bytes = rest;
+
+            if let Some(line) = screen.lines.get_mut(row) {
+                let mut changed = false;
+                for (cell, &byte) in line.cells[col..col + chunk_len].iter_mut().zip(chunk) {
+                    // Direct byte comparison: avoid encode_utf8 + str compare
+                    // overhead.  Bind the byte slice once to share the
+                    // fat-pointer load across both .len() and [0] accesses.
                     let gb = cell.grapheme.as_bytes();
                     let grapheme_matches = gb.len() == 1 && gb[0] == byte;
                     if !grapheme_matches
@@ -448,20 +464,18 @@ impl Screen {
                         cell.attrs = attrs;
                         cell.width = CellWidth::Half;
                         cell.extras = None;
-                        // Guard: mark dirty only on the first changed cell per row.
-                        // All subsequent cells on the same row are captured by the
-                        // next re-encode; dirty_set.insert is idempotent but not free.
-                        if row != last_marked_dirty_row {
-                            line.mark_dirty_and_bump();
-                            screen.dirty_set.insert(row);
-                            last_marked_dirty_row = row;
-                        }
+                        changed = true;
                     }
                 }
-
-                // Advance cursor
-                screen.advance_print_cursor(1, auto_wrap);
+                if changed && row != last_marked_dirty_row {
+                    line.mark_dirty_and_bump();
+                    screen.dirty_set.insert(row);
+                    last_marked_dirty_row = row;
+                }
             }
+
+            // One cursor advance + DECAWM clamp per chunk (was per byte).
+            screen.advance_print_cursor(chunk_len, auto_wrap);
         }
     }
 }

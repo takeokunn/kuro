@@ -23,6 +23,13 @@
 (defvar kuro--col-to-buf-map)
 (defvar kuro--cursor-marker)
 (defvar kuro--scroll-offset)
+;; Forward references for the v4 frame cursor scratch vars defined in
+;; kuro-binary-decoder.el (loaded via the pipeline's require chain).
+(defvar kuro--decode-cursor-row)
+(defvar kuro--decode-cursor-col)
+(defvar kuro--decode-cursor-visible)
+(defvar kuro--decode-cursor-shape)
+(defvar kuro--frame-carries-cursor)
 
 (declare-function kuro--decscusr-to-cursor-type "kuro-render-buffer" (shape))
 (declare-function kuro--goto-row-start "kuro-render-buffer" (row))
@@ -177,20 +184,44 @@ every live frame's window tree — called only on cache miss."
 
 ;;; Cursor update
 
+(defsubst kuro--apply-cursor-values (win row col visible shape)
+  "Apply cursor (ROW COL VISIBLE SHAPE) to WIN, or re-anchor when unchanged."
+  (if (kuro--cursor-state-changed-p row col visible shape)
+      (kuro--apply-cursor-state-change win row col visible shape)
+    (kuro--reanchor-cursor-window win row col)))
+
 (defun kuro--update-cursor ()
   "Update cursor position and shape in buffer.
-Uses the consolidated `kuro--get-cursor-state' to fetch position,
-visibility, and shape in a single Mutex acquisition (PERF-004).
-Skips buffer position computation when cursor state is unchanged,
-but ALWAYS re-anchors the window at point-min to prevent Emacs'
-native redisplay from drifting the viewport between render cycles."
+Prefers the cursor state carried by the last decoded v4 binary frame
+\(`kuro--decode-cursor-row' etc.) — zero FFI calls.  When a v4 module
+returned no frame this cycle the cursor is guaranteed unchanged, so
+only the window re-anchor runs from the cached state.  Pre-v4 modules
+fall back to the consolidated `kuro--get-cursor-state' FFI query
+\(single Mutex acquisition, PERF-004).
+ALWAYS re-anchors the window at point-min to prevent Emacs' native
+redisplay from drifting the viewport between render cycles."
   (unless (> kuro--scroll-offset 0)
-    (when-let* ((state (kuro--get-cursor-state))
-                (win (kuro--resolve-window)))
-      (pcase-let ((`(,row ,col ,visible ,shape) (kuro--cursor-state-parts state)))
-        (if (kuro--cursor-state-changed-p row col visible shape)
-            (kuro--apply-cursor-state-change win row col visible shape)
-          (kuro--reanchor-cursor-window win row col))))))
+    (cond
+     ;; v4 frame carried cursor state this cycle — no FFI call.
+     (kuro--decode-cursor-row
+      (when-let* ((win (kuro--resolve-window)))
+        (kuro--apply-cursor-values win
+                                   kuro--decode-cursor-row
+                                   kuro--decode-cursor-col
+                                   kuro--decode-cursor-visible
+                                   kuro--decode-cursor-shape)))
+     ;; v4 module, no frame this cycle → the Rust core guarantees the
+     ;; cursor did not change; re-anchor the window from the cache only.
+     ((and kuro--frame-carries-cursor kuro--last-cursor-row)
+      (when-let* ((win (kuro--resolve-window)))
+        (kuro--reanchor-cursor-window win kuro--last-cursor-row kuro--last-cursor-col)))
+     ;; Pre-v4 module, or cache invalidated before any v4 frame arrived:
+     ;; consolidated FFI query.
+     (t
+      (when-let* ((state (kuro--get-cursor-state))
+                  (win (kuro--resolve-window)))
+        (pcase-let ((`(,row ,col ,visible ,shape) (kuro--cursor-state-parts state)))
+          (kuro--apply-cursor-values win row col visible shape)))))))
 
 ;;; Scrollback indicator
 

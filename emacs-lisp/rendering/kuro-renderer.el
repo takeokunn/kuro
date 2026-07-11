@@ -210,10 +210,21 @@ repeating timer that fires forever as a no-op."
   (kuro--recompute-budget-vars new-rate)
   (kuro--recompute-blink-frame-intervals))
 
+;; v4 frame scratch vars from kuro-binary-decoder.el (loaded via the
+;; pipeline's require chain).
+(defvar kuro--decode-bell)
+(defvar kuro--frame-carries-cursor)
+
 (defun kuro--ring-pending-bell ()
-  "Ring the Emacs bell if a bell event is pending from the terminal."
-  (when (kuro--call nil (kuro-core-take-bell-pending kuro--session-id))
-    (ding)))
+  "Ring the Emacs bell if a bell event is pending from the terminal.
+With a v4 module the bell bit travels in the binary frame header
+\(`kuro--decode-bell', set by this cycle's poll) — no FFI call.
+Pre-v4 modules fall back to the `kuro-core-take-bell-pending' query."
+  (if kuro--frame-carries-cursor
+      (when kuro--decode-bell
+        (ding))
+    (when (kuro--call nil (kuro-core-take-bell-pending kuro--session-id))
+      (ding))))
 
 (defun kuro--tick-blink-if-active ()
   "Tick blink overlays if any are registered for the current buffer."
@@ -221,9 +232,12 @@ repeating timer that fires forever as a no-op."
     (kuro--tick-blink-overlays)))
 
 (defun kuro--render-cycle-stage-2 (frame-start)
-  "Run the coalesced Stage 2 render work for FRAME-START."
-  (kuro--ring-pending-bell)
+  "Run the coalesced Stage 2 render work for FRAME-START.
+The bell rings AFTER the dirty-update poll: with a v4 module the bell
+bit arrives in this cycle's frame header, so polling first delivers the
+bell in the same cycle instead of one frame late."
   (kuro--apply-dirty-updates)
+  (kuro--ring-pending-bell)
   (kuro--poll-within-budget frame-start)
   (kuro--tick-blink-if-active))
 

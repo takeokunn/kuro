@@ -65,6 +65,17 @@ The renderer applies the shift as a buffer-level delete+insert BEFORE
 rewriting dirty rows, so a scrolling stream (AI agent output) costs
 O(newly exposed rows) per frame instead of a full-screen repaint.")
 
+(defconst kuro--binary-format-version-v4 4
+  "Binary frame format version 4: 28-byte header, 28-byte face ranges.
+Appends cursor_row(u32), cursor_col(u32) and cursor_meta(u32) to the
+v3 header: the cursor state and bell event consumed atomically with
+the dirty rows.  cursor_meta bit 0 = visible (DECTCEM), bits 1-3 =
+DECSCUSR shape (0-6), bit 4 = bell pending.  Carrying these in the
+frame replaces the per-frame `kuro-core-get-cursor-state' and
+`kuro-core-take-bell-pending' FFI calls; the Rust core emits a
+header-only frame whenever the cursor changes or a bell fires with
+no dirty rows.")
+
 ;;; Scratch variable for decoder position advancement
 
 (defvar kuro--decode-pos 0
@@ -89,6 +100,37 @@ See `kuro--decode-scroll-up'; the Rust core guarantees at most one of
 the two shift fields is non-zero per frame (opposite-direction scroll
 interleaves degrade to a full repaint on the Rust side because they
 cannot be replayed from aggregate counts).")
+
+(defvar kuro--decode-cursor-row nil
+  "Cursor row decoded from the last version-4 binary frame header.
+nil when the last poll returned no frame or a pre-v4 frame — the
+renderer then falls back to its cached cursor state (v4 modules only
+omit the frame when nothing, including the cursor, changed) or to the
+`kuro-core-get-cursor-state' FFI call for older modules.")
+
+(defvar kuro--decode-cursor-col nil
+  "Cursor column decoded from the last version-4 binary frame header.
+See `kuro--decode-cursor-row'.")
+
+(defvar kuro--decode-cursor-visible nil
+  "Cursor visibility (DECTCEM) decoded from the last v4 frame header.
+Meaningful only when `kuro--decode-cursor-row' is non-nil.")
+
+(defvar kuro--decode-cursor-shape 0
+  "DECSCUSR shape (0-6) decoded from the last v4 frame header.
+Meaningful only when `kuro--decode-cursor-row' is non-nil.")
+
+(defvar kuro--decode-bell nil
+  "Non-nil when the last decoded v4 frame carried the bell bit.
+Cleared on every decode/poll; the renderer rings `ding' when set,
+replacing the per-frame `kuro-core-take-bell-pending' FFI call.")
+
+(defvar-local kuro--frame-carries-cursor nil
+  "Non-nil once a version-4 binary frame has been decoded in this buffer.
+Tells the renderer that the module transmits cursor state (and bell)
+inside the frame, so the per-frame `kuro-core-get-cursor-state' and
+`kuro-core-take-bell-pending' FFI calls can be skipped: a nil poll
+from a v4 module guarantees the cursor did not change.")
 
 ;;; Low-level byte readers
 
@@ -291,11 +333,13 @@ At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
                 (= format-version kuro--binary-format-version-v2)
-                (= format-version kuro--binary-format-version-v3))
+                (= format-version kuro--binary-format-version-v3)
+                (= format-version kuro--binary-format-version-v4))
       (error "Kuro: unsupported binary format version %d" format-version))
     (let* ((v3-p             (>= format-version kuro--binary-format-version-v3))
+           (v4-p             (>= format-version kuro--binary-format-version-v4))
            (num-rows         (kuro--read-u32-le vec 4))
-           (pos              (if v3-p 16 8))
+           (pos              (cond (v4-p 28) (v3-p 16) (t 8)))
            (face-ranges-v2-p (>= format-version 2)))
       ;; v3: scroll shift fields occupy header bytes 8..16.  v1/v2 frames
       ;; (and old .so modules) never carry a shift, so the scratch vars are
@@ -307,6 +351,23 @@ At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
                   kuro--decode-scroll-down (kuro--read-u32-le vec 12)))
         (setq kuro--decode-scroll-up 0
               kuro--decode-scroll-down 0))
+      ;; v4: cursor state + bell occupy header bytes 16..28.  Pre-v4 frames
+      ;; leave the cursor scratch nil so the renderer keeps its FFI fallback.
+      (if v4-p
+          (progn
+            (kuro--binary-require-available vec 16 12 "cursor header")
+            (let ((meta (kuro--read-u32-le vec 24)))
+              (setq kuro--decode-cursor-row     (kuro--read-u32-le vec 16)
+                    kuro--decode-cursor-col     (kuro--read-u32-le vec 20)
+                    kuro--decode-cursor-visible (= 1 (logand meta 1))
+                    kuro--decode-cursor-shape   (logand (ash meta -1) 7)
+                    kuro--decode-bell           (/= 0 (logand meta 16))
+                    kuro--frame-carries-cursor  t)))
+        (setq kuro--decode-cursor-row nil
+              kuro--decode-cursor-col nil
+              kuro--decode-cursor-visible nil
+              kuro--decode-cursor-shape 0
+              kuro--decode-bell nil))
       (kuro--binary-require-text-strings text-strings num-rows)
       ;; Every row must at least contain row-index, face-count, text-byte-len,
       ;; and col-to-buf-len.  This prevents huge count fields from allocating
@@ -356,10 +417,17 @@ the render pipeline expects.
 
 Side effect: `kuro--decode-scroll-up' and `kuro--decode-scroll-down'
 are set to the frame's scroll shift (v3 header) or zeroed when the FFI
-returned nil or an older frame version.  The render pipeline reads them
+returned nil or an older frame version.  The v4 cursor scratch vars
+\(`kuro--decode-cursor-row' etc.) and `kuro--decode-bell' are likewise
+set from the header or reset to nil.  The render pipeline reads them
 immediately after this call, before applying the dirty rows."
   (setq kuro--decode-scroll-up 0
-        kuro--decode-scroll-down 0)
+        kuro--decode-scroll-down 0
+        kuro--decode-cursor-row nil
+        kuro--decode-cursor-col nil
+        kuro--decode-cursor-visible nil
+        kuro--decode-cursor-shape 0
+        kuro--decode-bell nil)
   (let ((result (kuro-core-poll-updates-binary-with-strings session-id)))
     (cond
      ((null result) nil)

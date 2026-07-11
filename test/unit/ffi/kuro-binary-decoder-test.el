@@ -631,7 +631,107 @@ Exercises bytes ≥ 0x80 (color values) through the Latin-1 char mapping."
              (lambda (_id) (cons (vector "x") '(1 2 3)))))
     (should-error (kuro--poll-updates-binary-optimised 'fake-id))))
 
+;;; Group 17: version-4 cursor + bell header
+
+(defun kuro-binary-decoder-test--make-v4-frame (row col meta)
+  "Build a 0-row v4 frame with cursor ROW, COL and META in the header."
+  (apply #'vector
+         (append
+          (kuro-binary-decoder-test--make-u32-le 4)    ; format_version=4
+          (kuro-binary-decoder-test--make-u32-le 0)    ; num_rows=0
+          (kuro-binary-decoder-test--make-u32-le 0)    ; scroll_up
+          (kuro-binary-decoder-test--make-u32-le 0)    ; scroll_down
+          (kuro-binary-decoder-test--make-u32-le row)  ; cursor_row
+          (kuro-binary-decoder-test--make-u32-le col)  ; cursor_col
+          (kuro-binary-decoder-test--make-u32-le meta)))) ; cursor_meta
+
+(defmacro kuro-binary-decoder-test--with-clean-cursor-scratch (&rest body)
+  "Run BODY with the v4 cursor/bell scratch vars dynamically bound.
+The decoder writes these global scratch vars on every decode; binding
+them keeps decoder tests from leaking cursor state into later render
+tests (production resets them on every poll — tests must isolate)."
+  (declare (indent 0))
+  `(let ((kuro--decode-cursor-row nil)
+         (kuro--decode-cursor-col nil)
+         (kuro--decode-cursor-visible nil)
+         (kuro--decode-cursor-shape 0)
+         (kuro--decode-bell nil))
+     ,@body))
+
+(ert-deftest kuro-binary-decoder-v4-sets-cursor-scratch-vars ()
+  "A v4 frame populates the cursor scratch vars and the carries-cursor flag."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (with-temp-buffer
+      ;; meta: visible(1) | shape 6 << 1 = #x0D
+      (let ((vec (kuro-binary-decoder-test--make-v4-frame 5 7 #x0D)))
+        (kuro--decode-binary-updates-with-strings (vector) vec)
+        (should (equal kuro--decode-cursor-row 5))
+        (should (equal kuro--decode-cursor-col 7))
+        (should kuro--decode-cursor-visible)
+        (should (= kuro--decode-cursor-shape 6))
+        (should-not kuro--decode-bell)
+        (should kuro--frame-carries-cursor)))))
+
+(ert-deftest kuro-binary-decoder-v4-bell-bit-sets-decode-bell ()
+  "Meta bit 4 in a v4 frame sets `kuro--decode-bell'."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (with-temp-buffer
+      (let ((vec (kuro-binary-decoder-test--make-v4-frame 0 0 (logior 1 16))))
+        (kuro--decode-binary-updates-with-strings (vector) vec)
+        (should kuro--decode-bell)
+        (should kuro--decode-cursor-visible)))))
+
+(ert-deftest kuro-binary-decoder-v4-hidden-cursor-decodes ()
+  "Meta bit 0 clear decodes as an invisible cursor."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (with-temp-buffer
+      (let ((vec (kuro-binary-decoder-test--make-v4-frame 1 2 0)))
+        (kuro--decode-binary-updates-with-strings (vector) vec)
+        (should-not kuro--decode-cursor-visible)
+        (should (= kuro--decode-cursor-shape 0))))))
+
+(ert-deftest kuro-binary-decoder-v3-frame-resets-cursor-scratch ()
+  "A pre-v4 frame leaves the cursor scratch nil (renderer FFI fallback)."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (with-temp-buffer
+      ;; First decode a v4 frame to populate the vars...
+      (kuro--decode-binary-updates-with-strings
+       (vector) (kuro-binary-decoder-test--make-v4-frame 3 4 1))
+      ;; ...then a v2 frame must reset them.
+      (kuro--decode-binary-updates-with-strings
+       (vector "x") (kuro-binary-decoder-test--make-v2-frame-no-text 0 0))
+      (should (null kuro--decode-cursor-row))
+      (should (null kuro--decode-cursor-col))
+      (should-not kuro--decode-bell))))
+
+(ert-deftest kuro-binary-decoder-v4-truncated-cursor-header-errors ()
+  "A v4 frame shorter than 28 bytes is rejected."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (let ((vec (apply #'vector
+                      (append
+                       (kuro-binary-decoder-test--make-u32-le 4)
+                       (kuro-binary-decoder-test--make-u32-le 0)
+                       (kuro-binary-decoder-test--make-u32-le 0)
+                       (kuro-binary-decoder-test--make-u32-le 0)))))
+      (should-error (kuro--decode-binary-updates-with-strings (vector) vec)))))
+
+(ert-deftest kuro-binary-decoder-poll-nil-resets-cursor-scratch ()
+  "A nil FFI poll resets the cursor/bell scratch vars."
+  (kuro-binary-decoder-test--with-clean-cursor-scratch
+    (with-temp-buffer
+      (kuro--decode-binary-updates-with-strings
+       (vector) (kuro-binary-decoder-test--make-v4-frame 3 4 17))
+      (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+                 (lambda (_id) nil)))
+        (kuro--poll-updates-binary-optimised 'fake-id))
+      (should (null kuro--decode-cursor-row))
+      (should-not kuro--decode-bell))))
+
 ;;; ── Binary format version constants ──────────────────────────────────────────
+
+(ert-deftest kuro-binary-decoder-format-version-v4-is-4 ()
+  "`kuro--binary-format-version-v4' is 4 (wire encoding for v4 frames)."
+  (should (= kuro--binary-format-version-v4 4)))
 
 (ert-deftest kuro-binary-decoder-format-version-v1-is-1 ()
   "`kuro--binary-format-version-v1' is 1 (wire encoding for v1 frames)."

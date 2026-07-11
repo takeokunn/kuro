@@ -1,5 +1,5 @@
 use super::dirty_binary_support::{
-    binary_num_rows, binary_scroll_shift, consume_initial_dirty, enable_sync_output,
+    binary_cursor, binary_num_rows, binary_scroll_shift, consume_initial_dirty, enable_sync_output,
     enter_alt_screen, fill_screen_and_drain, fill_scrollback, make_binary_session,
 };
 
@@ -457,5 +457,140 @@ fn test_binary_payload_scroll_shift_in_header() {
         texts.len() < 24,
         "a scroll must not force a full repaint; got {} rows",
         texts.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Version-4 cursor + bell transport — unit tests
+// ---------------------------------------------------------------------------
+
+/// A pure cursor movement (no dirty rows, no scroll) must emit a header-only
+/// frame carrying the new cursor position — this replaces the per-frame
+/// `get_cursor_state` FFI poll.
+#[test]
+fn test_binary_v4_cursor_move_only_emits_header_frame() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+
+    // CUP to row 5, col 7 (1-based in CSI; 0-based on the wire).
+    session.core.advance(b"\x1b[6;8H");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("cursor-move frame must fit binary u32 fields");
+    assert!(
+        frame.texts.is_empty(),
+        "a pure cursor move must not re-encode any row"
+    );
+    assert!(
+        !frame.bytes.is_empty(),
+        "a pure cursor move must emit a header-only frame"
+    );
+    let (row, col, meta) = binary_cursor(&frame.bytes);
+    assert_eq!((row, col), (5, 7), "header must carry the new position");
+    assert_eq!(meta & 1, 1, "cursor must be visible by default");
+    assert_eq!(meta & (1 << 4), 0, "no bell was pending");
+
+    // A second poll with no further movement must be empty.
+    let idle = session
+        .get_dirty_lines_binary_direct()
+        .expect("idle frame must fit binary u32 fields");
+    assert!(
+        idle.texts.is_empty() && idle.bytes.is_empty(),
+        "unchanged cursor must not re-emit a frame"
+    );
+}
+
+/// A BEL with no other changes must emit a header-only frame with the bell
+/// bit set — and the bell must not repeat on the next poll.
+#[test]
+fn test_binary_v4_bell_only_emits_frame_once() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+
+    session.core.advance(b"\x07");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("bell frame must fit binary u32 fields");
+    assert!(
+        !frame.bytes.is_empty(),
+        "a bell must force a header-only frame"
+    );
+    let (_, _, meta) = binary_cursor(&frame.bytes);
+    assert_eq!(meta & (1 << 4), 1 << 4, "bell bit must be set");
+
+    let idle = session
+        .get_dirty_lines_binary_direct()
+        .expect("idle frame must fit binary u32 fields");
+    assert!(
+        idle.bytes.is_empty(),
+        "the bell must be consumed by the frame that carried it"
+    );
+}
+
+/// DECTCEM hide (`?25l`) is a cursor-state change: it must emit a header
+/// frame with the visible bit cleared.
+#[test]
+fn test_binary_v4_cursor_hide_emits_frame() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+
+    session.core.advance(b"\x1b[?25l");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("hide frame must fit binary u32 fields");
+    assert!(!frame.bytes.is_empty(), "DECTCEM change must emit a frame");
+    let (_, _, meta) = binary_cursor(&frame.bytes);
+    assert_eq!(meta & 1, 0, "visible bit must be cleared after ?25l");
+}
+
+/// DECSCUSR shape changes travel in meta bits 1-3.
+#[test]
+fn test_binary_v4_cursor_shape_in_meta() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+
+    session.core.advance(b"\x1b[6 q"); // steady bar = 6
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("shape frame must fit binary u32 fields");
+    assert!(!frame.bytes.is_empty(), "DECSCUSR change must emit a frame");
+    let (_, _, meta) = binary_cursor(&frame.bytes);
+    assert_eq!((meta >> 1) & 0x7, 6, "shape bits must carry DECSCUSR 6");
+}
+
+/// A bell arriving while the viewport is scrolled back (live rows suppressed)
+/// must still reach Emacs as a header-only frame, with the cursor fields
+/// repeating the last-sent state so the display does not move.
+#[test]
+fn test_binary_v4_bell_rings_through_scrollback_suppression() {
+    let mut session = make_binary_session();
+    fill_scrollback(&mut session, 5);
+    consume_initial_dirty(&mut session);
+    session.viewport_scroll_up(3);
+    // Drain the scrollback viewport frame (scroll_dirty path).
+    let viewport = session
+        .get_dirty_lines_binary_direct()
+        .expect("viewport frame must fit binary u32 fields");
+    let (sent_row, sent_col, _) = binary_cursor(&viewport.bytes);
+
+    // Bell while suppressed: live rows must stay suppressed, bell must ring.
+    session.core.advance(b"\x07");
+    let frame = session
+        .get_dirty_lines_binary_direct()
+        .expect("suppressed bell frame must fit binary u32 fields");
+    assert!(
+        frame.texts.is_empty(),
+        "suppression must still hold back live rows"
+    );
+    assert!(
+        !frame.bytes.is_empty(),
+        "the bell must ring through suppression"
+    );
+    let (row, col, meta) = binary_cursor(&frame.bytes);
+    assert_eq!(meta & (1 << 4), 1 << 4, "bell bit must be set");
+    assert_eq!(
+        (row, col),
+        (sent_row, sent_col),
+        "suppressed bell frame must repeat the last-sent cursor"
     );
 }

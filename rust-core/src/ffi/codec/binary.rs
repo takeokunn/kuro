@@ -39,7 +39,18 @@ impl HashedEncodedText {
 /// (delete N edge lines + insert N blanks at the opposite edge) before
 /// rewriting the dirty rows, turning per-scroll render cost from O(rows)
 /// into O(newly-exposed rows).  Row payload layout is unchanged from v2.
-pub(crate) const BINARY_FORMAT_VERSION: u32 = 3;
+///
+/// Version 4: extends the header to 28 bytes by appending
+/// `[cursor_row: u32 LE][cursor_col: u32 LE][cursor_meta: u32 LE]` — the
+/// cursor state (and bell event) consumed atomically with the dirty rows.
+/// `cursor_meta` bit layout: bit 0 = cursor visible (DECTCEM), bits 1–3 =
+/// DECSCUSR shape (0–6), bit 4 = bell pending.  Carrying the cursor in the
+/// frame lets Emacs drop its per-frame `kuro-core-get-cursor-state` and
+/// `kuro-core-take-bell-pending` FFI calls (3 mutex round-trips per frame
+/// → 1); the Rust side emits a header-only frame whenever the cursor state
+/// changes or a bell fires with no dirty rows.  Row payload layout is
+/// unchanged from v2.
+pub(crate) const BINARY_FORMAT_VERSION: u32 = 4;
 
 /// Encode a list of dirty lines into a flat binary frame for FFI transfer.
 ///
@@ -79,6 +90,13 @@ pub(crate) const BINARY_FORMAT_VERSION: u32 = 3;
 )]
 #[must_use = "encode result must be used for FFI transfer to Emacs Lisp"]
 pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> BinaryFrameResult<Vec<u8>> {
+    /// This legacy encode path is frozen at format version 3: it never
+    /// carries a scroll shift (degraded to full repaint by its drains) and
+    /// has no cursor source, so emitting a v4 header would force fake
+    /// cursor fields on the decoder.  The production path
+    /// (`get_dirty_lines_binary_payload`) emits `BINARY_FORMAT_VERSION`.
+    const LEGACY_FORMAT_VERSION: u32 = 3;
+
     // Pre-compute total capacity to avoid repeated reallocation.
     let capacity = {
         let mut cap = 16usize; // format_version + num_rows + scroll_up + scroll_down header
@@ -96,7 +114,7 @@ pub(crate) fn encode_screen_binary(lines: &[EncodedLine]) -> BinaryFrameResult<V
     // Header: format_version + num_rows + scroll shift (always zero here:
     // this encode path is fed by the legacy drains, which degrade pending
     // scroll shifts to a full repaint instead of transmitting them).
-    buf.extend_from_slice(&BINARY_FORMAT_VERSION.to_le_bytes());
+    buf.extend_from_slice(&LEGACY_FORMAT_VERSION.to_le_bytes());
     BinaryFrameU32::from_usize(lines.len(), BinaryFrameU32Field::RowCount)?.write_le(&mut buf);
     buf.extend_from_slice(&0u32.to_le_bytes());
     buf.extend_from_slice(&0u32.to_le_bytes());

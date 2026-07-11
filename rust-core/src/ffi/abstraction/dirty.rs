@@ -12,6 +12,22 @@ struct DirtyRowEmission<T> {
     content_hash: u64,
 }
 
+/// Cursor state as encoded in the version-4 frame header.
+///
+/// `meta` carries bit 0 = visible (DECTCEM) and bits 1–3 = DECSCUSR shape;
+/// it deliberately EXCLUDES the bell bit (bit 4 on the wire): bell is a
+/// one-shot event, not cursor state, so it must not participate in the
+/// "did the cursor change since the last emitted frame?" comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CursorWire {
+    row: u32,
+    col: u32,
+    meta: u32,
+}
+
+/// Wire bit position of the bell event in the v4 header's `cursor_meta`.
+const CURSOR_META_BELL_BIT: u32 = 1 << 4;
+
 /// Raw-bytes view of a binary dirty frame, kept for unit tests that assert
 /// on the wire layout (header fields, byte offsets).  The production bridge
 /// uses [`TerminalSession::get_dirty_lines_binary_payload`], which transcodes
@@ -457,7 +473,29 @@ impl TerminalSession {
     /// kitty and wezterm apply.
     pub(super) const SYNC_SUPPRESS_MAX_POLLS: u32 = 120;
 
-    fn begin_binary_dirty_frame(&mut self, scroll_up: u32, scroll_down: u32) -> usize {
+    /// Current cursor state in v4 wire form (bell bit excluded — see
+    /// [`CursorWire`]).
+    fn cursor_wire_state(&self) -> BinaryFrameResult<CursorWire> {
+        let (row, col) = self.get_cursor();
+        let row = BinaryFrameU32::from_usize(row, BinaryFrameU32Field::CursorRow)?.value();
+        let col = BinaryFrameU32::from_usize(col, BinaryFrameU32Field::CursorCol)?.value();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "DECSCUSR shape is 0..=6 by construction; fits any unsigned width"
+        )]
+        let shape = i64::from(self.get_cursor_shape()) as u32;
+        let meta = u32::from(self.get_cursor_visible()) | (shape << 1);
+        Ok(CursorWire { row, col, meta })
+    }
+
+    fn begin_binary_dirty_frame(
+        &mut self,
+        scroll_up: u32,
+        scroll_down: u32,
+        cursor: CursorWire,
+        bell: bool,
+    ) -> usize {
         self.texts_scratch.clear();
         self.buf_scratch.clear();
         self.buf_scratch
@@ -473,6 +511,14 @@ impl TerminalSession {
         self.buf_scratch.extend_from_slice(&scroll_up.to_le_bytes());
         self.buf_scratch
             .extend_from_slice(&scroll_down.to_le_bytes());
+        // Version 4: cursor state + bell travel in the same frame, replacing
+        // the per-frame `get_cursor_state` / `take_bell_pending` FFI calls.
+        self.buf_scratch
+            .extend_from_slice(&cursor.row.to_le_bytes());
+        self.buf_scratch
+            .extend_from_slice(&cursor.col.to_le_bytes());
+        let meta = cursor.meta | if bell { CURSOR_META_BELL_BIT } else { 0 };
+        self.buf_scratch.extend_from_slice(&meta.to_le_bytes());
         num_rows_offset
     }
 
@@ -529,9 +575,14 @@ impl TerminalSession {
     /// (scratch buffers are left cleared); `Ok(true)` when `texts_scratch` +
     /// `buf_scratch` hold a complete frame.
     fn build_binary_dirty_frame(&mut self) -> BinaryFrameResult<bool> {
+        let bell = self.core.meta.bell_pending;
+        let cursor = self.cursor_wire_state()?;
+
         // Scrollback viewport path: when scroll_dirty, encode all scrollback rows.
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
-            let num_rows_offset = self.begin_binary_dirty_frame(0, 0);
+            let num_rows_offset = self.begin_binary_dirty_frame(0, 0, cursor, bell);
+            self.core.meta.bell_pending = false;
+            self.last_sent_cursor = Some(cursor);
             self.texts_scratch = self.try_collect_scrollback_viewport_rows(|this, row| {
                 if let Some(line) = this.core.screen.get_scrollback_viewport_line(row) {
                     crate::ffi::codec::encode_line_into_buf(
@@ -556,6 +607,18 @@ impl TerminalSession {
 
         // Suppress live dirty lines when viewport is scrolled (but not scroll_dirty).
         if self.suppress_live_dirty_if_scrolled_or_sync() {
+            // A bell must still ring while the display is suppressed (scrolled
+            // back or inside a DEC 2026 batch): emit a header-only frame with
+            // 0 rows and no shift.  The cursor fields repeat the LAST-SENT
+            // state (not the live one) so the displayed cursor does not move
+            // mid-suppression; Emacs treats unchanged cursor state as a no-op.
+            if bell {
+                self.core.meta.bell_pending = false;
+                let held_cursor = self.last_sent_cursor.unwrap_or(cursor);
+                let num_rows_offset = self.begin_binary_dirty_frame(0, 0, held_cursor, true);
+                self.finish_binary_dirty_frame(num_rows_offset)?;
+                return Ok(true);
+            }
             self.texts_scratch.clear();
             self.buf_scratch.clear();
             return Ok(false);
@@ -572,7 +635,7 @@ impl TerminalSession {
         // buffer is cleared (retaining capacity) and transcoded in place by
         // `get_dirty_lines_binary_payload` — it is never moved out, so its
         // 2–50 KB capacity survives across frames at 120fps.
-        let num_rows_offset = self.begin_binary_dirty_frame(scroll_up, scroll_down);
+        let num_rows_offset = self.begin_binary_dirty_frame(scroll_up, scroll_down, cursor, bell);
 
         if self.core.screen.is_full_dirty() {
             self.texts_scratch =
@@ -608,13 +671,23 @@ impl TerminalSession {
             self.texts_scratch.extend(rows);
         }
 
-        // A frame carrying only a scroll shift (no dirty rows survived the
-        // hash skip) must still reach Emacs so the buffer shift is applied.
-        if self.texts_scratch.is_empty() && scroll_up == 0 && scroll_down == 0 {
+        // Emit when anything changed: dirty rows, a scroll shift, a cursor
+        // state change since the last emitted frame, or a bell event.  A
+        // rows-free frame still reaches Emacs for the latter three — the v4
+        // header is the transport for all of them.
+        let cursor_changed = self.last_sent_cursor != Some(cursor);
+        if self.texts_scratch.is_empty()
+            && scroll_up == 0
+            && scroll_down == 0
+            && !cursor_changed
+            && !bell
+        {
             self.buf_scratch.clear();
             return Ok(false);
         }
 
+        self.core.meta.bell_pending = false;
+        self.last_sent_cursor = Some(cursor);
         self.finish_binary_dirty_frame(num_rows_offset)?;
         Ok(true)
     }

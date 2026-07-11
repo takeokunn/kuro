@@ -348,15 +348,27 @@ installing a C-level setjmp target ~3,600 times per second.  In practice
 
 ;;; Core render pipeline
 
+(defun kuro--poll-frame-updates ()
+  "Poll the dirty-update list via the configured FFI path.
+The legacy cons-cell path carries no cursor/bell in-band, so the v4
+frame scratch vars are cleared first: a stale frame's cursor must not
+replay after a mid-session `kuro-use-binary-ffi' toggle."
+  (if kuro-use-binary-ffi
+      (kuro--poll-updates-binary-optimised kuro--session-id)
+    (setq kuro--decode-cursor-row nil
+          kuro--decode-cursor-col nil
+          kuro--decode-cursor-visible nil
+          kuro--decode-bell nil
+          kuro--frame-carries-cursor nil)
+    (kuro--poll-updates-with-faces)))
+
 (defun kuro--core-render-pipeline ()
   "Execute the core render pipeline and return the dirty-line update list.
 Runs title update, scroll events, dirty-line polling, line rewrite, and
   cursor positioning under a single `inhibit-redisplay' block.
 GC is suppressed during the render to reduce pause jitter."
   (kuro--core-render-pipeline-run updates
-    (setq updates (if kuro-use-binary-ffi
-                      (kuro--poll-updates-binary-optimised kuro--session-id)
-                    (kuro--poll-updates-with-faces)))
+    (setq updates (kuro--poll-frame-updates))
     ;; Shift before rewrite: the frame's dirty rows are post-shift positions.
     (kuro--apply-decoded-scroll-shift)
     (when updates
@@ -368,9 +380,7 @@ GC is suppressed during the render to reduce pause jitter."
 Return the update list.  Appends one timing line to *kuro-perf* per
 `kuro--perf-sample-interval' frames."
   (kuro--core-render-pipeline-run-with-timing updates t-total ffi-ms apply-ms cursor-ms
-    (kuro--timed ffi-ms    (setq updates (if kuro-use-binary-ffi
-                                             (kuro--poll-updates-binary-optimised kuro--session-id)
-                                           (kuro--poll-updates-with-faces))))
+    (kuro--timed ffi-ms    (setq updates (kuro--poll-frame-updates)))
     (kuro--timed apply-ms  (progn
                              ;; Shift before rewrite: dirty rows are post-shift.
                              (kuro--apply-decoded-scroll-shift)

@@ -131,6 +131,14 @@ pub struct TerminalSession {
     /// never sends the closing `l` freezing the display forever; see
     /// `suppress_live_dirty_if_scrolled_or_sync` in `dirty.rs`.
     pub(super) sync_suppressed_polls: u32,
+    /// Cursor state carried by the most recently emitted v4 binary frame.
+    ///
+    /// `build_binary_dirty_frame` compares the live cursor against this to
+    /// decide whether a rows-free frame must still be emitted (pure cursor
+    /// movement — e.g. arrow keys at a shell prompt — produces no dirty
+    /// rows).  `None` until the first frame is emitted, forcing the initial
+    /// frame to carry cursor state.
+    pub(super) last_sent_cursor: Option<super::dirty::CursorWire>,
 }
 
 /// Feed `data` into the terminal parser, limited by `budget`.

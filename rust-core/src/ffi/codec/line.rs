@@ -22,6 +22,8 @@ pub(crate) enum BinaryFrameU32Field {
     FaceEndBuf,
     ColToBufLen,
     ColToBufOffset,
+    CursorRow,
+    CursorCol,
 }
 
 /// Failure at the fixed-width integer boundary of the FFI binary frame.
@@ -61,6 +63,12 @@ impl BinaryFrameU32 {
     #[inline]
     pub(crate) fn write_le(self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.0.to_le_bytes());
+    }
+
+    /// Return the checked `u32` value.
+    #[inline]
+    pub(crate) const fn value(self) -> u32 {
+        self.0
     }
 
     #[inline]

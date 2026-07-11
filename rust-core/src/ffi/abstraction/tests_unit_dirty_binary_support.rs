@@ -45,3 +45,14 @@ pub(crate) fn fill_screen_and_drain(session: &mut TerminalSession) {
     let _ = session.get_dirty_lines_binary_direct();
     session.core.screen.consume_scroll_events();
 }
+
+/// Read the version-4 cursor fields from a binary frame header.
+/// Returns `(row, col, meta)`; meta bit 0 = visible, bits 1-3 = shape,
+/// bit 4 = bell.
+pub(crate) fn binary_cursor(buf: &[u8]) -> (u32, u32, u32) {
+    (
+        u32::from_le_bytes(buf[16..20].try_into().unwrap()),
+        u32::from_le_bytes(buf[20..24].try_into().unwrap()),
+        u32::from_le_bytes(buf[24..28].try_into().unwrap()),
+    )
+}

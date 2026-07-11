@@ -59,6 +59,7 @@ pub(crate) fn make_session() -> TerminalSession {
         encode_pool: crate::ffi::codec::EncodePool::new(),
         dirty_scratch: Vec::new(),
         texts_scratch: Vec::new(),
+        last_sent_cursor: None,
         buf_scratch: Vec::new(),
         sync_suppressed_polls: 0,
     }

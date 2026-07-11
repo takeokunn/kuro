@@ -60,19 +60,6 @@
                (should (,predicate (default-value ',variable) ,expected)))))
         (symbol-value table))))
 
-(defmacro kuro-url-detect-test--with-kuro-visible (&rest body)
-  "Run BODY in a url-detect buffer mocked as kuro-mode with full-window scan."
-  `(kuro-url-detect-test--with-buffer
-     (cl-letf (((symbol-function 'derived-mode-p)
-                (lambda (&rest _) t))
-               ((symbol-function 'window-start)
-                (lambda () (point-min)))
-               ((symbol-function 'window-end)
-                (lambda (_w _u) (point-max)))
-               ((symbol-function 'kuro--scan-urls-in-region)
-                (lambda (_s _e) nil)))
-       ,@body)))
-
 (defmacro kuro-url-detect-test--deftest-detection-proceeds (table)
   "Generate visible detection tests from TABLE."
   (declare (indent 1))

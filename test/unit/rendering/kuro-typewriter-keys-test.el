@@ -38,15 +38,6 @@
         (funcall fn-sym)
         (should (equal (car sent) expected))))))
 
-(defconst kuro-typewriter-test--send-special-table
-  '((kuro-typewriter-send-special-ctrl-a               1)
-    (kuro-typewriter-send-special-ctrl-c               3)
-    (kuro-typewriter-send-special-ctrl-z              26)
-    (kuro-typewriter-send-special-ctrl-bracket        27)
-    (kuro-typewriter-send-special-ctrl-backslash      28)
-    (kuro-typewriter-send-special-ctrl-right-bracket  29))
-  "Table of (test-name byte) for `kuro--send-special' byte dispatch.")
-
 (defmacro kuro-typewriter-test--def-send-special (test-name byte)
   `(ert-deftest ,test-name ()
      ,(format "`kuro--send-special' %d sends (string %d) to the PTY." byte byte)

@@ -261,11 +261,6 @@ the \"red\" entry in kuro--named-colors."
   (kuro--test-pi-setter-set 'kuro--test-pi-setter-var 42)
   (should (= (default-value 'kuro--test-pi-setter-var) 42)))
 
-(defconst kuro-config-test--pi-setter-reject-table
-  '((test-kuro-def-positive-int-setter-rejects-zero     kuro--test-pi-setter-zero 0)
-    (test-kuro-def-positive-int-setter-rejects-negative kuro--test-pi-setter-neg  -5))
-  "Table of (test-name setter-name value) for kuro--def-positive-int-setter rejection.")
-
 (defmacro kuro-config-test--def-pi-setter-reject (test-name setter-name value)
   `(ert-deftest ,test-name ()
      ,(format "Generated setter `%s' signals user-error for %S." setter-name value)
@@ -290,11 +285,6 @@ the \"red\" entry in kuro--named-colors."
   (should (= kuro--test-pi-side-effect 7)))
 
 ;;; Group 9: kuro--set-input-echo-delay
-
-(defconst kuro-config-test--echo-delay-valid-table
-  '((test-kuro-set-input-echo-delay-valid 0.05)
-    (test-kuro-set-input-echo-delay-zero  0))
-  "Table of (test-name value) for valid kuro--set-input-echo-delay inputs.")
 
 (defmacro kuro-config-test--def-echo-delay-valid (test-name value)
   `(ert-deftest ,test-name ()

@@ -31,13 +31,6 @@ The buffer is killed after BODY completes."
            ,@body)
        (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(defmacro kuro-lifecycle-send-test--stub-send (&rest body)
-  "Run BODY with `kuro--send-paste-or-raw' and `kuro--schedule-immediate-render' stubbed."
-  `(cl-letf (((symbol-function 'kuro--send-paste-or-raw) #'ignore)
-             ((symbol-function 'kuro--schedule-immediate-render) #'ignore))
-     ,@body))
-
-
 ;;; Group 1 — kuro--most-recent-buffer
 
 (ert-deftest kuro-lifecycle-send-test-most-recent-nil-when-no-kuro-buffers ()

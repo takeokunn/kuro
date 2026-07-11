@@ -68,19 +68,6 @@
      (kuro-mouse-test--with-event ,col ,row
        ,@body)))
 
-(defmacro kuro-mouse-test--full-stub (col row btn-type &rest body)
-  "Stub all event functions and run BODY with COL/ROW position and BTN-TYPE basic type."
-  (declare (indent 3))
-  `(cl-letf (((symbol-function 'event-start)
-               (lambda (_ev) 'fake-pos))
-              ((symbol-function 'event-basic-type)
-               (lambda (_ev) ,btn-type))
-              ((symbol-function 'posn-col-row)
-               (lambda (_pos) (cons ,col ,row)))
-              ((symbol-function 'posn-x-y)
-               (lambda (_pos) (cons ,col ,row))))
-     ,@body))
-
 (defun kuro-input-mouse-test--selected-cases (cases names)
   "Return CASES filtered by NAMES, preserving CASES order."
   (if names

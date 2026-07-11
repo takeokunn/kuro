@@ -142,12 +142,6 @@ from a v4 module guarantees the cursor did not change.")
   "Return non-nil when VALUE is an integer byte."
   (and (integerp value) (<= 0 value) (<= value #xff)))
 
-(defun kuro--binary-require-array (vec section)
-  "Require VEC to be a byte array (vector or string) while decoding SECTION."
-  (unless (or (stringp vec) (vectorp vec))
-    (kuro--binary-decode-error
-     "%s must be a vector or string, got %S" section vec)))
-
 (defun kuro--binary-require-count (count section)
   "Require COUNT to be a non-negative integer while decoding SECTION."
   (unless (and (integerp count) (<= 0 count))

@@ -25,11 +25,6 @@
 
 ;;; Utility
 
-(defun kuro-render-buffer-test--line-count (buf)
-  "Return the number of lines in BUF."
-  (with-current-buffer buf
-    (count-lines (point-min) (point-max))))
-
 ;;; Face-call recording and stubbing
 
 (defmacro kuro-render-buffer-test--capture-face-calls (calls-var &rest body)

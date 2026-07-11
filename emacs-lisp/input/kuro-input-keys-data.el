@@ -25,13 +25,10 @@ completeness; intentionally out of scope.")
 ;; KKP modifier bitmask values (Kitty keyboard protocol §Modifiers).
 ;; The WIRE value transmitted in CSI key;<mod>u is (bitmask + 1); see
 ;; `kuro--kitty-modifier-offset' and `kuro--encode-kitty-key'.
-(defconst kuro--kkp-mod-shift 1  "KKP modifier bit: Shift.")
 (defconst kuro--kkp-mod-alt   2  "KKP modifier bit: Alt.")
 (defconst kuro--kkp-mod-ctrl  4  "KKP modifier bit: Ctrl.")
 (defconst kuro--kkp-mod-super 8  "KKP modifier bit: Super (the s- modifier).")
 (defconst kuro--kkp-mod-hyper 16 "KKP modifier bit: Hyper (the H- modifier).")
-(defconst kuro--kkp-mod-meta  32 "KKP modifier bit: Meta.")
-
 (defconst kuro--kitty-modifier-offset 1
   "Offset added to the modifier bitmask in the Kitty keyboard protocol.
 The Kitty protocol encodes modifiers as (bitmask + 1) on the wire:

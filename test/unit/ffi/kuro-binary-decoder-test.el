@@ -312,24 +312,6 @@ col_to_buf section is also empty (length 0).  Each face range is 28 zero bytes."
            (kuro-binary-decoder-test--make-u32-le 0))))           ; col_to_buf_len=0
     (apply #'vector frame-bytes)))
 
-(defun kuro-binary-decoder-test--make-v1-frame-row (row-index text-strings-count)
-  "Build a v1 frame with TEXT-STRINGS-COUNT rows, all at sequential indices from ROW-INDEX.
-Each row has 0 face ranges, text_byte_len=0, and no col-to-buf entries."
-  (let* ((make-row (lambda (idx)
-                     (append
-                      (kuro-binary-decoder-test--make-u32-le idx)  ; row_index
-                      (kuro-binary-decoder-test--make-u32-le 0)    ; num_face_ranges
-                      (kuro-binary-decoder-test--make-u32-le 0)    ; text_byte_len
-                      (kuro-binary-decoder-test--make-u32-le 0)))) ; col_to_buf_len
-         (row-bytes (mapcan make-row
-                            (number-sequence row-index (+ row-index (1- text-strings-count)))))
-         (frame-bytes
-          (append
-           (kuro-binary-decoder-test--make-u32-le 1)              ; format_version=1
-           (kuro-binary-decoder-test--make-u32-le text-strings-count)
-           row-bytes)))
-    (apply #'vector frame-bytes)))
-
 (ert-deftest kuro-binary-decoder-decode-with-strings-empty-frame-returns-nil ()
   "kuro--decode-binary-updates-with-strings returns nil for a 0-row frame."
   (let* ((empty-frame (apply #'vector

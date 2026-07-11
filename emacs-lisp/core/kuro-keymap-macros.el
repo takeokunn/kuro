@@ -54,20 +54,6 @@ literal character string."
                bindings)
      map))
 
-(defmacro kuro--define-keymap-with-parent (parent &rest bindings)
-  "Build a sparse keymap from BINDINGS and set PARENT as its parent.
-Each binding is (KEY . COMMAND).  String KEYs are wrapped with `kbd'
-so that descriptions bind the actual control-key sequence rather than the
-literal character string."
-  `(let ((map (make-sparse-keymap)))
-     (set-keymap-parent map ,parent)
-     ,@(mapcar (lambda (binding)
-                 (let ((key (car binding)))
-                   `(define-key map ,(if (stringp key) `(kbd ,key) key)
-                      #',(cdr binding))))
-               bindings)
-     map))
-
 (provide 'kuro-keymap-macros)
 
 ;;; kuro-keymap-macros.el ends here

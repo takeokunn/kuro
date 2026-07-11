@@ -19,7 +19,9 @@
 ;; # Binary Frame Format
 ;;
 ;; See `encode_screen_binary' in rust-core/src/ffi/codec.rs for the canonical
-;; layout.  Each frame is a flat vector of byte integers (0–255) structured as:
+;; layout.  Each frame is a flat byte array — a unibyte string (current .so:
+;; one `make_string' FFI call for the whole payload) or a vector of byte
+;; integers 0–255 (older .so builds) — structured as:
 ;;
 ;;   [format_version: u32 LE]  (version 1 = current; version 2 = 28-byte face ranges)
 ;;   [num_rows: u32 LE]
@@ -98,10 +100,11 @@ cannot be replayed from aggregate counts).")
   "Return non-nil when VALUE is an integer byte."
   (and (integerp value) (<= 0 value) (<= value #xff)))
 
-(defun kuro--binary-require-vector (vec section)
-  "Require VEC to be a vector while decoding SECTION."
-  (unless (vectorp vec)
-    (kuro--binary-decode-error "%s must be a vector, got %S" section vec)))
+(defun kuro--binary-require-array (vec section)
+  "Require VEC to be a byte array (vector or string) while decoding SECTION."
+  (unless (or (stringp vec) (vectorp vec))
+    (kuro--binary-decode-error
+     "%s must be a vector or string, got %S" section vec)))
 
 (defun kuro--binary-require-count (count section)
   "Require COUNT to be a non-negative integer while decoding SECTION."
@@ -110,8 +113,9 @@ cannot be replayed from aggregate counts).")
                                section count)))
 
 (defun kuro--binary-require-available (vec pos byte-count section)
-  "Require BYTE-COUNT bytes to be available in VEC at POS for SECTION."
-  (kuro--binary-require-vector vec section)
+  "Require BYTE-COUNT bytes to be available in VEC at POS for SECTION.
+Pure arithmetic bounds check — element values are validated once per
+frame by `kuro--binary-normalize-frame', not here."
   (unless (and (integerp pos) (<= 0 pos))
     (kuro--binary-decode-error "%s offset must be a non-negative integer, got %S"
                                section pos))
@@ -124,22 +128,38 @@ cannot be replayed from aggregate counts).")
        "%s truncated: need bytes [%d,%d), frame has %d bytes"
        section pos end (length vec)))))
 
-(defun kuro--binary-read-byte (vec index section)
-  "Read and validate a byte from VEC at INDEX for SECTION."
-  (let ((byte (aref vec index)))
-    (unless (kuro--binary-byte-p byte)
-      (kuro--binary-decode-error
-       "%s byte at offset %d must be an integer in 0..255, got %S"
-       section index byte))
-    byte))
-
 (defun kuro--binary-require-byte-range (vec pos byte-count section)
-  "Require BYTE-COUNT validated bytes in VEC at POS for SECTION."
+  "Require BYTE-COUNT validated byte values in VEC at POS for SECTION.
+Only needed for vector payloads (older .so builds): a unibyte string's
+elements are 0–255 by construction and never require this scan."
   (kuro--binary-require-available vec pos byte-count section)
   (let ((end (+ pos byte-count)))
     (while (< pos end)
-      (kuro--binary-read-byte vec pos section)
+      (unless (kuro--binary-byte-p (aref vec pos))
+        (kuro--binary-decode-error
+         "%s byte at offset %d must be an integer in 0..255, got %S"
+         section pos (aref vec pos)))
       (setq pos (1+ pos)))))
+
+(defun kuro--binary-normalize-frame (payload)
+  "Normalize PAYLOAD to a byte array ready for raw `aref' decoding.
+A string payload (current .so: Latin-1 chars, one per frame byte) is
+converted to a unibyte string with a single `encode-coding-string' call;
+its elements are 0–255 by construction so no per-byte validation runs.
+A vector payload (older .so builds) is validated element-wise ONCE here,
+so the hot per-read path can use raw `aref' + `logior' with no checks.
+Anything else signals a malformed-frame error."
+  (cond
+   ((stringp payload)
+    (if (multibyte-string-p payload)
+        (encode-coding-string payload 'latin-1 t)
+      payload))
+   ((vectorp payload)
+    (kuro--binary-require-byte-range payload 0 (length payload) "frame")
+    payload)
+   (t
+    (kuro--binary-decode-error
+     "Frame payload must be a string or vector, got %S" payload))))
 
 (defun kuro--binary-require-text-strings (text-strings num-rows)
   "Require TEXT-STRINGS to contain exactly NUM-ROWS strings."
@@ -159,18 +179,24 @@ cannot be replayed from aggregate counts).")
 
 (defsubst kuro--read-u32-le (vec offset)
   "Read a u32 little-endian integer from VEC at byte OFFSET.
-VEC must be an Emacs vector of integer byte values (0–255).
+VEC is a byte array — a unibyte string (current .so) or a vector of byte
+values (older builds) — already validated by `kuro--binary-normalize-frame'.
 Returns a non-negative integer.
-Chained `1+' avoids three generic `+' bytecodes; at 1,440 calls/frame this
-saves ~4,320 add operations per frame vs the `(+ offset N)' form."
-  (kuro--binary-require-available vec offset 4 "u32")
+
+Raw `aref' reads with no per-call validation: byte-range validity is
+guaranteed once per frame at normalization, and section decoders bound
+their reads with `kuro--binary-require-available' before looping, so the
+former per-read bounds check + 4 per-byte range checks (≈40 bytecode ops
+per u32, ~1,440 u32 reads/frame) collapse to 4 `aref' + 3 `ash' + 1
+`logior'.  Out-of-range offsets still signal via `aref' itself.
+Chained `1+' avoids three generic `+' bytecodes."
   (let* ((o1 (1+ offset))
          (o2 (1+ o1))
          (o3 (1+ o2)))
-    (logior (kuro--binary-read-byte vec offset "u32")
-            (ash (kuro--binary-read-byte vec o1 "u32") 8)
-            (ash (kuro--binary-read-byte vec o2 "u32") 16)
-            (ash (kuro--binary-read-byte vec o3 "u32") 24))))
+    (logior (aref vec offset)
+            (ash (aref vec o1) 8)
+            (ash (aref vec o2) 16)
+            (ash (aref vec o3) 24))))
 
 ;;; Per-section decoders
 
@@ -199,7 +225,11 @@ the low u32 avoids the `(ash high-word 32)' bignum allocation that
 `kuro--read-u64-le' would otherwise incur on every face range decoded."
   (kuro--binary-require-count num-face-ranges "face ranges")
   (let ((byte-count (* num-face-ranges (if v2-p 28 24))))
-    (kuro--binary-require-byte-range vec pos byte-count "face ranges"))
+    ;; Arithmetic bounds check only: byte values were validated (vector
+    ;; payloads) or are guaranteed 0-255 (unibyte strings) at frame entry
+    ;; by `kuro--binary-normalize-frame'.  The former per-byte re-scan here
+    ;; read every face byte twice per frame.
+    (kuro--binary-require-available vec pos byte-count "face ranges"))
   (if (zerop num-face-ranges)
       ;; Zero-range fast exit: an empty vector (not nil) so callers that check
       ;; `(vectorp face-list)' see a consistent return type.  No allocation needed.
@@ -248,11 +278,15 @@ Without funcall overhead:
 TEXT-STRINGS is a vector of strings (one per dirty row) from
 `kuro-core-poll-updates-binary-with-strings'.  VEC carries only
 face/col-to-buf data; `text_byte_len' is always 0 in this path.
+VEC is a Latin-1 string (current .so) or a byte vector (older builds);
+`kuro--binary-normalize-frame' converts/validates it exactly once so
+every downstream read is a raw `aref'.
 
 Inlines the text acquisition step (was `funcall text-fn') to eliminate
 one closure dispatch per dirty row — allows the bytecode compiler to inline
 the direct `aref text-strings idx' without going through an indirect call.
 At 30 dirty rows × 120fps = 3600 saved funcall frames/sec."
+  (setq vec (kuro--binary-normalize-frame vec))
   (kuro--binary-require-available vec 0 8 "header")
   (let ((format-version (kuro--read-u32-le vec 0)))
     (unless (or (= format-version kuro--binary-format-version-v1)
@@ -335,9 +369,9 @@ immediately after this call, before applying the dirty rows."
      ((not (vectorp (car result)))
       (kuro--binary-decode-error
        "Binary FFI text payload must be a vector, got %S" (car result)))
-     ((not (vectorp (cdr result)))
+     ((not (or (stringp (cdr result)) (vectorp (cdr result))))
       (kuro--binary-decode-error
-       "Binary FFI byte payload must be a vector, got %S" (cdr result)))
+       "Binary FFI byte payload must be a string or vector, got %S" (cdr result)))
      (t
       (kuro--decode-binary-updates-with-strings (car result) (cdr result))))))
 

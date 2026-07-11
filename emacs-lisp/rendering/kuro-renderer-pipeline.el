@@ -263,14 +263,18 @@ Returns nil."
   (and (integerp value) (<= 0 value) (<= value #xffffffff)))
 
 (defun kuro--validate-dirty-face-ranges (face-ranges entry-index)
-  "Validate FACE-RANGES for dirty update ENTRY-INDEX."
+  "Validate FACE-RANGES for dirty update ENTRY-INDEX.
+The vector length is hoisted out of the loop condition: `length' is a
+C primitive but still a funcall bytecode per iteration, and this loop
+runs over every face-range slot of every dirty row per frame."
   (unless (and (vectorp face-ranges)
                (zerop (% (length face-ranges) 6)))
     (kuro--dirty-update-error
      "Entry %d face-ranges must be a stride-6 vector, got %S"
      entry-index face-ranges))
-  (let ((i 0))
-    (while (< i (length face-ranges))
+  (let ((i 0)
+        (len (length face-ranges)))
+    (while (< i len)
       (unless (kuro--dirty-update-u32-p (aref face-ranges i))
         (kuro--dirty-update-error
          "Entry %d face-ranges[%d] must be u32, got %S"
@@ -278,13 +282,15 @@ Returns nil."
       (setq i (1+ i)))))
 
 (defun kuro--validate-dirty-col-to-buf (col-to-buf entry-index)
-  "Validate COL-TO-BUF for dirty update ENTRY-INDEX."
+  "Validate COL-TO-BUF for dirty update ENTRY-INDEX.
+See `kuro--validate-dirty-face-ranges' for the length-hoist rationale."
   (unless (vectorp col-to-buf)
     (kuro--dirty-update-error
      "Entry %d col-to-buf must be a vector, got %S"
      entry-index col-to-buf))
-  (let ((i 0))
-    (while (< i (length col-to-buf))
+  (let ((i 0)
+        (len (length col-to-buf)))
+    (while (< i len)
       (unless (kuro--dirty-update-u32-p (aref col-to-buf i))
         (kuro--dirty-update-error
          "Entry %d col-to-buf[%d] must be u32, got %S"

@@ -89,13 +89,37 @@
   "kuro--read-u32-le rejects truncated input before byte reads."
   (should-error (kuro--read-u32-le [0 0 0] 0)))
 
-(ert-deftest kuro-binary-decoder-read-u32-le-rejects-negative-byte ()
-  "kuro--read-u32-le rejects byte values below 0."
-  (should-error (kuro--read-u32-le [-1 0 0 0] 0)))
+(ert-deftest kuro-binary-decoder-normalize-frame-rejects-negative-byte ()
+  "Frame normalization rejects vector byte values below 0.
+Byte-range validation moved from per-`kuro--read-u32-le'-call to a single
+per-frame pass in `kuro--binary-normalize-frame'."
+  (should-error (kuro--binary-normalize-frame [-1 0 0 0])))
 
-(ert-deftest kuro-binary-decoder-read-u32-le-rejects-overflow-byte ()
-  "kuro--read-u32-le rejects byte values above 255."
-  (should-error (kuro--read-u32-le [256 0 0 0] 0)))
+(ert-deftest kuro-binary-decoder-normalize-frame-rejects-overflow-byte ()
+  "Frame normalization rejects vector byte values above 255.
+See `kuro-binary-decoder-normalize-frame-rejects-negative-byte'."
+  (should-error (kuro--binary-normalize-frame [256 0 0 0])))
+
+(ert-deftest kuro-binary-decoder-normalize-frame-rejects-non-array ()
+  "Frame normalization rejects payloads that are neither string nor vector."
+  (should-error (kuro--binary-normalize-frame '(1 2 3))))
+
+(ert-deftest kuro-binary-decoder-normalize-frame-accepts-valid-vector ()
+  "Frame normalization returns a validated byte vector unchanged."
+  (let ((v [0 127 255]))
+    (should (eq (kuro--binary-normalize-frame v) v))))
+
+(ert-deftest kuro-binary-decoder-normalize-frame-string-roundtrip ()
+  "Frame normalization converts a Latin-1 multibyte string to unibyte bytes.
+Chars U+0000–U+00FF map 1:1 to byte values, mirroring the Rust-side
+byte→char transcode in `kuro-core-poll-updates-binary-with-strings'."
+  (let* ((payload (decode-coding-string (unibyte-string 0 1 127 128 200 255)
+                                        'latin-1))
+         (bytes (kuro--binary-normalize-frame payload)))
+    (should (multibyte-string-p payload))
+    (should (stringp bytes))
+    (should-not (multibyte-string-p bytes))
+    (should (equal (append bytes nil) '(0 1 127 128 200 255)))))
 
 (ert-deftest kuro-binary-decoder-read-u32-le-rejects-nonnumeric-byte ()
   "kuro--read-u32-le rejects non-integer byte values."
@@ -512,6 +536,61 @@ Row indices come from the binary data; text strings come from the vector."
   (let ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0)))
     (aset vec 0 256)
     (should-error (kuro--decode-binary-updates-with-strings (vector "x") vec))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-accepts-string-payload ()
+  "kuro--decode-binary-updates-with-strings decodes a Latin-1 string payload.
+The current .so transfers the frame as one string (byte b → char U+00b)
+instead of a byte-fixnum vector; both containers must decode identically."
+  (let* ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 3 0))
+         (payload (decode-coding-string
+                   (apply #'unibyte-string (append vec nil)) 'latin-1))
+         (result (kuro--decode-binary-updates-with-strings (vector "str-row") payload))
+         (entry (aref result 0)))
+    (should (= (length result) 1))
+    (should (= (aref entry 0) 3))
+    (should (equal (aref entry 1) "str-row"))))
+
+(ert-deftest kuro-binary-decoder-decode-with-strings-string-payload-face-ranges ()
+  "String payloads decode face ranges byte-identically to vector payloads.
+Exercises bytes ≥ 0x80 (color values) through the Latin-1 char mapping."
+  (let* ((frame-bytes
+          (append
+           (kuro-binary-decoder-test--make-u32-le 2)          ; format_version=2
+           (kuro-binary-decoder-test--make-u32-le 1)          ; num_rows=1
+           (kuro-binary-decoder-test--make-u32-le 0)          ; row_index=0
+           (kuro-binary-decoder-test--make-u32-le 1)          ; num_face_ranges=1
+           (kuro-binary-decoder-test--make-u32-le 0)          ; text_byte_len=0
+           (kuro-binary-decoder-test--make-u32-le 2)          ; start_buf=2
+           (kuro-binary-decoder-test--make-u32-le 9)          ; end_buf=9
+           (kuro-binary-decoder-test--make-u32-le #xFFAA80C0) ; fg (high bytes)
+           (kuro-binary-decoder-test--make-u32-le #x00FF00FF) ; bg
+           (kuro-binary-decoder-test--make-u64-le 5)          ; flags
+           (kuro-binary-decoder-test--make-u32-le #x80808080) ; ul_color
+           (kuro-binary-decoder-test--make-u32-le 0)))        ; col_to_buf_len=0
+         (vec (apply #'vector frame-bytes))
+         (payload (decode-coding-string
+                   (apply #'unibyte-string frame-bytes) 'latin-1))
+         (from-vec (kuro--decode-binary-updates-with-strings (vector "t") vec))
+         (from-str (kuro--decode-binary-updates-with-strings (vector "t") payload)))
+    (should (equal from-vec from-str))
+    (let ((fr (aref (aref from-str 0) 2)))
+      (should (= (aref fr 0) 2))
+      (should (= (aref fr 1) 9))
+      (should (= (aref fr 2) #xFFAA80C0))
+      (should (= (aref fr 3) #x00FF00FF))
+      (should (= (aref fr 4) 5))
+      (should (= (aref fr 5) #x80808080)))))
+
+(ert-deftest kuro-binary-decoder-poll-optimised-accepts-string-byte-payload ()
+  "kuro--poll-updates-binary-optimised accepts a string byte payload."
+  (let* ((vec (kuro-binary-decoder-test--make-v2-frame-no-text 0 0))
+         (payload (decode-coding-string
+                   (apply #'unibyte-string (append vec nil)) 'latin-1)))
+    (cl-letf (((symbol-function 'kuro-core-poll-updates-binary-with-strings)
+               (lambda (_id) (cons (vector "s") payload))))
+      (let ((result (kuro--poll-updates-binary-optimised 'fake-id)))
+        (should (= (length result) 1))
+        (should (equal (aref (aref result 0) 1) "s"))))))
 
 ;;; Group 16: kuro--poll-updates-binary-optimised
 

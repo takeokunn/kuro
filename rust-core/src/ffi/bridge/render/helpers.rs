@@ -34,22 +34,20 @@ pub(super) fn poll_encoded_lines(
 
 /// Poll dirty lines using the single-pass binary-direct encoding.
 ///
-/// Shared by `kuro_core_poll_updates_with_faces` and
-/// `kuro_core_poll_updates_binary`.  Returns `Vec::new()` when the session
-/// does not exist.
+/// Returns `(texts, payload)` where `payload` is the binary frame already
+/// transcoded to a Latin-1 string (see
+/// `TerminalSession::get_dirty_lines_binary_payload`).  Returns two empty
+/// values when the session does not exist or there is nothing to render.
 #[inline]
 pub(super) fn poll_binary_direct(
     session_id: u64,
     context: &'static str,
-) -> Result<(Vec<String>, Vec<u8>), KuroError> {
+) -> Result<(Vec<String>, String), KuroError> {
     poll_session_data_after_output(
         session_id,
         context,
-        || (Vec::new(), Vec::new()),
-        |session| {
-            let frame = session.get_dirty_lines_binary_direct()?;
-            Ok((frame.texts, frame.bytes))
-        },
+        || (Vec::new(), String::new()),
+        |session| Ok(session.get_dirty_lines_binary_payload()?),
     )
 }
 

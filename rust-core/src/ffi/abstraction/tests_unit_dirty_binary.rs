@@ -360,3 +360,102 @@ fn test_binary_direct_sync_suppression_times_out() {
         "a stuck sync batch must stop suppressing after the poll cap"
     );
 }
+
+// ---------------------------------------------------------------------------
+// get_dirty_lines_binary_payload — Latin-1 string transport
+// ---------------------------------------------------------------------------
+
+/// Map a Latin-1 payload string back to raw frame bytes (char U+00b → byte b).
+fn payload_bytes(payload: &str) -> Vec<u8> {
+    payload
+        .chars()
+        .map(|c| u8::try_from(u32::from(c)).expect("payload chars must be Latin-1 code points"))
+        .collect()
+}
+
+/// The payload transport must be byte-identical to the raw-bytes view:
+/// same frame, same texts, payload chars mapping 1:1 to the wire bytes.
+#[test]
+fn test_binary_payload_matches_direct_bytes() {
+    let mut direct_session = make_binary_session();
+    let mut payload_session = make_binary_session();
+    for session in [&mut direct_session, &mut payload_session] {
+        consume_initial_dirty(session);
+        session
+            .core
+            .advance(b"\x1b[31mcolored\x1b[0m plain \xc3\xa9");
+    }
+
+    let frame = direct_session
+        .get_dirty_lines_binary_direct()
+        .expect("direct frame must fit binary u32 fields");
+    let (texts, payload) = payload_session
+        .get_dirty_lines_binary_payload()
+        .expect("payload frame must fit binary u32 fields");
+
+    assert_eq!(texts, frame.texts, "texts must match the raw-bytes view");
+    assert_eq!(
+        payload_bytes(&payload),
+        frame.bytes,
+        "payload chars must map 1:1 onto the wire bytes"
+    );
+}
+
+/// The payload transcode reads `buf_scratch` in place: after a non-empty
+/// poll the scratch buffer must retain its capacity for the next frame
+/// (the former `mem::take` reset it to zero, forcing a realloc per poll).
+#[test]
+fn test_binary_payload_retains_buf_scratch_capacity() {
+    let mut session = make_binary_session();
+    fill_screen_and_drain(&mut session);
+    session.core.advance(b"dirty row\n");
+
+    let (texts, _payload) = session
+        .get_dirty_lines_binary_payload()
+        .expect("payload frame must fit binary u32 fields");
+    assert!(!texts.is_empty(), "precondition: frame must be non-empty");
+    assert!(
+        session.buf_scratch.capacity() > 0,
+        "buf_scratch must keep its capacity after the payload poll"
+    );
+}
+
+/// A scrolling payload frame must carry the shift in its header with the
+/// row count consistent between the header and the texts vector — the same
+/// smooth-streaming property as the raw-bytes view, through the Latin-1
+/// transport.
+#[test]
+fn test_binary_payload_scroll_shift_in_header() {
+    let mut session = make_binary_session();
+    consume_initial_dirty(&mut session);
+    // Walk the blank screen to the bottom margin plus one scroll, then drain
+    // so every row hash is populated and the shift is consumed.
+    session.core.advance(&b"\n".repeat(24));
+    let _ = session.get_dirty_lines_binary_payload();
+
+    // One more LF scrolls: the shift travels in the payload header.
+    session.core.advance(b"\n");
+    let (texts, payload) = session
+        .get_dirty_lines_binary_payload()
+        .expect("scroll frame must fit binary u32 fields");
+    assert!(
+        !payload.is_empty(),
+        "a scroll frame must transmit its header shift"
+    );
+    let bytes = payload_bytes(&payload);
+    assert_eq!(
+        binary_scroll_shift(&bytes),
+        (1, 0),
+        "the scroll must travel as scroll_up in the header"
+    );
+    assert_eq!(
+        texts.len() as u32,
+        binary_num_rows(&bytes),
+        "num_rows header must match the text vector"
+    );
+    assert!(
+        texts.len() < 24,
+        "a scroll must not force a full repaint; got {} rows",
+        texts.len()
+    );
+}

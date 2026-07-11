@@ -113,16 +113,18 @@ pub struct TerminalSession {
     pub(super) dirty_scratch: Vec<usize>,
     /// Reusable scratch vec for per-row text strings in the binary FFI path.
     ///
-    /// `get_dirty_lines_binary_direct` clears this and then `mem::take`s it on
-    /// return.  After the take the Vec is empty but retains its allocation, so the
-    /// next frame re-uses the same backing buffer — eliminating one `Vec<String>`
-    /// heap allocation per frame (~120/sec at 120fps).
+    /// `get_dirty_lines_binary_payload` clears this and then `mem::take`s it
+    /// on return: the row `String`s must be owned by the caller for the FFI
+    /// transfer, so only the outer Vec's pointer-array allocation is paid per
+    /// frame.
     pub(super) texts_scratch: Vec<String>,
     /// Reusable scratch buffer for binary frame serialisation bytes.
     ///
-    /// Same `clear()` + `mem::take()` pattern as `texts_scratch`.  The serialised
-    /// frame is typically 2–50 KB; persisting the allocation eliminates one
-    /// `Vec<u8>` heap allocation per frame on both the live and scrollback paths.
+    /// Cleared (capacity retained) by `begin_binary_dirty_frame`, then read
+    /// **in place** by `get_dirty_lines_binary_payload`'s Latin-1 transcode —
+    /// never moved out.  The serialised frame is typically 2–50 KB; keeping
+    /// the buffer resident eliminates the realloc-and-regrow cycle that a
+    /// `mem::take` would reintroduce on every poll.
     pub(super) buf_scratch: Vec<u8>,
     /// Consecutive polls suppressed by an open synchronized-output batch
     /// (DEC 2026).  Guards against an application that sets `?2026 h` and

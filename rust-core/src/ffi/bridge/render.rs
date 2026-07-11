@@ -145,17 +145,28 @@ define_poll_updates_handler!(
     /// Return value: a cons cell `(TEXT-STRINGS . BINARY-DATA)` where:
     /// - `TEXT-STRINGS` is an Emacs vector of strings, one entry per dirty row,
     ///   in the same order as the rows encoded in `BINARY-DATA`.
-    /// - `BINARY-DATA` is an Emacs vector of byte fixnums identical to what
-    ///   `kuro_core_poll_updates_binary` would return, **except** the `text_byte_len`
-    ///   header field is always 0 and no text bytes are written for any row (the
-    ///   strings are provided via `TEXT-STRINGS` instead).
+    /// - `BINARY-DATA` is an Emacs **string** whose characters are the frame's
+    ///   byte values (each in 0–255, i.e. Latin-1 code points).  The Elisp
+    ///   decoder converts it to a unibyte string with one
+    ///   `encode-coding-string` call and indexes it with `aref` exactly like
+    ///   the former byte-fixnum vector — but the transfer is a single
+    ///   `make_string` module call instead of one `make_integer` + one
+    ///   `vec_set` call **per byte**, and the N-slot Lisp vector (N × 8 bytes
+    ///   of GC-traced heap per frame) disappears entirely.  The
+    ///   `text_byte_len` header field is always 0 and no text bytes are
+    ///   written for any row (the strings are provided via `TEXT-STRINGS`
+    ///   instead).
     ///
     /// Returns `nil` (`false`) when no dirty lines are present.
     kuro_core_poll_updates_binary_with_strings,
     "panic in poll_updates_binary_with_strings",
     poll_binary_direct,
-    |env, (texts, bytes)| {
-        if texts.is_empty() {
+    |env, (texts, payload)| {
+        // A frame carrying only a scroll shift has no dirty-row texts but a
+        // non-empty payload (v3 header with the shift) — it must still reach
+        // Emacs so the buffer-level shift is applied.  Only a fully empty
+        // poll (no rows AND no payload) maps to nil.
+        if texts.is_empty() && payload.is_empty() {
             return false.into_lisp(env);
         }
 
@@ -166,22 +177,20 @@ define_poll_updates_handler!(
             texts,
             |env, text| text.as_str().into_lisp(env),
         )?;
-        let bytes_vec = build_emacs_vector_from_iter(
-            env,
-            bytes.len(),
-            0i64.into_lisp(env)?,
-            bytes,
-            |env, byte| i64::from(byte).into_lisp(env),
-        )?;
+
+        // `payload` is the frame already transcoded to Latin-1 chars by
+        // `get_dirty_lines_binary_payload` (byte b → char U+00b): one
+        // `make_string` module call transfers the whole frame.
+        let bytes_str = payload.into_lisp(env)?;
 
         // Return a true cons cell `(TEXT-STRINGS . BINARY-DATA)` as documented:
         // the Elisp decoder (`kuro--poll-updates-binary-optimised`) reads
-        // `(cdr result)` AS the binary vector. Using `build_emacs_list_from_values`
+        // `(cdr result)` AS the binary payload. Using `build_emacs_list_from_values`
         // here would instead produce the 2-element list `(TEXT-STRINGS BINARY-DATA)`,
-        // whose `cdr` is `(BINARY-DATA)` — a list, not the vector — causing the
-        // decoder to throw `wrong-type-argument arrayp` every frame and leaving the
-        // terminal buffer blank under the default `kuro-use-binary-ffi` path.
-        env.cons(strings_vec, bytes_vec)
+        // whose `cdr` is `(BINARY-DATA)` — a list, not the payload — causing the
+        // decoder to error every frame and leaving the terminal buffer blank
+        // under the default `kuro-use-binary-ffi` path.
+        env.cons(strings_vec, bytes_str)
     }
 );
 

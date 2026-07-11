@@ -12,11 +12,18 @@ struct DirtyRowEmission<T> {
     content_hash: u64,
 }
 
+/// Raw-bytes view of a binary dirty frame, kept for unit tests that assert
+/// on the wire layout (header fields, byte offsets).  The production bridge
+/// uses [`TerminalSession::get_dirty_lines_binary_payload`], which transcodes
+/// the frame to a Latin-1 string without consuming the session scratch
+/// buffer's capacity.
+#[cfg(test)]
 pub(crate) struct BinaryDirtyFrame {
     pub(crate) texts: Vec<String>,
     pub(crate) bytes: Vec<u8>,
 }
 
+#[cfg(test)]
 impl BinaryDirtyFrame {
     #[inline]
     fn empty() -> Self {
@@ -288,9 +295,12 @@ impl TerminalSession {
         let screen_rows = usize::from(self.core.screen.rows());
         self.ensure_row_hash_capacity(screen_rows);
 
-        let dirty_rows = self.dirty_scratch.clone();
+        // mem::take instead of clone: the loop needs `&mut self` while
+        // iterating the dirty indices, but a take + restore keeps the Vec's
+        // capacity without allocating a per-frame copy.
+        let dirty_rows = std::mem::take(&mut self.dirty_scratch);
         let mut result: Vec<T> = Vec::with_capacity(dirty_rows.len());
-        for row in dirty_rows {
+        for &row in &dirty_rows {
             if let Some(line) = self.core.screen.get_line(row) {
                 let cached = self.row_hashes[row];
 
@@ -319,6 +329,7 @@ impl TerminalSession {
                 }
             }
         }
+        self.dirty_scratch = dirty_rows;
 
         result
     }
@@ -392,9 +403,13 @@ impl TerminalSession {
         let screen_rows = usize::from(self.core.screen.rows());
         self.ensure_row_hash_capacity(screen_rows);
 
-        let dirty_rows = self.dirty_scratch.clone();
+        // mem::take instead of clone (see collect_dirty_rows_with_cache).  On
+        // the error return the take'd Vec is dropped and `dirty_scratch` stays
+        // empty-but-valid — `take_dirty_lines_into` refills it next frame, so
+        // only the (rare) error path pays a one-time capacity loss.
+        let dirty_rows = std::mem::take(&mut self.dirty_scratch);
         let mut result: Vec<T> = Vec::with_capacity(dirty_rows.len());
-        for row in dirty_rows {
+        for &row in &dirty_rows {
             if let Some(line) = self.core.screen.get_line(row) {
                 let cached = self.row_hashes[row];
 
@@ -430,6 +445,7 @@ impl TerminalSession {
                 }
             }
         }
+        self.dirty_scratch = dirty_rows;
 
         Ok(result)
     }
@@ -460,25 +476,59 @@ impl TerminalSession {
         num_rows_offset
     }
 
-    fn finish_binary_dirty_frame(
-        &mut self,
-        num_rows_offset: usize,
-    ) -> BinaryFrameResult<BinaryDirtyFrame> {
+    fn finish_binary_dirty_frame(&mut self, num_rows_offset: usize) -> BinaryFrameResult<()> {
         BinaryFrameU32::from_usize(self.texts_scratch.len(), BinaryFrameU32Field::TextCount)?
             .copy_le(
                 &mut self.buf_scratch[num_rows_offset..num_rows_offset + BinaryFrameU32::WIDTH],
             );
+        Ok(())
+    }
+
+    /// Collect dirty lines in the binary direct frame format for FFI transfer.
+    ///
+    /// Returns `(texts, payload)` where `payload` is the serialised frame
+    /// transcoded to a Latin-1 string (byte `b` → `char U+00b`), ready for a
+    /// single `make_string` transfer to Emacs.  The transcode reads
+    /// `buf_scratch` **in place** — unlike the former `mem::take`, the 2–50 KB
+    /// byte buffer keeps its capacity across frames, eliminating the
+    /// realloc-and-regrow cycle on every 30fps poll.  Both vectors empty means
+    /// "no frame" (the bridge returns nil).
+    pub(crate) fn get_dirty_lines_binary_payload(
+        &mut self,
+    ) -> BinaryFrameResult<(Vec<String>, String)> {
+        if !self.build_binary_dirty_frame()? {
+            return Ok((Vec::new(), String::new()));
+        }
+        let texts = std::mem::take(&mut self.texts_scratch);
+        // Bytes ≥ 0x80 become 2-byte UTF-8 sequences; reserve 2× upfront to
+        // avoid a mid-loop realloc on color-heavy frames.
+        let mut payload = String::with_capacity(self.buf_scratch.len() * 2);
+        for &byte in &self.buf_scratch {
+            payload.push(char::from(byte));
+        }
+        Ok((texts, payload))
+    }
+
+    /// Raw-bytes variant of [`Self::get_dirty_lines_binary_payload`], kept for
+    /// unit tests that assert on the wire layout.  Clones `buf_scratch` (test
+    /// convenience; the production path never copies the byte buffer).
+    #[cfg(test)]
+    pub(crate) fn get_dirty_lines_binary_direct(&mut self) -> BinaryFrameResult<BinaryDirtyFrame> {
+        if !self.build_binary_dirty_frame()? {
+            return Ok(BinaryDirtyFrame::empty());
+        }
         Ok(BinaryDirtyFrame::new(
             std::mem::take(&mut self.texts_scratch),
-            std::mem::take(&mut self.buf_scratch),
+            self.buf_scratch.clone(),
         ))
     }
 
-    /// Collect dirty lines in the binary direct frame format.
+    /// Build the binary dirty frame into the session scratch buffers.
     ///
-    /// This reuses the session scratch buffers for both text rows and the
-    /// serialized binary payload so callers can avoid per-frame heap churn.
-    pub(crate) fn get_dirty_lines_binary_direct(&mut self) -> BinaryFrameResult<BinaryDirtyFrame> {
+    /// Returns `Ok(false)` when there is nothing to transmit this frame
+    /// (scratch buffers are left cleared); `Ok(true)` when `texts_scratch` +
+    /// `buf_scratch` hold a complete frame.
+    fn build_binary_dirty_frame(&mut self) -> BinaryFrameResult<bool> {
         // Scrollback viewport path: when scroll_dirty, encode all scrollback rows.
         if self.core.screen.is_scroll_dirty() && self.core.screen.scroll_offset() > 0 {
             let num_rows_offset = self.begin_binary_dirty_frame(0, 0);
@@ -500,12 +550,15 @@ impl TerminalSession {
                     Ok(String::new())
                 }
             })?;
-            return self.finish_binary_dirty_frame(num_rows_offset);
+            self.finish_binary_dirty_frame(num_rows_offset)?;
+            return Ok(true);
         }
 
         // Suppress live dirty lines when viewport is scrolled (but not scroll_dirty).
         if self.suppress_live_dirty_if_scrolled_or_sync() {
-            return Ok(BinaryDirtyFrame::empty());
+            self.texts_scratch.clear();
+            self.buf_scratch.clear();
+            return Ok(false);
         }
 
         let epoch = self.refresh_render_epoch();
@@ -515,9 +568,10 @@ impl TerminalSession {
         // call, and both are applied by Emacs inside one render block.
         let (scroll_up, scroll_down) = self.consume_scroll_shift();
 
-        // Reuse persistent scratch allocations: both the text-strings Vec and the
-        // serialised binary frame buffer are cleared (retaining capacity) and
-        // mem::take'd on return — eliminating two heap allocations per frame at 120fps.
+        // Reuse persistent scratch allocations: the serialised binary frame
+        // buffer is cleared (retaining capacity) and transcoded in place by
+        // `get_dirty_lines_binary_payload` — it is never moved out, so its
+        // 2–50 KB capacity survives across frames at 120fps.
         let num_rows_offset = self.begin_binary_dirty_frame(scroll_up, scroll_down);
 
         if self.core.screen.is_full_dirty() {
@@ -557,10 +611,12 @@ impl TerminalSession {
         // A frame carrying only a scroll shift (no dirty rows survived the
         // hash skip) must still reach Emacs so the buffer shift is applied.
         if self.texts_scratch.is_empty() && scroll_up == 0 && scroll_down == 0 {
-            return Ok(BinaryDirtyFrame::empty());
+            self.buf_scratch.clear();
+            return Ok(false);
         }
 
-        self.finish_binary_dirty_frame(num_rows_offset)
+        self.finish_binary_dirty_frame(num_rows_offset)?;
+        Ok(true)
     }
 
     /// Get dirty lines with face ranges from screen, with scrollback viewport support.

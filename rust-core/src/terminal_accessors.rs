@@ -85,7 +85,7 @@ impl TerminalCore {
     /// Get whether overline SGR attribute (SGR 53) is currently set
     #[must_use]
     pub const fn current_overline(&self) -> bool {
-        self.current_attrs.overline
+        self.current_attrs.overline()
     }
 
     /// Get a cell from the screen at the given (row, col) position

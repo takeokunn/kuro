@@ -129,6 +129,60 @@ impl std::ops::Not for SgrFlags {
     }
 }
 
+/// Extended SGR boolean attribute flags — the second packed byte.
+///
+/// Holds the rarely-used SGR booleans that arrived after [`SgrFlags`] filled
+/// its 8 bits: overline (SGR 53), superscript (SGR 73), subscript (SGR 74).
+/// Packing them shrinks `SgrAttributes` by 2 bytes, which drops `Cell` from
+/// 56 to 48 bytes — ~14% less memory traffic on full-screen encode scans and
+/// ~6 MB less scrollback RSS at the default 10,000-line × 80-column budget.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SgrFlagsExt(u8);
+
+impl SgrFlagsExt {
+    /// SGR 53: Overline
+    pub const OVERLINE: Self = Self(0b0000_0001);
+    /// SGR 73: Superscript
+    pub const SUPERSCRIPT: Self = Self(0b0000_0010);
+    /// SGR 74: Subscript
+    pub const SUBSCRIPT: Self = Self(0b0000_0100);
+
+    /// Return `true` if all bits in `other` are set in `self`.
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Set or clear bits in `other` depending on `val`.
+    #[inline]
+    pub fn set(&mut self, other: Self, val: bool) {
+        if val {
+            self.0 |= other.0;
+        } else {
+            self.0 &= !other.0;
+        }
+    }
+
+    /// Return `true` if no bits are set.
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl Default for SgrFlagsExt {
+    #[inline]
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
+impl std::fmt::Debug for SgrFlagsExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SgrFlagsExt({:#05b})", self.0)
+    }
+}
+
 /// Cell width for Unicode/CJK character support
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CellWidth {
@@ -193,12 +247,9 @@ pub struct SgrAttributes {
     pub underline_style: UnderlineStyle,
     /// Underline color (SGR 58/59)
     pub underline_color: Color,
-    /// SGR 53: overline
-    pub overline: bool,
-    /// SGR 73: superscript
-    pub superscript: bool,
-    /// SGR 75: subscript
-    pub subscript: bool,
+    /// Extended boolean flags: overline (SGR 53), superscript (SGR 73),
+    /// subscript (SGR 74).  Packed into one byte — see [`SgrFlagsExt`].
+    pub flags_ext: SgrFlagsExt,
 }
 
 impl Default for SgrAttributes {
@@ -209,9 +260,7 @@ impl Default for SgrAttributes {
             flags: SgrFlags::default(),
             underline_style: UnderlineStyle::None,
             underline_color: Color::Default,
-            overline: false,
-            superscript: false,
-            subscript: false,
+            flags_ext: SgrFlagsExt::default(),
         }
     }
 }
@@ -230,6 +279,45 @@ impl SgrAttributes {
         self.underline_style != UnderlineStyle::None
     }
 
+    /// SGR 53: overline state.
+    #[inline]
+    #[must_use]
+    pub const fn overline(&self) -> bool {
+        self.flags_ext.contains(SgrFlagsExt::OVERLINE)
+    }
+
+    /// Set or clear SGR 53 overline.
+    #[inline]
+    pub fn set_overline(&mut self, val: bool) {
+        self.flags_ext.set(SgrFlagsExt::OVERLINE, val);
+    }
+
+    /// SGR 73: superscript state.
+    #[inline]
+    #[must_use]
+    pub const fn superscript(&self) -> bool {
+        self.flags_ext.contains(SgrFlagsExt::SUPERSCRIPT)
+    }
+
+    /// Set or clear SGR 73 superscript.
+    #[inline]
+    pub fn set_superscript(&mut self, val: bool) {
+        self.flags_ext.set(SgrFlagsExt::SUPERSCRIPT, val);
+    }
+
+    /// SGR 74: subscript state.
+    #[inline]
+    #[must_use]
+    pub const fn subscript(&self) -> bool {
+        self.flags_ext.contains(SgrFlagsExt::SUBSCRIPT)
+    }
+
+    /// Set or clear SGR 74 subscript.
+    #[inline]
+    pub fn set_subscript(&mut self, val: bool) {
+        self.flags_ext.set(SgrFlagsExt::SUBSCRIPT, val);
+    }
+
     /// Returns `true` when every attribute is at its terminal default value.
     ///
     /// Used in [`fill_encode_pool`] as a fast path that skips four
@@ -244,9 +332,7 @@ impl SgrAttributes {
     pub fn is_all_default(&self) -> bool {
         self.flags.is_empty()
             && self.underline_style == UnderlineStyle::None
-            && !self.overline
-            && !self.superscript
-            && !self.subscript
+            && self.flags_ext.is_empty()
             && self.foreground == Color::Default
             && self.background == Color::Default
             && self.underline_color == Color::Default

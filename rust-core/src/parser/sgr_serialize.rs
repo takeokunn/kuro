@@ -45,13 +45,13 @@ pub(crate) fn serialize_sgr(attrs: &SgrAttributes) -> String {
     if f.contains(SgrFlags::STRIKETHROUGH) {
         out.push_str(";9");
     }
-    if attrs.superscript {
+    if attrs.superscript() {
         out.push_str(";73");
     }
-    if attrs.subscript {
+    if attrs.subscript() {
         out.push_str(";75");
     }
-    if attrs.overline {
+    if attrs.overline() {
         out.push_str(";53");
     }
     append_sgr_color(&mut out, attrs.foreground, 30, 90, 38);

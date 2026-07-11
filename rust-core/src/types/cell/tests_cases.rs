@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{Cell, CellWidth, Color, SgrAttributes, SgrFlags, UnderlineStyle};
+use super::{Cell, CellWidth, Color, SgrAttributes, SgrFlags, SgrFlagsExt, UnderlineStyle};
 
 #[test]
 fn test_cell_default() {
@@ -198,9 +198,12 @@ fn test_sgr_reset_clears_all_fields() {
         flags: SgrFlags::BOLD | SgrFlags::ITALIC | SgrFlags::STRIKETHROUGH,
         underline_style: UnderlineStyle::Curly,
         underline_color: Color::Rgb(0, 0, 0),
-        overline: true,
-        superscript: true,
-        subscript: false,
+        flags_ext: {
+            let mut ext = SgrFlagsExt::default();
+            ext.set(SgrFlagsExt::OVERLINE, true);
+            ext.set(SgrFlagsExt::SUPERSCRIPT, true);
+            ext
+        },
     };
     attrs.reset();
     assert_eq!(attrs, SgrAttributes::default());
@@ -293,9 +296,10 @@ fn test_is_all_default_false_when_flags_set() {
 
 #[test]
 fn test_is_all_default_false_when_overline_set() {
-    let attrs = SgrAttributes {
-        overline: true,
-        ..SgrAttributes::default()
+    let attrs = {
+        let mut attrs = SgrAttributes::default();
+        attrs.set_overline(true);
+        attrs
     };
     assert!(
         !attrs.is_all_default(),
@@ -439,4 +443,23 @@ fn test_sgr_flags_from_bits_truncate_preserves_all_bits() {
     let raw: u8 = 0b1111_1111;
     let flags = SgrFlags::from_bits_truncate(raw);
     assert_eq!(flags.bits(), raw, "all 8 bits must be preserved");
+}
+
+// LAYOUT: Cell must stay ≤ 48 bytes.  The grid holds rows×cols live cells
+// plus up to 10,000 scrollback lines; every byte here is multiplied by
+// ~10^6.  SgrFlagsExt packing (overline/superscript/subscript → one byte)
+// brought Cell from 56 to 48 — a regression above 48 means a field grew
+// or padding crept back in.
+#[test]
+fn test_cell_size_stays_within_48_bytes() {
+    assert!(
+        std::mem::size_of::<Cell>() <= 48,
+        "Cell grew beyond 48 bytes: {}",
+        std::mem::size_of::<Cell>()
+    );
+    assert!(
+        std::mem::size_of::<SgrAttributes>() <= 15,
+        "SgrAttributes grew beyond 15 bytes: {}",
+        std::mem::size_of::<SgrAttributes>()
+    );
 }

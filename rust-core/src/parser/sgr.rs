@@ -126,8 +126,8 @@ fn remove_sgr_flags(attrs: &mut SgrAttributes, flags: &[SgrFlags]) {
 
 #[inline]
 fn set_sgr_script(attrs: &mut SgrAttributes, superscript: bool, subscript: bool) {
-    attrs.superscript = superscript;
-    attrs.subscript = subscript;
+    attrs.set_superscript(superscript);
+    attrs.set_subscript(subscript);
 }
 
 #[inline]
@@ -209,11 +209,11 @@ fn apply_sgr_style_group(attrs: &mut SgrAttributes, param: u16) -> bool {
             true
         }
         53 => {
-            attrs.overline = true;
+            attrs.set_overline(true);
             true
         }
         55 => {
-            attrs.overline = false;
+            attrs.set_overline(false);
             true
         }
         73 => {

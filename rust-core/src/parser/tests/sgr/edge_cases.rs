@@ -8,7 +8,7 @@ fn test_sgr_53_sets_overline_without_disturbing_other_attrs() {
     let mut term = crate::TerminalCore::new(24, 80);
     term.advance(b"\x1b[1m"); // bold on first
     term.advance(b"\x1b[53m"); // overline on
-    assert!(term.current_attrs.overline, "SGR 53 must set overline");
+    assert!(term.current_attrs.overline(), "SGR 53 must set overline");
     assert!(
         term.current_attrs.flags.contains(SgrFlags::BOLD),
         "SGR 53 must not clear BOLD"
@@ -27,7 +27,7 @@ fn test_sgr_55_clears_overline_without_disturbing_other_attrs() {
     term.advance(b"\x1b[53m"); // overline on
     term.advance(b"\x1b[3m"); // italic on
     term.advance(b"\x1b[55m"); // overline off
-    assert!(!term.current_attrs.overline, "SGR 55 must clear overline");
+    assert!(!term.current_attrs.overline(), "SGR 55 must clear overline");
     assert!(
         term.current_attrs.flags.contains(SgrFlags::ITALIC),
         "SGR 55 must not clear ITALIC"

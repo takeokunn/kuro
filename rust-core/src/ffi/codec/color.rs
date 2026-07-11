@@ -118,13 +118,13 @@ pub fn encode_attrs(attrs: &SgrAttributes) -> u64 {
         bits |= ATTRS_UNDERLINE_BIT;
     }
     bits |= u64::from(attrs.underline_style.wire_code()) << ATTRS_STYLE_SHIFT;
-    if attrs.overline {
+    if attrs.overline() {
         bits |= ATTRS_OVERLINE_BIT;
     }
-    if attrs.superscript {
+    if attrs.superscript() {
         bits |= ATTRS_SUPERSCRIPT_BIT;
     }
-    if attrs.subscript {
+    if attrs.subscript() {
         bits |= ATTRS_SUBSCRIPT_BIT;
     }
     bits

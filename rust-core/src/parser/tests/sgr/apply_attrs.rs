@@ -102,9 +102,9 @@ fn apply_sgr_attrs_overline_on_off() {
     let on: &[u16] = &[53];
     let off: &[u16] = &[55];
     apply_sgr_attrs(&mut a, &[on]);
-    assert!(a.overline);
+    assert!(a.overline());
     apply_sgr_attrs(&mut a, &[off]);
-    assert!(!a.overline);
+    assert!(!a.overline());
 }
 
 #[test]
@@ -114,11 +114,11 @@ fn apply_sgr_attrs_superscript_subscript_exclusive() {
     let sub: &[u16] = &[75];
     let off: &[u16] = &[74];
     apply_sgr_attrs(&mut a, &[sup]);
-    assert!(a.superscript && !a.subscript);
+    assert!(a.superscript() && !a.subscript());
     apply_sgr_attrs(&mut a, &[sub]);
-    assert!(a.subscript && !a.superscript);
+    assert!(a.subscript() && !a.superscript());
     apply_sgr_attrs(&mut a, &[off]);
-    assert!(!a.superscript && !a.subscript);
+    assert!(!a.superscript() && !a.subscript());
 }
 
 #[test]

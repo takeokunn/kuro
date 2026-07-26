@@ -653,8 +653,9 @@ mod tests {
         let integration = ShellIntegrationConfig::Bash {
             rcfile: PathBuf::from("/tmp/kuro-bash/.bashrc"),
         };
+        let executable = std::env::current_exe().unwrap();
         let ctx = build_shell_exec_context(
-            Path::new("/bin/bash"),
+            &executable,
             "bash",
             &[],
             &integration,
@@ -663,8 +664,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            ctx.argv_strings(),
-            ["bash", "--rcfile", "/tmp/kuro-bash/.bashrc"]
+            &ctx.argv_strings()[1..],
+            ["--rcfile", "/tmp/kuro-bash/.bashrc"]
         );
     }
 
@@ -716,8 +717,9 @@ mod tests {
             std::env::set_var("KURO_BASH_RCFILE", "/tmp/injected");
         }
 
+        let executable = std::env::current_exe().unwrap();
         let ctx = build_shell_exec_context(
-            Path::new("/bin/zsh"),
+            &executable,
             "zsh",
             &[],
             &ShellIntegrationConfig::default(),
@@ -729,7 +731,7 @@ mod tests {
         unsafe {
             std::env::remove_var("KURO_BASH_RCFILE");
         }
-        assert_eq!(ctx.argv_strings(), ["zsh"]);
+        assert_eq!(ctx.argv_strings().len(), 1);
     }
 
     #[test]

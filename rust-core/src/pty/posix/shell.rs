@@ -72,6 +72,7 @@ pub(super) fn open_executable(path: &Path) -> Result<File> {
     Ok(file)
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub(super) fn shell_path_to_cstring(path: &Path, command: &str) -> Result<std::ffi::CString> {
     std::ffi::CString::new(
         path.to_str()

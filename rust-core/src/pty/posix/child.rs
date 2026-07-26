@@ -654,14 +654,8 @@ mod tests {
             rcfile: PathBuf::from("/tmp/kuro-bash/.bashrc"),
         };
         let executable = std::env::current_exe().unwrap();
-        let ctx = build_shell_exec_context(
-            &executable,
-            "bash",
-            &[],
-            &integration,
-            empty_env(),
-        )
-        .unwrap();
+        let ctx =
+            build_shell_exec_context(&executable, "bash", &[], &integration, empty_env()).unwrap();
 
         assert_eq!(
             &ctx.argv_strings()[1..],

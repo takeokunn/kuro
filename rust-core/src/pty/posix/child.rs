@@ -516,6 +516,7 @@ fn build_shell_exec_context(
 
     Ok(ShellExecContext {
         shell_file,
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         shell_full_cstr,
         argv: PreparedCStringArray::new(argv),
         env,

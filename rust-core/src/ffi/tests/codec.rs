@@ -165,7 +165,7 @@ macro_rules! assert_binary_header {
 macro_rules! assert_binary_row {
     ($buf:expr, $base:expr, row $row:expr, text $text:expr, faces $faces:expr, ctb [$($ctb:expr),* $(,)?]) => {{
         let text = $text.as_bytes();
-        let ctb = &[$(test_usize_to_u32($ctb, "col_to_buf test value fits u32")),*];
+        let ctb: &[u32] = &[$(test_usize_to_u32($ctb, "col_to_buf test value fits u32")),*];
         let faces: usize = $faces;
         let ctb_base = $base + 12 + text.len() + (28 * faces);
 

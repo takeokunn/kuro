@@ -1,6 +1,6 @@
 # Kuro - Modern Terminal Emulator for Emacs
 
-![CI](https://github.com/takeokunn/kuro/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/takeokunn/kuro/actions/workflows/check.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Emacs](https://img.shields.io/badge/Emacs-29.4%2B-purple)
 ![Rust](https://img.shields.io/badge/rust-1.84.0%2B-orange)
@@ -9,7 +9,7 @@ A high-performance terminal emulator for Emacs, powered by a Rust dynamic module
 
 ## Features
 
-- **High Performance**: >100MB/s VT parse rate, <1us FFI call overhead, <16ms/frame rendering
+- **High Performance Architecture**: Rust-backed parsing and batched binary-frame transport minimize work across the Emacs module boundary
 - **VTE Compliance**: VT100/VT220 compatible with cursor movement, erase, scroll regions, insert/delete, tab stops
 - **SGR Attributes**: Bold, italic, underline, blink, reverse, strikethrough, conceal, dim; 256-color and TrueColor
 - **Kitty Protocols**: Kitty Graphics Protocol (APC), Kitty Keyboard Protocol
@@ -48,6 +48,23 @@ Optionally add the `takeokunn-kuro` Cachix binary cache to avoid recompiling:
 ```bash
 cachix use takeokunn-kuro
 ```
+
+### From a Git checkout
+
+Clone the repository and add its entry-point directory to `load-path`:
+
+```bash
+git clone https://github.com/takeokunn/kuro.git ~/.local/share/kuro-src
+```
+
+```elisp
+(add-to-list 'load-path "~/.local/share/kuro-src/emacs-lisp/core")
+(require 'kuro)
+```
+
+Then install the native module with `M-x kuro-module-download`, or build it
+locally with `M-x kuro-module-build`.  Prebuilt release modules are available
+for x86_64 and ARM64 Linux and macOS.
 
 ### From Source (without Nix)
 
@@ -106,7 +123,11 @@ These bindings forward to the PTY even if you run evil-mode, god-mode, meow, or 
 
 ## Status
 
-Kuro is feature-complete at v1.1.0. The Rust core passes 3220 tests (2678 unit + 542 integration) and the Emacs Lisp layer passes 4459 ERT tests. Clippy runs with `-D warnings` and 0 warnings. CI uses `nix flake check` on Linux and macOS; the Elisp checks run on Emacs 30 with binary caching via Cachix. The project includes 8 fuzz targets and 4 criterion benchmark suites.
+Kuro is under active development.  Pull requests run `nix flake check` and PTY
+end-to-end tests on Linux; release builds produce native modules for x86_64 and
+ARM64 Linux and macOS.  The flake checks include Rust tests, ERT, Clippy with
+warnings denied, formatting, byte-compilation, package-lint, and checkdoc.  The
+repository also includes fuzz targets and Criterion benchmark suites.
 
 ## Architecture
 
@@ -114,7 +135,7 @@ Kuro uses the **Remote Display Model** -- all terminal state lives in Rust, Emac
 
 ```mermaid
 graph LR
-    A["Emacs Lisp<br/>(Display)"] <-->|"FFI (~100ns)"| B["Rust Core<br/>(Terminal)"]
+    A["Emacs Lisp<br/>(Display)"] <-->|"Batched FFI"| B["Rust Core<br/>(Terminal)"]
     B --> C["PTY / Shell"]
 ```
 

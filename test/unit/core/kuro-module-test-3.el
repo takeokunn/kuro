@@ -143,7 +143,11 @@
            (module-load-called nil)
            (was-bound (fboundp 'kuro-core-init))
            (original-def (and was-bound (symbol-function 'kuro-core-init))))
-      (set-file-modes module-path #o644)
+      (dolist (mode '(#o644 #o755))
+        (set-file-modes module-path mode)
+        (should (kuro-module--library-candidate-from-path
+                 module-path t "permission test")))
+      (set-file-modes module-path #o664)
       (when was-bound (fmakunbound 'kuro-core-init))
       (unwind-protect
           (cl-letf (((symbol-function 'kuro-module--find-library)

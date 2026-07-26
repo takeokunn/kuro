@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-26
+
+### Added
+
+- Release artifacts for x86_64 and ARM64 macOS, in addition to the existing
+  Linux targets.
+- Release preflight validation for stable SemVer tags, consistent Cargo,
+  Emacs Lisp, native downloader, and Nix versions, and reachability from the
+  default branch.
+
+### Changed
+
+- Binary frame protocol v4 carries cursor state and the bell flag in the frame
+  header, keeping frame-related state in the same atomic FFI transfer.
+- Binary frames are transported as a single Latin-1 string built in place,
+  reducing allocation and conversion overhead at the FFI boundary.
+- The PTY/session lifecycle and rendering pipeline were decomposed into smaller
+  ownership-focused components without changing the public command surface.
+- Package metadata and the native downloader now report version 1.2.0
+  consistently.
+
+### Fixed
+
+- The package now declares its documented minimum Emacs version, 29.4.
+
 ## [1.1.0] - 2026-07-06
 
 ### Added

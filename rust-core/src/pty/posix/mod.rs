@@ -48,11 +48,10 @@ pub struct Pty {
 }
 
 impl Pty {
-    /// Validate shell command against the allowlist
+    /// Validate an absolute executable command path.
     ///
-    /// Ensures only allowed shells can be spawned to prevent command injection.
-    /// The command must be an absolute path; `$PATH` is never consulted, so
-    /// validation and exec target the same filesystem object.
+    /// `$PATH` is never consulted, so validation and exec target the same
+    /// filesystem object.
     #[cfg(test)]
     fn validate_shell(command: &str) -> Result<PathBuf> {
         ShellCommand::resolve(command).map(ShellCommand::into_path)
@@ -74,21 +73,15 @@ impl Pty {
 
     fn duplicate_reader_fd(master: &std::fs::File) -> Result<RawFd> {
         // SAFETY: master.as_raw_fd() is a valid open fd returned by openpty;
-        // libc::dup and libc::fcntl are safe on valid fds; the result is
-        // checked for -1 (error) before any further use.
+        // fcntl returns a new owned fd or -1 on failure.
         unsafe {
-            // dup3 with O_CLOEXEC is available on macOS via F_DUPFD_CLOEXEC fcntl
-            let fd = libc::dup(master.as_raw_fd());
+            // Duplicate and set CLOEXEC atomically, avoiding an fd leak race
+            // with concurrent fork/exec in another thread.
+            let fd = libc::fcntl(master.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0);
             if fd == -1 {
-                return Err(pty_operation_error("dup", "Failed to duplicate master fd"));
-            }
-            // Set FD_CLOEXEC so the fd is closed on exec in child processes
-            let flags = libc::fcntl(fd, libc::F_GETFD);
-            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
-                libc::close(fd);
                 return Err(pty_operation_error(
                     "fcntl",
-                    "Failed to set FD_CLOEXEC on reader fd",
+                    "Failed to duplicate master fd with FD_CLOEXEC",
                 ));
             }
             Ok(fd)
@@ -224,7 +217,7 @@ impl Pty {
     /// # Errors
     /// Returns `Err` if the shell path is invalid, `openpty` fails, or `fork` fails.
     pub fn spawn(command: &str, shell_args: &[String], rows: u16, cols: u16) -> Result<Self> {
-        // Validate command against the allowlist
+        // Validate the exact executable path before allocating the PTY.
         let shell = ShellCommand::resolve(command)?;
 
         // Open PTY master/slave pair with the correct initial window size.
@@ -286,15 +279,13 @@ impl Pty {
     /// Write bytes to the PTY
     ///
     /// # Errors
-    /// Returns `Err` if the underlying `write_all` to the master file descriptor fails.
-    pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
+    /// Returns the number of bytes written, or `Err` if the underlying write fails.
+    pub fn write(&mut self, bytes: &[u8]) -> Result<usize> {
         use std::io::Write as _;
 
         self.master
-            .write_all(bytes)
-            .map_err(|e| pty_operation_error("write", &format!("Failed to write to PTY: {e}")))?;
-
-        Ok(())
+            .write(bytes)
+            .map_err(|e| pty_operation_error("write", &format!("Failed to write to PTY: {e}")))
     }
 
     /// Read bytes from the PTY (non-blocking, drains all available data)

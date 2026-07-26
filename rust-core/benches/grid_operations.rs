@@ -8,7 +8,7 @@
     reason = "bench dimension casts: rows/cols are small constants (≤ 400); usize→u16 is always safe here"
 )]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use kuro_core::{grid::screen::Screen, types::cell::SgrAttributes};
 
 /// Benchmark grid cell updates with varying dimensions
@@ -25,19 +25,21 @@ fn bench_grid_update(c: &mut Criterion) {
 
         let input = (rows, cols);
         group.bench_with_input(format!("{rows}x{cols}"), &input, |b, &(rows, cols)| {
-            let mut screen = Screen::new(rows as u16, cols as u16);
             let attrs = SgrAttributes::default();
 
-            b.iter(|| {
-                // Fill the entire screen with characters
-                for row in 0..rows {
-                    for _col in 0..cols {
-                        screen.print(black_box('A'), attrs, false);
+            b.iter_batched(
+                || Screen::new(rows as u16, cols as u16),
+                |mut screen| {
+                    for row in 0..rows {
+                        for _col in 0..cols {
+                            screen.print(black_box('A'), attrs, false);
+                        }
+                        screen.move_cursor(row, 0);
                     }
-                    // Return to start of line for next row
-                    screen.move_cursor(row, 0);
-                }
-            });
+                    black_box(screen);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
 
@@ -53,21 +55,24 @@ fn bench_screen_erase(c: &mut Criterion) {
     for &(rows, cols) in &sizes {
         let input = (rows, cols);
         group.bench_with_input(format!("{rows}x{cols}"), &input, |b, &(rows, cols)| {
-            b.iter(|| {
-                let mut screen = Screen::new(rows as u16, cols as u16);
-
-                // Fill screen with content
-                let attrs = SgrAttributes::default();
-                for row in 0..rows {
-                    for _col in 0..cols {
-                        screen.print('X', attrs, false);
+            b.iter_batched(
+                || {
+                    let mut screen = Screen::new(rows as u16, cols as u16);
+                    let attrs = SgrAttributes::default();
+                    for row in 0..rows {
+                        for _col in 0..cols {
+                            screen.print('X', attrs, false);
+                        }
+                        screen.move_cursor(row, 0);
                     }
-                    screen.move_cursor(row, 0);
-                }
-
-                // Erase all lines
-                screen.clear_lines(0, rows);
-            });
+                    screen
+                },
+                |mut screen| {
+                    screen.clear_lines(0, rows);
+                    black_box(screen);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
 
@@ -79,21 +84,21 @@ fn bench_line_erase(c: &mut Criterion) {
     let mut group = c.benchmark_group("line_erase");
 
     group.bench_function("erase_single_line", |b| {
-        let mut screen = Screen::new(24, 80);
-        let attrs = SgrAttributes::default();
-
-        b.iter(|| {
-            // Fill a line with content
-            for _col in 0..80 {
-                screen.print(black_box('A'), attrs, false);
-            }
-
-            // Erase the line
-            screen.clear_lines(0, 1);
-
-            // Reset cursor for next iteration
-            screen.move_cursor(0, 0);
-        });
+        b.iter_batched(
+            || {
+                let mut screen = Screen::new(24, 80);
+                let attrs = SgrAttributes::default();
+                for _col in 0..80 {
+                    screen.print(black_box('A'), attrs, false);
+                }
+                screen
+            },
+            |mut screen| {
+                screen.clear_lines(0, 1);
+                black_box(screen);
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();

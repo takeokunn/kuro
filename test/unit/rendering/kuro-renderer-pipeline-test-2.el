@@ -79,6 +79,41 @@ At 30fps, half-frame = 16.7ms; 5ms < 16.7ms so the call is coalesced."
       (kuro--core-render-pipeline-with-timing)
       (should (= kuro--perf-frame-count 8)))))
 
+(ert-deftest test-kuro-pipeline-core-render-variants-share-step-semantics ()
+  "Timed and untimed pipelines poll once and execute identical core steps."
+  (kuro-renderer-timing-test--with-buffer
+    (let ((fake-updates (vector 'update))
+          results)
+      (dolist (pipeline '(kuro--core-render-pipeline
+                          kuro--core-render-pipeline-with-timing))
+        (let ((log nil)
+              (poll-count 0)
+              (kuro--perf-sample-interval 1000))
+          (cl-letf (((symbol-function 'kuro--apply-title-update)
+                     (lambda () (push 'title log)))
+                    ((symbol-function 'kuro--poll-frame-updates)
+                     (lambda ()
+                       (setq poll-count (1+ poll-count))
+                       (push 'poll log)
+                       fake-updates))
+                    ((symbol-function 'kuro--apply-decoded-scroll-shift)
+                     (lambda () (push 'scroll log)))
+                    ((symbol-function 'kuro--apply-dirty-lines)
+                     (lambda (_) (push 'dirty log)))
+                    ((symbol-function 'kuro--update-cursor)
+                     (lambda () (push 'cursor log)))
+                    ((symbol-function 'kuro--update-scroll-indicator)
+                     (lambda () (push 'indicator log)))
+                    ((symbol-function 'kuro--perf-report) #'ignore))
+            (push (list (funcall pipeline) (nreverse log) poll-count) results))))
+      (should (equal (nreverse results)
+                     (list (list fake-updates
+                                 '(title poll scroll dirty cursor indicator)
+                                 1)
+                           (list fake-updates
+                                 '(title poll scroll dirty cursor indicator)
+                                 1)))))))
+
 ;;; Group 23: kuro--render-cycle
 
 (ert-deftest kuro-renderer-render-cycle-calls-all-4-stages ()

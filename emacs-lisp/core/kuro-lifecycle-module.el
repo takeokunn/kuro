@@ -49,9 +49,10 @@ point provided by the native module."
   (fboundp 'kuro-core-init))
 
 (defun kuro--try-load-module ()
-  "Attempt to load the Rust native module, swallowing any errors.
-Returns non-nil iff the module is loaded after the attempt."
-  (ignore-errors (kuro-module-load))
+  "Attempt to load the Rust native module.
+Return non-nil iff the module is loaded after the attempt.
+Errors from a discovered but invalid or unloadable module are propagated."
+  (kuro-module-load)
   (kuro--module-loadable-p))
 
 (defun kuro--install-and-load-module (install-fn install-name)

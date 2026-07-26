@@ -1,9 +1,9 @@
 //! VTE parser throughput benchmark (FR-005-01)
 //!
 //! Measures the time to parse large VTE sequences.
-//! Target: >100MB/s throughput.
+//! Targets: >=40 MiB/s for mixed terminal traffic and >=100 MiB/s for plain text.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use kuro_core::TerminalCore;
 
 /// Generate simulated PTY output with various escape sequences
@@ -74,11 +74,11 @@ fn bench_parser_throughput(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(output.len() as u64));
 
         group.bench_with_input(format!("{size_mb}MB"), size_mb, |b, &_size_mb| {
-            let mut term = TerminalCore::new(24, 80);
-
-            b.iter(|| {
-                term.advance(black_box(&output));
-            });
+            b.iter_batched(
+                || TerminalCore::new(24, 80),
+                |mut term| term.advance(black_box(&output)),
+                BatchSize::SmallInput,
+            );
         });
     }
 
@@ -98,11 +98,11 @@ fn bench_plain_text_throughput(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(output.len() as u64));
 
         group.bench_with_input(format!("{size_mb}MB"), size_mb, |b, &_size_mb| {
-            let mut term = TerminalCore::new(24, 80);
-
-            b.iter(|| {
-                term.advance(black_box(&output));
-            });
+            b.iter_batched(
+                || TerminalCore::new(24, 80),
+                |mut term| term.advance(black_box(&output)),
+                BatchSize::SmallInput,
+            );
         });
     }
 

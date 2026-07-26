@@ -160,7 +160,7 @@ in
   kuro-fmt = craneLib.cargoFmt {
     inherit src;
     pname = "kuro";
-    version = "0.1.0";
+    version = commonArgs.version;
   };
 
   # Rust unit + integration tests.

@@ -116,40 +116,6 @@ fn test_has_pending_data_true_after_echo() {
     );
 }
 
-// --- Tests for validate_shell error message format ---
-
-#[test]
-fn test_validate_shell_disallowed_message_contains_shell_name() {
-    // The error message for a disallowed shell must include the shell's basename
-    // and the list of allowed shells, so users know what is permitted.
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let dir =
-        std::env::temp_dir().join(format!("kuro_pty_shell_disallowed_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir(&dir).unwrap();
-    let path = dir.join("python3");
-    std::fs::write(&path, b"#!/bin/sh").unwrap();
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&path, perms).unwrap();
-
-    let err = Pty::validate_shell(path.to_str().unwrap()).unwrap_err();
-    let msg = format!("{err}");
-
-    let _ = std::fs::remove_file(&path);
-    let _ = std::fs::remove_dir(&dir);
-
-    assert!(
-        msg.contains("python3"),
-        "error message must contain the rejected shell name; got: {msg}"
-    );
-    assert!(
-        msg.contains("bash") || msg.contains("sh"),
-        "error message must mention allowed shells; got: {msg}"
-    );
-}
-
 #[test]
 fn test_validate_shell_not_found_message_contains_shell_name() {
     let err = Pty::validate_shell("_no_such_shell_xyz_").unwrap_err();

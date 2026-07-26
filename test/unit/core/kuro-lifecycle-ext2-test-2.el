@@ -257,14 +257,14 @@ calls switch-to-buffer with the newly created buffer."
       (unless was-bound
         (ignore-errors (fmakunbound 'kuro-core-init))))))
 
-(ert-deftest kuro-lifecycle--try-load-module-swallows-error-returns-nil ()
-  "`kuro--try-load-module' returns nil without propagating errors from `kuro-module-load'."
+(ert-deftest kuro-lifecycle--try-load-module-propagates-load-error ()
+  "`kuro--try-load-module' propagates errors from `kuro-module-load'."
   (let ((was-bound (fboundp 'kuro-core-init)))
     (when was-bound (fmakunbound 'kuro-core-init))
     (unwind-protect
         (cl-letf (((symbol-function 'kuro-module-load)
                    (lambda () (error "simulated load failure"))))
-          (should-not (kuro--try-load-module)))
+          (should-error (kuro--try-load-module) :type 'error))
       (when was-bound
         (fset 'kuro-core-init (lambda () nil))))))
 

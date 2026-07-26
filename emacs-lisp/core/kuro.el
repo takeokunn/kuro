@@ -4,8 +4,8 @@
 
 ;; Author: takeokunn <bararararatty@gmail.com>
 ;; URL: https://github.com/takeokunn/kuro
-;; Version: 1.0.0
-;; Package-Requires: ((emacs "29.1"))
+;; Version: 1.2.0
+;; Package-Requires: ((emacs "29.4"))
 ;; Keywords: terminals, tools
 
 ;;; Commentary:
@@ -31,7 +31,7 @@
                                       (locate-library "kuro")))))))
   (dolist (subdir '("core" "rendering" "input" "ffi" "faces" "features"))
     (when (file-directory-p (expand-file-name subdir base))
-      (add-to-list 'load-path (expand-file-name subdir base) t))))
+      (add-to-list 'load-path (expand-file-name subdir base)))))
 
 (require 'kuro-module)
 (require 'kuro-config)

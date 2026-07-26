@@ -362,30 +362,48 @@ replay after a mid-session `kuro-use-binary-ffi' toggle."
           kuro--frame-carries-cursor nil)
     (kuro--poll-updates-with-faces)))
 
+(defun kuro--execute-core-render-steps (&optional timings)
+  "Run shared polling, application, and cursor positioning.
+Return the dirty-line update list.
+When TIMINGS is a vector, store elapsed milliseconds for polling,
+application, and cursor positioning in slots 0, 1, and 2 respectively."
+  (let (updates step-start)
+    (when timings
+      (setq step-start (float-time)))
+    (setq updates (kuro--poll-frame-updates))
+    (when timings
+      (aset timings 0 (* 1000.0 (- (float-time) step-start)))
+      (setq step-start (float-time)))
+    ;; Shift before rewrite: the frame's dirty rows are post-shift positions.
+    (kuro--apply-decoded-scroll-shift)
+    (when updates
+      (kuro--apply-dirty-lines updates))
+    (when timings
+      (aset timings 1 (* 1000.0 (- (float-time) step-start)))
+      (setq step-start (float-time)))
+    (kuro--update-cursor)
+    (when timings
+      (aset timings 2 (* 1000.0 (- (float-time) step-start))))
+    updates))
+
 (defun kuro--core-render-pipeline ()
   "Execute the core render pipeline and return the dirty-line update list.
 Runs title update, scroll events, dirty-line polling, line rewrite, and
   cursor positioning under a single `inhibit-redisplay' block.
 GC is suppressed during the render to reduce pause jitter."
   (kuro--core-render-pipeline-run updates
-    (setq updates (kuro--poll-frame-updates))
-    ;; Shift before rewrite: the frame's dirty rows are post-shift positions.
-    (kuro--apply-decoded-scroll-shift)
-    (when updates
-      (kuro--apply-dirty-lines updates))
-    (kuro--update-cursor)))
+    (setq updates (kuro--execute-core-render-steps))))
 
 (defun kuro--core-render-pipeline-with-timing ()
   "Execute the core render pipeline with per-step timing.
 Return the update list.  Appends one timing line to *kuro-perf* per
 `kuro--perf-sample-interval' frames."
-  (kuro--core-render-pipeline-run-with-timing updates t-total ffi-ms apply-ms cursor-ms
-    (kuro--timed ffi-ms    (setq updates (kuro--poll-frame-updates)))
-    (kuro--timed apply-ms  (progn
-                             ;; Shift before rewrite: dirty rows are post-shift.
-                             (kuro--apply-decoded-scroll-shift)
-                             (when updates (kuro--apply-dirty-lines updates))))
-    (kuro--timed cursor-ms (kuro--update-cursor))))
+  (let ((timings (vector 0.0 0.0 0.0)))
+    (kuro--core-render-pipeline-run-with-timing updates t-total ffi-ms apply-ms cursor-ms
+      (setq updates (kuro--execute-core-render-steps timings)
+            ffi-ms (aref timings 0)
+            apply-ms (aref timings 1)
+            cursor-ms (aref timings 2)))))
 
 (defun kuro--finalize-dirty-updates (update-list)
   "Evict stale col-to-buf entries and record the dirty-line count.

@@ -213,24 +213,32 @@ When BUFFER-NAME is nil, generate a fresh name from `kuro--buffer-name-default'.
 
 (defun kuro--start-session-in-buffer (buffer command)
   "Start COMMAND in BUFFER and initialize the terminal display.
-Returns BUFFER after attempting startup."
-  (with-current-buffer buffer
-    (kuro-mode)
-    (setq kuro--shell-command command)
-    ;; Measure AFTER kuro-mode: kuro--assign-mono-fonts changes the fontset
-    ;; via set-fontset-font, which can change effective line height (replacing
-    ;; taller fallback fonts with the ASCII monospace font).  This changes
-    ;; window-body-height without triggering window-size-change-functions
-    ;; (pixel size is unchanged).  Measuring before kuro-mode gives a stale
-    ;; row count, causing TUI apps to draw for the wrong terminal size.
-    (pcase-let ((`(,rows . ,cols) (kuro--terminal-dimensions)))
-      (kuro--initialize-session-buffer buffer rows cols)
-      (kuro--setup-shell-integration-env)
-      (when (kuro--init command nil rows cols)
-        (kuro--start-render-loop)
-        (kuro--schedule-initial-render buffer)
-        (message "Kuro: Started terminal with command: %s" command))))
-  buffer)
+Return BUFFER when initialization succeeds or declines to start.  Roll back
+session state and signal when initialization or post-initialization errors."
+  (let ((previous-integration-dir (getenv "KURO_SHELL_INTEGRATION_DIR")))
+    (condition-case err
+        (progn
+          (with-current-buffer buffer
+            (kuro-mode)
+            (setq kuro--shell-command command)
+            (pcase-let ((`(,rows . ,cols) (kuro--terminal-dimensions)))
+              (kuro--initialize-session-buffer buffer rows cols)
+              (when (unwind-protect
+                        (progn
+                          (kuro--setup-shell-integration-env)
+                          (kuro--init command nil rows cols))
+                      (setenv "KURO_SHELL_INTEGRATION_DIR" previous-integration-dir))
+                (kuro--start-render-loop)
+                (kuro--schedule-initial-render buffer)
+                (message "Kuro: Started terminal with command: %s" command))))
+          buffer)
+      (error
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (ignore-errors (kuro--stop-render-loop))
+           (ignore-errors (kuro--shutdown)))
+         (kill-buffer buffer))
+       (signal (car err) (cdr err))))))
 
 (defun kuro--do-attach (session-id rows cols)
   "Perform the core attach step for SESSION-ID at terminal size ROWS x COLS.

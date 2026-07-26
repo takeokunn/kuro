@@ -43,7 +43,7 @@
           commonArgs = {
             inherit src;
             pname = "kuro";
-            version = "0.1.0";
+            version = "1.2.0";
             strictDeps = true;
             buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
             nativeBuildInputs = [ pkgs.pkg-config ];

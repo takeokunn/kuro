@@ -6,30 +6,29 @@
 #     previously-pushed tag without retagging).
 #
 # What it produces:
-#   For each of 2 target triples, builds the `kuro-core` cdylib in release
+#   For each supported target triple, builds the `kuro-core` cdylib in release
 #   mode and uploads two artifacts to the GitHub Release for the tag:
-#     - libkuro_core-<VERSION>-<TARGET>.tar.gz          (contains libkuro_core.so)
+#     - libkuro_core-<VERSION>-<TARGET>.tar.gz          (contains the native library)
 #     - libkuro_core-<VERSION>-<TARGET>.tar.gz.sha256   (sha256 of the tarball)
 #
 #   Targets:
 #     - x86_64-unknown-linux-gnu   (ubuntu-latest, native)
 #     - aarch64-unknown-linux-gnu  (ubuntu-22.04-arm, native aarch64 runner)
-#
-#   macOS targets are intentionally not built here — GitHub-hosted macOS
-#   runner capacity/queue times made this workflow unreliable.
+#     - x86_64-apple-darwin         (macos-15-intel, native)
+#     - aarch64-apple-darwin        (macos-15, native)
 #
 # How Elisp consumes it:
 #   The companion Elisp loader fetches
 #     https://github.com/takeokunn/kuro/releases/download/v<VERSION>/libkuro_core-<VERSION>-<TARGET>.tar.gz
 #   plus the matching `.sha256`, verifies the hash, untars, and dlopens
-#   `libkuro_core.so` from the resulting directory.
+#   the platform-specific native library from the resulting directory.
 #
 # Design notes:
 #   - Raw cargo (no Nix) for portability and speed.
 #   - MSRV pinned to 1.84.0 (matches Cargo.toml workspace.package.rust-version).
 #   - Release profile (lto=fat, codegen-units=1, strip=symbols) already set in
 #     workspace Cargo.toml — no extra flags needed.
-#   - Action versions pinned to major (@v4, @v2) per repo convention.
+#   - Third-party Actions are pinned to immutable commit SHAs.
 
 name: Release native module
 
@@ -44,30 +43,66 @@ on:
         type: string
 
 permissions:
-  contents: write  # required for creating releases and uploading assets
+  contents: read
 
 jobs:
+  preflight:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve and validate tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          bash scripts/check-release-version.sh "$TAG"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "release commit must be reachable from origin/main" >&2
+            exit 1
+          }
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust security audit tooling
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
+
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-audit --locked --version 0.22.1
+          cargo audit
+
   build:
     name: Build ${{ matrix.target }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu  }
-          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  lib: libkuro_core.so }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, lib: libkuro_core.so }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       lib: libkuro_core.dylib }
+          - { os: macos-15,         target: aarch64-apple-darwin,      lib: libkuro_core.dylib }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust toolchain (1.84.0)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
         with:
           toolchain: 1.84.0
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           key: release-${{ matrix.target }}
 
@@ -92,14 +127,18 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.meta.outputs.version }}"
           TARGET="${{ matrix.target }}"
-          LIB="libkuro_core.so"
+          LIB="${{ matrix.lib }}"
           OUT="libkuro_core-${VERSION}-${TARGET}.tar.gz"
 
           tar -C "target/${TARGET}/release" -czf "${OUT}" "${LIB}"
-          shasum -a 256 "${OUT}" | awk '{print $1}' > "${OUT}.sha256"
+          perl -MDigest::SHA=sha256_hex -e '
+            local $/;
+            open my $fh, "<:raw", $ARGV[0] or die "$ARGV[0]: $!\n";
+            print sha256_hex(<$fh>), "\n";
+          ' "${OUT}" > "${OUT}.sha256"
           ls -la "${OUT}" "${OUT}.sha256"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: kuro-${{ matrix.target }}
           path: |
@@ -110,10 +149,12 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [preflight, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: kuro-*
           path: dist
@@ -122,16 +163,9 @@ jobs:
       - name: List collected artifacts
         run: ls -la dist/
 
-      - name: Resolve tag for release
-        id: tag
-        shell: bash
-        run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e  # v3
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.preflight.outputs.tag }}
           files: |
             dist/libkuro_core-*.tar.gz
             dist/libkuro_core-*.tar.gz.sha256

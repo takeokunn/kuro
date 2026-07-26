@@ -53,7 +53,7 @@ fn required_test_shell_path() -> String {
 }
 
 #[test]
-fn test_validate_allowed_shells() {
+fn test_validate_common_shell_paths() {
     for shell_name in TEST_SHELL_NAMES {
         if let Some(path) = optional_shell_path(shell_name) {
             let result = Pty::validate_shell(&path);
@@ -114,7 +114,7 @@ fn test_validate_shell_empty_string_rejected() {
 fn test_validate_shell_absolute_path_bash() {
     let bash_path = std::path::Path::new("/bin/bash");
     if is_executable_file(bash_path) {
-        // An absolute path to bash resolves to the "bash" basename which is in the allowlist
+        // An absolute path to bash resolves to an existing executable.
         let result = Pty::validate_shell("/bin/bash");
         assert!(
             result.is_ok(),
@@ -132,11 +132,11 @@ fn test_validate_shell_rejects_relative_path_slash_slash() {
 
 #[test]
 fn test_validate_shell_rejects_python() {
-    // Relative executable names are rejected even before basename allowlist checks.
+    // Relative executable names are rejected because `$PATH` is not consulted.
     let result = Pty::validate_shell("python3");
     assert!(
         result.is_err(),
-        "python3 should be rejected (not in allowlist)"
+        "relative executable names must be rejected"
     );
 }
 
@@ -146,24 +146,21 @@ fn test_validate_shell_rejects_python() {
 fn test_validate_shell_absolute_nix_store() {
     // Use $SHELL to test with the actual shell path on this system.
     // On NixOS this is a Nix store path like /nix/store/…/bin/fish.
-    // Skip gracefully if $SHELL is unset or points to a shell outside the allowlist.
+    // Skip gracefully if $SHELL is unset or does not point to an executable file.
     if let Ok(shell) = std::env::var("SHELL") {
         let p = std::path::Path::new(&shell);
         if p.is_absolute() && is_executable_file(p) {
-            let basename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if ["bash", "zsh", "sh", "fish"].contains(&basename) {
-                let result = Pty::validate_shell(&shell);
-                assert!(
-                    result.is_ok(),
-                    "absolute path from $SHELL should be accepted: {shell}. Error: {:?}",
-                    result.err()
-                );
-                assert_eq!(
-                    result.unwrap(),
-                    std::path::PathBuf::from(&shell),
-                    "returned PathBuf must equal the input path exactly"
-                );
-            }
+            let result = Pty::validate_shell(&shell);
+            assert!(
+                result.is_ok(),
+                "absolute path from $SHELL should be accepted: {shell}. Error: {:?}",
+                result.err()
+            );
+            assert_eq!(
+                result.unwrap(),
+                std::path::PathBuf::from(&shell),
+                "returned PathBuf must equal the input path exactly"
+            );
         }
     }
 }
@@ -199,8 +196,7 @@ fn test_validate_shell_absolute_not_executable() {
 }
 
 #[test]
-fn test_validate_shell_absolute_not_in_allowlist() {
-    // An executable absolute path whose basename is not in ALLOWED_SHELLS must be rejected.
+fn test_validate_shell_accepts_arbitrary_absolute_executable() {
     let dir =
         std::env::temp_dir().join(format!("kuro_pty_shell_not_allowed_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -214,8 +210,8 @@ fn test_validate_shell_absolute_not_in_allowlist() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
     assert!(
-        result.is_err(),
-        "absolute path with basename outside the allowlist must be rejected"
+        result.is_ok(),
+        "arbitrary absolute executable must be accepted"
     );
 }
 
@@ -231,17 +227,14 @@ fn test_validate_shell_absolute_not_regular_file() {
     let result = Pty::validate_shell(path.to_str().unwrap());
     let _ = std::fs::remove_dir(&path);
     let _ = std::fs::remove_dir(&dir);
-    assert!(
-        result.is_err(),
-        "absolute directory path must be rejected even when basename is allowlisted"
-    );
+    assert!(result.is_err(), "absolute directory path must be rejected");
 }
 
 #[test]
 fn test_validate_shell_absolute_bin_sh() {
     // /bin/sh exists on all POSIX systems (typically a symlink to bash or dash).
-    // Its basename "sh" is in ALLOWED_SHELLS. On NixOS it is a symlink into the
-    // Nix store, so this test exercises the absolute-path branch on NixOS.
+    // On NixOS it may be a symlink into the Nix store, so this test exercises
+    // executable validation through an absolute symlink path.
     let bin_sh = std::path::Path::new("/bin/sh");
     if is_executable_file(bin_sh) {
         let result = Pty::validate_shell("/bin/sh");
@@ -299,8 +292,8 @@ fn test_spawn_rows_cols_passed_through() {
 
 #[test]
 fn test_validate_shell_returns_absolute_path() {
-    // validate_shell must return an absolute PathBuf so that execv uses
-    // the exact binary we validated, not a later PATH resolution.
+    // validate_shell must return an absolute PathBuf so exec avoids a later
+    // `$PATH` lookup; it does not guarantee object identity after validation.
     let shell = required_test_shell_path();
     let result = Pty::validate_shell(&shell);
     assert!(result.is_ok());

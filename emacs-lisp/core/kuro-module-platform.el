@@ -10,7 +10,7 @@
 
 ;;; Code:
 
-(defconst kuro-module--version "1.0.0"
+(defconst kuro-module--version "1.2.0"
   "Release version string for constructing prebuilt-binary download URLs.")
 
 (defun kuro-module--platform-extension ()

@@ -16,8 +16,25 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Check release version consistency
+        shell: bash
+        run: |
+          VERSION="$(perl -ne 'print $1 if /^version = "([^"]+)"/' Cargo.toml)"
+          bash scripts/check-release-version.sh "v${VERSION}"
       - name: Run nix flake check
         run: nix flake check
+
+  security:
+    name: Cargo security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Audit Rust dependencies
+        run: nix develop --command cargo audit
 
   e2e:
     name: E2E tests

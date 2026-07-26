@@ -61,9 +61,11 @@ When REQUIRED is non-nil, missing or empty PATH is an error."
           (kuro-module--library-candidate-error
            origin path "file must have exactly one link"))
         (let ((modes (file-modes path)))
-          (unless (and modes (= (logand modes #o777) #o600))
+          (unless (and modes
+                       (/= (logand modes #o400) 0)
+                       (= (logand modes #o022) 0))
             (kuro-module--library-candidate-error
-             origin path "file mode must be 0600")))
+             origin path "file must be owner-readable and not group/other-writable")))
         (kuro-module--library-candidate-create
          :path path
          :device (nth 11 attrs)

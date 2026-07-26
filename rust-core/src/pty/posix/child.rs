@@ -4,7 +4,9 @@
 //! before `fork()`. The child path only performs fd/session syscalls and
 //! `execve(2)`, then terminates with `_exit(2)` on failure.
 
-use super::shell::{shell_name_to_cstring, shell_path_to_cstring};
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+use super::shell::shell_path_to_cstring;
+use super::shell::{open_executable, shell_name_to_cstring};
 use crate::ffi::error::pty_spawn_error;
 use crate::Result;
 use std::ffi::{CString, OsStr};
@@ -16,6 +18,16 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::io::{AsRawFd as _, RawFd};
 use std::path::{Path, PathBuf};
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe extern "C" {
+    #[link_name = "fexecve"]
+    fn posix_fexecve(
+        fd: libc::c_int,
+        argv: *const *const c_char,
+        envp: *const *const c_char,
+    ) -> libc::c_int;
+}
 
 const SECURE_TEMP_DIR_ATTEMPTS: usize = 64;
 const CHILD_EXIT_SETUP_FAILED: i32 = 126;
@@ -363,6 +375,8 @@ impl PreparedCStringArray {
 
 /// Shell invocation state built from the validated shell path and args.
 pub(super) struct ShellExecContext {
+    shell_file: File,
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     shell_full_cstr: CString,
     argv: PreparedCStringArray,
     env: PreparedCStringArray,
@@ -472,6 +486,10 @@ fn build_shell_exec_context(
     integration: &ShellIntegrationConfig,
     env: PreparedCStringArray,
 ) -> Result<ShellExecContext> {
+    // Pin the executable before fork. Metadata is read from this open handle,
+    // and the child executes the same handle rather than resolving the path again.
+    let shell_file = open_executable(shell_path)?;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let shell_full_cstr = shell_path_to_cstring(shell_path, command)?;
     let mut argv = Vec::with_capacity(shell_args.len() + 3);
     argv.push(shell_name_to_cstring(shell_path, command)?);
@@ -497,6 +515,8 @@ fn build_shell_exec_context(
     }
 
     Ok(ShellExecContext {
+        shell_file,
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         shell_full_cstr,
         argv: PreparedCStringArray::new(argv),
         env,
@@ -553,11 +573,43 @@ pub(super) fn exec_in_child(ctx: ChildExecContext) -> ! {
     // without this they see 0 columns and permanently enter dumb/novis mode.
     set_child_winsize(rows, cols);
 
-    // Execute the shell via its absolute path so the exact validated binary is used
-    // (not whatever $PATH resolves first).  argv[0] = basename keeps ps/top readable.
+    // argv[0] = basename keeps ps/top readable.
     // SAFETY: all pointers refer to CString storage prepared before fork and
-    // kept alive by `exec` until execve either replaces the image or fails.
+    // kept alive by `exec` until the platform exec call replaces the image or fails.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     unsafe {
+        // Execute the already-open object so a path rename cannot substitute a
+        // different executable between validation and exec.
+        posix_fexecve(
+            exec.shell_file.as_raw_fd(),
+            exec.argv.as_ptr(),
+            exec.env.as_ptr(),
+        );
+
+        // Linux cannot execute a shebang script through a CLOEXEC descriptor.
+        // File::open sets CLOEXEC, so retry without it only after the first exec
+        // attempt fails. The parent descriptor remains race-safe.
+        libc::fcntl(exec.shell_file.as_raw_fd(), libc::F_SETFD, 0);
+        posix_fexecve(
+            exec.shell_file.as_raw_fd(),
+            exec.argv.as_ptr(),
+            exec.env.as_ptr(),
+        );
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    unsafe {
+        // macOS has no fexecve/execveat. Revalidate the path immediately before
+        // execve and reject any replacement visible at that point.
+        let mut opened_stat = std::mem::zeroed::<libc::stat>();
+        let mut path_stat = std::mem::zeroed::<libc::stat>();
+        if libc::fstat(exec.shell_file.as_raw_fd(), &mut opened_stat) == -1
+            || libc::stat(exec.shell_full_cstr.as_ptr(), &mut path_stat) == -1
+            || opened_stat.st_dev != path_stat.st_dev
+            || opened_stat.st_ino != path_stat.st_ino
+        {
+            child_exit(CHILD_EXIT_EXEC_FAILED);
+        }
         libc::execve(
             exec.shell_full_cstr.as_ptr(),
             exec.argv.as_ptr(),
@@ -570,6 +622,7 @@ pub(super) fn exec_in_child(ctx: ChildExecContext) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::MetadataExt as _;
     use std::os::unix::fs::PermissionsExt as _;
     use std::sync::Mutex;
 
@@ -600,18 +653,53 @@ mod tests {
         let integration = ShellIntegrationConfig::Bash {
             rcfile: PathBuf::from("/tmp/kuro-bash/.bashrc"),
         };
-        let ctx = build_shell_exec_context(
-            Path::new("/bin/bash"),
-            "bash",
+        let executable = std::env::current_exe().unwrap();
+        let ctx =
+            build_shell_exec_context(&executable, "bash", &[], &integration, empty_env()).unwrap();
+
+        assert_eq!(
+            &ctx.argv_strings()[1..],
+            ["--rcfile", "/tmp/kuro-bash/.bashrc"]
+        );
+    }
+
+    #[test]
+    fn build_shell_exec_context_pins_validated_executable() {
+        let dir = std::env::temp_dir().join(format!(
+            "kuro-child-executable-pin-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let shell_path = dir.join("shell");
+        let replacement_path = dir.join("replacement");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&shell_path, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(&replacement_path, b"#!/bin/sh\nexit 1\n").unwrap();
+        for path in [&shell_path, &replacement_path] {
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
+
+        let exec = build_shell_exec_context(
+            &shell_path,
+            "shell",
             &[],
-            &integration,
+            &ShellIntegrationConfig::default(),
             empty_env(),
         )
         .unwrap();
+        std::fs::rename(&replacement_path, &shell_path).unwrap();
+        let pinned = exec.shell_file.metadata().unwrap();
+        let replacement = std::fs::metadata(&shell_path).unwrap();
 
-        assert_eq!(
-            ctx.argv_strings(),
-            ["bash", "--rcfile", "/tmp/kuro-bash/.bashrc"]
+        let _ = std::fs::remove_file(&shell_path);
+        let _ = std::fs::remove_dir(&dir);
+
+        assert_ne!(
+            (pinned.dev(), pinned.ino()),
+            (replacement.dev(), replacement.ino()),
+            "the exec context must retain the validated object after path replacement"
         );
     }
 
@@ -623,8 +711,9 @@ mod tests {
             std::env::set_var("KURO_BASH_RCFILE", "/tmp/injected");
         }
 
+        let executable = std::env::current_exe().unwrap();
         let ctx = build_shell_exec_context(
-            Path::new("/bin/zsh"),
+            &executable,
             "zsh",
             &[],
             &ShellIntegrationConfig::default(),
@@ -636,7 +725,7 @@ mod tests {
         unsafe {
             std::env::remove_var("KURO_BASH_RCFILE");
         }
-        assert_eq!(ctx.argv_strings(), ["zsh"]);
+        assert_eq!(ctx.argv_strings().len(), 1);
     }
 
     #[test]
